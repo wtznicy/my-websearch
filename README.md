@@ -59,7 +59,7 @@ The server provides a single tool named `search` that accepts the following para
 ```typescript
 {
   "query": string,    // The search query
-  "limit": number     // Optional: Number of results to return (default: 5, max: 10)
+  "limit": number     // Optional: Number of results to return (default: 5)
 }
 ```
 

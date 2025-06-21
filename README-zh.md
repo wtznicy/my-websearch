@@ -59,7 +59,7 @@ Claude桌面版：
 ```typescript
 {
   "query": string,    // 搜索查询词
-  "limit": number     // 可选：返回结果数量（默认：5，最大：10）
+  "limit": number     // 可选：返回结果数量（默认：5）
 }
 ```
 
