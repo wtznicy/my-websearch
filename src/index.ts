@@ -90,7 +90,7 @@ class WebSearchServer {
       }
 
       const query = request.params.arguments.query;
-      const limit = Math.min(request.params.arguments.limit || 5, 10);
+      const limit = request.params.arguments.limit || 5;
 
       try {
         const results = await this.performSearch(query, limit);
