@@ -59,7 +59,8 @@ The server provides a single tool named `search` that accepts the following para
 ```typescript
 {
   "query": string,    // The search query
-  "limit": number     // Optional: Number of results to return (default: 5)
+  "limit": number,     // Optional: Number of results to return (default: 5)
+  "engines": string[]  // Optional: the search engine to use. Available options are `bing` and `baidu`. Defaults to `bing`.
 }
 ```
 
@@ -70,7 +71,8 @@ use_mcp_tool({
   tool_name: "search",
   arguments: {
     query: "your search query",
-    limit: 3  // optional
+    limit: 3,  // optional
+    engines: ["bing"] // optional
   }
 })
 ```
@@ -81,28 +83,32 @@ Example response:
   {
     "title": "Example Search Result",
     "url": "https://example.com",
-    "description": "Description of the search result..."
+    "description": "Description of the search result...",
+    "source": "Source",
+    "engine": "Engine to use"
   }
 ]
 ```
 
 ## Limitations
 
-Since this tool uses web scraping of Baidu search results, there are some important limitations to be aware of:
+Since this tool relies on scraping search results from multiple engines, please be aware of the following important limitations:
 
-1. **Rate Limiting**: Baidu may temporarily block requests if too many searches are performed in a short time. To avoid this:
-   - Keep searches to a reasonable frequency
-   - Use the limit parameter judiciously
-   - Consider implementing delays between searches if needed
+1. **Rate Limiting**: 
+   - Performing too many searches in a short period may result in temporary blocking by the selected engine.
+   - Recommendations:
+     - Maintain a reasonable search frequency
+     - Use the limit parameter cautiously
+     - Introduce delays between searches if necessary
 
 2. **Result Accuracy**:
-   - The tool relies on Baidu's HTML structure, which may change
+   - Parsing depends on the HTML structure of each engine, which may change and cause failures
    - Some results might be missing descriptions or other metadata
    - Complex search operators may not work as expected
 
 3. **Legal Considerations**:
    - This tool is intended for personal use
-   - Respect Baidu's terms of service
+   - Please comply with the terms of service of each search engine
    - Consider implementing appropriate rate limiting for your use case
 
 ## Contributing
