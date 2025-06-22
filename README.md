@@ -7,13 +7,16 @@ A Model Context Protocol (MCP) server based on multi-engine search results, supp
 ## Features
 
 - Uses multi-engine search results for web retrieval
+  - bing
+  - baidu
+  - linux.do
 - No API keys or authentication required
 - Returns structured results with titles, URLs, and descriptions
 - Configurable number of results per search
 
 ## TODO
-- Support search engines such as Bing, Google, etc.
-- Support blogs, forums, and social media platforms
+- Support for ~~Bing~~ (already supported), Google, and other search engines
+- Support for more blogs, forums, and social platforms
 
 ## Installation
 
@@ -52,45 +55,76 @@ For Claude Desktop:
 }
 ```
 
-## Usage
+## Usage Instructions
 
-The server provides a single tool named `search` that accepts the following parameters:
+The server provides a tool named `search` and a tool named `fetchLinuxDoArticle`, which accept the following parameters:
+
+### search Tool Usage Instructions
 
 ```typescript
 {
-  "query": string,    // The search query
+  "query": string,    // Search query term
   "limit": number,     // Optional: Number of results to return (default: 5)
-  "engines": string[]  // Optional: the search engine to use. Available options are `bing` and `baidu`. Defaults to `bing`.
+  "engines": string[]     // Optional: Engines to use (bing,baidu,linuxdo) default bing
 }
 ```
 
-Example usage:
+Usage example:
 ```typescript
 use_mcp_tool({
   server_name: "web-search",
   tool_name: "search",
   arguments: {
-    query: "your search query",
-    limit: 3,  // optional
-    engines: ["bing"] // optional
+    query: "search content",
+    limit: 3,  // Optional parameter
+    engines: ["bing"] // Optional parameter
   }
 })
 ```
 
-Example response:
+Return example:
 ```json
 [
   {
-    "title": "Example Search Result",
+    "title": "Example search result",
     "url": "https://example.com",
-    "description": "Description of the search result...",
+    "description": "Description text of search result...",
     "source": "Source",
-    "engine": "Engine to use"
+    "engine": "Engine used"
   }
 ]
 ```
 
-## Limitations
+### fetchLinuxDoArticle Tool Usage Instructions
+
+
+```typescript
+{
+  "url": string    // URL obtained from linuxdo search using the search tool
+}
+```
+
+Usage example:
+```typescript
+use_mcp_tool({
+  server_name: "web-search",
+  tool_name: "fetchLinuxDoArticle",
+  arguments: {
+    url: "https://xxxx.json"
+  }
+})
+```
+
+Return example:
+```json
+[
+  {
+    "content": "Example search result"
+  }
+]
+```
+
+## Usage Limitations
 
 Since this tool relies on scraping search results from multiple engines, please be aware of the following important limitations:
 

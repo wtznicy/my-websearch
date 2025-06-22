@@ -7,13 +7,16 @@
 ## 功能特性
 
 - 使用多引擎搜索结果进行网络检索
+  - bing
+  - baidu
+  - linux.do
 - 无需API密钥或身份验证
 - 返回带标题、URL和描述的结构化结果
 - 可配置每次搜索返回的结果数量
 
 ## TODO
-- 支持Bing,Google等搜索引擎
-- 支持博客论坛、社交软件
+- 支持~~Bing~~（已支持）,Google等搜索引擎
+- 支持更多博客论坛、社交软件
 
 ## 安装指南
 
@@ -54,13 +57,15 @@ Claude桌面版：
 
 ## 使用说明
 
-服务器提供一个名为`search`的工具，接受以下参数：
+服务器提供一个名为`search`和一个名为`fetchLinuxDoArticle`的工具，接受以下参数：
+
+### search工具使用说明
 
 ```typescript
 {
   "query": string,    // 搜索查询词
   "limit": number,     // 可选：返回结果数量（默认：5）
-  "engines": string[]     // 可选：要使用的引擎（bing,baidu）默认bing
+  "engines": string[]     // 可选：要使用的引擎（bing,baidu,linuxdo）默认bing
 }
 ```
 
@@ -90,6 +95,34 @@ use_mcp_tool({
 ]
 ```
 
+### fetchLinuxDoArticle工具使用说明
+
+
+```typescript
+{
+  "url": string    // search 工具使用linuxdo查询出的url
+}
+```
+
+使用示例：
+```typescript
+use_mcp_tool({
+  server_name: "web-search",
+  tool_name: "fetchLinuxDoArticle",
+  arguments: {
+    url: "https://xxxx.json"
+  }
+})
+```
+
+返回示例：
+```json
+[
+  {
+    "content": "示例搜索结果"
+  }
+]
+```
 ## 使用限制
 
 由于本工具通过爬取多引擎搜索结果实现，请注意以下重要限制：
