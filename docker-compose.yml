@@ -1,0 +1,9 @@
+version: "3.8"
+
+services:
+  web-search:
+    image: registry.cn-hangzhou.aliyuncs.com/aasee-share/open-web-search:latest
+    container_name: web-search
+    working_dir: /app
+    restart: unless-stopped
+    command: ["node", "build/index.js"]
