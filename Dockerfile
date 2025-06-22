@@ -4,13 +4,6 @@ FROM node:18-alpine
 # 设置工作目录
 WORKDIR /app
 
-# 安装必要的系统依赖
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    && ln -sf python3 /usr/bin/python
-
 # 复制 package.json 和 package-lock.json
 COPY package*.json ./
 
