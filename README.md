@@ -2,11 +2,11 @@
 
 [中文版本](./README-zh.md)
 
-A Model Context Protocol (MCP) server that enables free web searching using Baidu search results, with no API keys required.
+A Model Context Protocol (MCP) server based on multi-engine search results, supporting free web searches without requiring API keys.
 
 ## Features
 
-- Search the web using Baidu search results
+- Uses multi-engine search results for web retrieval
 - No API keys or authentication required
 - Returns structured results with titles, URLs, and descriptions
 - Configurable number of results per search
