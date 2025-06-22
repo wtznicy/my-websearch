@@ -15,7 +15,7 @@ RUN apk add --no-cache \
 COPY package*.json ./
 
 # 安装依赖
-RUN npm install && npm cache clean --force
+RUN npm ci || npm install && npm cache clean --force
 
 # 拷贝源码
 COPY . .
