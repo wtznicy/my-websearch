@@ -45,26 +45,108 @@ jobs:
             try {
               console.log(`Health checking ${url}...`);
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 10000);
+              const timeoutId = setTimeout(() => controller.abort(), 15000);
           
-              const response = await fetch(url, { 
-                method: 'HEAD',
-                signal: controller.signal,
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-              });
+              // 先尝试 HEAD 请求
+              let response;
+              try {
+                response = await fetch(url, { 
+                  method: 'HEAD',
+                  signal: controller.signal,
+                  headers: {
+                    'accept': ' text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7', 
+                    'accept-language': ' zh-CN,zh;q=0.9,en;q=0.8',
+                    'cache-control': ' no-cache',
+                    'pragma': ' no-cache',
+                    'sec-ch-ua': ' "Chromium";v="112", "Google Chrome";v="112", "Not:A-Brand";v="99"',
+                    'sec-ch-ua-arch': ' "x86"',
+                    'sec-ch-ua-bitness': ' "64"',
+                    'sec-ch-ua-full-version': ' "112.0.5615.50"',
+                    'sec-ch-ua-full-version-list': ' "Chromium";v="112.0.5615.50", "Google Chrome";v="112.0.5615.50", "Not:A-Brand";v="99.0.0.0"',
+                    'sec-ch-ua-mobile': ' ?0',
+                    'sec-ch-ua-model': ' ""',
+                    'sec-ch-ua-platform': ' "Windows"',
+                    'sec-ch-ua-platform-version': ' "15.0.0"',
+                    'sec-fetch-dest': ' document',
+                    'sec-fetch-mode': ' navigate',
+                    'sec-fetch-site': ' none',
+                    'sec-fetch-user': ' ?1',
+                    'upgrade-insecure-requests': ' 1',
+                    'user-agent': ' Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36',
+                    'Host': 'linux.do',
+                    'Connection': 'keep-alive'
+                  }
+                });
+              } catch (headError) {
+                console.log(`HEAD request failed, trying GET: ${headError.message}`);
+                // HEAD 失败时尝试 GET 请求
+                response = await fetch(url, { 
+                  method: 'GET',
+                  signal: controller.signal,
+                  headers: {
+                    'accept': ' text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7', 
+                    'accept-language': ' zh-CN,zh;q=0.9,en;q=0.8',
+                    'cache-control': ' no-cache',
+                    'pragma': ' no-cache',
+                    'sec-ch-ua': ' "Chromium";v="112", "Google Chrome";v="112", "Not:A-Brand";v="99"',
+                    'sec-ch-ua-arch': ' "x86"',
+                    'sec-ch-ua-bitness': ' "64"',
+                    'sec-ch-ua-full-version': ' "112.0.5615.50"',
+                    'sec-ch-ua-full-version-list': ' "Chromium";v="112.0.5615.50", "Google Chrome";v="112.0.5615.50", "Not:A-Brand";v="99.0.0.0"',
+                    'sec-ch-ua-mobile': ' ?0',
+                    'sec-ch-ua-model': ' ""',
+                    'sec-ch-ua-platform': ' "Windows"',
+                    'sec-ch-ua-platform-version': ' "15.0.0"',
+                    'sec-fetch-dest': ' document',
+                    'sec-fetch-mode': ' navigate',
+                    'sec-fetch-site': ' none',
+                    'sec-fetch-user': ' ?1',
+                    'upgrade-insecure-requests': ' 1',
+                    'user-agent': ' Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36',
+                    'Host': 'linux.do',
+                    'Connection': 'keep-alive'
+                  }
+                });
+              }
           
               clearTimeout(timeoutId);
           
-              if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              // 更宽松的状态码检查
+              if (response.status >= 200 && response.status < 400) {
+                console.log(`✓ Health check passed for ${url} (Status: ${response.status})`);
+                return true;
+              } else if (response.status === 403 || response.status === 429) {
+                // 403/429 可能是防护机制，但站点可能仍然可达
+                console.log(`⚠ Health check: ${url} returned ${response.status}, but site may still be reachable`);
+                return true;
+              } else {
+                console.log(`⚠ Health check: ${url} returned ${response.status}, will try anyway`);
+                return true; // 即使状态码不理想，也尝试继续
               }
           
-              console.log(`✓ Health check passed for ${url}`);
-              return true;
             } catch (error) {
               console.log(`⚠ Health check failed for ${url}: ${error.message}`);
+          
+              // 对于某些错误，仍然尝试继续
+              const allowedErrors = [
+                'fetch failed',
+                'timeout',
+                'network error',
+                'ENOTFOUND',
+                'ECONNREFUSED',
+                'certificate',
+                'SSL'
+              ];
+          
+              const shouldContinue = allowedErrors.some(err => 
+                error.message.toLowerCase().includes(err.toLowerCase())
+              );
+          
+              if (shouldContinue) {
+                console.log(`⚠ Will attempt to continue despite health check failure`);
+                return true;
+              }
+          
               return false;
             }
           }
@@ -173,28 +255,48 @@ jobs:
               try {
                 console.log(`\n=== Processing ${url} ===`);
           
-                // 1. 健康检查
+                // 1. 健康检查（更宽松的策略）
                 const isHealthy = await healthCheck(url);
                 if (!isHealthy) {
-                  throw new Error('Health check failed - site may be unreachable');
+                  console.log(`⚠ Health check failed for ${url}, but continuing anyway...`);
+                  // 不直接抛出错误，而是继续尝试
                 }
           
                 // 2. 获取动态超时配置
                 const timeouts = getTimeouts(url);
                 console.log(`Using timeouts: page=${timeouts.page}ms, wait=${timeouts.wait}ms`);
           
-                // 3. 带重试的页面访问
+                // 3. 带重试的页面访问（增强错误处理）
                 const cookieResult = await withRetry(async () => {
                   const context = await browser.newContext({
                     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     viewport: { width: 1920, height: 1080 },
                     extraHTTPHeaders: {
-                      'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8',
-                      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-                      'Accept-Encoding': 'gzip, deflate, br',
-                      'Cache-Control': 'no-cache',
-                      'Pragma': 'no-cache'
-                    }
+                      'accept': ' text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7', 
+                      'accept-language': ' zh-CN,zh;q=0.9,en;q=0.8',
+                      'cache-control': ' no-cache',
+                      'pragma': ' no-cache',
+                      'sec-ch-ua': ' "Chromium";v="112", "Google Chrome";v="112", "Not:A-Brand";v="99"',
+                      'sec-ch-ua-arch': ' "x86"',
+                      'sec-ch-ua-bitness': ' "64"',
+                      'sec-ch-ua-full-version': ' "112.0.5615.50"',
+                      'sec-ch-ua-full-version-list': ' "Chromium";v="112.0.5615.50", "Google Chrome";v="112.0.5615.50", "Not:A-Brand";v="99.0.0.0"',
+                      'sec-ch-ua-mobile': ' ?0',
+                      'sec-ch-ua-model': ' ""',
+                      'sec-ch-ua-platform': ' "Windows"',
+                      'sec-ch-ua-platform-version': ' "15.0.0"',
+                      'sec-fetch-dest': ' document',
+                      'sec-fetch-mode': ' navigate',
+                      'sec-fetch-site': ' none',
+                      'sec-fetch-user': ' ?1',
+                      'upgrade-insecure-requests': ' 1',
+                      'user-agent': ' Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36',
+                      'Host': 'linux.do',
+                      'Connection': 'keep-alive'
+                    },
+                    // 添加更多浏览器上下文选项
+                    ignoreHTTPSErrors: true,
+                    javaScriptEnabled: true
                   });
 
                   // 移除自动化检测
@@ -212,6 +314,11 @@ jobs:
                     Object.defineProperty(navigator, 'languages', {
                       get: () => ['en-US', 'en', 'zh-CN']
                     });
+          
+                    // 伪造 webdriver 属性
+                    Object.defineProperty(navigator, 'webdriver', {
+                      get: () => undefined
+                    });
                   });
 
                   const page = await context.newPage();
@@ -219,11 +326,26 @@ jobs:
                   // 设置动态超时
                   page.setDefaultTimeout(timeouts.page);
           
-                  console.log('Navigating to page...');
-                  await page.goto(url, { 
-                    waitUntil: 'networkidle',
-                    timeout: timeouts.page 
+                  // 监听页面错误但不中断执行
+                  page.on('pageerror', (error) => {
+                    console.log(`Page error (non-fatal): ${error.message}`);
                   });
+          
+                  console.log('Navigating to page...');
+          
+                  try {
+                    await page.goto(url, { 
+                      waitUntil: 'domcontentloaded', // 改为更宽松的等待条件
+                      timeout: timeouts.page 
+                    });
+                  } catch (gotoError) {
+                    console.log(`Initial goto failed, trying with networkidle: ${gotoError.message}`);
+                    // 如果 domcontentloaded 失败，尝试 networkidle
+                    await page.goto(url, { 
+                      waitUntil: 'networkidle',
+                      timeout: timeouts.page 
+                    });
+                  }
 
                   console.log('Initial wait...');
                   await page.waitForTimeout(timeouts.wait);
@@ -237,7 +359,13 @@ jobs:
 
                   const cookies = await context.cookies();
                   const finalUrl = page.url();
-                  const title = await page.title();
+          
+                  let title = 'Unknown';
+                  try {
+                    title = await page.title();
+                  } catch (titleError) {
+                    console.log(`Could not get page title: ${titleError.message}`);
+                  }
           
                   await context.close();
           
@@ -247,7 +375,7 @@ jobs:
                     title,
                     cookieCount: cookies.length
                   };
-                }, 3, 8000);
+                }, 3, 10000); // 增加重试间隔到10秒
 
                 results[domain] = {
                   ...cookieResult,
