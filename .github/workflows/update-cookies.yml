@@ -15,7 +15,7 @@ on:
 jobs:
   update-cookies:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20  # 增加总体超时时间
 
     steps:
       - name: Checkout code
@@ -40,6 +40,108 @@ jobs:
           import { chromium } from 'playwright-core';
           import { writeFileSync } from 'fs';
 
+          // 健康检查函数
+          async function healthCheck(url) {
+            try {
+              console.log(`Health checking ${url}...`);
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 10000);
+          
+              const response = await fetch(url, { 
+                method: 'HEAD',
+                signal: controller.signal,
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+              });
+          
+              clearTimeout(timeoutId);
+          
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              }
+          
+              console.log(`✓ Health check passed for ${url}`);
+              return true;
+            } catch (error) {
+              console.log(`⚠ Health check failed for ${url}: ${error.message}`);
+              return false;
+            }
+          }
+
+          // 获取动态超时时间
+          function getTimeouts(url) {
+            const domain = new URL(url).hostname;
+          
+            // 为特定域名设置更长超时
+            const specialDomains = {
+              'linux.do': { page: 60000, wait: 25000 },
+              'github.com': { page: 45000, wait: 15000 }
+            };
+          
+            return specialDomains[domain] || { page: 30000, wait: 10000 };
+          }
+
+          // 检测 Cloudflare 挑战
+          async function waitForCloudflare(page, maxWaitTime = 30000) {
+            const startTime = Date.now();
+          
+            while (Date.now() - startTime < maxWaitTime) {
+              try {
+                const title = await page.title();
+                const content = await page.content();
+          
+                // 检测 Cloudflare 挑战页面的各种特征
+                const cfIndicators = [
+                  title.includes('Just a moment'),
+                  title.includes('Checking'),
+                  title.includes('Please wait'),
+                  content.includes('cf-browser-verification'),
+                  content.includes('cf-challenge-running'),
+                  content.includes('DDoS protection'),
+                  content.includes('cloudflare')
+                ];
+          
+                const isCloudflareChallenge = cfIndicators.some(indicator => indicator);
+          
+                if (!isCloudflareChallenge) {
+                  console.log('✓ Cloudflare check completed');
+                  return true;
+                }
+          
+                console.log('⏳ Waiting for Cloudflare challenge to complete...');
+                await page.waitForTimeout(3000);
+          
+              } catch (error) {
+                console.log('Error during Cloudflare check:', error.message);
+                break;
+              }
+            }
+          
+            console.log('⚠ Cloudflare wait timeout, proceeding anyway');
+            return false;
+          }
+
+          // 重试包装函数
+          async function withRetry(operation, maxRetries = 3, baseDelay = 5000) {
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+              try {
+                return await operation();
+              } catch (error) {
+                console.log(`Attempt ${attempt}/${maxRetries} failed: ${error.message}`);
+          
+                if (attempt === maxRetries) {
+                  throw error;
+                }
+          
+                // 指数退避延迟
+                const delay = baseDelay * Math.pow(1.5, attempt - 1);
+                console.log(`Waiting ${delay}ms before retry...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+              }
+            }
+          }
+
           async function updateCookies() {
             const urls = process.env.TARGET_URLS ? 
               process.env.TARGET_URLS.split(',').map(url => url.trim()) : 
@@ -59,83 +161,137 @@ jobs:
                 '--disable-dev-shm-usage',
                 '--disable-background-timer-throttling',
                 '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding'
+                '--disable-renderer-backgrounding',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-extensions'
               ]
             });
 
             for (const url of urls) {
+              const domain = new URL(url).hostname;
+          
               try {
-                console.log(`Processing ${url}...`);
+                console.log(`\n=== Processing ${url} ===`);
           
-                const context = await browser.newContext({
-                  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                  viewport: { width: 1920, height: 1080 },
-                  extraHTTPHeaders: {
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-                  }
-                });
-
-                // 移除自动化检测
-                await context.addInitScript(() => {
-                  delete window.webdriver;
-                  delete window.chrome;
-                  window.navigator.webdriver = undefined;
-                });
-
-                const page = await context.newPage();
-          
-                // 设置更长的超时时间
-                page.setDefaultTimeout(30000);
-          
-                await page.goto(url, { 
-                  waitUntil: 'networkidle',
-                  timeout: 30000 
-                });
-
-                // 等待 Cloudflare 检查完成
-                await page.waitForTimeout(10000);
-
-                // 检查是否仍在 Cloudflare 检查页面
-                const title = await page.title();
-                if (title.includes('Just a moment') || title.includes('Checking')) {
-                  console.log(`Still checking for ${url}, waiting longer...`);
-                  await page.waitForTimeout(15000);
+                // 1. 健康检查
+                const isHealthy = await healthCheck(url);
+                if (!isHealthy) {
+                  throw new Error('Health check failed - site may be unreachable');
                 }
+          
+                // 2. 获取动态超时配置
+                const timeouts = getTimeouts(url);
+                console.log(`Using timeouts: page=${timeouts.page}ms, wait=${timeouts.wait}ms`);
+          
+                // 3. 带重试的页面访问
+                const cookieResult = await withRetry(async () => {
+                  const context = await browser.newContext({
+                    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    viewport: { width: 1920, height: 1080 },
+                    extraHTTPHeaders: {
+                      'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8',
+                      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                      'Accept-Encoding': 'gzip, deflate, br',
+                      'Cache-Control': 'no-cache',
+                      'Pragma': 'no-cache'
+                    }
+                  });
 
-                const cookies = await context.cookies();
-                const domain = new URL(url).hostname;
+                  // 移除自动化检测
+                  await context.addInitScript(() => {
+                    delete window.webdriver;
+                    delete window.chrome;
+                    window.navigator.webdriver = undefined;
+          
+                    // 伪造 plugins
+                    Object.defineProperty(navigator, 'plugins', {
+                      get: () => [1, 2, 3, 4, 5]
+                    });
+          
+                    // 伪造 languages
+                    Object.defineProperty(navigator, 'languages', {
+                      get: () => ['en-US', 'en', 'zh-CN']
+                    });
+                  });
+
+                  const page = await context.newPage();
+          
+                  // 设置动态超时
+                  page.setDefaultTimeout(timeouts.page);
+          
+                  console.log('Navigating to page...');
+                  await page.goto(url, { 
+                    waitUntil: 'networkidle',
+                    timeout: timeouts.page 
+                  });
+
+                  console.log('Initial wait...');
+                  await page.waitForTimeout(timeouts.wait);
+
+                  // 处理 Cloudflare 挑战
+                  console.log('Checking for Cloudflare challenge...');
+                  await waitForCloudflare(page, 30000);
+
+                  // 额外等待确保页面完全加载
+                  await page.waitForTimeout(3000);
+
+                  const cookies = await context.cookies();
+                  const finalUrl = page.url();
+                  const title = await page.title();
+          
+                  await context.close();
+          
+                  return {
+                    cookies,
+                    finalUrl,
+                    title,
+                    cookieCount: cookies.length
+                  };
+                }, 3, 8000);
 
                 results[domain] = {
-                  cookies,
+                  ...cookieResult,
                   timestamp: Date.now(),
-                  url,
-                  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                  originalUrl: url,
+                  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                  success: true
                 };
 
-                console.log(`✓ Got ${cookies.length} cookies for ${domain}`);
-                await context.close();
+                console.log(`✓ Successfully got ${cookieResult.cookieCount} cookies for ${domain}`);
+                console.log(`✓ Final URL: ${cookieResult.finalUrl}`);
+                console.log(`✓ Page title: ${cookieResult.title}`);
 
                 // 避免请求过快
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                console.log('Waiting before next request...');
+                await new Promise(resolve => setTimeout(resolve, 3000));
 
               } catch (error) {
                 console.error(`✗ Failed to get cookies for ${url}:`, error.message);
           
-                // 即使失败也记录，避免完全丢失数据
-                const domain = new URL(url).hostname;
+                // 记录详细错误信息
                 results[domain] = {
                   error: error.message,
                   timestamp: Date.now(),
-                  url
+                  originalUrl: url,
+                  success: false,
+                  errorType: error.name || 'Unknown'
                 };
               }
             }
 
             await browser.close();
 
+            // 输出摘要
+            const successCount = Object.values(results).filter(r => r.success).length;
+            const totalCount = Object.keys(results).length;
+            console.log(`\n=== Summary ===`);
+            console.log(`Total URLs: ${totalCount}`);
+            console.log(`Successful: ${successCount}`);
+            console.log(`Failed: ${totalCount - successCount}`);
+
             // 输出结果供 GitHub Actions 使用
-            console.log('RESULTS:', JSON.stringify(results));
+            console.log('\n=== Results ===');
+            console.log(JSON.stringify(results, null, 2));
             writeFileSync('cookies-output.json', JSON.stringify(results, null, 2));
           }
 
@@ -159,6 +315,12 @@ jobs:
           if [ -f cookies-output.json ]; then
             COOKIES_CONTENT=$(cat cookies-output.json)
           
+            # 检查是否有成功的结果
+            SUCCESS_COUNT=$(echo "$COOKIES_CONTENT" | jq '[.[] | select(.success == true)] | length')
+            TOTAL_COUNT=$(echo "$COOKIES_CONTENT" | jq '. | length')
+          
+            echo "Upload summary: $SUCCESS_COUNT/$TOTAL_COUNT successful"
+          
             curl -X PATCH \
               -H "Authorization: token $GH_TOKEN" \
               -H "Content-Type: application/json" \
@@ -166,12 +328,22 @@ jobs:
               -d "{
                 \"files\": {
                   \"cookies.json\": {
-                    \"content\": $(echo "$COOKIES_CONTENT" | jq -R -s .)
+                    \"content\": $(echo "$COOKIES_CONTENT" | jq -R -s .),
+                    \"filename\": \"cookies.json\"
+                  },
+                  \"last_update.txt\": {
+                    \"content\": \"Last updated: $(date -u +%Y-%m-%dT%H:%M:%SZ)\\nSuccess rate: $SUCCESS_COUNT/$TOTAL_COUNT\\nWorkflow: ${{ github.run_id }}\",
+                    \"filename\": \"last_update.txt\"
                   }
                 }
               }"
           
             echo "✓ Cookies uploaded to Gist successfully"
+          
+            # 如果成功率低于50%，输出警告
+            if [ "$SUCCESS_COUNT" -lt $(($TOTAL_COUNT / 2)) ]; then
+              echo "::warning::Low success rate: $SUCCESS_COUNT/$TOTAL_COUNT"
+            fi
           else
             echo "✗ No cookies file found"
             exit 1
@@ -182,9 +354,23 @@ jobs:
           GIST_ID: ${{ secrets.GIST_ID }}
         run: |
           echo "Gist URL: https://gist.github.com/$GIST_ID"
-          echo "Raw URL: https://gist.githubusercontent.com/[username]/$GIST_ID/raw/cookies.json"
+          echo "Raw cookies URL: https://gist.githubusercontent.com/[username]/$GIST_ID/raw/cookies.json"
+          echo "Last update URL: https://gist.githubusercontent.com/[username]/$GIST_ID/raw/last_update.txt"
 
       - name: Notify on failure
         if: failure()
         run: |
           echo "::error::Cookie update failed. Check the logs above for details."
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f cookies-output.json ]; then
+            echo "=== Final Summary ==="
+            cat cookies-output.json | jq -r '
+              "Total domains: " + (. | length | tostring) + "\n" +
+              "Successful: " + ([.[] | select(.success == true)] | length | tostring) + "\n" +
+              "Failed: " + ([.[] | select(.success != true)] | length | tostring) + "\n" +
+              "Domains processed: " + ([keys[]] | join(", "))
+            '
+          fi
