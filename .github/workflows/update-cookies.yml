@@ -36,8 +36,9 @@ jobs:
 
       - name: Create cookie updater script
         run: |
-          cat > update-cookies.js << 'EOF'
-          const { chromium } = require('playwright-core');
+          cat > update-cookies.mjs << 'EOF'
+          import { chromium } from 'playwright-core';
+          import { writeFileSync } from 'fs';
 
           async function updateCookies() {
             const urls = process.env.TARGET_URLS ? 
@@ -135,7 +136,7 @@ jobs:
 
             // 输出结果供 GitHub Actions 使用
             console.log('RESULTS:', JSON.stringify(results));
-            require('fs').writeFileSync('cookies-output.json', JSON.stringify(results, null, 2));
+            writeFileSync('cookies-output.json', JSON.stringify(results, null, 2));
           }
 
           updateCookies().catch(error => {
@@ -148,7 +149,7 @@ jobs:
         env:
           TARGET_URLS: ${{ secrets.TARGET_URLS }}
           MANUAL_URLS: ${{ github.event.inputs.urls }}
-        run: node update-cookies.js
+        run: node update-cookies.mjs
 
       - name: Upload to Gist
         env:
