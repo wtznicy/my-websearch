@@ -21,13 +21,22 @@ async function main() {
   setupTools(server)
   app.use(express.json());
 
+  const whitelist = (process.env.CORS_ORIGIN || '').split(',').map(s => s.trim());
   // 是否启用跨域
   if (process.env.ENABLE_CORS === 'true') {
-    console.log("enable cors")
+    console.log("enable cors, whitelist: ",whitelist)
     app.use(cors({
-      origin: process.env.CORS_ORIGIN || '*',
+      origin:(origin, callback) => {
+        console.log('🌍 CORS Origin Request:', origin);
+        if (!origin || whitelist.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
       methods: ['GET', 'POST', 'DELETE'],
     }));
+    app.options('*', cors());
   }
 
   // Store transports for each session type
