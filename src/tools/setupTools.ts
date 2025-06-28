@@ -6,6 +6,8 @@ import { searchBing } from '../engines/bing.js';
 import { SearchResult } from '../types.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { searchLinuxDo } from "../engines/linuxdo/linuxdo.js";
+import { searchCsdn } from "../engines/csdn/csdn.js";
+import { fetchCsdnArticle } from "../engines/csdn/fetchCsdnArticle.js";
 
 const isValidSearchArgs = (args: any): args is { query: string; limit?: number; engines: string[] } =>
     typeof args === 'object' && args !== null && typeof args.query === 'string' &&
@@ -52,6 +54,20 @@ export const setupTools = (server: Server) => {
                     },
                     required: ['url']
                 }
+            },
+            {
+                name: 'fetchCsdnArticle',
+                description: 'Fetch full article content from a csdn post URL',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        url: {
+                            type: 'string',
+                            description: 'URL of csdn article post (e.g., https://blog.csdn.net/xxx/article/details/xxxx)'
+                        }
+                    },
+                    required: ['url']
+                }
             }
         ]
     }));
@@ -79,6 +95,7 @@ export const setupTools = (server: Server) => {
                         case 'baidu': tasks.push(searchBaidu(query, engineLimit)); break;
                         case 'bing': tasks.push(searchBing(query, engineLimit)); break;
                         case 'linuxdo': tasks.push(searchLinuxDo(query, engineLimit)); break;
+                        case 'csdn': tasks.push(searchCsdn(query, engineLimit)); break;
                         default: break;
                     }
                 });
@@ -100,6 +117,23 @@ export const setupTools = (server: Server) => {
 
                 const { url } = args;
                 const result = await fetchLinuxDoArticle(url);
+
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: result.content
+                        }
+                    ]
+                };
+            }
+            case 'fetchCsdnArticle': {
+                if (!isValidFetchArgs(args)) {
+                    throw new McpError(ErrorCode.InvalidParams, 'Invalid fetchCsdnArticle arguments');
+                }
+
+                const { url } = args;
+                const result = await fetchCsdnArticle(url);
 
                 return {
                     content: [
