@@ -6,4 +6,6 @@ services:
     container_name: web-search
     working_dir: /app
     restart: no
+    ports:
+      - "3000:3000"
     command: ["node", "build/index.js"]

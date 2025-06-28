@@ -81,7 +81,7 @@ export const setupTools = (server: McpServer): void => {
     // 搜索工具
     server.tool(
         'search',
-        "description: 'Search the web using multiple engines (e.g., Baidu, Bing, Linuxdo, CSDN) with no API key required',",
+        "Search the web using multiple engines (e.g., Baidu, Bing, Linuxdo, CSDN) with no API key required",
         {
             query: z.string().min(1, "Search query must not be empty"),
             limit: z.number().min(1).max(50).default(10),

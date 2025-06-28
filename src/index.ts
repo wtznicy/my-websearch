@@ -6,11 +6,19 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import express from 'express';
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { randomUUID } from "node:crypto";
-
+import cors from 'cors';
 
 async function main() {
   // 创建 Express 应用
   const app = express();
+
+  // 是否启用跨域
+  if (process.env.ENABLE_CORS === 'true') {
+    app.use(cors({
+      origin: process.env.CORS_ORIGIN || '*',
+      methods: ['GET', 'POST', 'DELETE'],
+    }));
+  }
 
   const server = new McpServer({
     name: 'web-search',
@@ -118,7 +126,9 @@ async function main() {
     }
   });
 
-  app.listen(3000)
+  app.listen(3000 ,'0.0.0.0', () => {
+    console.log('Server is running on port 3000')
+  })
 }
 
 main().catch(console.error);
