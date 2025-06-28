@@ -1,152 +1,191 @@
 // tools/setupTools.ts
-import { ListToolsRequestSchema, CallToolRequestSchema, McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { fetchLinuxDoArticle } from '../engines/linuxdo/fetchLinuxDoArticle.js';
 import { searchBaidu } from '../engines/baidu.js';
 import { searchBing } from '../engines/bing.js';
-import { SearchResult } from '../types.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { searchLinuxDo } from "../engines/linuxdo/linuxdo.js";
 import { searchCsdn } from "../engines/csdn/csdn.js";
 import { fetchCsdnArticle } from "../engines/csdn/fetchCsdnArticle.js";
+import { SearchResult } from '../types.js';
+import { z } from 'zod';
 
-const isValidSearchArgs = (args: any): args is { query: string; limit?: number; engines: string[] } =>
-    typeof args === 'object' && args !== null && typeof args.query === 'string' &&
-    (args.limit === undefined || typeof args.limit === 'number');
+// 支持的搜索引擎
+const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn'] as const;
+type SupportedEngine = typeof SUPPORTED_ENGINES[number];
 
-const isValidFetchArgs = (args: any): args is { url: string } =>
-    typeof args === 'object' && args !== null && typeof args.url === 'string';
+// 搜索引擎调用函数映射
+const engineMap: Record<SupportedEngine, (query: string, limit: number) => Promise<SearchResult[]>> = {
+    baidu: searchBaidu,
+    bing: searchBing,
+    linuxdo: searchLinuxDo,
+    csdn: searchCsdn,
+};
 
-export const setupTools = (server: Server) => {
-    // 统一的工具列表处理器
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({
-        tools: [
-            {
-                name: 'search',
-                description: 'Search the web using multiple engines (e.g., Baidu, Bing, Linuxdo) with no API key required',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        query: { type: 'string', description: 'Search query' },
-                        limit: { type: 'number', description: 'Maximum number of results to return (default: 5)', minimum: 1, maximum: 20, default: 5 },
-                        engines: {
-                            type: 'array',
-                            description: 'Search engines to use (e.g., ["baidu", "bing", "linuxdo"])',
-                            items: {
-                                type: 'string',
-                                enum: ['baidu', 'bing', 'linuxdo']
-                            },
-                            default: ['bing']
-                        },
-                    },
-                    required: ['query'],
-                },
-            },
-            {
-                name: 'fetchLinuxDoArticle',
-                description: 'Fetch full article content from a linux.do post URL',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        url: {
-                            type: 'string',
-                            description: 'URL of linux.do article post (must end with .json, e.g., https://linux.do/t/742055.json?track_visit=true&forceLoad=true)'
-                        }
-                    },
-                    required: ['url']
-                }
-            },
-            {
-                name: 'fetchCsdnArticle',
-                description: 'Fetch full article content from a csdn post URL',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        url: {
-                            type: 'string',
-                            description: 'URL of csdn article post (e.g., https://blog.csdn.net/xxx/article/details/xxxx)'
-                        }
-                    },
-                    required: ['url']
-                }
-            }
-        ]
-    }));
+// 分配搜索结果数量
+const distributeLimit = (totalLimit: number, engineCount: number): number[] => {
+    const base = Math.floor(totalLimit / engineCount);
+    const remainder = totalLimit % engineCount;
 
-    // 统一的工具调用处理器
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
-        const { name, arguments: args } = request.params;
+    return Array.from({ length: engineCount }, (_, i) =>
+        base + (i < remainder ? 1 : 0)
+    );
+};
 
-        switch (name) {
-            case 'search': {
-                if (!isValidSearchArgs(args)) {
-                    throw new McpError(ErrorCode.InvalidParams, 'Invalid search arguments');
-                }
+// 执行搜索
+const executeSearch = async (query: string, engines: string[], limit: number): Promise<SearchResult[]> => {
+    const limits = distributeLimit(limit, engines.length);
 
-                const { query, limit = 5, engines } = args;
-                const engineCount = engines.length;
-                const base = Math.floor(limit / engineCount);
-                const rem = limit % engineCount;
+    const searchTasks = engines.map((engine, index) => {
+        const engineLimit = limits[index];
+        const searchFn = engineMap[engine as SupportedEngine];
 
-                const tasks: Promise<SearchResult[]>[] = [];
+        if (!searchFn) {
+            console.warn(`Unsupported search engine: ${engine}`);
+            return Promise.resolve([]);
+        }
 
-                engines.forEach((engine, i) => {
-                    const engineLimit = base + (i < rem ? 1 : 0);
-                    switch (engine) {
-                        case 'baidu': tasks.push(searchBaidu(query, engineLimit)); break;
-                        case 'bing': tasks.push(searchBing(query, engineLimit)); break;
-                        case 'linuxdo': tasks.push(searchLinuxDo(query, engineLimit)); break;
-                        case 'csdn': tasks.push(searchCsdn(query, engineLimit)); break;
-                        default: break;
-                    }
-                });
+        return searchFn(query, engineLimit).catch(error => {
+            console.error(`Search failed for engine ${engine}:`, error);
+            return [];
+        });
+    });
 
-                const results = (await Promise.all(tasks)).flat().slice(0, limit);
+    try {
+        const results = await Promise.all(searchTasks);
+        return results.flat().slice(0, limit);
+    } catch (error) {
+        console.error('Search execution failed:', error);
+        throw error;
+    }
+};
+
+// 验证文章 URL
+const validateArticleUrl = (url: string, type: 'linuxdo' | 'csdn'): boolean => {
+    try {
+        const urlObj = new URL(url);
+
+        switch (type) {
+            case 'linuxdo':
+                return urlObj.hostname === 'linux.do' && url.includes('.json');
+            case 'csdn':
+                return urlObj.hostname === 'blog.csdn.net' && url.includes('/article/details/');
+            default:
+                return false;
+        }
+    } catch {
+        return false;
+    }
+};
+
+export const setupTools = (server: McpServer): void => {
+    // 搜索工具
+    server.tool(
+        'search',
+        "description: 'Search the web using multiple engines (e.g., Baidu, Bing, Linuxdo, CSDN) with no API key required',",
+        {
+            query: z.string().min(1, "Search query must not be empty"),
+            limit: z.number().min(1).max(50).default(10),
+            engines: z.array(z.enum(['baidu', 'bing', 'linuxdo', 'csdn'])).min(1).default(['bing'])
+        },
+        async ({ query, limit = 10, engines = ['bing'] }) => {
+            try {
+                console.log(`Searching for "${query}" using engines: ${engines.join(', ')}`);
+
+                const results = await executeSearch(query.trim(), engines, limit);
 
                 return {
                     content: [{
                         type: 'text',
-                        text: JSON.stringify(results, null, 2),
+                        text: JSON.stringify({
+                            query: query.trim(),
+                            engines: engines,
+                            totalResults: results.length,
+                            results: results
+                        }, null, 2)
                     }]
                 };
+            } catch (error) {
+                console.error('Search tool execution failed:', error);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: `Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    }],
+                    isError: true
+                };
             }
+        }
+    );
 
-            case 'fetchLinuxDoArticle': {
-                if (!isValidFetchArgs(args)) {
-                    throw new McpError(ErrorCode.InvalidParams, 'Invalid fetchLinuxDoArticle arguments');
-                }
-
-                const { url } = args;
+    // 获取 Linux.do 文章工具
+    server.tool(
+        'fetchLinuxDoArticle',
+        "Fetch full article content from a linux.do post URL",
+        {
+            url: z.string().url().refine(
+                (url) => validateArticleUrl(url, 'linuxdo'),
+                "URL must be from linux.do and end with .json"
+            )
+        },
+        async ({ url }) => {
+            try {
+                console.log(`Fetching Linux.do article: ${url}`);
                 const result = await fetchLinuxDoArticle(url);
 
                 return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: result.content
-                        }
-                    ]
+                    content: [{
+                        type: 'text',
+                        text: result.content
+                    }]
+                };
+            } catch (error) {
+                console.error('Failed to fetch Linux.do article:', error);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    }],
+                    isError: true
                 };
             }
-            case 'fetchCsdnArticle': {
-                if (!isValidFetchArgs(args)) {
-                    throw new McpError(ErrorCode.InvalidParams, 'Invalid fetchCsdnArticle arguments');
-                }
+        }
+    );
 
-                const { url } = args;
+    // 获取 CSDN 文章工具
+    server.tool(
+        'fetchCsdnArticle',
+        "Fetch full article content from a csdn post URL",
+        {
+            url: z.string().url().refine(
+                (url) => validateArticleUrl(url, 'csdn'),
+                "URL must be from blog.csdn.net contains /article/details/ path"
+            )
+        },
+        async ({ url }) => {
+            try {
+                console.log(`Fetching CSDN article: ${url}`);
                 const result = await fetchCsdnArticle(url);
 
                 return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: result.content
-                        }
-                    ]
+                    content: [{
+                        type: 'text',
+                        text: result.content
+                    }]
+                };
+            } catch (error) {
+                console.error('Failed to fetch CSDN article:', error);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    }],
+                    isError: true
                 };
             }
-
-            default:
-                throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
         }
-    });
+    );
 };
+
+// 导出类型和常量供其他模块使用
+export {SUPPORTED_ENGINES};
+export type { SupportedEngine };

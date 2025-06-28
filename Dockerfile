@@ -24,6 +24,9 @@ RUN addgroup -g 1001 -S nodejs && \
 RUN chown -R nodejs:nodejs /app
 USER nodejs
 
+# 暴露端口
+EXPOSE 3000
+
 # 设置环境变量
 ENV NODE_ENV=production
 
