@@ -12,14 +12,6 @@ async function main() {
   // 创建 Express 应用
   const app = express();
 
-  // 是否启用跨域
-  if (process.env.ENABLE_CORS === 'true') {
-    app.use(cors({
-      origin: process.env.CORS_ORIGIN || '*',
-      methods: ['GET', 'POST', 'DELETE'],
-    }));
-  }
-
   const server = new McpServer({
     name: 'web-search',
     version: '0.1.0'
@@ -28,6 +20,15 @@ async function main() {
   // ... set up server resources, tools, and prompts ...
   setupTools(server)
   app.use(express.json());
+
+  // 是否启用跨域
+  if (process.env.ENABLE_CORS === 'true') {
+    console.log("enable cors")
+    app.use(cors({
+      origin: process.env.CORS_ORIGIN || '*',
+      methods: ['GET', 'POST', 'DELETE'],
+    }));
+  }
 
   // Store transports for each session type
   const transports = {
