@@ -8,4 +8,8 @@ services:
     restart: no
     ports:
       - "3000:3000"
+    environment:
+      NODE_ENV: production
+      ENABLE_CORS: "true"
+      CORS_ORIGIN: "*"  # 可以多个值逗号分隔，自行解析
     command: ["node", "build/index.js"]
