@@ -21,19 +21,10 @@ async function main() {
   setupTools(server)
   app.use(express.json());
 
-  const whitelist = (process.env.CORS_ORIGIN || '').split(',').map(s => s.trim());
   // 是否启用跨域
   if (process.env.ENABLE_CORS === 'true') {
-    console.log("enable cors, whitelist: ",whitelist)
     app.use(cors({
-      origin:(origin, callback) => {
-        console.log('🌍 CORS Origin Request:', origin);
-        if (!origin || whitelist.includes(origin)) {
-          callback(null, true);
-        } else {
-          callback(new Error('Not allowed by CORS'));
-        }
-      },
+      origin: process.env.CORS_ORIGIN || '*',
       methods: ['GET', 'POST', 'DELETE'],
     }));
     app.options('*', cors());
