@@ -47,15 +47,32 @@ jobs:
         id: lowercase
         run: echo "repository_owner_lowercase=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
-      # 准备镜像 tag（包括 ACR 的 tag）
+      # 准备镜像 tag（包括 latest 和版本 tag）
       - name: Prepare tags
         id: tags
         run: |
-          TAGS="ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:latest"
-          if [ "${{ steps.check-acr.outputs.acr_enabled }}" == "true" ] && [ -n "${{ secrets.ACR_IMAGE_NAME }}" ]; then
-            TAGS="$TAGS,${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_NAME }}:latest"
+          REPO_LOWERCASE="ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search"
+          TAGS="${REPO_LOWERCASE}:latest"
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION_TAG="${GITHUB_REF##*/}"
+            TAGS="${TAGS},${REPO_LOWERCASE}:${VERSION_TAG}"
           fi
-          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+
+          if [ "${{ steps.check-acr.outputs.acr_enabled }}" == "true" ] && [ -n "${{ secrets.ACR_IMAGE_NAME }}" ]; then
+            ACR_REPO="${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_NAME }}"
+            TAGS="${TAGS},${ACR_REPO}:latest"
+
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              TAGS="${TAGS},${ACR_REPO}:${VERSION_TAG}"
+            fi
+          fi
+
+          # 输出 tags 结果
+          echo "tags<<EOF" >> $GITHUB_OUTPUT
+          echo "$TAGS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
 
       # 构建并推送镜像
       - name: Build and Push Docker Image
