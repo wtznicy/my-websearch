@@ -1,6 +1,6 @@
 # Open-WebSearch MCP Server
 
-[中文](./README.zh.md)
+[中文](./README-zh.md)
 
 A Model Context Protocol (MCP) server based on multi-engine search results, supporting free web search without API keys.
 
