@@ -33,13 +33,13 @@ export async function searchCsdn(query: string, limit: number): Promise<SearchRe
 
         result_vos.forEach(re => {
 
-            const { digest, title, url_location } = re
+            const { digest, title, url_location,nickname } = re
 
             results.push ({
                 title: title,
                 url: url_location,
                 description: digest,
-                source: "csdn",
+                source: nickname,
                 engine: "csdn"
             });
         });
