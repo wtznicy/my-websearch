@@ -1,24 +1,29 @@
 # Open-WebSearch MCP Server
 
-[中文版本](./README-zh.md)
+[中文](./README-zh.md)
 
-A Model Context Protocol (MCP) server based on multi-engine search results, supporting free web searches without requiring API keys.
+A Model Context Protocol (MCP) server based on multi-engine search results, supporting free web search without API keys.
 
 ## Features
 
-- Uses multi-engine search results for web retrieval
-  - bing
-  - baidu
-  - linux.do
+- Multi-engine web search retrieval
+    - bing
+    - baidu
+    - ~~linux.do~~ Not currently supported
+    - csdn
 - No API keys or authentication required
-- Returns structured results with titles, URLs, and descriptions
+- Returns structured results with title, URL, and description
 - Configurable number of results per search
+- Support for fetching individual article content
+    - csdn
 
 ## TODO
-- Support for ~~Bing~~ (already supported), Google, and other search engines
-- Support for more blogs, forums, and social platforms
+- Support ~~Bing~~ (already supported), Google and other search engines
+- Support more blogs, forums, and social platforms
 
-## Installation
+## Installation Guide
+
+### Local Installation
 
 1. Clone or download this repository
 2. Install dependencies:
@@ -31,25 +36,93 @@ npm run build
 ```
 4. Add the server to your MCP configuration:
 
-For VSCode (Claude Dev Extension):
+**Cherry Studio:**
 ```json
 {
   "mcpServers": {
     "web-search": {
-      "command": "node",
-      "args": ["/path/to/web-search/build/index.js"]
+      "name": "Web Search MCP",
+      "type": "streamableHttp",
+      "description": "Multi-engine web search with article fetching",
+      "isActive": true,
+      "baseUrl": "http://localhost:3000/mcp"
     }
   }
 }
 ```
 
-For Claude Desktop:
+**VSCode (Claude Development Extension):**
 ```json
 {
   "mcpServers": {
     "web-search": {
-      "command": "node",
-      "args": ["/path/to/web-search/build/index.js"]
+      "transport": {
+        "type": "streamableHttp",
+        "url": "http://localhost:3000/mcp"
+      }
+    },
+    "web-search-sse": {
+      "transport": {
+        "type": "sse",
+        "url": "http://localhost:3000/sse"
+      }
+    }
+  }
+}
+```
+
+**Claude Desktop:**
+```json
+{
+  "mcpServers": {
+    "web-search": {
+      "transport": {
+        "type": "streamableHttp",
+        "url": "http://localhost:3000/mcp"
+      }
+    },
+    "web-search-sse": {
+      "transport": {
+        "type": "sse",
+        "url": "http://localhost:3000/sse"
+      }
+    }
+  }
+}
+```
+
+### Docker Deployment
+
+Deploy quickly using Docker Compose:
+
+```bash
+docker-compose up -d
+```
+
+Or use Docker directly:
+```bash
+docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
+```
+
+Then configure in your MCP client:
+```json
+{
+  "mcpServers": {
+    "web-search": {
+      "name": "Web Search MCP",
+      "type": "streamableHttp",
+      "description": "Multi-engine web search with article fetching",
+      "isActive": true,
+      "baseUrl": "http://localhost:3000/mcp"
+    },
+    "web-search-sse": {
+      "transport": {
+        "name": "Web Search MCP",
+        "type": "sse",
+        "description": "Multi-engine web search with article fetching",
+        "isActive": true,
+        "url": "http://localhost:3000/sse"
+      }
     }
   }
 }
@@ -57,15 +130,15 @@ For Claude Desktop:
 
 ## Usage Instructions
 
-The server provides a tool named `search` and a tool named `fetchLinuxDoArticle`, which accept the following parameters:
+The server provides three tools: `search`, `fetchLinuxDoArticle`, and `fetchCsdnArticle`.
 
-### search Tool Usage Instructions
+### search Tool Usage
 
 ```typescript
 {
-  "query": string,    // Search query term
-  "limit": number,     // Optional: Number of results to return (default: 5)
-  "engines": string[]     // Optional: Engines to use (bing,baidu,linuxdo) default bing
+  "query": string,        // Search query
+  "limit": number,        // Optional: Number of results to return (default: 5)
+  "engines": string[]     // Optional: Engines to use (bing,baidu,linuxdo,csdn) default: bing
 }
 ```
 
@@ -77,7 +150,7 @@ use_mcp_tool({
   arguments: {
     query: "search content",
     limit: 3,  // Optional parameter
-    engines: ["bing"] // Optional parameter
+    engines: ["bing", "csdn"] // Optional parameter, supports multi-engine combined search
   }
 })
 ```
@@ -95,12 +168,43 @@ Return example:
 ]
 ```
 
-### fetchLinuxDoArticle Tool Usage Instructions
+### fetchCsdnArticle Tool Usage
 
+Used to fetch complete content of CSDN blog articles.
 
 ```typescript
 {
-  "url": string    // URL obtained from linuxdo search using the search tool
+  "url": string    // URL returned from search tool using csdn query
+}
+```
+
+Usage example:
+```typescript
+use_mcp_tool({
+  server_name: "web-search",
+  tool_name: "fetchCsdnArticle",
+  arguments: {
+    url: "https://blog.csdn.net/xxx/article/details/xxx"
+  }
+})
+```
+
+Return example:
+```json
+[
+  {
+    "content": "Example search result"
+  }
+]
+```
+
+### fetchLinuxDoArticle Tool Usage
+
+Used to fetch complete content of Linux.do forum articles.
+
+```typescript
+{
+  "url": string    // URL returned from search tool using linuxdo query
 }
 ```
 
@@ -126,25 +230,25 @@ Return example:
 
 ## Usage Limitations
 
-Since this tool relies on scraping search results from multiple engines, please be aware of the following important limitations:
+Since this tool is implemented by crawling multi-engine search results, please note the following important limitations:
 
-1. **Rate Limiting**: 
-   - Performing too many searches in a short period may result in temporary blocking by the selected engine.
-   - Recommendations:
-     - Maintain a reasonable search frequency
-     - Use the limit parameter cautiously
-     - Introduce delays between searches if necessary
+1. **Rate Limiting**:
+    - Too many searches in a short time may cause the engines to temporarily block requests
+    - Recommendations:
+        - Maintain reasonable search frequency
+        - Use the limit parameter judiciously
+        - Set delays between searches when necessary
 
 2. **Result Accuracy**:
-   - Parsing depends on the HTML structure of each engine, which may change and cause failures
-   - Some results might be missing descriptions or other metadata
-   - Complex search operators may not work as expected
+    - Depends on the HTML structure of corresponding engines, may fail with engine updates
+    - Some results may lack metadata such as descriptions
+    - Complex search operators may not work as expected
 
-3. **Legal Considerations**:
-   - This tool is intended for personal use
-   - Please comply with the terms of service of each search engine
-   - Consider implementing appropriate rate limiting for your use case
+3. **Legal Terms**:
+    - This tool is for personal use only
+    - Please comply with the terms of service of corresponding engines
+    - Recommend implementing appropriate rate limiting based on actual usage scenarios
 
 ## Contributing
 
-Feel free to submit issues and enhancement requests!
+Welcome to submit issue reports and feature improvement suggestions!

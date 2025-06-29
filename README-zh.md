@@ -7,18 +7,23 @@
 ## 功能特性
 
 - 使用多引擎搜索结果进行网络检索
-  - bing
-  - baidu
-  - linux.do
+    - bing
+    - baidu
+    - ~~linux.do~~ 暂不支持
+    - csdn
 - 无需API密钥或身份验证
 - 返回带标题、URL和描述的结构化结果
 - 可配置每次搜索返回的结果数量
+- 支持获取单篇文章内容
+    - csdn
 
 ## TODO
 - 支持~~Bing~~（已支持）,Google等搜索引擎
 - 支持更多博客论坛、社交软件
 
 ## 安装指南
+
+### 本地安装
 
 1. 克隆或下载本仓库
 2. 安装依赖项：
@@ -31,25 +36,93 @@ npm run build
 ```
 4. 将服务器添加到您的MCP配置中：
 
-VSCode版(Claude开发扩展)：
+**Cherry Studio:**
 ```json
 {
   "mcpServers": {
     "web-search": {
-      "command": "node",
-      "args": ["/path/to/web-search/build/index.js"]
+      "name": "Web Search MCP",
+      "type": "streamableHttp",
+      "description": "Multi-engine web search with article fetching",
+      "isActive": true,
+      "baseUrl": "http://localhost:3000/mcp"
     }
   }
 }
 ```
 
-Claude桌面版：
+**VSCode版(Claude开发扩展):**
 ```json
 {
   "mcpServers": {
     "web-search": {
-      "command": "node",
-      "args": ["/path/to/web-search/build/index.js"]
+      "transport": {
+        "type": "streamableHttp",
+        "url": "http://localhost:3000/mcp"
+      }
+    },
+    "web-search-sse": {
+      "transport": {
+        "type": "sse",
+        "url": "http://localhost:3000/sse"
+      }
+    }
+  }
+}
+```
+
+**Claude桌面版:**
+```json
+{
+  "mcpServers": {
+    "web-search": {
+      "transport": {
+        "type": "streamableHttp",
+        "url": "http://localhost:3000/mcp"
+      }
+    },
+    "web-search-sse": {
+      "transport": {
+        "type": "sse",
+        "url": "http://localhost:3000/sse"
+      }
+    }
+  }
+}
+```
+
+### Docker部署
+
+使用Docker Compose快速部署：
+
+```bash
+docker-compose up -d
+```
+
+或者
+```bash
+docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
+```
+
+然后在MCP客户端中配置：
+```json
+{
+  "mcpServers": {
+    "web-search": {
+      "name": "Web Search MCP",
+      "type": "streamableHttp",
+      "description": "Multi-engine web search with article fetching",
+      "isActive": true,
+      "baseUrl": "http://localhost:3000/mcp"
+    },
+    "web-search-sse": {
+      "transport": {
+        "name": "Web Search MCP",
+        "type": "sse",
+        "description": "Multi-engine web search with article fetching",
+        "isActive": true,
+        "url": "http://localhost:3000/sse"
+      }
     }
   }
 }
@@ -57,15 +130,15 @@ Claude桌面版：
 
 ## 使用说明
 
-服务器提供一个名为`search`和一个名为`fetchLinuxDoArticle`的工具，接受以下参数：
+服务器提供三个工具：`search`、`fetchLinuxDoArticle`和`fetchCsdnArticle`。
 
 ### search工具使用说明
 
 ```typescript
 {
-  "query": string,    // 搜索查询词
-  "limit": number,     // 可选：返回结果数量（默认：5）
-  "engines": string[]     // 可选：要使用的引擎（bing,baidu,linuxdo）默认bing
+  "query": string,        // 搜索查询词
+  "limit": number,        // 可选：返回结果数量（默认：5）
+  "engines": string[]     // 可选：要使用的引擎（bing,baidu,linuxdo,csdn）默认bing
 }
 ```
 
@@ -77,7 +150,7 @@ use_mcp_tool({
   arguments: {
     query: "搜索内容",
     limit: 3,  // 可选参数
-    engines: ["bing"] // 可选参数
+    engines: ["bing", "csdn"] // 可选参数，支持多引擎组合搜索
   }
 })
 ```
@@ -95,8 +168,40 @@ use_mcp_tool({
 ]
 ```
 
+
+### fetchCsdnArticle工具使用说明
+
+用于获取CSDN博客文章的完整内容。
+
+```typescript
+{
+  "url": string    // search 工具使用csdn查询出的url
+}
+```
+
+使用示例：
+```typescript
+use_mcp_tool({
+  server_name: "web-search",
+  tool_name: "fetchCsdnArticle",
+  arguments: {
+    url: "https://blog.csdn.net/xxx/article/details/xxx"
+  }
+})
+```
+
+返回示例：
+```json
+[
+  {
+    "content": "示例搜索结果"
+  }
+]
+```
+
 ### fetchLinuxDoArticle工具使用说明
 
+用于获取Linux.do论坛文章的完整内容。
 
 ```typescript
 {
@@ -122,7 +227,10 @@ use_mcp_tool({
     "content": "示例搜索结果"
   }
 ]
+
 ```
+
+
 ## 使用限制
 
 由于本工具通过爬取多引擎搜索结果实现，请注意以下重要限制：
