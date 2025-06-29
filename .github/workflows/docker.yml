@@ -10,18 +10,31 @@ on:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      # 检查 ACR 是否启用
+      - name: Check if ACR registry is set
+        id: check-acr
+        run: |
+          if [ -n "${{ secrets.ACR_REGISTRY }}" ]; then
+            echo "acr_enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "acr_enabled=false" >> $GITHUB_OUTPUT
+          fi
+
+      # 登录 ACR（仅在启用时）
       - name: Log in to Aliyun ACR
-        if: ${{ secrets.ACR_REGISTRY }}
+        if: steps.check-acr.outputs.acr_enabled == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.ACR_REGISTRY }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
+      # 登录 GitHub Container Registry
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -29,19 +42,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 获取仓库所有者小写形式
       - name: Get lowercase repository owner
         id: lowercase
         run: echo "repository_owner_lowercase=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
+      # 准备镜像 tag（包括 ACR 的 tag）
       - name: Prepare tags
         id: tags
         run: |
           TAGS="ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:latest"
-          if [ -n "${{ secrets.ACR_REGISTRY }}" ] && [ -n "${{ secrets.ACR_IMAGE_NAME }}" ]; then
+          if [ "${{ steps.check-acr.outputs.acr_enabled }}" == "true" ] && [ -n "${{ secrets.ACR_IMAGE_NAME }}" ]; then
             TAGS="$TAGS,${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_NAME }}:latest"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
+      # 构建并推送镜像
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
