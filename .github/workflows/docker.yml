@@ -1,8 +1,8 @@
 name: Build and Push to GHCR & ACR
+# 此工作流仅在推送标签 (v*) 时触发，用于构建和推送 Docker 镜像
 
 on:
   push:
-    branches: [main]
     tags:
       - 'v*'
   workflow_dispatch:
@@ -52,20 +52,12 @@ jobs:
         id: tags
         run: |
           REPO_LOWERCASE="ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search"
-          TAGS="${REPO_LOWERCASE}:latest"
-
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION_TAG="${GITHUB_REF##*/}"
-            TAGS="${TAGS},${REPO_LOWERCASE}:${VERSION_TAG}"
-          fi
+          VERSION_TAG="${GITHUB_REF##*/}"
+          TAGS="${REPO_LOWERCASE}:latest,${REPO_LOWERCASE}:${VERSION_TAG}"
 
           if [ "${{ steps.check-acr.outputs.acr_enabled }}" == "true" ] && [ -n "${{ secrets.ACR_IMAGE_NAME }}" ]; then
             ACR_REPO="${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_NAME }}"
-            TAGS="${TAGS},${ACR_REPO}:latest"
-
-            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-              TAGS="${TAGS},${ACR_REPO}:${VERSION_TAG}"
-            fi
+            TAGS="${TAGS},${ACR_REPO}:latest,${ACR_REPO}:${VERSION_TAG}"
           fi
 
           # 输出 tags 结果
