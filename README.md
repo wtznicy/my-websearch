@@ -11,6 +11,9 @@ A Model Context Protocol (MCP) server based on multi-engine search results, supp
     - baidu
     - ~~linux.do~~ temporarily unsupported
     - csdn
+    - duckduckgo
+    - exa
+    - brave
 - No API keys or authentication required
 - Returns structured results with titles, URLs, and descriptions
 - Configurable number of results per search

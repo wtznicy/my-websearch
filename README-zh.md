@@ -11,6 +11,9 @@
     - baidu
     - ~~linux.do~~ 暂不支持
     - csdn
+    - duckduckgo
+    - exa
+    - brave
 - 无需API密钥或身份验证
 - 返回带标题、URL和描述的结构化结果
 - 可配置每次搜索返回的结果数量
