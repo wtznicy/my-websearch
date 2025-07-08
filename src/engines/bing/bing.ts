@@ -1,13 +1,13 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { SearchResult } from '../types.js';
+import { SearchResult } from '../../types.js';
 
 export async function searchBing(query: string, limit: number): Promise<SearchResult[]> {
     let allResults: SearchResult[] = [];
     let pn = 0;
 
     while (allResults.length < limit) {
-        const response = await axios.get('https://cn.bing.com/search', {
+        const response = await axios.get('https://www.bing.com/search', {
             params: {
                 q: query,
                 first: 1 + pn * 10
