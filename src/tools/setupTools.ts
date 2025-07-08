@@ -10,9 +10,11 @@ import { SearchResult } from '../types.js';
 import { z } from 'zod';
 import {searchDuckDuckGo} from "../engines/duckduckgo/index.js";
 import {config} from "../config.js";
+import {searchExa} from "../engines/exa/index.js";
+import {searchBrave} from "../engines/brave/index.js";
 
 // 支持的搜索引擎
-const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn', 'duckduckgo'] as const;
+const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn', 'duckduckgo','exa','brave'] as const;
 type SupportedEngine = typeof SUPPORTED_ENGINES[number];
 
 // 搜索引擎调用函数映射
@@ -21,7 +23,9 @@ const engineMap: Record<SupportedEngine, (query: string, limit: number) => Promi
     bing: searchBing,
     linuxdo: searchLinuxDo,
     csdn: searchCsdn,
-    duckduckgo: searchDuckDuckGo
+    duckduckgo: searchDuckDuckGo,
+    exa: searchExa,
+    brave: searchBrave,
 };
 
 // 分配搜索结果数量
@@ -94,11 +98,11 @@ export const setupTools = (server: McpServer): void => {
     // 搜索工具
     server.tool(
         'search',
-        "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN) with no API key required",
+        "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave) with no API key required",
         {
             query: z.string().min(1, "Search query must not be empty"),
             limit: z.number().min(1).max(50).default(10),
-            engines: z.array(z.enum(['baidu', 'bing', 'csdn', 'duckduckgo'])).min(1).default([config.defaultSearchEngine])
+            engines: z.array(z.enum(['baidu', 'bing', 'csdn', 'duckduckgo','exa','brave'])).min(1).default([config.defaultSearchEngine])
         },
         async ({ query, limit = 10, engines = ['bing'] }) => {
             try {
