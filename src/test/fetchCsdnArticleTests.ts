@@ -7,7 +7,7 @@ async function testFetchCsdnArticle() {
   console.log('🔍 Starting CSDN article fetch test...');
 
   try {
-    const url = 'https://blog.csdn.net/qq_53444631/article/details/146310812';
+    const url = 'https://blog.csdn.net/weixin_45801664/article/details/149000138';
 
     console.log(`📝 Fetching article from URL: ${url}`);
 
