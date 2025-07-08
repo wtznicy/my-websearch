@@ -1,7 +1,7 @@
 // src/config.ts
 export interface AppConfig {
     // Search engine configuration
-    defaultSearchEngine: 'bing' | 'duckduckgo';
+    defaultSearchEngine: 'bing' | 'duckduckgo' | 'exa' | 'brave';
     // Proxy configuration
     proxyUrl?: string;
     useProxy: boolean;

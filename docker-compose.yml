@@ -11,7 +11,7 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: production
-      # DEFAULT_SEARCH_ENGINE: "duckduckgo" # default bing (optional)
+      # DEFAULT_SEARCH_ENGINE: "duckduckgo" # Optional: 'bing' | 'duckduckgo' | 'exa' | 'brave', default bing (optional)
       # USE_PROXY: true # Using a proxy (optional)
       # PROXY_URL: "xxx"  #  Using a proxy (optional)
       ENABLE_CORS: "true"
