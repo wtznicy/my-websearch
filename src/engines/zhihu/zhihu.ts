@@ -4,7 +4,7 @@ import { config } from '../../config.js';
 import {searchDuckDuckGo} from "../duckduckgo/index.js";
 import * as cheerio from 'cheerio';
 
-async function searchBingForLinuxDo(query: string, limit: number): Promise<SearchResult[]> {
+async function searchBingForZhiHu(query: string, limit: number): Promise<SearchResult[]> {
     let allResults: SearchResult[] = [];
     let pn = 0;
     // Format query for URL
@@ -65,13 +65,13 @@ async function searchBingForLinuxDo(query: string, limit: number): Promise<Searc
 
                     if (titleElement.length && linkElement.length) {
                         const url = linkElement.attr('href');
-                        if (url && url.startsWith('http') && url.includes('linux.do')) {
+                        if (url && url.startsWith('http') && url.includes('zhuanlan.zhihu.com')) {
                             const sourceElement = $(element).find('.b_tpcn');
                             results.push({
                                 title: titleElement.text(),
                                 url: url,
                                 description: snippetElement.text().trim() || '',
-                                source: 'linux.do',
+                                source: 'zhuanlan.zhihu.com',
                                 engine: 'bing'
                             });
                         }
@@ -96,12 +96,12 @@ async function searchBingForLinuxDo(query: string, limit: number): Promise<Searc
 }
 
 
-export async function searchLinuxDo(query: string, limit: number): Promise<SearchResult[]> {
+export async function searchZhiHu(query: string, limit: number): Promise<SearchResult[]> {
 
-    console.log(`🔍 Searching linux.do with "${query}" using ${config.defaultSearchEngine} engine`);
+    console.log(`🔍 Searching zhuanlan.zhihu.com with "${query}" using ${config.defaultSearchEngine} engine`);
 
     // Create the site-specific query
-    const siteQuery = `site:linux.do ${query}`;
+    const siteQuery = `site:zhuanlan.zhihu.com ${query}`;
 
     let results: SearchResult[] = [];
 
@@ -111,14 +111,14 @@ export async function searchLinuxDo(query: string, limit: number): Promise<Searc
             results = await searchDuckDuckGo(siteQuery, limit);
         } else {
             // Default to Bing
-            results = await searchBingForLinuxDo(siteQuery, limit);
+            results = await searchBingForZhiHu(siteQuery, limit);
         }
 
-        // Filter results to ensure they're from linux.do
+        // Filter results to ensure they're from zhuanlan.zhihu.com
         const filteredResults = results.filter(result => {
             try {
                 const url = new URL(result.url);
-                return url.hostname === 'linux.do';
+                return url.hostname === 'zhuanlan.zhihu.com';
             } catch {
                 return false;
             }
@@ -126,13 +126,13 @@ export async function searchLinuxDo(query: string, limit: number): Promise<Searc
 
         // Update source to be consistent
         filteredResults.forEach(result => {
-            result.source = 'linux.do';
+            result.source = 'zhuanlan.zhihu.com';
             // Keep the original engine info
         });
 
         return filteredResults.slice(0, limit);
     } catch (error: any) {
-        console.error(`❌ Linux.do search failed using ${config.defaultSearchEngine}:`, error.message || error);
+        console.error(`❌ zhuanlan.zhihu.com search failed using ${config.defaultSearchEngine}:`, error.message || error);
         return [];
     }
 

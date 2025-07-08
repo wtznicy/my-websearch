@@ -1,16 +1,18 @@
 // tools/setupTools.ts
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { fetchLinuxDoArticle } from '../engines/linuxdo/fetchLinuxDoArticle.js';
-import { searchBaidu } from '../engines/baidu.js';
-import { searchBing } from '../engines/bing.js';
+import { searchBaidu } from '../engines/baidu/baidu.js';
+import { searchBing } from '../engines/bing/bing.js';
 import { searchLinuxDo } from "../engines/linuxdo/linuxdo.js";
 import { searchCsdn } from "../engines/csdn/csdn.js";
 import { fetchCsdnArticle } from "../engines/csdn/fetchCsdnArticle.js";
 import { SearchResult } from '../types.js';
 import { z } from 'zod';
+import {searchDuckDuckGo} from "../engines/duckduckgo/index.js";
+import {config} from "../config.js";
 
 // 支持的搜索引擎
-const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn'] as const;
+const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn', 'duckduckgo'] as const;
 type SupportedEngine = typeof SUPPORTED_ENGINES[number];
 
 // 搜索引擎调用函数映射
@@ -19,6 +21,7 @@ const engineMap: Record<SupportedEngine, (query: string, limit: number) => Promi
     bing: searchBing,
     linuxdo: searchLinuxDo,
     csdn: searchCsdn,
+    duckduckgo: searchDuckDuckGo
 };
 
 // 分配搜索结果数量
@@ -33,6 +36,16 @@ const distributeLimit = (totalLimit: number, engineCount: number): number[] => {
 
 // 执行搜索
 const executeSearch = async (query: string, engines: string[], limit: number): Promise<SearchResult[]> => {
+    // Clean up the query string to ensure it won't cause issues due to spaces or special characters
+    const cleanQuery = query.trim();
+    console.log(`[DEBUG] Executing search, query: "${cleanQuery}", engines: ${engines.join(', ')}, limit: ${limit}`);
+
+    if (!cleanQuery) {
+        console.error('Query string is empty');
+        throw new Error('Query string cannot be empty');
+
+    }
+
     const limits = distributeLimit(limit, engines.length);
 
     const searchTasks = engines.map((engine, index) => {
@@ -81,11 +94,11 @@ export const setupTools = (server: McpServer): void => {
     // 搜索工具
     server.tool(
         'search',
-        "Search the web using multiple engines (e.g., Baidu, Bing, Linuxdo, CSDN) with no API key required",
+        "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN) with no API key required",
         {
             query: z.string().min(1, "Search query must not be empty"),
             limit: z.number().min(1).max(50).default(10),
-            engines: z.array(z.enum(['baidu', 'bing', 'linuxdo', 'csdn'])).min(1).default(['bing'])
+            engines: z.array(z.enum(['baidu', 'bing', 'csdn', 'duckduckgo'])).min(1).default([config.defaultSearchEngine])
         },
         async ({ query, limit = 10, engines = ['bing'] }) => {
             try {
@@ -186,6 +199,3 @@ export const setupTools = (server: McpServer): void => {
     );
 };
 
-// 导出类型和常量供其他模块使用
-export {SUPPORTED_ENGINES};
-export type { SupportedEngine };

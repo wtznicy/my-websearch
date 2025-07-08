@@ -2,14 +2,15 @@ import axios from 'axios';
 import { JSDOM } from 'jsdom';
 
 export async function fetchLinuxDoArticle(url: string): Promise<{ content: string }> {
-    const match = url.match(/\/t\/(\d+)\.json/);
+    const match = url.match(/\/topic\/(\d+)/);
     const topicId = match ? match[1] : null;
 
     if (!topicId) {
         throw new Error('Invalid URL: Cannot extract topic ID.');
     }
+    const apiUrl = `https://linux.do/t/${topicId}.json`;
 
-    const response = await axios.get(url, {
+    const response = await axios.get(apiUrl, {
         headers: {
             'accept': 'application/json, text/javascript, */*; q=0.01',
             'accept-language': 'zh-CN,zh;q=0.9',

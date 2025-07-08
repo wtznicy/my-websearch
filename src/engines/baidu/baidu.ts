@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { SearchResult } from '../types.js';
+import { SearchResult } from '../../types.js';
 
 export async function searchBaidu(query: string, limit: number): Promise<SearchResult[]> {
     let allResults: SearchResult[] = [];
