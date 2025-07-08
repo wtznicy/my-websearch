@@ -7,6 +7,7 @@ import express from 'express';
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { randomUUID } from "node:crypto";
 import cors from 'cors';
+import {config} from "./config.js";
 
 async function main() {
   // 创建 Express 应用
@@ -14,7 +15,7 @@ async function main() {
 
   const server = new McpServer({
     name: 'web-search',
-    version: '0.1.0'
+    version: '1.1'
   });
 
   // ... set up server resources, tools, and prompts ...
@@ -22,9 +23,9 @@ async function main() {
   app.use(express.json());
 
   // 是否启用跨域
-  if (process.env.ENABLE_CORS === 'true') {
+  if (config.enableCors) {
     app.use(cors({
-      origin: process.env.CORS_ORIGIN || '*',
+      origin: config.corsOrigin || '*',
       methods: ['GET', 'POST', 'DELETE'],
     }));
     app.options('*', cors());
