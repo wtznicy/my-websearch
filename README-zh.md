@@ -310,3 +310,8 @@ use_mcp_tool({
 - 如果您不配置ACR secrets，工作流程将只发布到GitHub Container Registry
 - 确保您的GitHub仓库已启用Actions功能
 - 工作流程会使用您的GitHub用户名（转换为小写）作为GHCR镜像名称
+
+## Star History
+如果项目对你有帮助，请考虑给个⭐ Star！
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Aas-ee/open-webSearch&type=Date)](https://www.star-history.com/#Aas-ee/open-webSearch&Date)

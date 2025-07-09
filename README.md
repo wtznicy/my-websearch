@@ -307,3 +307,8 @@ The repository includes a GitHub Actions workflow (`.github/workflows/docker.yml
 - If you don't configure ACR secrets, the workflow will only publish to GitHub Container Registry
 - Make sure your GitHub repository has Actions enabled
 - The workflow will use your GitHub username (converted to lowercase) as the GHCR image name
+
+## Star History
+If you find this project helpful, please consider giving it a ⭐ Star!
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Aas-ee/open-webSearch&type=Date)](https://www.star-history.com/#Aas-ee/open-webSearch&Date)
