@@ -14,15 +14,18 @@ A Model Context Protocol (MCP) server based on multi-engine search results, supp
     - duckduckgo
     - exa
     - brave
+- HTTP proxy configuration support for accessing restricted resources
 - No API keys or authentication required
 - Returns structured results with titles, URLs, and descriptions
 - Configurable number of results per search
+- Customizable default search engine
 - Support for fetching individual article content
     - csdn
 
 ## TODO
-- Support for ~~Bing~~ (already supported), Google and other search engines
+- Support for ~~Bing~~ (already supported), ~~DuckDuckGo~~ (already supported), ~~Exa~~ (already supported), ~~Brave~~ (already supported), Google and other search engines
 - Support for more blogs, forums, and social platforms
+- Optimize article content extraction, add support for more sites
 
 ## Installation Guide
 
@@ -107,6 +110,25 @@ Or use Docker directly:
 docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
 ```
 
+Environment variable configuration:
+
+```bash
+# Enable CORS (default: false)
+ENABLE_CORS=true
+
+# CORS origin configuration (default: *)
+CORS_ORIGIN=*
+
+# Default search engine (options: bing, duckduckgo, exa, brave, default: bing)
+DEFAULT_SEARCH_ENGINE=duckduckgo
+
+# Enable HTTP proxy (default: false)
+USE_PROXY=true
+
+# Proxy server URL (default: http://127.0.0.1:10809)
+PROXY_URL=http://your-proxy-server:port
+```
+
 Then configure in your MCP client:
 ```json
 {
@@ -140,8 +162,8 @@ The server provides three tools: `search`, `fetchLinuxDoArticle`, and `fetchCsdn
 ```typescript
 {
   "query": string,        // Search query
-  "limit": number,        // Optional: Number of results to return (default: 5)
-  "engines": string[]     // Optional: Engines to use (bing,baidu,linuxdo,csdn) default bing
+  "limit": number,        // Optional: Number of results to return (default: 10)
+  "engines": string[]     // Optional: Engines to use (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave) default bing
 }
 ```
 
@@ -153,7 +175,7 @@ use_mcp_tool({
   arguments: {
     query: "search content",
     limit: 3,  // Optional parameter
-    engines: ["bing", "csdn"] // Optional parameter, supports multi-engine combined search
+    engines: ["bing", "csdn", "duckduckgo", "exa", "brave"] // Optional parameter, supports multi-engine combined search
   }
 })
 ```
@@ -251,6 +273,16 @@ Since this tool works by scraping multi-engine search results, please note the f
     - This tool is for personal use only
     - Please comply with the terms of service of corresponding engines
     - Implement appropriate rate limiting based on your actual use case
+
+    4. **Search Engine Configuration**:
+    - Default search engine can be set via the `DEFAULT_SEARCH_ENGINE` environment variable
+    - Supported engines: bing, duckduckgo, exa, brave
+    - The default engine is used when searching specific websites
+
+    5. **Proxy Configuration**:
+    - HTTP proxy can be configured when certain search engines are unavailable in specific regions
+    - Enable proxy with environment variable `USE_PROXY=true`
+    - Configure proxy server address with `PROXY_URL`
 
 ## Contributing
 

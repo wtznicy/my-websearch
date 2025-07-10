@@ -14,15 +14,18 @@
     - duckduckgo
     - exa
     - brave
+- 支持HTTP代理配置，轻松解决网络访问限制
 - 无需API密钥或身份验证
 - 返回带标题、URL和描述的结构化结果
 - 可配置每次搜索返回的结果数量
+- 可自定义默认搜索引擎
 - 支持获取单篇文章内容
     - csdn
 
 ## TODO
-- 支持~~Bing~~（已支持）,Google等搜索引擎
+- 支持~~Bing~~（已支持）,~~DuckDuckGo~~（已支持）,~~Exa~~（已支持）,~~Brave~~（已支持）,Google等搜索引擎
 - 支持更多博客论坛、社交软件
+- 优化文章内容提取功能，增加更多站点支持
 
 ## 安装指南
 
@@ -107,6 +110,25 @@ docker-compose up -d
 docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
 ```
 
+配置环境变量说明：
+
+```bash
+# 启用CORS (默认: false)
+ENABLE_CORS=true
+
+# CORS来源配置 (默认: *)
+CORS_ORIGIN=*
+
+# 默认搜索引擎 (可选值: bing, duckduckgo, exa, brave，默认: bing)
+DEFAULT_SEARCH_ENGINE=duckduckgo
+
+# 启用HTTP代理 (默认: false)
+USE_PROXY=true
+
+# 代理服务器URL (默认: http://127.0.0.1:10809)
+PROXY_URL=http://your-proxy-server:port
+```
+
 然后在MCP客户端中配置：
 ```json
 {
@@ -140,8 +162,8 @@ docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=
 ```typescript
 {
   "query": string,        // 搜索查询词
-  "limit": number,        // 可选：返回结果数量（默认：5）
-  "engines": string[]     // 可选：要使用的引擎（bing,baidu,linuxdo,csdn）默认bing
+  "limit": number,        // 可选：返回结果数量（默认：10）
+  "engines": string[]     // 可选：要使用的引擎（bing,baidu,linuxdo,csdn,duckduckgo,exa,brave）默认bing
 }
 ```
 
@@ -153,7 +175,7 @@ use_mcp_tool({
   arguments: {
     query: "搜索内容",
     limit: 3,  // 可选参数
-    engines: ["bing", "csdn"] // 可选参数，支持多引擎组合搜索
+    engines: ["bing", "csdn", "duckduckgo", "exa", "brave"] // 可选参数，支持多引擎组合搜索
   }
 })
 ```
@@ -254,6 +276,16 @@ use_mcp_tool({
     - 本工具仅限个人使用
     - 请遵守对应引擎的服务条款
     - 建议根据实际使用场景实施适当的频率限制
+
+    4. **搜索引擎配置**：
+    - 可通过环境变量`DEFAULT_SEARCH_ENGINE`设置默认搜索引擎
+    - 支持的引擎有：bing, duckduckgo, exa, brave
+    - 当搜索特定网站内容时，会自动使用默认搜索引擎
+
+    5. **代理服务配置**：
+    - 当某些搜索引擎在特定地区不可用时，可配置HTTP代理
+    - 通过环境变量`USE_PROXY=true`启用代理
+    - 使用`PROXY_URL`配置代理服务器地址
 
 ## 贡献指南
 
