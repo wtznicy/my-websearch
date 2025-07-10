@@ -274,15 +274,15 @@ Since this tool works by scraping multi-engine search results, please note the f
     - Please comply with the terms of service of corresponding engines
     - Implement appropriate rate limiting based on your actual use case
 
-    4. **Search Engine Configuration**:
-    - Default search engine can be set via the `DEFAULT_SEARCH_ENGINE` environment variable
-    - Supported engines: bing, duckduckgo, exa, brave
-    - The default engine is used when searching specific websites
+4. **Search Engine Configuration**:
+   - Default search engine can be set via the `DEFAULT_SEARCH_ENGINE` environment variable
+   - Supported engines: bing, duckduckgo, exa, brave
+   - The default engine is used when searching specific websites
 
-    5. **Proxy Configuration**:
-    - HTTP proxy can be configured when certain search engines are unavailable in specific regions
-    - Enable proxy with environment variable `USE_PROXY=true`
-    - Configure proxy server address with `PROXY_URL`
+5. **Proxy Configuration**:
+   - HTTP proxy can be configured when certain search engines are unavailable in specific regions
+   - Enable proxy with environment variable `USE_PROXY=true`
+   - Configure proxy server address with `PROXY_URL`
 
 ## Contributing
 
