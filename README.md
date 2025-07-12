@@ -127,6 +127,9 @@ USE_PROXY=true
 
 # Proxy server URL (default: http://127.0.0.1:10809)
 PROXY_URL=http://your-proxy-server:port
+
+# Server port (default: 3000)
+PORT=8080
 ```
 
 Then configure in your MCP client:

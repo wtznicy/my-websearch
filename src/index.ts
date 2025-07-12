@@ -128,8 +128,11 @@ async function main() {
     }
   });
 
-  app.listen(3000 ,'0.0.0.0', () => {
-    console.log('Server is running on port 3000')
+  // Read the port number from the environment variable; use the default port 3000 if it is not set.
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server is running on port ${PORT}`)
   })
 }
 

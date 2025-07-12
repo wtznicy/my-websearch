@@ -127,6 +127,9 @@ USE_PROXY=true
 
 # 代理服务器URL (默认: http://127.0.0.1:10809)
 PROXY_URL=http://your-proxy-server:port
+
+# 服务器端口 (默认: 3000)
+PORT=8080
 ```
 
 然后在MCP客户端中配置：

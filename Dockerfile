@@ -24,11 +24,13 @@ RUN addgroup -g 1001 -S nodejs && \
 RUN chown -R nodejs:nodejs /app
 USER nodejs
 
-# 暴露端口
-EXPOSE 3000
-
 # 设置环境变量
 ENV NODE_ENV=production
+# 默认端口设置，可被部署环境覆盖
+ENV PORT=3000
+
+# 暴露端口（使用ARG允许构建时覆盖）
+EXPOSE ${PORT}
 
 # 启动命令
 CMD ["node", "build/index.js"]
