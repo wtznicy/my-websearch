@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { setupTools } from './tools/setupTools.js';
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import express from 'express';
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { randomUUID } from "node:crypto";
@@ -130,6 +131,11 @@ async function main() {
 
   // Read the port number from the environment variable; use the default port 3000 if it is not set.
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  // Studio/IDE integration via stdio
+  const transport = new StdioServerTransport();
+  await server.connect(transport).then(() => {
+    console.log('STDIO Transport enabled');
+  }).catch(console.error);
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server is running on port ${PORT}`)

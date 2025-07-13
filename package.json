@@ -1,11 +1,10 @@
 {
-  "name": "web-search",
-  "version": "1.1",
+  "name": "open-websearch",
+  "version": "1.1.0",
   "description": "web search the internet",
-  "private": true,
   "type": "module",
   "bin": {
-    "web-search": "./build/index.js"
+    "open-websearch": "./build/index.js"
   },
   "files": [
     "build"
@@ -26,7 +25,8 @@
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "https-proxy-agent": "^7.0.6",
-    "jsdom": "^26.1.0"
+    "jsdom": "^26.1.0",
+    "npx": "^10.2.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
