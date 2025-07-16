@@ -1,6 +1,7 @@
 # Open-WebSearch MCP 服务器
 
 [![ModelScope](https://img.shields.io/badge/dynamic/json?label=ModelScope&url=https://www.modelscope.cn/api/v1/mcpServers/Aasee1/open-webSearch&query=$.Data.CallVolume&prefix=%E2%96%B2%20&color=orange)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
+[![smithery badge](https://smithery.ai/badge/@Aas-ee/open-websearch)](https://smithery.ai/server/@Aas-ee/open-websearch)
 ![Version](https://img.shields.io/github/v/release/Aas-ee/open-websearch)
 ![License](https://img.shields.io/github/license/Aas-ee/open-websearch)
 ![Issues](https://img.shields.io/github/issues/Aas-ee/open-websearch)
