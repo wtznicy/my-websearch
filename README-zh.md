@@ -1,5 +1,10 @@
 # Open-WebSearch MCP 服务器
 
+[![ModelScope](https://img.shields.io/badge/dynamic/json?label=ModelScope&url=https://www.modelscope.cn/api/v1/mcpServers/Aasee1/open-webSearch&query=$.Data.CallVolume&prefix=%E2%96%B2%20&color=orange)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
+![Version](https://img.shields.io/github/v/release/Aas-ee/open-websearch)
+![License](https://img.shields.io/github/license/Aas-ee/open-websearch)
+![Issues](https://img.shields.io/github/issues/Aas-ee/open-websearch)
+
 [English](./README.md)
 
 一个基于多引擎搜索结果的模型上下文协议(MCP)服务器，支持免费网络搜索，无需API密钥。

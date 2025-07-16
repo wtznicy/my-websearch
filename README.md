@@ -1,5 +1,10 @@
 # Open-WebSearch MCP Server
 
+[![ModelScope](https://img.shields.io/badge/dynamic/json?label=ModelScope&url=https://www.modelscope.cn/api/v1/mcpServers/Aasee1/open-webSearch&query=$.Data.CallVolume&prefix=%E2%96%B2%20&color=orange)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
+![Version](https://img.shields.io/github/v/release/Aas-ee/open-websearch)
+![License](https://img.shields.io/github/license/Aas-ee/open-websearch)
+![Issues](https://img.shields.io/github/issues/Aas-ee/open-websearch)
+
 [中文](./README-zh.md)
 
 A Model Context Protocol (MCP) server based on multi-engine search results, supporting free web search without API keys.
