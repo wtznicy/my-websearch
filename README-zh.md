@@ -1,3 +1,5 @@
+<div align="center">
+
 # Open-WebSearch MCP 服务器
 
 [![ModelScope](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Aas-ee/3af09e0f4c7821fb2e9acb96483a5ff0/raw/badge.json&color=orange)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
@@ -6,7 +8,9 @@
 ![License](https://img.shields.io/github/license/Aas-ee/open-websearch)
 ![Issues](https://img.shields.io/github/issues/Aas-ee/open-websearch)
 
-[English](./README.md)
+**🇨🇳 中文 | [🇺🇸 English](./README.md)**
+
+</div>
 
 一个基于多引擎搜索结果的模型上下文协议(MCP)服务器，支持免费网络搜索，无需API密钥。
 
@@ -441,7 +445,11 @@ use_mcp_tool({
 - 确保您的GitHub仓库已启用Actions功能
 - 工作流程会使用您的GitHub用户名（转换为小写）作为GHCR镜像名称
 
+<div align="center">
+
 ## Star History
 如果项目对你有帮助，请考虑给个⭐ Star！
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Aas-ee/open-webSearch&type=Date)](https://www.star-history.com/#Aas-ee/open-webSearch&Date)
+
+</div>

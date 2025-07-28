@@ -1,3 +1,5 @@
+<div align="center">
+
 # Open-WebSearch MCP Server
 
 [![ModelScope](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Aas-ee/3af09e0f4c7821fb2e9acb96483a5ff0/raw/badge.json&color=orange)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
@@ -6,7 +8,9 @@
 ![License](https://img.shields.io/github/license/Aas-ee/open-websearch)
 ![Issues](https://img.shields.io/github/issues/Aas-ee/open-websearch)
 
-[中文](./README-zh.md)
+**[🇨🇳 中文](./README-zh.md) | 🇺🇸 English**
+
+</div>
 
 A Model Context Protocol (MCP) server based on multi-engine search results, supporting free web search without API keys.
 
@@ -349,7 +353,11 @@ The repository includes a GitHub Actions workflow (`.github/workflows/docker.yml
 - Make sure your GitHub repository has Actions enabled
 - The workflow will use your GitHub username (converted to lowercase) as the GHCR image name
 
+<div align="center">
+
 ## Star History
 If you find this project helpful, please consider giving it a ⭐ Star!
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Aas-ee/open-webSearch&type=Date)](https://www.star-history.com/#Aas-ee/open-webSearch&Date)
+
+</div>
