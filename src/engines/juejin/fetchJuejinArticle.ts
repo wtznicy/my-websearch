@@ -12,7 +12,6 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
                 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
                 'pragma': 'no-cache',
                 'priority': 'u=0, i',
                 'sec-fetch-user': '?1',
