@@ -12,6 +12,7 @@ import {searchDuckDuckGo} from "../engines/duckduckgo/index.js";
 import {config} from "../config.js";
 import {searchExa} from "../engines/exa/index.js";
 import {searchBrave} from "../engines/brave/index.js";
+import {fetchGithubReadme} from "../engines/github/index.js";
 
 // 支持的搜索引擎
 const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn', 'duckduckgo','exa','brave'] as const;
@@ -89,6 +90,34 @@ const validateArticleUrl = (url: string, type: 'linuxdo' | 'csdn'): boolean => {
             default:
                 return false;
         }
+    } catch {
+        return false;
+    }
+};
+
+// 验证 GitHub URL
+const validateGithubUrl = (url: string): boolean => {
+    try {
+
+        const isSshGithub = /^git@github\.com:/.test(url);
+
+        if (isSshGithub) {
+            // SSH 格式: git@github.com:owner/repo.git
+            return /^git@github\.com:[^\/]+\/[^\/]+/.test(url);
+        }
+
+        const urlObj = new URL(url);
+
+        // 支持多种 GitHub URL 格式
+        const isHttpsGithub = urlObj.hostname === 'github.com' || urlObj.hostname === 'www.github.com';
+
+        if (isHttpsGithub) {
+            // 检查路径格式: /owner/repo
+            const pathParts = urlObj.pathname.split('/').filter(part => part.length > 0);
+            return pathParts.length >= 2;
+        }
+
+        return false;
     } catch {
         return false;
     }
@@ -195,6 +224,50 @@ export const setupTools = (server: McpServer): void => {
                     content: [{
                         type: 'text',
                         text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    }],
+                    isError: true
+                };
+            }
+        }
+    );
+
+    // 获取 GitHub README 工具
+    server.tool(
+        'fetchGithubReadme',
+        "Fetch README content from a GitHub repository URL",
+        {
+            url: z.string().min(1).refine(
+                (url) => validateGithubUrl(url),
+                "URL must be a valid GitHub repository URL (supports HTTPS, SSH formats)"
+            )
+        },
+        async ({ url }) => {
+            try {
+                console.log(`Fetching GitHub README: ${url}`);
+                const result = await fetchGithubReadme(url);
+
+                if (result) {
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: result
+                        }]
+                    };
+                } else {
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: 'README not found or repository does not exist'
+                        }],
+                        isError: true
+                    };
+                }
+            } catch (error) {
+                console.error('Failed to fetch GitHub README:', error);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: `Failed to fetch README: ${error instanceof Error ? error.message : 'Unknown error'}`
                     }],
                     isError: true
                 };
