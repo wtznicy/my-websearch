@@ -113,6 +113,7 @@ MCP工具支持：
     - duckduckgo
     - exa
     - brave
+    - juejin
 - 支持HTTP代理配置，轻松解决网络访问限制
 - 无需API密钥或身份验证
 - 返回带标题、URL和描述的结构化结果

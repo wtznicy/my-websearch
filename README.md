@@ -24,6 +24,7 @@ A Model Context Protocol (MCP) server based on multi-engine search results, supp
     - duckduckgo
     - exa
     - brave
+    - juejin
 - HTTP proxy configuration support for accessing restricted resources
 - No API keys or authentication required
 - Returns structured results with titles, URLs, and descriptions
