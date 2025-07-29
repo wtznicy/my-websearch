@@ -1,4 +1,5 @@
-import { searchJuejin } from '../engines/juejin';
+import { searchJuejin } from '../engines/juejin/index.js';
+import { SearchResult } from '../types.js';
 
 async function testJuejin() {
   console.log('🔍 Starting Juejin search test...');
@@ -13,7 +14,7 @@ async function testJuejin() {
     const results = await searchJuejin(query, maxResults);
 
     console.log(`🎉 Search completed, retrieved ${results.length} results:`);
-    results.forEach((result, index) => {
+    results.forEach((result: SearchResult, index: number) => {
       console.log(`\n${index + 1}. ${result.title}`);
       console.log(`   🔗 ${result.url}`);
       console.log(`   📄 ${result.description.substring(0, 150)}...`);
