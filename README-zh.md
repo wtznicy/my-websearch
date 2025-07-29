@@ -120,13 +120,63 @@ MCP工具支持：
 - 可自定义默认搜索引擎
 - 支持获取单篇文章内容
     - csdn
+    - github（README文件）
 
 ## TODO
 - 支持~~Bing~~（已支持）,~~DuckDuckGo~~（已支持）,~~Exa~~（已支持）,~~Brave~~（已支持）,Google等搜索引擎
 - 支持更多博客论坛、社交软件
 - 优化文章内容提取功能，增加更多站点支持
+- ~~支持GitHub README获取~~（已支持）
 
 ## 安装指南
+
+### NPX 快速启动（推荐）
+
+最快的使用方式：
+
+```bash
+# 基本使用
+npx open-websearch@latest
+
+# 带环境变量（Linux/macOS）
+DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true npx open-websearch@latest
+
+# Windows CMD
+set DEFAULT_SEARCH_ENGINE=duckduckgo && set ENABLE_CORS=true && npx open-websearch@latest
+
+# Windows PowerShell
+$env:DEFAULT_SEARCH_ENGINE="duckduckgo"; $env:ENABLE_CORS="true"; npx open-websearch@latest
+
+# 跨平台（需要 cross-env，用于本地开发）
+# 全局安装
+npm install -g open-websearch
+npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
+```
+
+**环境变量说明：**
+
+| 变量名 | 默认值                     | 可选值 | 说明 |
+|--------|-------------------------|--------|------|
+| `ENABLE_CORS` | `false`                 | `true`, `false` | 启用CORS |
+| `CORS_ORIGIN` | `*`                     | 任何有效来源 | CORS来源配置 |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave` | 默认搜索引擎 |
+| `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理 |
+| `PROXY_URL` | `http://127.0.0.1:7890` | 任何有效URL | 代理服务器URL |
+| `PORT` | `3000`                  | 1-65535 | 服务器端口 |
+
+**常用配置示例：**
+```bash
+# 启用代理（适用于网络受限地区）
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch@latest
+
+# 完整配置
+DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch@latest
+```
+
+**Windows 用户注意事项：**
+- 在 CMD 中使用 `set VAR=value && ` 语法
+- 在 PowerShell 中使用 `$env:VAR="value"; ` 语法
+- 本地开发推荐使用 `npx cross-env` 实现跨平台兼容
 
 ### 本地安装
 
@@ -211,25 +261,14 @@ docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=
 
 配置环境变量说明：
 
-```bash
-# 启用CORS (默认: false)
-ENABLE_CORS=true
-
-# CORS来源配置 (默认: *)
-CORS_ORIGIN=*
-
-# 默认搜索引擎 (可选值: bing, duckduckgo, exa, brave，默认: bing)
-DEFAULT_SEARCH_ENGINE=duckduckgo
-
-# 启用HTTP代理 (默认: false)
-USE_PROXY=true
-
-# 代理服务器URL (默认: http://127.0.0.1:10809)
-PROXY_URL=http://your-proxy-server:port
-
-# 服务器端口 (默认: 3000)
-PORT=8080
-```
+| 变量名 | 默认值                     | 可选值 | 说明 |
+|--------|-------------------------|--------|------|
+| `ENABLE_CORS` | `false`                 | `true`, `false` | 启用CORS |
+| `CORS_ORIGIN` | `*`                     | 任何有效来源 | CORS来源配置 |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave` | 默认搜索引擎 |
+| `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理 |
+| `PROXY_URL` | `http://127.0.0.1:7890` | 任何有效URL | 代理服务器URL |
+| `PORT` | `3000`                  | 1-65535 | 服务器端口 |
 
 然后在MCP客户端中配置：
 ```json
@@ -257,7 +296,7 @@ PORT=8080
 
 ## 使用说明
 
-服务器提供三个工具：`search`、`fetchLinuxDoArticle`和`fetchCsdnArticle`。
+服务器提供四个工具：`search`、`fetchLinuxDoArticle`、`fetchCsdnArticle` 和 `fetchGithubReadme`。
 
 ### search工具使用说明
 
@@ -355,6 +394,43 @@ use_mcp_tool({
   }
 ]
 
+```
+
+
+### fetchGithubReadme工具使用说明
+
+用于获取GitHub仓库的README文件内容。
+
+```typescript
+{
+  "url": string    // GitHub仓库URL（支持HTTPS、SSH格式）
+}
+```
+
+使用示例：
+```typescript
+use_mcp_tool({
+  server_name: "web-search",
+  tool_name: "fetchGithubReadme",
+  arguments: {
+    url: "https://github.com/Aas-ee/open-webSearch"
+  }
+})
+```
+
+支持的URL格式：
+- HTTPS: `https://github.com/owner/repo`
+- HTTPS with .git: `https://github.com/owner/repo.git`
+- SSH: `git@github.com:owner/repo.git`
+- 带参数的URL: `https://github.com/owner/repo?tab=readme`
+
+返回示例：
+```json
+[
+  {
+    "content": "<div align=\"center\">\n\n# Open-WebSearch MCP Server..."
+  }
+]
 ```
 
 

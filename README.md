@@ -31,13 +31,57 @@ A Model Context Protocol (MCP) server based on multi-engine search results, supp
 - Customizable default search engine
 - Support for fetching individual article content
     - csdn
+    - github (README files)
 
 ## TODO
 - Support for ~~Bing~~ (already supported), ~~DuckDuckGo~~ (already supported), ~~Exa~~ (already supported), ~~Brave~~ (already supported), Google and other search engines
 - Support for more blogs, forums, and social platforms
 - Optimize article content extraction, add support for more sites
+- ~~Support for GitHub README fetching~~ (already supported)
 
 ## Installation Guide
+
+### NPX Quick Start (Recommended)
+
+The fastest way to get started:
+
+```bash
+# Basic usage
+npx open-websearch@latest
+
+# With environment variables (Linux/macOS)
+DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true npx open-websearch@latest
+
+# Windows CMD
+set DEFAULT_SEARCH_ENGINE=duckduckgo && set ENABLE_CORS=true && npx open-websearch@latest
+
+# Windows PowerShell
+$env:DEFAULT_SEARCH_ENGINE="duckduckgo"; $env:ENABLE_CORS="true"; npx open-websearch@latest
+
+# Cross-platform (requires cross-env, Used for local development)
+npm install -g open-websearch
+npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
+```
+
+**Environment Variables:**
+
+| Variable | Default                 | Options | Description |
+|----------|-------------------------|---------|-------------|
+| `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
+| `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave` | Default search engine |
+| `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
+| `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
+| `PORT` | `3000`                  | 1-65535 | Server port |
+
+**Common configurations:**
+```bash
+# Enable proxy for restricted regions
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch@latest
+
+# Full configuration
+DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch@latest
+```
 
 ### Local Installation
 
@@ -122,25 +166,14 @@ docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=
 
 Environment variable configuration:
 
-```bash
-# Enable CORS (default: false)
-ENABLE_CORS=true
-
-# CORS origin configuration (default: *)
-CORS_ORIGIN=*
-
-# Default search engine (options: bing, duckduckgo, exa, brave, default: bing)
-DEFAULT_SEARCH_ENGINE=duckduckgo
-
-# Enable HTTP proxy (default: false)
-USE_PROXY=true
-
-# Proxy server URL (default: http://127.0.0.1:10809)
-PROXY_URL=http://your-proxy-server:port
-
-# Server port (default: 3000)
-PORT=8080
-```
+| Variable | Default                 | Options | Description |
+|----------|-------------------------|---------|-------------|
+| `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
+| `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave` | Default search engine |
+| `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
+| `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
+| `PORT` | `3000`                  | 1-65535 | Server port |
 
 Then configure in your MCP client:
 ```json
@@ -168,7 +201,7 @@ Then configure in your MCP client:
 
 ## Usage Guide
 
-The server provides three tools: `search`, `fetchLinuxDoArticle`, and `fetchCsdnArticle`.
+The server provides four tools: `search`, `fetchLinuxDoArticle`, `fetchCsdnArticle`, and `fetchGithubReadme`.
 
 ### search Tool Usage
 
@@ -262,6 +295,42 @@ Response example:
 [
   {
     "content": "Example search result"
+  }
+]
+```
+
+### fetchGithubReadme Tool Usage
+
+Used to fetch README content from GitHub repositories.
+
+```typescript
+{
+  "url": string    // GitHub repository URL (supports HTTPS, SSH formats)
+}
+```
+
+Usage example:
+```typescript
+use_mcp_tool({
+  server_name: "web-search",
+  tool_name: "fetchGithubReadme",
+  arguments: {
+    url: "https://github.com/Aas-ee/open-webSearch"
+  }
+})
+```
+
+Supported URL formats:
+- HTTPS: `https://github.com/owner/repo`
+- HTTPS with .git: `https://github.com/owner/repo.git`
+- SSH: `git@github.com:owner/repo.git`
+- URLs with parameters: `https://github.com/owner/repo?tab=readme`
+
+Response example:
+```json
+[
+  {
+    "content": "<div align=\"center\">\n\n# Open-WebSearch MCP Server..."
   }
 ]
 ```
