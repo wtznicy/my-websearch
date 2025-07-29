@@ -17,8 +17,8 @@ startCommand:
         description: CORS origin
       defaultSearchEngine:
         type: string
-        default: bing
-        description: Default search engine (bing, baidu, duckduckgo, exa, brave)
+        default: duckduckgo
+        description: Default search engine (bing, baidu, duckduckgo, exa, brave, juejin)
       useProxy:
         type: boolean
         default: false

@@ -300,7 +300,7 @@ docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=
 {
   "query": string,        // 搜索查询词
   "limit": number,        // 可选：返回结果数量（默认：10）
-  "engines": string[]     // 可选：要使用的引擎（bing,baidu,linuxdo,csdn,duckduckgo,exa,brave）默认bing
+  "engines": string[]     // 可选：使用的引擎 (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin) 默认bing
 }
 ```
 
@@ -312,7 +312,7 @@ use_mcp_tool({
   arguments: {
     query: "搜索内容",
     limit: 3,  // 可选参数
-    engines: ["bing", "csdn", "duckduckgo", "exa", "brave"] // 可选参数，支持多引擎组合搜索
+    engines: ["bing", "csdn", "duckduckgo", "exa", "brave", "juejin"] // 可选参数，支持多引擎组合搜索
   }
 })
 ```
@@ -425,6 +425,40 @@ use_mcp_tool({
 [
   {
     "content": "<div align=\"center\">\n\n# Open-WebSearch MCP Server..."
+  }
+]
+```
+
+
+### fetchJuejinArticle工具使用说明
+
+用于获取掘金文章的完整内容。
+
+```typescript
+{
+  "url": string    // 掘金文章URL
+}
+```
+
+使用示例：
+```typescript
+use_mcp_tool({
+  server_name: "web-search",
+  tool_name: "fetchJuejinArticle",
+  arguments: {
+    url: "https://juejin.cn/post/7520959840199360563"
+  }
+})
+```
+
+支持的URL格式：
+- `https://juejin.cn/post/{文章ID}`
+
+返回示例：
+```json
+[
+  {
+    "content": "🚀 开源 AI 联网搜索工具：Open-WebSearch MCP 全新升级，支持多引擎 + 流式响应..."
   }
 ]
 ```

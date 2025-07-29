@@ -13,9 +13,11 @@ import {config} from "../config.js";
 import {searchExa} from "../engines/exa/index.js";
 import {searchBrave} from "../engines/brave/index.js";
 import {fetchGithubReadme} from "../engines/github/index.js";
+import { fetchJuejinArticle } from "../engines/juejin/fetchJuejinArticle.js";
+import { searchJuejin } from "../engines/juejin/index.js";
 
 // 支持的搜索引擎
-const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn', 'duckduckgo','exa','brave'] as const;
+const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn', 'duckduckgo','exa','brave','juejin'] as const;
 type SupportedEngine = typeof SUPPORTED_ENGINES[number];
 
 // 搜索引擎调用函数映射
@@ -27,6 +29,7 @@ const engineMap: Record<SupportedEngine, (query: string, limit: number) => Promi
     duckduckgo: searchDuckDuckGo,
     exa: searchExa,
     brave: searchBrave,
+    juejin: searchJuejin,
 };
 
 // 分配搜索结果数量
@@ -78,7 +81,7 @@ const executeSearch = async (query: string, engines: string[], limit: number): P
 };
 
 // 验证文章 URL
-const validateArticleUrl = (url: string, type: 'linuxdo' | 'csdn'): boolean => {
+const validateArticleUrl = (url: string, type: 'linuxdo' | 'csdn' | 'juejin'): boolean => {
     try {
         const urlObj = new URL(url);
 
@@ -87,6 +90,8 @@ const validateArticleUrl = (url: string, type: 'linuxdo' | 'csdn'): boolean => {
                 return urlObj.hostname === 'linux.do' && url.includes('.json');
             case 'csdn':
                 return urlObj.hostname === 'blog.csdn.net' && url.includes('/article/details/');
+            case 'juejin':
+                return urlObj.hostname === 'juejin.cn' && url.includes('/post/');
             default:
                 return false;
         }
@@ -127,11 +132,11 @@ export const setupTools = (server: McpServer): void => {
     // 搜索工具
     server.tool(
         'search',
-        "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave) with no API key required",
+        "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金)) with no API key required",
         {
             query: z.string().min(1, "Search query must not be empty"),
             limit: z.number().min(1).max(50).default(10),
-            engines: z.array(z.enum(['baidu', 'bing', 'csdn', 'duckduckgo','exa','brave'])).min(1).default([config.defaultSearchEngine])
+            engines: z.array(z.enum(['baidu', 'bing', 'csdn', 'duckduckgo','exa','brave','juejin'])).min(1).default([config.defaultSearchEngine])
         },
         async ({ query, limit = 10, engines = ['bing'] }) => {
             try {
@@ -268,6 +273,40 @@ export const setupTools = (server: McpServer): void => {
                     content: [{
                         type: 'text',
                         text: `Failed to fetch README: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    }],
+                    isError: true
+                };
+            }
+        }
+    );
+
+    // 获取掘金文章工具
+    server.tool(
+        'fetchJuejinArticle',
+        "Fetch full article content from a Juejin(掘金) post URL",
+        {
+            url: z.string().url().refine(
+                (url) => validateArticleUrl(url, 'juejin'),
+                "URL must be from juejin.cn and contain /post/ path"
+            )
+        },
+        async ({ url }) => {
+            try {
+                console.log(`Fetching Juejin article: ${url}`);
+                const result = await fetchJuejinArticle(url);
+
+                return {
+                    content: [{
+                        type: 'text',
+                        text: result.content
+                    }]
+                };
+            } catch (error) {
+                console.error('Failed to fetch Juejin article:', error);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
                     }],
                     isError: true
                 };

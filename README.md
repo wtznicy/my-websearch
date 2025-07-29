@@ -206,7 +206,7 @@ The server provides four tools: `search`, `fetchLinuxDoArticle`, `fetchCsdnArtic
 {
   "query": string,        // Search query
   "limit": number,        // Optional: Number of results to return (default: 10)
-  "engines": string[]     // Optional: Engines to use (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave) default bing
+  "engines": string[]     // Optional: Engines to use (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin) default bing
 }
 ```
 
@@ -218,7 +218,7 @@ use_mcp_tool({
   arguments: {
     query: "search content",
     limit: 3,  // Optional parameter
-    engines: ["bing", "csdn", "duckduckgo", "exa", "brave"] // Optional parameter, supports multi-engine combined search
+    engines: ["bing", "csdn", "duckduckgo", "exa", "brave", "juejin"] // Optional parameter, supports multi-engine combined search
   }
 })
 ```
@@ -328,6 +328,39 @@ Response example:
 [
   {
     "content": "<div align=\"center\">\n\n# Open-WebSearch MCP Server..."
+  }
+]
+```
+
+### fetchJuejinArticle Tool Usage
+
+Used to fetch complete content of Juejin articles.
+
+```typescript
+{
+  "url": string    // Juejin article URL from search results
+}
+```
+
+Usage example:
+```typescript
+use_mcp_tool({
+  server_name: "web-search",
+  tool_name: "fetchJuejinArticle",
+  arguments: {
+    url: "https://juejin.cn/post/7520959840199360563"
+  }
+})
+```
+
+Supported URL format:
+- `https://juejin.cn/post/{article_id}`
+
+Response example:
+```json
+[
+  {
+    "content": "🚀 开源 AI 联网搜索工具：Open-WebSearch MCP 全新升级，支持多引擎 + 流式响应..."
   }
 ]
 ```
