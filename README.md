@@ -52,9 +52,6 @@ npx open-websearch@latest
 # With environment variables (Linux/macOS)
 DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true npx open-websearch@latest
 
-# Windows CMD
-set DEFAULT_SEARCH_ENGINE=duckduckgo && set ENABLE_CORS=true && npx open-websearch@latest
-
 # Windows PowerShell
 $env:DEFAULT_SEARCH_ENGINE="duckduckgo"; $env:ENABLE_CORS="true"; npx open-websearch@latest
 

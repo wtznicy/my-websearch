@@ -141,9 +141,6 @@ npx open-websearch@latest
 # 带环境变量（Linux/macOS）
 DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true npx open-websearch@latest
 
-# Windows CMD
-set DEFAULT_SEARCH_ENGINE=duckduckgo && set ENABLE_CORS=true && npx open-websearch@latest
-
 # Windows PowerShell
 $env:DEFAULT_SEARCH_ENGINE="duckduckgo"; $env:ENABLE_CORS="true"; npx open-websearch@latest
 
@@ -174,7 +171,6 @@ DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http:
 ```
 
 **Windows 用户注意事项：**
-- 在 CMD 中使用 `set VAR=value && ` 语法
 - 在 PowerShell 中使用 `$env:VAR="value"; ` 语法
 - 本地开发推荐使用 `npx cross-env` 实现跨平台兼容
 
