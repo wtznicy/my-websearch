@@ -16,7 +16,7 @@ async function main() {
 
   const server = new McpServer({
     name: 'web-search',
-    version: '1.1.3'
+    version: '1.1.4'
   });
 
   // ... set up server resources, tools, and prompts ...

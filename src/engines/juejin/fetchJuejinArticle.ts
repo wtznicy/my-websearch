@@ -22,19 +22,41 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
 
         const $ = cheerio.load(response.data);
 
-        // 掘金文章内容的可能选择器
-        const selector = '.markdown-body';
+        // 掘金文章内容的可能选择器（按优先级排序）
+        const selectors = [
+            '.markdown-body',
+            '.article-content',
+            '.content',
+            '[data-v-md-editor-preview]',
+            '.bytemd-preview',
+            '.article-area .content',
+            '.main-area .article-area',
+            '.article-wrapper .content'
+        ];
 
         let content = '';
 
+        // 尝试多个选择器
+        for (const selector of selectors) {
+            console.log(`🔍 Trying selector: ${selector}`);
+            const element = $(selector);
+            if (element.length > 0) {
+                console.log(`✅ Found content with selector: ${selector}`);
+                // 移除脚本和样式标签
+                element.find('script, style, .code-block-extension, .hljs-ln-numbers').remove();
+                content = element.text().trim();
 
-        console.log(`🔍 Trying selector: ${selector}`);
-        const element = $(selector);
-        if (element.length > 0) {
-            console.log(`✅ Found content with selector: ${selector}`);
-            // 移除脚本和样式标签
-            element.find('script, style, .code-block-extension').remove();
-            content = element.text().trim();
+                if (content.length > 100) { // 确保内容足够长
+                    break;
+                }
+            }
+        }
+
+        // 如果所有选择器都失败，尝试提取页面主要文本内容
+        if (!content || content.length < 100) {
+            console.log('⚠️ All selectors failed, trying fallback extraction');
+            $('script, style, nav, header, footer, .sidebar, .comment').remove();
+            content = $('body').text().trim();
         }
 
         console.log(`✅ Successfully extracted ${content.length} characters`);
