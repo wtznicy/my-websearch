@@ -18,7 +18,9 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
                 'Sec-Fetch-Mode': 'navigate',
                 'Sec-Fetch-Site': 'none',
                 'Upgrade-Insecure-Requests': '1'
-            }
+            },
+            timeout: 30000,
+            decompress: true
         });
 
         const $ = cheerio.load(response.data);
