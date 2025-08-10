@@ -24,7 +24,7 @@ export const config: AppConfig = {
 };
 
 // Validate config
-if (!['bing', 'duckduckgo'].includes(config.defaultSearchEngine)) {
+if (!['bing', 'duckduckgo', 'exa', 'brave'].includes(config.defaultSearchEngine)) {
     console.warn(`Invalid DEFAULT_SEARCH_ENGINE: "${config.defaultSearchEngine}", falling back to "bing"`);
     config.defaultSearchEngine = 'bing';
 }
