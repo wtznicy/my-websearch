@@ -3,6 +3,7 @@
 # Open-WebSearch MCP Server
 
 [![ModelScope](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Aas-ee/3af09e0f4c7821fb2e9acb96483a5ff0/raw/badge.json&color=orange)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
+[![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/Aas-ee/open-webSearch)](https://archestra.ai/mcp-catalog/Aas-ee__open-webSearch)
 [![smithery badge](https://smithery.ai/badge/@Aas-ee/open-websearch)](https://smithery.ai/server/@Aas-ee/open-websearch)
 ![Version](https://img.shields.io/github/v/release/Aas-ee/open-websearch)
 ![License](https://img.shields.io/github/license/Aas-ee/open-websearch)
