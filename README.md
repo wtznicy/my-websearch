@@ -150,6 +150,20 @@ npm run build
 }
 ```
 
+**NPX Command Line Configuration:**
+```json
+{
+  "mcpServers": {
+    "web-search": {
+      "args": [
+        "open-websearch@latest"
+      ],
+      "command": "npx"
+    }
+  }
+}
+```
+
 ### Docker Deployment
 
 Quick deployment using Docker Compose:

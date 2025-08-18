@@ -243,6 +243,20 @@ npm run build
 }
 ```
 
+**NPX命令行配置示例:**
+```json
+{
+  "mcpServers": {
+    "web-search": {
+      "args": [
+        "open-websearch@latest"
+      ],
+      "command": "npx"
+    }
+  }
+}
+```
+
 ### Docker部署
 
 使用Docker Compose快速部署：
