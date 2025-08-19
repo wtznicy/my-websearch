@@ -57,7 +57,7 @@ export async function searchExa(query: string, limit: number): Promise<SearchRes
 
     try {
         const response = await axios.post<{ results: ExaResult[] }>(
-            `https://exa.ai/search/api/search`,
+            `https://exa.ai/search/api/search-fast`,
             data,
             requestOptions
         );
