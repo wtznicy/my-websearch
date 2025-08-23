@@ -15,6 +15,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      # 设置 Docker Buildx（支持多架构构建）
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 设置 QEMU（用于模拟不同架构）
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       # 检查 ACR 是否启用
       - name: Check if ACR registry is set
         id: check-acr
@@ -64,12 +72,14 @@ jobs:
           echo "tags<<EOF" >> $GITHUB_OUTPUT
           echo "$TAGS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-      
 
-      # 构建并推送镜像
-      - name: Build and Push Docker Image
+      # 构建并推送多架构镜像
+      - name: Build and Push Multi-Platform Docker Image
         uses: docker/build-push-action@v5
         with:
           context: .
+          platforms: linux/amd64,linux/arm64  # 🎯 这里添加了多平台支持
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
