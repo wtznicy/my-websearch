@@ -130,15 +130,55 @@ const validateGithubUrl = (url: string): boolean => {
 
 export const setupTools = (server: McpServer): void => {
     // 搜索工具
+    // 生成搜索工具的动态描述
+    const getSearchDescription = () => {
+        if (config.allowedSearchEngines.length === 0) {
+            return "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金)) with no API key required";
+        } else {
+            const enginesText = config.allowedSearchEngines.map(e => {
+                switch (e) {
+                    case 'juejin':
+                        return 'Juejin(掘金)';
+                    default:
+                        return e.charAt(0).toUpperCase() + e.slice(1);
+                }
+            }).join(', ');
+            return `Search the web using these engines: ${enginesText} (no API key required)`;
+        }
+    };
+
+    // 生成搜索引擎选项的枚举
+    const getEnginesEnum = () => {
+        // 如果没有限制，使用所有支持的引擎
+        const allowedEngines = config.allowedSearchEngines.length > 0
+            ? config.allowedSearchEngines
+            : [...SUPPORTED_ENGINES];
+
+        return z.enum(allowedEngines as [string, ...string[]]);
+    };
+
     server.tool(
         'search',
-        "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金)) with no API key required",
+        getSearchDescription(),
         {
             query: z.string().min(1, "Search query must not be empty"),
             limit: z.number().min(1).max(50).default(10),
-            engines: z.array(z.enum(['baidu', 'bing', 'csdn', 'duckduckgo','exa','brave','juejin'])).min(1).default([config.defaultSearchEngine])
+            engines: z.array(getEnginesEnum()).min(1).default([config.defaultSearchEngine])
+                .transform(requestedEngines => {
+                    // 如果有配置允许的搜索引擎，过滤请求的引擎
+                    if (config.allowedSearchEngines.length > 0) {
+                        const filteredEngines = requestedEngines.filter(engine =>
+                            config.allowedSearchEngines.includes(engine));
+
+                        // 如果所有请求的引擎都被过滤掉，使用默认引擎
+                        return filteredEngines.length > 0 ?
+                            filteredEngines :
+                            [config.defaultSearchEngine];
+                    }
+                    return requestedEngines;
+                })
         },
-        async ({ query, limit = 10, engines = ['bing'] }) => {
+        async ({query, limit = 10, engines = ['bing']}) => {
             try {
                 console.log(`Searching for "${query}" using engines: ${engines.join(', ')}`);
 
@@ -178,7 +218,7 @@ export const setupTools = (server: McpServer): void => {
                 "URL must be from linux.do and end with .json"
             )
         },
-        async ({ url }) => {
+        async ({url}) => {
             try {
                 console.log(`Fetching Linux.do article: ${url}`);
                 const result = await fetchLinuxDoArticle(url);
@@ -212,7 +252,7 @@ export const setupTools = (server: McpServer): void => {
                 "URL must be from blog.csdn.net contains /article/details/ path"
             )
         },
-        async ({ url }) => {
+        async ({url}) => {
             try {
                 console.log(`Fetching CSDN article: ${url}`);
                 const result = await fetchCsdnArticle(url);
@@ -246,7 +286,7 @@ export const setupTools = (server: McpServer): void => {
                 "URL must be a valid GitHub repository URL (supports HTTPS, SSH formats)"
             )
         },
-        async ({ url }) => {
+        async ({url}) => {
             try {
                 console.log(`Fetching GitHub README: ${url}`);
                 const result = await fetchGithubReadme(url);
@@ -290,7 +330,7 @@ export const setupTools = (server: McpServer): void => {
                 "URL must be from juejin.cn and contain /post/ path"
             )
         },
-        async ({ url }) => {
+        async ({url}) => {
             try {
                 console.log(`Fetching Juejin article: ${url}`);
                 const result = await fetchJuejinArticle(url);

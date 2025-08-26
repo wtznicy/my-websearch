@@ -71,6 +71,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave` | Default search engine |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
+| `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
 | `PORT` | `3000`                  | 1-65535 | Server port |
 
 **Common configurations:**
