@@ -14,7 +14,7 @@ async function main() {
   // Create MCP server
   const server = new McpServer({
     name: 'web-search',
-    version: '1.1.5'
+    version: '1.2.0'
   });
 
   // Set up server tools
