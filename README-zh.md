@@ -145,6 +145,9 @@ DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true npx open-websearch@latest
 # Windows PowerShell
 $env:DEFAULT_SEARCH_ENGINE="duckduckgo"; $env:ENABLE_CORS="true"; npx open-websearch@latest
 
+# Windows CMD
+set MODE=stdio && set DEFAULT_SEARCH_ENGINE=duckduckgo && npx open-websearch@latest
+
 # 跨平台（需要 cross-env，用于本地开发）
 # 全局安装
 npm install -g open-websearch
@@ -153,14 +156,16 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 
 **环境变量说明：**
 
-| 变量名 | 默认值                     | 可选值 | 说明 |
-|--------|-------------------------|--------|------|
-| `ENABLE_CORS` | `false`                 | `true`, `false` | 启用CORS |
-| `CORS_ORIGIN` | `*`                     | 任何有效来源 | CORS来源配置 |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave` | 默认搜索引擎 |
-| `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理 |
-| `PROXY_URL` | `http://127.0.0.1:7890` | 任何有效URL | 代理服务器URL |
-| `PORT` | `3000`                  | 1-65535 | 服务器端口 |
+| 变量名 | 默认值                     | 可选值 | 说明                                   |
+|--------|-------------------------|--------|--------------------------------------|
+| `ENABLE_CORS` | `false`                 | `true`, `false` | 启用CORS                               |
+| `CORS_ORIGIN` | `*`                     | 任何有效来源 | CORS来源配置                             |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin` | 默认搜索引擎                               |
+| `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理                             |
+| `PROXY_URL` | `http://127.0.0.1:7890` | 任何有效URL | 代理服务器URL                             |
+| `MODE` | `both`                  | `both`, `http`, `stdio` | 服务器模式：同时支持HTTP+STDIO、仅HTTP或仅STDIO    |
+| `PORT` | `3000`                  | 1-65535 | 服务器端口                                |
+| `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名称 | 限制可使用的搜索引擎，如默认搜索引擎不在范围，则默认第一个为默认搜索引擎 |
 
 **常用配置示例：**
 ```bash
@@ -251,7 +256,29 @@ npm run build
       "args": [
         "open-websearch@latest"
       ],
-      "command": "npx"
+      "command": "npx",
+      "env": {
+        "MODE": "stdio",
+        "DEFAULT_SEARCH_ENGINE": "duckduckgo",
+        "ALLOWED_SEARCH_ENGINES": "duckduckgo,bing,exa"
+      }
+    }
+  }
+}
+```
+
+**Cherry Studio 本地 STDIO 配置 (Windows):**
+```json
+{
+  "mcpServers": {
+    "open-websearch-local": {
+      "command": "node",
+      "args": ["C:/你的项目路径/build/index.js"],
+      "env": {
+        "MODE": "stdio",
+        "DEFAULT_SEARCH_ENGINE": "duckduckgo",
+        "ALLOWED_SEARCH_ENGINES": "duckduckgo,bing,exa"
+      }
     }
   }
 }
