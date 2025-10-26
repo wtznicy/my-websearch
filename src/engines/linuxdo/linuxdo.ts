@@ -81,7 +81,7 @@ async function searchBingForLinuxDo(query: string, limit: number): Promise<Searc
             allResults = allResults.concat(results);
 
             if (results.length === 0) {
-                console.log('⚠️ No more results from Bing, ending early....');
+                console.error('⚠️ No more results from Bing, ending early....');
                 break;
             }
 
@@ -98,7 +98,7 @@ async function searchBingForLinuxDo(query: string, limit: number): Promise<Searc
 
 export async function searchLinuxDo(query: string, limit: number): Promise<SearchResult[]> {
 
-    console.log(`🔍 Searching linux.do with "${query}" using ${config.defaultSearchEngine} engine`);
+    console.error(`🔍 Searching linux.do with "${query}" using ${config.defaultSearchEngine} engine`);
 
     // Create the site-specific query
     const siteQuery = `site:linux.do ${query}`;

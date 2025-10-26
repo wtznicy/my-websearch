@@ -47,7 +47,7 @@ export async function searchCsdn(query: string, limit: number): Promise<SearchRe
         allResults = allResults.concat(results);
 
         if (results.length === 0) {
-            console.log('⚠️ No more results, ending early....');
+            console.error('⚠️ No more results, ending early....');
             break;
         }
 

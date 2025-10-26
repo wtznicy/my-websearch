@@ -22,10 +22,10 @@ async function main() {
 
   // Enable STDIO mode if MODE is 'both' or 'stdio' or not specified
   if (process.env.MODE === undefined || process.env.MODE === 'both' || process.env.MODE === 'stdio') {
-    console.log('🔌 Starting STDIO transport...');
+    console.error('🔌 Starting STDIO transport...');
     const stdioTransport = new StdioServerTransport();
     await server.connect(stdioTransport).then(() => {
-      console.log('✅ STDIO transport enabled');
+      console.error('✅ STDIO transport enabled');
     }).catch(error => {
       console.error('❌ Failed to initialize STDIO transport:', error);
     });
@@ -33,7 +33,7 @@ async function main() {
 
   // Only set up HTTP server if enabled
   if (config.enableHttpServer) {
-    console.log('🔌 Starting HTTP server...');
+    console.error('🔌 Starting HTTP server...');
     // 创建 Express 应用
     const app = express();
     app.use(express.json());
@@ -148,10 +148,10 @@ async function main() {
     const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`✅ HTTP server running on port ${PORT}`)
+      console.error(`✅ HTTP server running on port ${PORT}`)
     });
   } else {
-    console.log('ℹ️ HTTP server disabled, running in STDIO mode only')
+    console.error('ℹ️ HTTP server disabled, running in STDIO mode only')
   }
 }
 

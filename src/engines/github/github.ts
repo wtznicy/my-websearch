@@ -54,7 +54,7 @@ async function fetchReadme(owner: string, repo: string): Promise<string | null> 
 
     try {
         const apiUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/readme`;
-        console.log(`Fetching README from: ${apiUrl}`);
+        console.error(`Fetching README from: ${apiUrl}`);
 
         const response = await axios.get(apiUrl, {
             headers: {
@@ -89,7 +89,7 @@ async function fetchReadme(owner: string, repo: string): Promise<string | null> 
  * @returns README content or null if failed
  */
 async function getReadmeFromUrl(githubUrl: string): Promise<string | null> {
-    console.log(`\n--- Processing URL: ${githubUrl} ---`);
+    console.error(`\n--- Processing URL: ${githubUrl} ---`);
 
     if (!githubUrl?.trim()) {
         console.error('Invalid URL provided');
@@ -103,12 +103,12 @@ async function getReadmeFromUrl(githubUrl: string): Promise<string | null> {
         return null;
     }
 
-    console.log(`✅ Extraction successful: ${repoInfo.owner}/${repoInfo.repo}`);
+    console.error(`✅ Extraction successful: ${repoInfo.owner}/${repoInfo.repo}`);
 
     const content = await fetchReadme(repoInfo.owner, repoInfo.repo);
 
     if (content) {
-        console.log(`✅ README fetched successfully (${content.length} characters)`);
+        console.error(`✅ README fetched successfully (${content.length} characters)`);
         return content;
     } else {
         console.warn(`❌ Failed to fetch README for ${repoInfo.owner}/${repoInfo.repo}`);
