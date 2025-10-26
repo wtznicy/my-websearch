@@ -128,7 +128,29 @@ const validateGithubUrl = (url: string): boolean => {
     }
 };
 
+// 获取工具名称，优先使用环境变量，否则使用默认值
+function getToolName(envVarName: string, defaultName: string): string {
+    const configuredName = process.env[envVarName];
+    if (configuredName) {
+        // Validate tool name to ensure it follows MCP naming conventions
+        if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(configuredName)) {
+            console.warn(`Invalid tool name "${configuredName}" from environment variable ${envVarName}. Using default: "${defaultName}"`);
+            return defaultName;
+        }
+        console.log(`Using custom tool name "${configuredName}" for ${envVarName}`);
+        return configuredName;
+    }
+    return defaultName;
+}
+
 export const setupTools = (server: McpServer): void => {
+    // Get configurable tool names from environment variables
+    const searchToolName = getToolName('MCP_TOOL_SEARCH_NAME', 'search');
+    const fetchLinuxDoToolName = getToolName('MCP_TOOL_FETCH_LINUXDO_NAME', 'fetchLinuxDoArticle');
+    const fetchCsdnToolName = getToolName('MCP_TOOL_FETCH_CSDN_NAME', 'fetchCsdnArticle');
+    const fetchGithubToolName = getToolName('MCP_TOOL_FETCH_GITHUB_NAME', 'fetchGithubReadme');
+    const fetchJuejinToolName = getToolName('MCP_TOOL_FETCH_JUEJIN_NAME', 'fetchJuejinArticle');
+
     // 搜索工具
     // 生成搜索工具的动态描述
     const getSearchDescription = () => {
@@ -158,7 +180,7 @@ export const setupTools = (server: McpServer): void => {
     };
 
     server.tool(
-        'search',
+        searchToolName,
         getSearchDescription(),
         {
             query: z.string().min(1, "Search query must not be empty"),
@@ -210,7 +232,7 @@ export const setupTools = (server: McpServer): void => {
 
     // 获取 Linux.do 文章工具
     server.tool(
-        'fetchLinuxDoArticle',
+        fetchLinuxDoToolName,
         "Fetch full article content from a linux.do post URL",
         {
             url: z.string().url().refine(
@@ -244,7 +266,7 @@ export const setupTools = (server: McpServer): void => {
 
     // 获取 CSDN 文章工具
     server.tool(
-        'fetchCsdnArticle',
+        fetchCsdnToolName,
         "Fetch full article content from a csdn post URL",
         {
             url: z.string().url().refine(
@@ -278,7 +300,7 @@ export const setupTools = (server: McpServer): void => {
 
     // 获取 GitHub README 工具
     server.tool(
-        'fetchGithubReadme',
+        fetchGithubToolName,
         "Fetch README content from a GitHub repository URL",
         {
             url: z.string().min(1).refine(
@@ -322,7 +344,7 @@ export const setupTools = (server: McpServer): void => {
 
     // 获取掘金文章工具
     server.tool(
-        'fetchJuejinArticle',
+        fetchJuejinToolName,
         "Fetch full article content from a Juejin(掘金) post URL",
         {
             url: z.string().url().refine(
