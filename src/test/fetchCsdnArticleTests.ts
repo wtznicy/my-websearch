@@ -4,19 +4,19 @@ import {fetchCsdnArticle} from "../engines/csdn/fetchCsdnArticle.js";
  * Test suite for CSDN article fetching functionality
  */
 async function testFetchCsdnArticle() {
-  console.log('🔍 Starting CSDN article fetch test...');
+  console.error('🔍 Starting CSDN article fetch test...');
 
   try {
     const url = 'https://blog.csdn.net/weixin_45801664/article/details/149000138';
 
-    console.log(`📝 Fetching article from URL: ${url}`);
+    console.error(`📝 Fetching article from URL: ${url}`);
 
     const result = await fetchCsdnArticle(url);
 
-    console.log(`🎉 Article fetched successfully!`);
-    console.log(`\n📄 Content preview (first 200 chars):`);
-    console.log(`   ${result.content}`);
-    console.log(`\n📊 Total content length: ${result.content.length} characters`);
+    console.error(`🎉 Article fetched successfully!`);
+    console.error(`\n📄 Content preview (first 200 chars):`);
+    console.error(`   ${result.content}`);
+    console.error(`\n📊 Total content length: ${result.content.length} characters`);
 
     return result;
   } catch (error) {
@@ -32,12 +32,12 @@ async function testFetchCsdnArticle() {
  * Test with an invalid URL to verify error handling
  */
 async function testInvalidUrl() {
-  console.log('\n🔍 Testing with invalid URL...');
+  console.error('\n🔍 Testing with invalid URL...');
 
   try {
     const invalidUrl = 'https://blog.csdn.net/invalid_path';
 
-    console.log(`📝 Attempting to fetch from invalid URL: ${invalidUrl}`);
+    console.error(`📝 Attempting to fetch from invalid URL: ${invalidUrl}`);
 
     const result = await fetchCsdnArticle(invalidUrl);
     console.log(`🎉 Result: ${result.content.substring(0, 100)}...`);

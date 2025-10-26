@@ -3,7 +3,7 @@ import * as cheerio from 'cheerio';
 
 export async function fetchJuejinArticle(url: string): Promise<{ content: string }> {
     try {
-        console.log(`🔍 Fetching Juejin article: ${url}`);
+        console.error(`🔍 Fetching Juejin article: ${url}`);
 
         const response = await axios.get(url, {
             headers: {
@@ -43,10 +43,10 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
 
         // 尝试多个选择器
         for (const selector of selectors) {
-            console.log(`🔍 Trying selector: ${selector}`);
+            console.error(`🔍 Trying selector: ${selector}`);
             const element = $(selector);
             if (element.length > 0) {
-                console.log(`✅ Found content with selector: ${selector}`);
+                console.error(`✅ Found content with selector: ${selector}`);
                 // 移除脚本和样式标签
                 element.find('script, style, .code-block-extension, .hljs-ln-numbers').remove();
                 content = element.text().trim();
@@ -59,12 +59,12 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
 
         // 如果所有选择器都失败，尝试提取页面主要文本内容
         if (!content || content.length < 100) {
-            console.log('⚠️ All selectors failed, trying fallback extraction');
+            console.error('⚠️ All selectors failed, trying fallback extraction');
             $('script, style, nav, header, footer, .sidebar, .comment').remove();
             content = $('body').text().trim();
         }
 
-        console.log(`✅ Successfully extracted ${content.length} characters`);
+        console.error(`✅ Successfully extracted ${content.length} characters`);
         return { content };
 
     } catch (error) {

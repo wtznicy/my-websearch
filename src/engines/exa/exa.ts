@@ -65,7 +65,7 @@ export async function searchExa(query: string, limit: number): Promise<SearchRes
         const apiResults = response.data.results;
 
         if (!apiResults || apiResults.length === 0) {
-            console.log('⚠️ No results returned from Exa.ai API.');
+            console.error('⚠️ No results returned from Exa.ai API.');
             return [];
         }
 

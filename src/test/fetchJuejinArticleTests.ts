@@ -1,7 +1,7 @@
 import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
 
 async function testJuejinArticleFetch() {
-  console.log('🔍 Starting Juejin article fetch test...');
+  console.error('🔍 Starting Juejin article fetch test...');
 
   try {
     const url = 'https://juejin.cn/post/7520959840199360563?searchId=20250729204924B8807908658C2F9C698D';

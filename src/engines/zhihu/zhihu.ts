@@ -80,7 +80,7 @@ async function searchBingForZhiHu(query: string, limit: number): Promise<SearchR
             allResults = allResults.concat(results);
 
             if (results.length === 0) {
-                console.log('⚠️ No more results from Bing, ending early....');
+                console.error('⚠️ No more results from Bing, ending early....');
                 break;
             }
 
@@ -97,7 +97,7 @@ async function searchBingForZhiHu(query: string, limit: number): Promise<SearchR
 
 export async function searchZhiHu(query: string, limit: number): Promise<SearchResult[]> {
 
-    console.log(`🔍 Searching zhuanlan.zhihu.com with "${query}" using ${config.defaultSearchEngine} engine`);
+    console.error(`🔍 Searching zhuanlan.zhihu.com with "${query}" using ${config.defaultSearchEngine} engine`);
 
     // Create the site-specific query
     const siteQuery = `site:zhuanlan.zhihu.com ${query}`;

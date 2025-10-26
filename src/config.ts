@@ -60,33 +60,33 @@ if (config.allowedSearchEngines.length > 0) {
         console.warn(`Default search engine "${config.defaultSearchEngine}" is not in the allowed engines list`);
         // Update the default engine to the first allowed engine
         config.defaultSearchEngine = config.allowedSearchEngines[0] as AppConfig['defaultSearchEngine'];
-        console.log(`Default search engine updated to "${config.defaultSearchEngine}"`);
+        console.error(`Default search engine updated to "${config.defaultSearchEngine}"`);
     }
 }
 
 // Log configuration
-console.log(`🔍 Default search engine: ${config.defaultSearchEngine}`);
+console.error(`🔍 Default search engine: ${config.defaultSearchEngine}`);
 if (config.allowedSearchEngines.length > 0) {
-    console.log(`🔍 Allowed search engines: ${config.allowedSearchEngines.join(', ')}`);
+    console.error(`🔍 Allowed search engines: ${config.allowedSearchEngines.join(', ')}`);
 } else {
-    console.log(`🔍 No search engine restrictions, all available engines can be used`);
+    console.error(`🔍 No search engine restrictions, all available engines can be used`);
 }
 
 if (config.useProxy) {
-    console.log(`🌐 Using proxy: ${config.proxyUrl}`);
+    console.error(`🌐 Using proxy: ${config.proxyUrl}`);
 } else {
-    console.log(`🌐 No proxy configured (set USE_PROXY=true to enable)`);
+    console.error(`🌐 No proxy configured (set USE_PROXY=true to enable)`);
 }
 
 // Determine server mode from config
 const mode = process.env.MODE || (config.enableHttpServer ? 'both' : 'stdio');
-console.log(`🖥️ Server mode: ${mode.toUpperCase()}`);
+console.error(`🖥️ Server mode: ${mode.toUpperCase()}`);
 
 if (config.enableHttpServer) {
     if (config.enableCors) {
-        console.log(`🔒 CORS enabled with origin: ${config.corsOrigin}`);
+        console.error(`🔒 CORS enabled with origin: ${config.corsOrigin}`);
     } else {
-        console.log(`🔒 CORS disabled (set ENABLE_CORS=true to enable)`);
+        console.error(`🔒 CORS disabled (set ENABLE_CORS=true to enable)`);
     }
 }
 
