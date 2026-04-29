@@ -1379,29 +1379,63 @@ async function waitForBrowserReadyViaStdout(
         // Node.js child process stdout/stderr
         const child = source.child;
         return new Promise<string>((resolve, reject) => {
+            let settled = false;
             const timer = setTimeout(() => {
-                reject(new Error(`Browser did not emit DevTools ready signal within ${timeoutMs}ms`));
+                finish(new Error(`Browser did not emit DevTools ready signal within ${timeoutMs}ms`));
             }, timeoutMs);
             // 与管道分支保持一致：unref() 防止 timer 阻止 CLI/测试进程自然退出
             if (typeof timer === 'object' && 'unref' in timer) (timer as NodeJS.Timeout).unref();
+
+            const cleanup = () => {
+                clearTimeout(timer);
+                child.stdout?.removeListener('data', onData);
+                child.stderr?.removeListener('data', onData);
+                child.removeListener('error', onError);
+                child.removeListener('exit', onExit);
+                child.removeListener('close', onClose);
+            };
+
+            const finish = (error: Error | null, value?: string) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                cleanup();
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(value ?? '');
+                }
+            };
 
             const onData = (data: Buffer) => {
                 accumulated += data.toString('utf-8');
                 const match = accumulated.match(/DevTools listening on (ws:\/\/[^\s]+)/);
                 if (match) {
-                    clearTimeout(timer);
-                    child.stdout?.removeListener('data', onData);
-                    child.stderr?.removeListener('data', onData);
-                    resolve(match[1]);
+                    finish(null, match[1]);
                 }
+            };
+
+            const onError = (error: Error) => {
+                // 有些失败只触发 error/close，不触发 exit，必须把原始错误传给上层启动逻辑。
+                finish(error);
+            };
+
+            const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+                const detail = signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`;
+                finish(new Error(`Browser process exited before emitting DevTools ready signal (${detail})`));
+            };
+
+            const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
+                const detail = signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`;
+                finish(new Error(`Browser process closed before emitting DevTools ready signal (${detail})`));
             };
 
             child.stdout?.on('data', onData);
             child.stderr?.on('data', onData);
-            child.on('exit', () => {
-                clearTimeout(timer);
-                reject(new Error('Browser process exited before emitting DevTools ready signal'));
-            });
+            child.on('error', onError);
+            child.on('exit', onExit);
+            child.on('close', onClose);
         });
     }
 }
@@ -1720,7 +1754,6 @@ async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionK
             stdio: ['ignore', 'pipe', 'pipe'],
             detached: true
         });
-        child.on('error', () => undefined);
         browserPid = child.pid;
 
         try {
@@ -1824,7 +1857,6 @@ async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionK
             stdio: ['ignore', 'pipe', 'pipe'],
             detached: true
         });
-        child.on('error', () => undefined);
 
         try {
             await waitForBrowserReadyViaStdout({ type: 'child', child });
