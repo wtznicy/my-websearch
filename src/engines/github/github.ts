@@ -16,6 +16,74 @@ const README_CANDIDATES = [
     'readme.txt'
 ];
 
+const RAW_GITHUB_BASE = 'https://raw.githubusercontent.com';
+// jsDelivr mirrors GitHub repo files on a global CDN that stays reachable in
+// networks where raw.githubusercontent.com DNS is polluted or blocked.
+// URL shape: https://cdn.jsdelivr.net/gh/{owner}/{repo}@{ref}/{file}
+// An empty ref uses the repository's default branch.
+const JSDELIVR_CDN_BASE = 'https://cdn.jsdelivr.net/gh';
+const JSDELIVR_REF_CANDIDATES = ['', '@main', '@master'];
+
+// Set GITHUB_README_CDN_FIRST=true to skip raw.githubusercontent.com and go
+// straight to the jsDelivr CDN (useful when GitHub is unreachable).
+const cdnFirst = process.env.GITHUB_README_CDN_FIRST === 'true';
+
+type ReadmeFetchOutcome =
+    | { status: 'ok'; content: string }
+    | { status: 'notfound' }
+    | { status: 'error'; message: string };
+
+/**
+ * Fetch one README candidate URL and classify the outcome.
+ * @param url Candidate URL to fetch
+ * @param label Source label for logs ('raw' or 'jsDelivr')
+ * @param timeout Request timeout in ms
+ */
+async function fetchReadmeSource(url: string, label: string, timeout: number): Promise<ReadmeFetchOutcome> {
+    try {
+        console.error(`Fetching README from ${label}: ${url}`);
+
+        const response = await axios.get(url, {
+            ...buildAxiosRequestOptions({
+                headers: {
+                    'User-Agent': 'GitHub-README-Fetcher/1.0'
+                },
+                // raw.githubusercontent.com 是代码固定生成的可信 host；禁用重定向并绕过通用 DNS 私网过滤，
+                // 避免部分网络把 GitHub raw 域名解析到 100.64.0.0/10 代理地址时误判为 SSRF。
+                // jsDelivr CDN 走标准过滤 agent（保持 SSRF 防护），其域名解析正常。
+                trustedStaticHost: label === 'raw',
+                timeout,
+                responseType: 'text',
+                validateStatus: (status) => status === 200 || status === 404
+            })
+        });
+
+        if (response.status === 404) {
+            return { status: 'notfound' };
+        }
+
+        if (typeof response.data === 'string' && response.data.trim()) {
+            return { status: 'ok', content: response.data };
+        }
+
+        return { status: 'error', message: 'Empty or invalid README content' };
+    } catch (error: any) {
+        const isTimeout = error?.code === 'ECONNABORTED';
+        const status = typeof error?.response?.status === 'number' ? error.response.status : undefined;
+        const message = error instanceof Error ? error.message : String(error);
+
+        if (isTimeout) {
+            console.error(`Timeout fetching README from ${label}: ${url}`);
+        } else if (status !== undefined) {
+            console.error(`Failed to fetch README from ${label}: ${url} (HTTP ${status}):`, message);
+        } else {
+            console.error(`Network error fetching README from ${label}: ${url}:`, message);
+        }
+
+        return { status: 'error', message };
+    }
+}
+
 /**
  * GitHub README Fetcher - Extract repo info from URLs and fetch README content
  */
@@ -68,53 +136,39 @@ async function fetchReadme(owner: string, repo: string): Promise<string | null> 
         return null;
     }
 
+    const ownerEnc = encodeURIComponent(owner.trim());
+    const repoEnc = encodeURIComponent(repo.trim());
+    let rawUnreachable = false;
     let sawFetchFailure = false;
 
     for (const readmeFile of README_CANDIDATES) {
-        const rawUrl = `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/HEAD/${readmeFile}`;
+        // 1) Try raw.githubusercontent.com first, unless CDN-first is forced or
+        //    a previous candidate proved the raw host unreachable.
+        if (!cdnFirst && !rawUnreachable) {
+            const rawUrl = `${RAW_GITHUB_BASE}/${ownerEnc}/${repoEnc}/HEAD/${readmeFile}`;
+            const rawResult = await fetchReadmeSource(rawUrl, 'raw', 10000);
 
-        try {
-            console.error(`Fetching README from: ${rawUrl}`);
-
-            const response = await axios.get(rawUrl, {
-                ...buildAxiosRequestOptions({
-                    headers: {
-                        'User-Agent': 'GitHub-README-Fetcher/1.0'
-                    },
-                    // raw.githubusercontent.com 是代码固定生成的可信 host；禁用重定向并绕过通用 DNS 私网过滤，
-                    // 避免部分网络把 GitHub raw 域名解析到 100.64.0.0/10 代理地址时误判为 SSRF。
-                    trustedStaticHost: true,
-                    timeout: 10000,
-                    responseType: 'text',
-                    validateStatus: (status) => status === 200 || status === 404
-                })
-            });
-
-            if (response.status === 404) {
-                continue;
+            if (rawResult.status === 'ok') {
+                return rawResult.content;
             }
-
-            if (typeof response.data === 'string' && response.data.trim()) {
-                return response.data;
+            if (rawResult.status === 'error') {
+                sawFetchFailure = true;
+                // Domain-level failure: later candidates should not retry the raw host.
+                rawUnreachable = true;
             }
+        }
 
-            sawFetchFailure = true;
-            console.warn(`Empty or invalid README content for ${owner}/${repo} at ${readmeFile}`);
-        } catch (error: any) {
-            const isTimeout = error?.code === 'ECONNABORTED';
-            const status = typeof error?.response?.status === 'number' ? error.response.status : undefined;
-            const message = error instanceof Error ? error.message : String(error);
+        // 2) Fall back to the jsDelivr CDN mirror (default branch, then main/master).
+        for (const ref of JSDELIVR_REF_CANDIDATES) {
+            const cdnUrl = `${JSDELIVR_CDN_BASE}/${ownerEnc}/${repoEnc}${ref}/${readmeFile}`;
+            const cdnResult = await fetchReadmeSource(cdnUrl, 'jsDelivr', 10000);
 
-            if (isTimeout) {
-                console.error(`Timeout fetching README for ${owner}/${repo} at ${readmeFile}`);
-            } else if (status !== undefined) {
-                console.error(`Failed to fetch README for ${owner}/${repo} at ${readmeFile} (HTTP ${status}):`, message);
-            } else {
-                console.error(`Network error fetching README for ${owner}/${repo} at ${readmeFile}:`, message);
+            if (cdnResult.status === 'ok') {
+                return cdnResult.content;
             }
-
-            // Short-circuit on request failures that are unlikely to improve on later candidates.
-            return null;
+            if (cdnResult.status === 'error') {
+                sawFetchFailure = true;
+            }
         }
     }
 
