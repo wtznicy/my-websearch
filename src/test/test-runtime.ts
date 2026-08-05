@@ -66,10 +66,6 @@ async function testRuntimeUsesInjectedDependencies(): Promise<void> {
             fetchJuejinArticle: async (url) => {
                 seenCalls.push(`juejin:${url}`);
                 return { content: 'juejin' };
-            },
-            fetchLinuxDoArticle: async (url) => {
-                seenCalls.push(`linuxdo:${url}`);
-                return { content: 'linuxdo' };
             }
         }
     });
@@ -103,11 +99,6 @@ async function testRuntimeUsesInjectedDependencies(): Promise<void> {
         url: 'https://juejin.cn/post/1234567890'
     });
     assert(juejin.content === 'juejin', 'runtime juejin service should be callable');
-
-    const linuxdo = await runtime.services.fetchLinuxDoArticle.execute({
-        url: 'https://linux.do/t/topic/123.json'
-    });
-    assert(linuxdo.content === 'linuxdo', 'runtime linuxdo service should be callable');
 
     assert(
         seenCalls.includes('search:open web search:1') &&

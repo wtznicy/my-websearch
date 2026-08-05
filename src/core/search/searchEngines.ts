@@ -1,7 +1,6 @@
 export const SUPPORTED_SEARCH_ENGINES = [
     'baidu',
     'bing',
-    'linuxdo',
     'csdn',
     'duckduckgo',
     'exa',
@@ -22,8 +21,6 @@ export function normalizeEngineName(engine: string): string {
             return 'baidu';
         case 'bing':
             return 'bing';
-        case 'linuxdo':
-            return 'linuxdo';
         case 'csdn':
             return 'csdn';
         case 'duckduckgo':

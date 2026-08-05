@@ -12,15 +12,6 @@ function assert(condition: unknown, message: string): asserts condition {
 
 function testValidateArticleUrl(): void {
     assert(
-        validateArticleUrl('https://linux.do/t/topic/123.json', 'linuxdo'),
-        'linuxdo json endpoint should be valid'
-    );
-    assert(
-        !validateArticleUrl('https://linux.do/t/topic/123', 'linuxdo'),
-        'linuxdo non-json endpoint should be invalid'
-    );
-
-    assert(
         validateArticleUrl('https://blog.csdn.net/user/article/details/123456', 'csdn'),
         'csdn article details url should be valid'
     );

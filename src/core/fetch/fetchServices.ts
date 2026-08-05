@@ -10,7 +10,7 @@ export type GithubReadmeFetcher = (url: string) => Promise<string | null>;
 export type WebFetcher = (url: string, maxChars: number, options?: FetchWebContentOptions) => Promise<FetchWebContentResult>;
 
 export function createArticleFetchService(
-    type: 'linuxdo' | 'csdn' | 'juejin',
+    type: 'csdn' | 'juejin',
     fetcher: ArticleFetcher
 ) {
     return {

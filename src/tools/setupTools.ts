@@ -33,7 +33,6 @@ function getToolName(envVarName: string, defaultName: string): string {
 export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): void => {
     // Get configurable tool names from environment variables
     const searchToolName = getToolName('MCP_TOOL_SEARCH_NAME', 'search');
-    const fetchLinuxDoToolName = getToolName('MCP_TOOL_FETCH_LINUXDO_NAME', 'fetchLinuxDoArticle');
     const fetchCsdnToolName = getToolName('MCP_TOOL_FETCH_CSDN_NAME', 'fetchCsdnArticle');
     const fetchGithubToolName = getToolName('MCP_TOOL_FETCH_GITHUB_NAME', 'fetchGithubReadme');
     const fetchJuejinToolName = getToolName('MCP_TOOL_FETCH_JUEJIN_NAME', 'fetchJuejinArticle');
@@ -133,40 +132,6 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                     content: [{
                         type: 'text',
                         text: `Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-                    }],
-                    isError: true
-                };
-            }
-        }
-    );
-
-    // 获取 Linux.do 文章工具
-    server.tool(
-        fetchLinuxDoToolName,
-        "Fetch full article content from a linux.do post URL",
-        {
-            url: z.string().url().refine(
-                (url) => validateArticleUrl(url, 'linuxdo'),
-                "URL must be from linux.do and end with .json"
-            )
-        },
-        async ({url}) => {
-            try {
-                console.error(`Fetching Linux.do article: ${url}`);
-                const result = await runtime.services.fetchLinuxDoArticle.execute({ url });
-
-                return {
-                    content: [{
-                        type: 'text',
-                        text: result.content
-                    }]
-                };
-            } catch (error) {
-                console.error('Failed to fetch Linux.do article:', error);
-                return {
-                    content: [{
-                        type: 'text',
-                        text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
                     }],
                     isError: true
                 };

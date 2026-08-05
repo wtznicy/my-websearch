@@ -46,8 +46,7 @@ function getCapabilities(): string[] {
         'fetch-web',
         'fetch-csdn',
         'fetch-juejin',
-        'fetch-github-readme',
-        'fetch-linuxdo'
+        'fetch-github-readme'
     ];
 }
 
@@ -291,22 +290,6 @@ export async function startLocalDaemon(
             const message = error instanceof Error ? error.message : String(error);
             sendError(res, 400, 'validation_failed', message, {
                 hint: 'Use a valid juejin.cn post URL.'
-            });
-        }
-    });
-
-    app.post('/fetch-linuxdo', async (req, res) => {
-        try {
-            const url = parseUrl(req.body?.url);
-            const result = await runtime.services.fetchLinuxDoArticle.execute({ url });
-            res.json(createSuccessEnvelope({
-                url,
-                content: result.content
-            }));
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            sendError(res, 400, 'validation_failed', message, {
-                hint: 'Use a valid linux.do topic JSON URL.'
             });
         }
     });

@@ -25,7 +25,6 @@ export type FetchWebService = {
 
 export type OpenWebSearchRuntimeServices = {
     search: SearchService;
-    fetchLinuxDoArticle: FetchArticleService;
     fetchCsdnArticle: FetchArticleService;
     fetchJuejinArticle: FetchArticleService;
     fetchGithubReadme: GithubReadmeService;

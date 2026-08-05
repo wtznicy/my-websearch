@@ -42,7 +42,6 @@ function createStubRuntime() {
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
             fetchJuejinArticle: async () => ({ content: 'juejin' }),
-            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
         }
     });
 }
@@ -166,7 +165,6 @@ async function testSetupToolsUsesRuntimeConfigDefaults(): Promise<void> {
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
             fetchJuejinArticle: async () => ({ content: 'juejin' }),
-            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
         }
     });
     const server = new McpServer({ name: 'test', version: '1.0.0' });
@@ -226,7 +224,6 @@ async function testSearchToolPassesSearchModeOverride(): Promise<void> {
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
             fetchJuejinArticle: async () => ({ content: 'juejin' }),
-            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
         }
     });
     const server = new McpServer({ name: 'test', version: '1.0.0' });
@@ -280,7 +277,6 @@ async function testSearchToolAutoModeUsesRuntimeDefault(): Promise<void> {
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
             fetchJuejinArticle: async () => ({ content: 'juejin' }),
-            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
         }
     });
     const server = new McpServer({ name: 'test', version: '1.0.0' });
@@ -337,7 +333,6 @@ async function testFetchWebToolPassesReadabilityFlags(): Promise<void> {
             },
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
             fetchJuejinArticle: async () => ({ content: 'juejin' }),
-            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
         }
     });
     const server = new McpServer({ name: 'test', version: '1.0.0' });

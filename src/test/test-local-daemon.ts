@@ -73,8 +73,7 @@ function createStubRuntime() {
                 links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
-            fetchJuejinArticle: async () => ({ content: 'juejin' }),
-            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
+            fetchJuejinArticle: async () => ({ content: 'juejin' })
         }
     });
 }
@@ -216,16 +215,6 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
         assertEqual(fetchJuejinResult.response.status, 200, 'daemon /fetch-juejin http status');
         assertEqual(fetchJuejinResult.payload.status, 'ok', 'daemon /fetch-juejin payload status');
         assertEqual(fetchJuejinResult.payload.data.content, 'juejin', 'daemon /fetch-juejin content');
-
-        const fetchLinuxDoResult = await postJson<{
-            status: string;
-            data: { url: string; content: string };
-        }>(daemon.baseUrl, '/fetch-linuxdo', {
-            url: 'https://linux.do/t/topic/123.json'
-        });
-        assertEqual(fetchLinuxDoResult.response.status, 200, 'daemon /fetch-linuxdo http status');
-        assertEqual(fetchLinuxDoResult.payload.status, 'ok', 'daemon /fetch-linuxdo payload status');
-        assertEqual(fetchLinuxDoResult.payload.data.content, 'linuxdo', 'daemon /fetch-linuxdo content');
 
         const invalidFetchWebResult = await postJson<{
             status: string;

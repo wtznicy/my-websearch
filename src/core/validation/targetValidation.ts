@@ -1,12 +1,10 @@
 import { isPublicHttpUrl } from '../../utils/urlSafety.js';
 
-export function validateArticleUrl(url: string, type: 'linuxdo' | 'csdn' | 'juejin'): boolean {
+export function validateArticleUrl(url: string, type: 'csdn' | 'juejin'): boolean {
     try {
         const urlObj = new URL(url);
 
         switch (type) {
-            case 'linuxdo':
-                return urlObj.hostname === 'linux.do' && url.includes('.json');
             case 'csdn':
                 return urlObj.hostname === 'blog.csdn.net' && url.includes('/article/details/');
             case 'juejin':

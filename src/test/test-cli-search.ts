@@ -77,8 +77,7 @@ function createStubRuntime(configOverrides: Partial<AppConfig> = {}) {
                 links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
-            fetchJuejinArticle: async () => ({ content: 'juejin' }),
-            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
+            fetchJuejinArticle: async () => ({ content: 'juejin' })
         }
     });
 }
@@ -219,8 +218,7 @@ async function testRunCliSearchModeOverride(): Promise<void> {
                 content: `ok:${maxChars}`
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
-            fetchJuejinArticle: async () => ({ content: 'juejin' }),
-            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
+            fetchJuejinArticle: async () => ({ content: 'juejin' })
         }
     });
     const stdout: string[] = [];
@@ -558,58 +556,6 @@ async function testRunCliFetchCsdnValidationFailure(): Promise<void> {
     console.log('✅ CLI runCli fetch-csdn validation failure');
 }
 
-async function testRunCliFetchLinuxDoJsonSuccess(): Promise<void> {
-    const runtime = createStubRuntime();
-    const stdout: string[] = [];
-    const stderr: string[] = [];
-    const exitCode = await runCli(
-        ['fetch-linuxdo', 'https://linux.do/t/topic/123.json', '--json'],
-        runtime,
-        {
-            stdout: (text) => stdout.push(text),
-            stderr: (text) => stderr.push(text)
-        }
-    );
-
-    assertEqual(exitCode, 0, 'CLI fetch-linuxdo json success exit code');
-    assertEqual(stderr.length, 0, 'CLI fetch-linuxdo json success stderr');
-    const payload = JSON.parse(stdout[0]) as {
-        status: string;
-        data: { url: string; content: string };
-    };
-    assertEqual(payload.status, 'ok', 'CLI fetch-linuxdo json status');
-    assertEqual(payload.data.url, 'https://linux.do/t/topic/123.json', 'CLI fetch-linuxdo json url');
-    assertEqual(payload.data.content, 'linuxdo', 'CLI fetch-linuxdo json content');
-
-    console.log('✅ CLI runCli fetch-linuxdo json success');
-}
-
-async function testRunCliFetchLinuxDoValidationFailure(): Promise<void> {
-    const runtime = createStubRuntime();
-    const stdout: string[] = [];
-    const stderr: string[] = [];
-    const exitCode = await runCli(
-        ['fetch-linuxdo', 'https://linux.do/t/topic/123', '--json'],
-        runtime,
-        {
-            stdout: (text) => stdout.push(text),
-            stderr: (text) => stderr.push(text)
-        }
-    );
-
-    assertEqual(exitCode, 1, 'CLI fetch-linuxdo validation exit code');
-    assertEqual(stderr.length, 0, 'CLI fetch-linuxdo validation stderr');
-    const payload = JSON.parse(stdout[0]) as {
-        status: string;
-        error: { code: string; message: string };
-    };
-    assertEqual(payload.status, 'error', 'CLI fetch-linuxdo validation status');
-    assertEqual(payload.error.code, 'validation_failed', 'CLI fetch-linuxdo validation code');
-    assert(payload.error.message.includes('Invalid linuxdo article URL'), 'CLI fetch-linuxdo validation message');
-
-    console.log('✅ CLI runCli fetch-linuxdo validation failure');
-}
-
 async function testRunCliPrefersDaemonWhenAvailable(): Promise<void> {
     const localRuntime = createStubRuntime();
     const daemonRuntime = createOpenWebSearchRuntime({
@@ -635,8 +581,7 @@ async function testRunCliPrefersDaemonWhenAvailable(): Promise<void> {
                 content: `daemon:${maxChars}`
             }),
             fetchCsdnArticle: async () => ({ content: 'daemon-csdn' }),
-            fetchJuejinArticle: async () => ({ content: 'daemon-juejin' }),
-            fetchLinuxDoArticle: async () => ({ content: 'daemon-linuxdo' })
+            fetchJuejinArticle: async () => ({ content: 'daemon-juejin' })
         }
     });
 
@@ -726,8 +671,7 @@ async function testRunCliExplicitDaemonTimeout(): Promise<void> {
                 content: `ok:${maxChars}`
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
-            fetchJuejinArticle: async () => ({ content: 'juejin' }),
-            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
+            fetchJuejinArticle: async () => ({ content: 'juejin' })
         }
     });
     const daemon = await startLocalDaemon(delayedRuntime, { port: 0, version: 'timeout-test' });
@@ -789,8 +733,7 @@ async function testRunCliSpawnStartsDaemon(): Promise<void> {
                 content: `spawned:${maxChars}`
             }),
             fetchCsdnArticle: async () => ({ content: 'spawned-csdn' }),
-            fetchJuejinArticle: async () => ({ content: 'spawned-juejin' }),
-            fetchLinuxDoArticle: async () => ({ content: 'spawned-linuxdo' })
+            fetchJuejinArticle: async () => ({ content: 'spawned-juejin' })
         }
     });
 
@@ -954,8 +897,6 @@ async function main(): Promise<void> {
             await testRunCliFetchCsdnJsonSuccess();
             await testRunCliFetchJuejinJsonSuccess();
             await testRunCliFetchCsdnValidationFailure();
-            await testRunCliFetchLinuxDoJsonSuccess();
-            await testRunCliFetchLinuxDoValidationFailure();
             await testRunCliUnknownCommandJson();
             await testRunCliUnknownMcpStyleCommandHint();
             await testRunCliHelp();

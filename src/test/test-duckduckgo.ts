@@ -5,7 +5,7 @@ async function testDuckDuckGoSearch() {
 
   try {
     // const query = 'site:zhuanlan.zhihu.com websearch mcp';
-    const query = 'site:linux.do websearch mcp';
+    const query = 'websearch mcp';
     const maxResults = 30;
 
     console.log(`📝 Search query: ${query}`);

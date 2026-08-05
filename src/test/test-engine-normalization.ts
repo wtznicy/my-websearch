@@ -4,7 +4,6 @@ import { normalizeEngineName } from '../tools/setupTools.js';
 const SUPPORTED_ENGINES = [
     'baidu',
     'bing',
-    'linuxdo',
     'csdn',
     'duckduckgo',
     'exa',
@@ -36,7 +35,6 @@ const successCases: SuccessCase[] = [
     { input: ['Bing'], expected: ['bing'] },
     { input: ['DuckDuckGo'], expected: ['duckduckgo'] },
     { input: ['duck-duck-go'], expected: ['duckduckgo'] },
-    { input: ['linux.do'], expected: ['linuxdo'] },
     { input: ['  CSDN  ', 'JueJin'], expected: ['csdn', 'juejin'] },
     { input: ['StartPage'], expected: ['startpage'] },
     { input: ['SouGou'], expected: ['sogou'] },

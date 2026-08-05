@@ -19,7 +19,6 @@ const COMMANDS_REQUIRING_RUNTIME = new Set([
     'fetch-github-readme',
     'fetch-csdn',
     'fetch-juejin',
-    'fetch-linuxdo',
     'serve'
 ]);
 
@@ -27,8 +26,7 @@ const MCP_TO_CLI_COMMAND_HINTS: Record<string, string> = {
     fetchWebContent: 'fetch-web',
     fetchGithubReadme: 'fetch-github-readme',
     fetchCsdnArticle: 'fetch-csdn',
-    fetchJuejinArticle: 'fetch-juejin',
-    fetchLinuxDoArticle: 'fetch-linuxdo'
+    fetchJuejinArticle: 'fetch-juejin'
 };
 
 export function commandNeedsRuntime(argv: string[]): boolean {
@@ -58,7 +56,6 @@ function formatCliHelp(): string {
         '  open-websearch fetch-github-readme <url> [--daemon-url URL] [--spawn] [--json]',
         '  open-websearch fetch-csdn <url> [--daemon-url URL] [--spawn] [--json]',
         '  open-websearch fetch-juejin <url> [--daemon-url URL] [--spawn] [--json]',
-        '  open-websearch fetch-linuxdo <url> [--daemon-url URL] [--spawn] [--json]',
         '',
         'Common action flags:',
         '  --daemon-url URL',
@@ -1178,75 +1175,6 @@ export async function runCli(
                     { hint: isDaemonRequestError(error)
                         ? getDaemonCliErrorHint(error)
                         : 'Use a valid juejin.cn post URL.' }
-                ), null, 2));
-            } else {
-                io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);
-            }
-            return 1;
-        }
-    }
-
-    if (command === 'fetch-linuxdo') {
-        let transport: DaemonTransportArgs;
-        let parsed: ParsedFetchGithubArgs;
-        try {
-            transport = extractDaemonTransportArgs(rest);
-            parsed = parseFetchGithubArgs(transport.argv);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            if (rest.includes('--json')) {
-                io.stdout(JSON.stringify(createErrorEnvelope(
-                    'invalid_arguments',
-                    message,
-                    { hint: 'Use `open-websearch fetch-linuxdo <article-url> [--json]`.' }
-                ), null, 2));
-            } else {
-                io.stderr(message);
-                io.stderr('Usage: open-websearch fetch-linuxdo <article-url> [--json]');
-            }
-            return 1;
-        }
-
-        try {
-            const daemonResult = await tryDaemonRequest<{ url: string; content: string }>(
-                transport,
-                '/fetch-linuxdo',
-                { url: parsed.url },
-                options
-            );
-            if (daemonResult) {
-                if (parsed.json) {
-                    io.stdout(JSON.stringify(daemonResult, null, 2));
-                } else if (isSuccessEnvelope(daemonResult)) {
-                    io.stdout(formatArticleHumanReadable('Linux.do', daemonResult.data.url, daemonResult.data.content));
-                } else {
-                    io.stderr(`Fetch failed: ${daemonResult.error?.message ?? 'Unknown error'}`);
-                    if (daemonResult.hint) {
-                        io.stderr(daemonResult.hint);
-                    }
-                }
-                return daemonResult.status === 'ok' ? 0 : 1;
-            }
-
-            const result = await runtime.services.fetchLinuxDoArticle.execute({ url: parsed.url });
-            if (parsed.json) {
-                io.stdout(JSON.stringify(createSuccessEnvelope({
-                    url: parsed.url,
-                    content: result.content
-                }), null, 2));
-            } else {
-                io.stdout(formatArticleHumanReadable('Linux.do', parsed.url, result.content));
-            }
-            return 0;
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            if (parsed.json) {
-                io.stdout(JSON.stringify(createErrorEnvelope(
-                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : 'validation_failed',
-                    message,
-                    { hint: isDaemonRequestError(error)
-                        ? getDaemonCliErrorHint(error)
-                        : 'Use a valid linux.do topic JSON URL.' }
                 ), null, 2));
             } else {
                 io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);

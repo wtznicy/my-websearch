@@ -42,14 +42,12 @@ function createResult(engine: string, index: number): SearchResult {
 function testNormalizeEngineName(): void {
     assertEqual(normalizeEngineName('Bing'), 'bing', 'normalizes Bing');
     assertEqual(normalizeEngineName('duck-duck-go'), 'duckduckgo', 'normalizes duckduckgo alias');
-    assertEqual(normalizeEngineName('linux.do'), 'linuxdo', 'normalizes linux.do alias');
     assertEqual(normalizeEngineName('StartPage'), 'startpage', 'normalizes StartPage');
     assertEqual(normalizeEngineName('sou-gou'), 'sogou', 'normalizes sou-gou alias');
     assertEqual(normalizeEngineName('搜狗'), 'sogou', 'normalizes Chinese Sogou alias');
     assertEqualArray([...SUPPORTED_SEARCH_ENGINES], [
         'baidu',
         'bing',
-        'linuxdo',
         'csdn',
         'duckduckgo',
         'exa',
