@@ -142,6 +142,16 @@ function parseBooleanFlag(value: unknown, name: string): boolean | undefined {
     return value;
 }
 
+function parseStartIndex(value: unknown): number | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+        throw new Error('startIndex must be a non-negative integer');
+    }
+    return value;
+}
+
 export async function startLocalDaemon(
     runtime: OpenWebSearchRuntime,
     options: LocalDaemonOptions = {}
@@ -228,12 +238,14 @@ export async function startLocalDaemon(
             const maxChars = parseMaxChars(req.body?.maxChars);
             const readability = parseBooleanFlag(req.body?.readability, 'readability');
             const includeLinks = parseBooleanFlag(req.body?.includeLinks, 'includeLinks');
-            const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks });
+            const raw = parseBooleanFlag(req.body?.raw, 'raw');
+            const startIndex = parseStartIndex(req.body?.startIndex);
+            const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, raw, startIndex });
             res.json(createSuccessEnvelope(result));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             sendError(res, 400, 'validation_failed', message, {
-                hint: 'Use a public HTTP(S) URL, keep maxChars within the supported range, and pass readability/includeLinks only as booleans.'
+                hint: 'Use a public HTTP(S) URL, keep maxChars within the supported range, and pass readability/includeLinks/raw only as booleans and startIndex as a non-negative integer.'
             });
         }
     });

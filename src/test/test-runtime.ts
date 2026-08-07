@@ -56,7 +56,9 @@ async function testRuntimeUsesInjectedDependencies(): Promise<void> {
                     title: 'Example',
                     retrievalMethod: 'request',
                     truncated: false,
-                    content: 'example'
+                    content: 'example',
+                    totalLength: 7,
+                    startIndex: 0
                 };
             },
             fetchCsdnArticle: async (url) => {

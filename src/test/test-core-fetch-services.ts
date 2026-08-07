@@ -22,12 +22,16 @@ async function testWebFetchService(): Promise<void> {
     let seenMaxChars = 0;
     let seenReadability: boolean | undefined;
     let seenIncludeLinks: boolean | undefined;
+    let seenRaw: boolean | undefined;
+    let seenStartIndex: number | undefined;
 
     const service = createWebFetchService(async (url, maxChars, options) => {
         seenUrl = url;
         seenMaxChars = maxChars;
         seenReadability = options?.readability;
         seenIncludeLinks = options?.includeLinks;
+        seenRaw = options?.raw;
+        seenStartIndex = options?.startIndex;
         return {
             url,
             finalUrl: url,
@@ -36,6 +40,8 @@ async function testWebFetchService(): Promise<void> {
             retrievalMethod: 'request',
             truncated: false,
             content: 'hello',
+            totalLength: 5,
+            startIndex: options?.startIndex ?? 0,
             readabilityApplied: options?.readability ?? false,
             links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
         } satisfies FetchWebContentResult;
@@ -45,13 +51,17 @@ async function testWebFetchService(): Promise<void> {
         url: 'https://example.com/docs',
         maxChars: 1234,
         readability: true,
-        includeLinks: true
+        includeLinks: true,
+        raw: true,
+        startIndex: 100
     });
 
     assertEqual(seenUrl, 'https://example.com/docs', 'web fetch forwards url');
     assertEqual(seenMaxChars, 1234, 'web fetch forwards maxChars');
     assertEqual(seenReadability, true, 'web fetch forwards readability');
     assertEqual(seenIncludeLinks, true, 'web fetch forwards includeLinks');
+    assertEqual(seenRaw, true, 'web fetch forwards raw');
+    assertEqual(seenStartIndex, 100, 'web fetch forwards startIndex');
     assertEqual(result.title, 'Example', 'web fetch returns delegate result');
     assertEqual(result.readabilityApplied, true, 'web fetch returns delegate readability result');
     assertEqual(result.links?.[0]?.href, 'https://example.com/doc', 'web fetch returns delegate links');

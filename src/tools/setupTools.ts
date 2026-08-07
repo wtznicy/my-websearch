@@ -228,12 +228,14 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
             ),
             maxChars: z.number().int().min(1000).max(200000).default(30000),
             readability: z.boolean().optional(),
-            includeLinks: z.boolean().optional()
+            includeLinks: z.boolean().optional(),
+            raw: z.boolean().optional().describe("Return the raw response body (HTML/plain text) without extraction"),
+            startIndex: z.number().int().min(0).optional().describe("Character offset to start reading from (for paging through long content)"),
         },
-        async ({url, maxChars = 30000, readability, includeLinks}) => {
+        async ({url, maxChars = 30000, readability, includeLinks, raw, startIndex}) => {
             try {
                 console.error(`Fetching web content: ${url}`);
-                const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks });
+                const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, raw, startIndex });
 
                 return {
                     content: [{

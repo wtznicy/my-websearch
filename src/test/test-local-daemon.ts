@@ -69,6 +69,8 @@ function createStubRuntime() {
                 retrievalMethod: 'request' as const,
                 truncated: false,
                 content: `ok:${maxChars}:${options?.readability ? 'readability' : 'plain'}`,
+                totalLength: 1000,
+                startIndex: 0,
                 readabilityApplied: options?.readability ?? false,
                 links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
             }),

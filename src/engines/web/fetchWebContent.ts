@@ -17,6 +17,16 @@ export interface FetchWebContentResult {
     retrievalMethod: 'request' | 'request-with-browser-cookies' | 'browser-html';
     truncated: boolean;
     content: string;
+    /** Raw response body (HTML/plain text) as received, before any extraction. */
+    raw?: string;
+    /** Total length of the extracted (or raw) content before paging. */
+    totalLength: number;
+    /** Starting character offset of this page (echo of the request). */
+    startIndex: number;
+    /** Whether more content remains beyond this page (call with nextStartIndex to continue). */
+    hasMore?: boolean;
+    /** Offset to pass as startIndex on the next call to continue reading. */
+    nextStartIndex?: number;
     readabilityApplied?: boolean;
     readableHtml?: string;
     links?: ExtractedLink[];
@@ -33,6 +43,10 @@ export type ExtractedLink = {
 export type FetchWebContentOptions = {
     readability?: boolean;
     includeLinks?: boolean;
+    /** Return the raw response body (HTML/plain text) without extraction. */
+    raw?: boolean;
+    /** Start reading at this character offset (for paging through long content). */
+    startIndex?: number;
 };
 
 const DEFAULT_TIMEOUT_MS = 20000;
@@ -317,6 +331,9 @@ export async function fetchWebContent(
     const parsedUrl = new URL(url);
     await assertPublicHttpUrlResolved(parsedUrl, 'Request URL');
 
+    const startIndex = Math.max(0, Math.floor(options.startIndex ?? 0));
+    const targetMaxChars = clampMaxChars(maxChars);
+
     const requestOptions = buildRequestOptions();
 
     // Pre-flight check to avoid downloading oversized payloads when Content-Length is present.
@@ -408,56 +425,61 @@ export async function fetchWebContent(
 
     const finalParsedUrl = new URL(finalUrl);
 
-    // Keep raw markdown behavior for the resolved final path.
-    if (isMarkdownPath(finalParsedUrl)) {
-        extractedContent = normalizeText(raw);
-    } else if (contentType.includes('text/html') || looksLikeHtml(raw)) {
-        htmlExtraction = extractMainTextFromHtml(raw);
-        title = htmlExtraction.title;
-        extractedContent = htmlExtraction.text;
-    } else if (isMarkdownContentType(contentType)) {
+    // Raw mode: return the response body as-is (no extraction, no readability).
+    if (options.raw) {
         extractedContent = normalizeText(raw);
     } else {
-        extractedContent = normalizeText(raw);
-    }
-
-    if (shouldTryBrowserHtmlFallback(contentType, raw, htmlExtraction)) {
-        const browserResult = await fetchHtmlViaBrowser(parsedUrl.toString());
-        if (browserResult) {
-            contentType = browserResult.contentType;
-            finalUrl = browserResult.finalUrl;
-            raw = browserResult.raw;
-            retrievalMethod = 'browser-html';
+        // Keep raw markdown behavior for the resolved final path.
+        if (isMarkdownPath(finalParsedUrl)) {
+            extractedContent = normalizeText(raw);
+        } else if (contentType.includes('text/html') || looksLikeHtml(raw)) {
             htmlExtraction = extractMainTextFromHtml(raw);
-            title = htmlExtraction.title || browserResult.title;
+            title = htmlExtraction.title;
             extractedContent = htmlExtraction.text;
+        } else if (isMarkdownContentType(contentType)) {
+            extractedContent = normalizeText(raw);
+        } else {
+            extractedContent = normalizeText(raw);
         }
-    }
 
-    if (options.readability && (contentType.includes('text/html') || looksLikeHtml(raw))) {
-        try {
-            const article = await readabilityParser(raw, finalUrl);
-            if (article?.content) {
-                const readableText = normalizeText(article.textContent || extractReadableTextFromHtml(article.content));
-                if (readableText) {
-                    readabilityApplied = true;
-                    readableHtml = article.content;
-                    links = options.includeLinks ? extractReadableLinks(article.content, finalUrl) : undefined;
-                    byline = article.byline?.trim() || undefined;
-                    excerpt = article.excerpt?.trim() || undefined;
-                    siteName = article.siteName?.trim() || undefined;
-                    title = article.title?.trim() || title;
-                    extractedContent = readableText;
+        if (shouldTryBrowserHtmlFallback(contentType, raw, htmlExtraction)) {
+            const browserResult = await fetchHtmlViaBrowser(parsedUrl.toString());
+            if (browserResult) {
+                contentType = browserResult.contentType;
+                finalUrl = browserResult.finalUrl;
+                raw = browserResult.raw;
+                retrievalMethod = 'browser-html';
+                htmlExtraction = extractMainTextFromHtml(raw);
+                title = htmlExtraction.title || browserResult.title;
+                extractedContent = htmlExtraction.text;
+            }
+        }
+
+        if (options.readability && (contentType.includes('text/html') || looksLikeHtml(raw))) {
+            try {
+                const article = await readabilityParser(raw, finalUrl);
+                if (article?.content) {
+                    const readableText = normalizeText(article.textContent || extractReadableTextFromHtml(article.content));
+                    if (readableText) {
+                        readabilityApplied = true;
+                        readableHtml = article.content;
+                        links = options.includeLinks ? extractReadableLinks(article.content, finalUrl) : undefined;
+                        byline = article.byline?.trim() || undefined;
+                        excerpt = article.excerpt?.trim() || undefined;
+                        siteName = article.siteName?.trim() || undefined;
+                        title = article.title?.trim() || title;
+                        extractedContent = readableText;
+                    }
+                } else {
+                    logReadabilityFallback('parser returned no article content');
                 }
-            } else {
-                logReadabilityFallback('parser returned no article content');
-            }
-        } catch (error) {
-            if (error instanceof ReadabilityUnavailableError) {
-                throw error;
-            }
+            } catch (error) {
+                if (error instanceof ReadabilityUnavailableError) {
+                    throw error;
+                }
 
-            logReadabilityFallback('falling back to existing extractor after parser error', error);
+                logReadabilityFallback('falling back to existing extractor after parser error', error);
+            }
         }
     }
 
@@ -465,11 +487,12 @@ export async function fetchWebContent(
         throw new Error('No readable content was extracted from this URL');
     }
 
-    const targetMaxChars = clampMaxChars(maxChars);
-    const truncated = extractedContent.length > targetMaxChars;
+    const totalLength = extractedContent.length;
+    const pageContent = extractedContent.slice(startIndex, startIndex + targetMaxChars);
+    const truncated = startIndex + targetMaxChars < totalLength;
     const content = truncated
-        ? `${extractedContent.slice(0, targetMaxChars)}\n\n[...truncated ${extractedContent.length - targetMaxChars} characters]`
-        : extractedContent;
+        ? `${pageContent}\n\n[...truncated ${totalLength - (startIndex + pageContent.length)} characters; call again with startIndex=${startIndex + pageContent.length} to continue]`
+        : pageContent;
 
     return {
         url: parsedUrl.toString(),
@@ -479,6 +502,10 @@ export async function fetchWebContent(
         retrievalMethod,
         truncated,
         content,
+        ...(options.raw ? { raw } : {}),
+        totalLength,
+        startIndex,
+        ...(truncated ? { hasMore: true, nextStartIndex: startIndex + pageContent.length } : {}),
         ...(options.readability ? { readabilityApplied } : {}),
         ...(readableHtml ? { readableHtml } : {}),
         ...(links ? { links } : {}),

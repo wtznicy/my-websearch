@@ -73,6 +73,8 @@ function createStubRuntime(configOverrides: Partial<AppConfig> = {}) {
                 retrievalMethod: 'request' as const,
                 truncated: false,
                 content: `ok:${maxChars}:${options?.readability ? 'readability' : 'plain'}`,
+                totalLength: 1000,
+                startIndex: 0,
                 readabilityApplied: options?.readability ?? false,
                 links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
             }),
@@ -215,7 +217,9 @@ async function testRunCliSearchModeOverride(): Promise<void> {
                 title: 'Example',
                 retrievalMethod: 'request' as const,
                 truncated: false,
-                content: `ok:${maxChars}`
+                content: `ok:${maxChars}`,
+                totalLength: 1000,
+                startIndex: 0
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
             fetchJuejinArticle: async () => ({ content: 'juejin' })
@@ -578,7 +582,9 @@ async function testRunCliPrefersDaemonWhenAvailable(): Promise<void> {
                 title: 'Example',
                 retrievalMethod: 'request' as const,
                 truncated: false,
-                content: `daemon:${maxChars}`
+                content: `daemon:${maxChars}`,
+                totalLength: 1000,
+                startIndex: 0
             }),
             fetchCsdnArticle: async () => ({ content: 'daemon-csdn' }),
             fetchJuejinArticle: async () => ({ content: 'daemon-juejin' })
@@ -668,7 +674,9 @@ async function testRunCliExplicitDaemonTimeout(): Promise<void> {
                 title: 'Example',
                 retrievalMethod: 'request' as const,
                 truncated: false,
-                content: `ok:${maxChars}`
+                content: `ok:${maxChars}`,
+                totalLength: 1000,
+                startIndex: 0
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
             fetchJuejinArticle: async () => ({ content: 'juejin' })
@@ -730,7 +738,9 @@ async function testRunCliSpawnStartsDaemon(): Promise<void> {
                 title: 'Example',
                 retrievalMethod: 'request' as const,
                 truncated: false,
-                content: `spawned:${maxChars}`
+                content: `spawned:${maxChars}`,
+                totalLength: 1000,
+                startIndex: 0
             }),
             fetchCsdnArticle: async () => ({ content: 'spawned-csdn' }),
             fetchJuejinArticle: async () => ({ content: 'spawned-juejin' })

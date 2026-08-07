@@ -220,6 +220,49 @@ async function main(): Promise<void> {
             }
         },
         {
+            name: 'should return raw response body when raw option is set',
+            run: async () => {
+                const result = await fetchWebContent('https://example.com/page', 5000, { raw: true });
+                assert(result.raw !== undefined, 'raw body should be returned');
+                assert(result.content.includes('<html>'), 'raw content should contain original html');
+                assert(result.content.includes('Skill body content'), 'raw content should keep full html body');
+                assert(result.title === '', 'raw mode should not extract title');
+                assert(result.totalLength === result.content.length, 'totalLength should match raw content length');
+            }
+        },
+        {
+            name: 'should page through long content with startIndex',
+            run: async () => {
+                const page1 = await fetchWebContent('https://example.com/long.md', 1500);
+                assert(page1.truncated === true, 'first page should be truncated');
+                assert(page1.hasMore === true, 'first page should report hasMore');
+                assert(typeof page1.nextStartIndex === 'number' && page1.nextStartIndex > 0, 'nextStartIndex should be provided');
+                assert(page1.startIndex === 0, 'first page starts at 0');
+
+                const page2 = await fetchWebContent('https://example.com/long.md', 1500, {
+                    startIndex: page1.nextStartIndex
+                });
+                assert(page2.startIndex === page1.nextStartIndex, 'second page starts at nextStartIndex');
+                assert(page2.content.length > 0, 'second page should have content');
+                assert(!page2.content.includes('# Long'), 'second page should not repeat first page content');
+                const combined = page1.content + page2.content;
+                assert(combined.includes('# Long'), 'combined pages should cover the document');
+            }
+        },
+        {
+            name: 'should support raw + startIndex combination',
+            run: async () => {
+                const raw1 = await fetchWebContent('https://example.com/long.md', 1500, { raw: true });
+                assert(raw1.hasMore === true, 'raw paged content should report hasMore');
+                const raw2 = await fetchWebContent('https://example.com/long.md', 1500, {
+                    raw: true,
+                    startIndex: raw1.nextStartIndex
+                });
+                assert(raw2.content.length > 0, 'raw second page should have content');
+                assert(!raw2.content.includes(raw1.content.slice(0, 50)), 'raw pages should not overlap');
+            }
+        },
+        {
             name: 'should fallback to metadata for js-rendered html pages',
             run: async () => {
                 __setBrowserHtmlFetcherForTests(async () => {

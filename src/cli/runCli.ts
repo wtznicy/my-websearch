@@ -51,8 +51,8 @@ function formatCliHelp(): string {
         'One-shot action commands:',
         '  open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--daemon-url URL] [--spawn] [--json]',
         '    Search the web. `--search-mode` is request|auto|playwright and currently only affects Bing.',
-        '  open-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--daemon-url URL] [--spawn] [--json]',
-        '    Fetch readable page content. `--readability` enables Mozilla Readability extraction; `--include-links` returns preserved article links.',
+        '  open-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--daemon-url URL] [--spawn] [--json]',
+        '    Fetch readable page content. `--readability` enables Mozilla Readability extraction; `--include-links` returns preserved article links; `--raw` returns the raw response body; `--start-index N` continues reading from character offset N.',
         '  open-websearch fetch-github-readme <url> [--daemon-url URL] [--spawn] [--json]',
         '  open-websearch fetch-csdn <url> [--daemon-url URL] [--spawn] [--json]',
         '  open-websearch fetch-juejin <url> [--daemon-url URL] [--spawn] [--json]',
@@ -91,6 +91,8 @@ export type ParsedFetchWebArgs = {
     maxChars: number;
     readability: boolean;
     includeLinks: boolean;
+    raw: boolean;
+    startIndex: number;
     json: boolean;
 };
 
@@ -283,6 +285,8 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
     let maxChars = 30000;
     let readability = false;
     let includeLinks = false;
+    let raw = false;
+    let startIndex = 0;
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -313,6 +317,21 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
             continue;
         }
 
+        if (arg === '--raw') {
+            raw = true;
+            continue;
+        }
+
+        if (arg === '--start-index') {
+            const next = argv[index + 1];
+            if (!next || isFlag(next)) {
+                throw new Error('Missing value for --start-index');
+            }
+            startIndex = Number(next);
+            index += 1;
+            continue;
+        }
+
         if (isFlag(arg)) {
             throw new Error(`Unknown argument: ${arg}`);
         }
@@ -327,12 +346,17 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
     if (!Number.isInteger(maxChars) || maxChars < 1000 || maxChars > 200000) {
         throw new Error('maxChars must be an integer between 1000 and 200000');
     }
+    if (!Number.isInteger(startIndex) || startIndex < 0) {
+        throw new Error('startIndex must be a non-negative integer');
+    }
 
     return {
         url,
         maxChars,
         readability,
         includeLinks,
+        raw,
+        startIndex,
         json
     };
 }
@@ -902,7 +926,7 @@ export async function runCli(
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: open-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--json]');
+                io.stderr('Usage: open-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--json]');
             }
             return 1;
         }
@@ -915,7 +939,9 @@ export async function runCli(
                     url: parsed.url,
                     maxChars: parsed.maxChars,
                     readability: parsed.readability,
-                    includeLinks: parsed.includeLinks
+                    includeLinks: parsed.includeLinks,
+                    raw: parsed.raw,
+                    startIndex: parsed.startIndex
                 },
                 options
             );
@@ -937,7 +963,9 @@ export async function runCli(
                 url: parsed.url,
                 maxChars: parsed.maxChars,
                 readability: parsed.readability,
-                includeLinks: parsed.includeLinks
+                includeLinks: parsed.includeLinks,
+                raw: parsed.raw,
+                startIndex: parsed.startIndex
             });
 
             if (parsed.json) {
