@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import { config, getProxyUrl } from '../config.js';
+import { prepareStealthPage, getStealthUserAgent } from './browserStealth.js';
 import { openPlaywrightBrowser, loadPlaywrightClient } from './playwrightClient.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from './urlSafety.js';
 
@@ -165,9 +166,14 @@ async function createCookieCollectionPage(browser: any): Promise<{ page: any; cl
     // 这里显式为每次采集创建独立 context，确保 cookies/storage/open pages 不会跨调用污染。
     // 但 connectOverCDP 返回的浏览器通常只有一个默认持久化 context，不支持 newContext()，
     // 所以当 newContext 不可用时回退到默认 context + 手动清理。
+    const contextOptions = {
+        ...COOKIE_CONTEXT_OPTIONS,
+        userAgent: getStealthUserAgent()
+    };
+
     if (typeof browser.newContext === 'function') {
         try {
-            const context = await browser.newContext(COOKIE_CONTEXT_OPTIONS);
+            const context = await browser.newContext(contextOptions);
             const page = await context.newPage();
             return {
                 page,
@@ -277,6 +283,15 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
 
         try {
             await installNavigationGuard(page);
+            // 注入 stealth 指纹伪装，降低被 JS 反爬站点识别的概率
+            await prepareStealthPage(page);
+
+            // 模拟人类访问间隔（300-1200ms）
+            if (typeof page.waitForTimeout === 'function') {
+                const humanDelay = Math.random() * 900 + 300;
+                await page.waitForTimeout(humanDelay).catch(() => undefined);
+            }
+
             await page.goto(urlInput, {
                 waitUntil: 'domcontentloaded',
                 timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)

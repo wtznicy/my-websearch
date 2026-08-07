@@ -3,6 +3,7 @@ import * as cheerio from 'cheerio';
 import { AppConfig, config } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
+import { prepareStealthPage } from '../../utils/browserStealth.js';
 import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
 
@@ -29,14 +30,65 @@ const SEARCH_SUBMIT_SELECTORS = [
     'button[aria-label="搜索"]',
     'button[aria-label="Search"]'
 ];
-const FALLBACK_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    'Cache-Control': 'no-cache',
-    'Pragma': 'no-cache',
-    'Upgrade-Insecure-Requests': '1'
-};
+// 更接近真实浏览器的请求头集合（EnhancedBing 同款反爬对抗）：
+// 随机 UA/语言、全套 Sec-Fetch 头、随机 MUID cookie，降低被 Bing 反爬拦截的概率。
+const BROWSER_USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0'
+];
+const ACCEPT_LANGUAGES = [
+    'zh-CN,zh;q=0.9,en;q=0.8',
+    'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+    'zh-CN,zh-Hans;q=0.9,en;q=0.8',
+    'zh-CN,zh;q=0.8,en-US;q=0.7,en;q=0.6'
+];
+const SEC_CH_UA_VARIANTS = [
+    '"Not_A Brand";v="8", "Chromium";v="133", "Google Chrome";v="133"',
+    '"Not_A Brand";v="8", "Chromium";v="131", "Google Chrome";v="131"',
+    '"Not_A Brand";v="99", "Chromium";v="132", "Google Chrome";v="132"'
+];
+
+function pickRandom<T>(items: readonly T[]): T {
+    return items[Math.floor(Math.random() * items.length)];
+}
+
+function generateMuid(): string {
+    // 与浏览器生成的 MUID 格式相近的随机值
+    return `${Math.random().toString(36).substring(2, 10)}${Math.random().toString(36).substring(2, 10)}`;
+}
+
+function buildBingAntiDetectionHeaders(): Record<string, string> {
+    const userAgent = pickRandom(BROWSER_USER_AGENTS);
+    const acceptLanguage = pickRandom(ACCEPT_LANGUAGES);
+    const secChUa = pickRandom(SEC_CH_UA_VARIANTS);
+
+    return {
+        'User-Agent': userAgent,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': acceptLanguage,
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Sec-Ch-Ua': secChUa,
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'DNT': '1',
+        // 随机 MUID cookie，模拟浏览器首次访问 Bing 的状态
+        'Cookie': `SRCHHPGUSR=SRCHLANG=zh-Hans; _EDGE_S=ui=zh-cn; _EDGE_V=1; MUID=${generateMuid()}`
+    };
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 const BOT_DETECTION_KEYWORDS = [
     'captcha',
     'verification',
@@ -119,7 +171,7 @@ function analyzeBlockedPage(html: string): { blocked: boolean; hasResults: boole
 function buildBingAxiosRequestOptions(): any {
     return buildSharedAxiosRequestOptions({
         trustedStaticHost: true,
-        headers: FALLBACK_HEADERS,
+        headers: buildBingAntiDetectionHeaders(),
         timeout: config.playwrightNavigationTimeoutMs
     });
 }
@@ -202,176 +254,6 @@ export function __buildBingBrowserLaunchArgsForTests(hideWindow: boolean, platfo
     return buildBrowserLaunchArgs(hideWindow, platform);
 }
 
-async function setupAntiDetection(page: any): Promise<void> {
-    await page.addInitScript(() => {
-        Object.defineProperty(navigator, 'webdriver', {
-            get: () => false
-        });
-        delete (navigator as any).__proto__.webdriver;
-
-        Object.defineProperty(navigator, 'userAgent', {
-            get: () => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        });
-        Object.defineProperty(navigator, 'platform', {
-            get: () => 'MacIntel'
-        });
-        Object.defineProperty(navigator, 'languages', {
-            get: () => ['zh-CN', 'zh', 'en-US', 'en']
-        });
-        Object.defineProperty(navigator, 'hardwareConcurrency', {
-            get: () => 8
-        });
-
-        if (!(navigator as any).deviceMemory) {
-            Object.defineProperty(navigator, 'deviceMemory', {
-                get: () => 8
-            });
-        }
-
-        const createPlugin = (name: string, filename: string, description: string, mimeTypes: any[]) => {
-            const plugin: any = { name, filename, description, length: mimeTypes.length };
-            mimeTypes.forEach((mimeType, index) => {
-                plugin[index] = mimeType;
-            });
-            return plugin;
-        };
-        const createMimeType = (type: string, suffixes: string, description: string) => ({
-            type,
-            suffixes,
-            description,
-            enabledPlugin: {}
-        });
-
-        Object.defineProperty(navigator, 'plugins', {
-            get: () => [
-                createPlugin('Chrome PDF Plugin', 'internal-pdf-viewer', 'Portable Document Format', [createMimeType('application/x-google-chrome-pdf', 'pdf', 'Portable Document Format')]),
-                createPlugin('Chrome PDF Viewer', 'mhjfbmdgcfjbbpaeojofohoefgiehjai', '', [createMimeType('application/pdf', 'pdf', '')]),
-                createPlugin('Native Client', 'internal-nacl-plugin', '', [
-                    createMimeType('application/x-nacl', '', 'Native Client Executable'),
-                    createMimeType('application/x-pnacl', '', 'Portable Native Client Executable')
-                ])
-            ]
-        });
-
-        Object.defineProperty(navigator, 'mimeTypes', {
-            get: () => {
-                const mimeTypes: any[] = [];
-                const plugins = navigator.plugins as any;
-                for (let pluginIndex = 0; pluginIndex < plugins.length; pluginIndex += 1) {
-                    const plugin = plugins[pluginIndex];
-                    for (let mimeIndex = 0; mimeIndex < plugin.length; mimeIndex += 1) {
-                        mimeTypes.push(plugin[mimeIndex]);
-                    }
-                }
-                return mimeTypes;
-            }
-        });
-
-        (window as any).chrome = {
-            app: {
-                InstallState: 'installed',
-                RunningState: 'running',
-                getDetails: () => null,
-                getIsInstalled: () => false
-            },
-            csi: () => ({
-                startE: Date.now(),
-                onloadT: Date.now(),
-                pageT: 100,
-                tran: 15
-            }),
-            loadTimes: () => ({
-                commitLoadTime: 0,
-                connectionInfo: 'http/1.1',
-                finishDocumentLoadTime: 0,
-                finishLoadTime: 0,
-                firstPaintAfterLoadTime: 0,
-                firstPaintTime: 0,
-                navigationType: 'Other',
-                npnNegotiatedProtocol: 'unknown',
-                requestTime: 0,
-                startLoadTime: 0,
-                wasAlternateProtocolAvailable: false,
-                wasFetchedViaSpdy: false,
-                wasNpnNegotiated: false
-            }),
-            runtime: {
-                connect: () => ({
-                    onConnect: { addListener: () => undefined },
-                    onMessage: { addListener: () => undefined },
-                    postMessage: () => undefined,
-                    disconnect: () => undefined
-                }),
-                sendMessage: () => Promise.resolve({}),
-                onConnect: { addListener: () => undefined },
-                onMessage: { addListener: () => undefined }
-            }
-        };
-
-        const originalQuery = (window.navigator.permissions as any).query;
-        (window.navigator.permissions as any).query = (parameters: any) => {
-            if (parameters.name === 'notifications') {
-                return Promise.resolve({ state: Notification.permission });
-            }
-            return originalQuery ? originalQuery(parameters) : Promise.resolve({ state: 'granted' });
-        };
-
-        const webglGetParameter = WebGLRenderingContext.prototype.getParameter;
-        WebGLRenderingContext.prototype.getParameter = function (parameter: number) {
-            if (parameter === 37445) {
-                return 'Intel Inc.';
-            }
-            if (parameter === 37446) {
-                return 'Intel(R) Iris(TM) Graphics 6100';
-            }
-            return webglGetParameter.call(this, parameter);
-        };
-
-        if (typeof WebGL2RenderingContext !== 'undefined') {
-            const webgl2GetParameter = WebGL2RenderingContext.prototype.getParameter;
-            WebGL2RenderingContext.prototype.getParameter = function (parameter: number) {
-                if (parameter === 37445) {
-                    return 'Intel Inc.';
-                }
-                if (parameter === 37446) {
-                    return 'Intel(R) Iris(TM) Graphics 6100';
-                }
-                return webgl2GetParameter.call(this, parameter);
-            };
-        }
-
-        const viewportWidth = window.innerWidth || 1920;
-        const viewportHeight = window.innerHeight || 1080;
-        Object.defineProperty(window, 'outerWidth', { get: () => viewportWidth });
-        Object.defineProperty(window, 'outerHeight', { get: () => viewportHeight });
-
-        if (!(navigator as any).connection) {
-            Object.defineProperty(navigator, 'connection', {
-                get: () => ({
-                    effectiveType: '4g',
-                    rtt: 50,
-                    downlink: 10,
-                    saveData: false
-                })
-            });
-        }
-
-        const originalToString = Function.prototype.toString;
-        Function.prototype.toString = function () {
-            return originalToString.call(this).includes('[native code]') ? originalToString.call(this) : 'function () { [native code] }';
-        };
-    });
-}
-
-async function preparePlaywrightPage(page: any): Promise<void> {
-    await setupAntiDetection(page);
-    if (typeof page.setViewportSize === 'function') {
-        await page.setViewportSize(BROWSER_CONTEXT_OPTIONS.viewport).catch(() => undefined);
-    }
-    await page.setExtraHTTPHeaders({
-        'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
-    });
-}
 
 function getBingUiTimeoutMs(): number {
     return Math.min(config.playwrightNavigationTimeoutMs, 15000);
@@ -669,6 +551,10 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
     let pageNumber = 0;
 
     while (allResults.length < limit) {
+        // 模拟人类搜索间隔（300-1200ms），降低被反爬识别的概率
+        const delay = Math.random() * 900 + 300;
+        await sleep(delay);
+
         const response = await axios.get(buildBingSearchUrl(query, pageNumber), buildBingAxiosRequestOptions());
         const html = String(response.data || '');
 
@@ -711,7 +597,7 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
         const { page, releasePage } = await acquirePooledPlaywrightPage(session.browser, {
             poolKey: 'bing-search',
             contextOptions: BROWSER_CONTEXT_OPTIONS,
-            preparePage: preparePlaywrightPage,
+            preparePage: prepareStealthPage,
             // 对 Bing 的真实交互流程，这里改成 false 后会稳定复现搜索页等待超时与查询被建议词改写的问题，
             // 说明当前实现仍需要复用 connectOverCDP 暴露出来的现有 context 来保持搜索链路稳定。
             preferExistingContext: true
