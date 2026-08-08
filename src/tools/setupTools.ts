@@ -289,5 +289,71 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
             }
         }
     );
+
+    // 查找库文档（context7 融合）——按库名搜索官方文档索引
+    server.tool(
+        "resolveLibraryId",
+        "Resolve a general library/package name into a Context7-compatible library ID (e.g. /vercel/next.js). Returns matching libraries with reputation and quality scores so the agent can pick the authoritative one.",
+        {
+            libraryName: z.string().min(1).describe("The library or package name to search for (e.g. 'Next.js', 'express', 'prisma')"),
+            query: z.string().min(1).describe("The user's question or task, used to rank results by relevance (e.g. 'how to implement authentication')"),
+            limit: z.number().int().min(1).max(10).optional().describe("Maximum number of library matches to return (default 5)")
+        },
+        async ({libraryName, query, limit}) => {
+            try {
+                console.error(`Context7 resolving library: ${libraryName}`);
+                const result = await runtime.services.context7Libraries.execute({ libraryName, query, limit });
+
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify(result, null, 2)
+                    }]
+                };
+            } catch (error) {
+                console.error('Failed to resolve library via Context7:', error);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: `Failed to resolve library: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    }],
+                    isError: true
+                };
+            }
+        }
+    );
+
+    // 获取库文档（context7 融合）——按库 ID 获取官方文档片段与代码示例
+    server.tool(
+        "queryDocs",
+        "Retrieve up-to-date, version-specific documentation snippets and code examples for a library using a Context7 library ID (e.g. /vercel/next.js). Use resolveLibraryId first if unsure of the ID.",
+        {
+            libraryId: z.string().min(1).describe("Exact Context7-compatible library ID (e.g. /vercel/next.js, /packages/express; optional version like /vercel/next.js@v15.1.8)"),
+            query: z.string().min(1).describe("The question or task to get relevant documentation for (e.g. 'how to set up middleware with auth')"),
+            limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets to return (default 5)")
+        },
+        async ({libraryId, query, limit}) => {
+            try {
+                console.error(`Context7 fetching docs for: ${libraryId}`);
+                const result = await runtime.services.context7Docs.execute({ libraryId, query, limit });
+
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify(result, null, 2)
+                    }]
+                };
+            } catch (error) {
+                console.error('Failed to fetch docs via Context7:', error);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: `Failed to fetch docs: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    }],
+                    isError: true
+                };
+            }
+        }
+    );
 };
 

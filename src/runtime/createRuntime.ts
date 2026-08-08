@@ -12,8 +12,8 @@ import { fetchCsdnArticle } from '../engines/csdn/fetchCsdnArticle.js';
 import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
 import { fetchGithubReadme } from '../engines/github/index.js';
 import { fetchWebContent } from '../engines/web/index.js';
-import { createSearchService, SearchEngineExecutorMap } from '../core/search/searchService.js';
-import {
+import { createContext7Services } from '../core/context7/context7Service.js';
+import { createSearchService, SearchEngineExecutorMap } from '../core/search/searchService.js';import {
     createArticleFetchService,
     createGithubReadmeService,
     createWebFetchService,
@@ -62,7 +62,9 @@ export function createOpenWebSearchRuntime(options: CreateOpenWebSearchRuntimeOp
             fetchCsdnArticle: createArticleFetchService('csdn', dependencies.fetchCsdnArticle ?? fetchCsdnArticle),
             fetchJuejinArticle: createArticleFetchService('juejin', dependencies.fetchJuejinArticle ?? fetchJuejinArticle),
             fetchGithubReadme: createGithubReadmeService(dependencies.fetchGithubReadme ?? fetchGithubReadme),
-            fetchWeb: createWebFetchService(dependencies.fetchWebContent ?? fetchWebContent)
+            fetchWeb: createWebFetchService(dependencies.fetchWebContent ?? fetchWebContent),
+            context7Libraries: createContext7Services().libraries,
+            context7Docs: createContext7Services().docs
         }
     };
 }

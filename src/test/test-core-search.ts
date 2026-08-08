@@ -7,6 +7,9 @@ import {
 } from '../core/search/searchEngines.js';
 import {
     createSearchService,
+    mergeSearchResults,
+    normalizeResultUrl,
+    SearchTtlCache,
     SearchEngineExecutorMap
 } from '../core/search/searchService.js';
 
@@ -157,6 +160,77 @@ async function testSearchServiceValidation(): Promise<void> {
     console.log('✅ search service validates empty query');
 }
 
+function testNormalizeResultUrl(): void {
+    assertEqual(
+        normalizeResultUrl('https://a.com/p?utm_source=x&id=1#sec'),
+        normalizeResultUrl('https://a.com/p?id=1'),
+        'strips tracking params and hash for dedup'
+    );
+    assertEqual(
+        normalizeResultUrl('https://a.com/p?utm_source=x'),
+        normalizeResultUrl('https://a.com/p'),
+        'removes utm_ params'
+    );
+    console.log('✅ normalizeResultUrl');
+}
+
+function testMergeSearchResultsDedupAndRank(): void {
+    // bing 和 startpage 都返回 url A；只有 bing 返回 url B；只有 startpage 返回 url C
+    const bing = [
+        { title: 'A-bing', url: 'https://example.com/a', description: 'd', source: 'example.com', engine: 'bing' } as SearchResult,
+        { title: 'B', url: 'https://example.com/b', description: 'd', source: 'example.com', engine: 'bing' } as SearchResult
+    ];
+    const startpage = [
+        { title: 'A-startpage', url: 'https://example.com/a?utm_source=sp', description: 'd', source: 'example.com', engine: 'startpage' } as SearchResult,
+        { title: 'C', url: 'https://example.com/c', description: 'd', source: 'example.com', engine: 'startpage' } as SearchResult
+    ];
+
+    const merged = mergeSearchResults([bing, startpage]);
+    assertEqual(merged.length, 3, 'deduplicates shared URL across engines');
+    assertEqual(merged[0].url, 'https://example.com/a', 'result hit by both engines ranks first');
+    assertEqual(merged[0].title, 'A-bing', 'keeps first-seen engine result for shared URL');
+    assertEqualArray(
+        merged.map(r => r.url),
+        ['https://example.com/a', 'https://example.com/b', 'https://example.com/c'],
+        'stable order for unique results after shared winner'
+    );
+
+    const single = mergeSearchResults([bing]);
+    assertEqualArray(
+        single.map(r => r.url),
+        ['https://example.com/a', 'https://example.com/b'],
+        'single engine preserves original order'
+    );
+    console.log('✅ mergeSearchResults dedups and ranks by multi-engine hits');
+}
+
+async function testSearchTtlCache(): Promise<void> {
+    let callCount = 0;
+    const service = createSearchService({
+        bing: async (query, limit) => {
+            callCount += 1;
+            return Array.from({ length: limit }, (_, index) => createResult('bing', index + 1));
+        }
+    });
+
+    const input = { query: 'cache me', engines: ['bing'], limit: 2 };
+    await service.execute(input);
+    await service.execute(input);
+    assertEqual(callCount, 1, 'second identical query hits TTL cache');
+
+    await service.execute({ ...input, engines: ['bing', 'startpage'] });
+    assertEqual(callCount, 2, 'different engines bypass cache');
+
+    // 直接验证缓存类
+    const cache = new SearchTtlCache(100);
+    cache.set(input, { query: 'x', engines: ['bing'], totalResults: 0, results: [], partialFailures: [] });
+    assert(cache.get(input) !== undefined, 'cache returns fresh entry');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert(cache.get(input) === undefined, 'cache expires entry after TTL');
+
+    console.log('✅ SearchTtlCache deduplicates requests and expires');
+}
+
 async function main(): Promise<void> {
     testNormalizeEngineName();
     testDistributeLimit();
@@ -164,6 +238,9 @@ async function main(): Promise<void> {
     await testSearchServiceExecution();
     await testSearchServiceAutoModeUsesRuntimeDefault();
     await testSearchServiceValidation();
+    testNormalizeResultUrl();
+    testMergeSearchResultsDedupAndRank();
+    await testSearchTtlCache();
     console.log('\nCore search tests passed.');
 }
 
