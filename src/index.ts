@@ -7,12 +7,19 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import express from 'express';
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { randomUUID } from "node:crypto";
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 import type { CorsOptions } from 'cors';
 import { runCli } from './cli/runCli.js';
 import type { OpenWebSearchRuntime } from './runtime/runtimeTypes.js';
 import { shouldCreateFullRuntimeForInvocation } from './runtime/runtimeSelection.js';
 import { shutdownLocalPlaywrightBrowserSessions } from './utils/playwrightClient.js';
+
+// 从 package.json 注入真实版本号，避免 MCP 客户端看到的 server 版本失真。
+// 注意：此文件编译后位于 build/index.js，package.json 在仓库根目录，需上溯一级。
+const packageJsonPath = fileURLToPath(new URL('../package.json', import.meta.url));
+const serverVersion = JSON.parse(readFileSync(packageJsonPath, 'utf8')).version as string;
 
 type StreamableSession = {
   server: McpServer;
@@ -29,7 +36,7 @@ type SseSession = {
 function createServer(runtime: OpenWebSearchRuntime): McpServer {
   const server = new McpServer({
     name: 'web-search',
-    version: '1.2.0'
+    version: serverVersion
   });
 
   setupTools(server, runtime);
@@ -135,10 +142,12 @@ async function main() {
             // Store the transport by session ID
             transports.streamable[sessionId] = session;
           },
-          // DNS rebinding protection is disabled by default for backwards compatibility. If you are running this server
-          // locally, make sure to set:
-          // enableDnsRebindingProtection: true,
-          // allowedHosts: ['127.0.0.1'],
+          // DNS rebinding 保护默认开启：仅接受来自本地回环地址的请求。
+          // 若需要从局域网/公网访问，通过环境变量 OPEN_WEBSEARCH_ALLOWED_HOSTS 显式放行。
+          enableDnsRebindingProtection: true,
+          allowedHosts: process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS
+            ? process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS.split(',').map((host) => host.trim()).filter(Boolean)
+            : ['127.0.0.1', 'localhost'],
         });
 
         session.server = server;
@@ -260,8 +269,12 @@ async function main() {
     // Read the port number from the environment variable; use the default port 3000 if it is not set.
     const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-    app.listen(PORT, '0.0.0.0', () => {
-      console.error(`✅ HTTP server running on port ${PORT}`)
+    // 默认只绑定回环地址，避免端口暴露到局域网/公网（配合上面的 DNS rebinding 保护）。
+    // 如需局域网/公网访问，设置 OPEN_WEBSEARCH_HOST=0.0.0.0 显式放开。
+    const HOST = process.env.OPEN_WEBSEARCH_HOST || '127.0.0.1';
+
+    app.listen(PORT, HOST, () => {
+      console.error(`✅ HTTP server running on ${HOST}:${PORT}`)
     });
   } else {
     console.error('ℹ️ HTTP server disabled, running in STDIO mode only')

@@ -6,9 +6,10 @@ export function validateArticleUrl(url: string, type: 'csdn' | 'juejin'): boolea
 
         switch (type) {
             case 'csdn':
-                return urlObj.hostname === 'blog.csdn.net' && url.includes('/article/details/');
+                // 用 pathname 而非完整 url 判断，避免 query 参数伪造路径（如 /article/details/ 出现在 ?next= 中）
+                return urlObj.hostname === 'blog.csdn.net' && urlObj.pathname.includes('/article/details/');
             case 'juejin':
-                return urlObj.hostname === 'juejin.cn' && url.includes('/post/');
+                return urlObj.hostname === 'juejin.cn' && urlObj.pathname.includes('/post/');
             default:
                 return false;
         }

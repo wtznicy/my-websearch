@@ -112,11 +112,13 @@ export class SearchTtlCache {
     }
 
     private buildKey(input: SearchExecutionInput): string {
+        // searchMode 用规范化后的值（'auto' 等价于 undefined），保证两种写法共享缓存
+        const normalizedSearchMode = resolveSearchModeOverride(input.searchMode);
         return JSON.stringify({
             q: input.query.trim().toLowerCase(),
             e: [...input.engines].sort(),
             l: input.limit,
-            m: input.searchMode
+            m: normalizedSearchMode
         });
     }
 
@@ -165,6 +167,10 @@ export class SearchTtlCache {
 // 服务
 // ---------------------------------------------------------------------------
 
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: SearchTtlCache) {
     const ttlCache = cache ?? new SearchTtlCache();
 
@@ -198,20 +204,60 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                     return [];
                 }
 
-                try {
-                    return await executor(cleanQuery, engineLimit, { searchMode: effectiveSearchMode });
-                } catch (error) {
-                    partialFailures.push({
-                        engine,
-                        code: 'engine_error',
-                        message: error instanceof Error ? error.message : String(error)
-                    });
+                // 配额为 0 时跳过调用（引擎未被分配结果配额，直接视为"未调用"，不进 partialFailures）
+                if (engineLimit <= 0) {
                     return [];
                 }
+
+                // 引擎请求错峰：按索引交错启动，避免多引擎同时突发请求触发限流
+                if (index > 0) {
+                    await sleep(index * 150);
+                }
+
+                // 失败指数退避：最多重试 2 次（300ms/600ms 间隔）
+                let lastError: unknown;
+                for (let attempt = 0; attempt < 3; attempt += 1) {
+                    try {
+                        const results = await executor(cleanQuery, engineLimit, { searchMode: effectiveSearchMode });
+                        if (attempt > 0) {
+                            console.error(`✅ Engine ${engine} recovered after ${attempt} retries`);
+                        }
+                        return results;
+                    } catch (error) {
+                        lastError = error;
+                        if (attempt < 2) {
+                            const backoff = 300 * (2 ** attempt);
+                            console.error(`⚠️ Engine ${engine} failed (attempt ${attempt + 1}/3), retrying in ${backoff}ms:`, error instanceof Error ? error.message : String(error));
+                            await sleep(backoff);
+                        }
+                    }
+                }
+
+                partialFailures.push({
+                    engine,
+                    code: 'engine_error',
+                    message: lastError instanceof Error ? lastError.message : String(lastError)
+                });
+                return [];
             });
 
             const engineResults = await Promise.all(tasks);
             const merged = mergeSearchResults(engineResults).slice(0, limit);
+
+            // 配额 >0 但引擎返回 0 条时，记录为可见的部分失败，便于 agent 区分
+            // "该引擎没结果" 与 "该引擎没被调用"（配额 0 的情况）。
+            engines.forEach((engine, index) => {
+                const executor = engineMap[engine];
+                if (executor && limits[index] > 0 && engineResults[index].length === 0) {
+                    if (!partialFailures.some((failure) => failure.engine === engine)) {
+                        partialFailures.push({
+                            engine,
+                            code: 'engine_error',
+                            message: 'Engine returned no results for the allocated quota'
+                        });
+                    }
+                }
+            });
 
             const result: SearchExecutionResult = {
                 query: cleanQuery,

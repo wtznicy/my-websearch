@@ -188,7 +188,6 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Whether Playwright Chromium runs in headless mode |
 | `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | Positive integer | Timeout for Playwright navigation and Bing result waits |
 | `MCP_TOOL_SEARCH_NAME` | `search` | Valid MCP tool name | Custom name for the search tool |
-| `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | Valid MCP tool name | Custom name for the Linux.do article fetch tool |
 | `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | Valid MCP tool name | Custom name for the CSDN article fetch tool |
 | `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | Valid MCP tool name | Custom name for the GitHub README fetch tool |
 | `MCP_TOOL_FETCH_JUEJIN_NAME` | `fetchJuejinArticle` | Valid MCP tool name | Custom name for the Juejin article fetch tool |
@@ -459,7 +458,7 @@ Then configure in your MCP client:
 
 ## Usage Guide
 
-The server provides six tools: `search`, `fetchLinuxDoArticle`, `fetchCsdnArticle`, `fetchGithubReadme`, `fetchJuejinArticle`, and `fetchWebContent`.
+The server provides seven tools: `search`, `resolveLibraryId`, `queryDocs`, `fetchCsdnArticle`, `fetchGithubReadme`, `fetchJuejinArticle`, and `fetchWebContent`.
 
 For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`, `POST /fetch-*`), see [docs/http-api.md](docs/http-api.md).
 
@@ -469,7 +468,7 @@ For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`,
 {
   "query": string,        // Search query
   "limit": number,        // Optional: Number of results to return (default: 10)
-  "engines": string[],    // Optional: Engines to use (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage,sogou) default runtime-configured engine
+  "engines": string[],    // Optional: Engines to use (bing,baidu,csdn,duckduckgo,exa,brave,juejin,startpage,sogou) default runtime-configured engine
   "searchMode": string    // Optional: request, auto, or playwright (currently only affects Bing)
 }
 ```
@@ -517,36 +516,6 @@ use_mcp_tool({
   tool_name: "fetchCsdnArticle",
   arguments: {
     url: "https://blog.csdn.net/xxx/article/details/xxx"
-  }
-})
-```
-
-Response example:
-```json
-[
-  {
-    "content": "Example search result"
-  }
-]
-```
-
-### fetchLinuxDoArticle Tool Usage
-
-Used to fetch complete content of Linux.do forum articles.
-
-```typescript
-{
-  "url": string    // URL from linuxdo search results using the search tool
-}
-```
-
-Usage example:
-```typescript
-use_mcp_tool({
-  server_name: "web-search",
-  tool_name: "fetchLinuxDoArticle",
-  arguments: {
-    url: "https://xxxx.json"
   }
 })
 ```
@@ -751,6 +720,56 @@ The repository includes a GitHub Actions workflow (`.github/workflows/docker.yml
 - If you don't configure ACR secrets, the workflow will only publish to GitHub Container Registry
 - Make sure your GitHub repository has Actions enabled
 - The workflow will use your GitHub username (converted to lowercase) as the GHCR image name
+
+### resolveLibraryId Tool Usage
+
+Resolves a library/package name into a Context7-compatible library ID, with reputation and quality metadata. Powered by the [Context7](https://context7.com) documentation index — official, version-specific library docs without needing a separate MCP server.
+
+```typescript
+{
+  "libraryName": string,  // e.g. "Next.js", "express", "prisma"
+  "query": string,        // The user's question, used to rank matches (e.g. "how to implement authentication")
+  "limit": number         // Optional: max matches (default 5, max 10)
+}
+```
+
+Usage example:
+```typescript
+use_mcp_tool({
+  server_name: "web-search",
+  tool_name: "resolveLibraryId",
+  arguments: {
+    libraryName: "Next.js",
+    query: "how to set up middleware with auth"
+  }
+})
+```
+
+### queryDocs Tool Usage
+
+Retrieves up-to-date, version-specific documentation snippets and code examples for a library. Use `resolveLibraryId` first if you don't know the library ID.
+
+```typescript
+{
+  "libraryId": string,  // Context7-compatible ID, e.g. "/vercel/next.js", "/packages/express" (optional version: "/vercel/next.js@v15.1.8")
+  "query": string,      // The question or task to get relevant documentation for
+  "limit": number       // Optional: max code snippets (default 5, max 10)
+}
+```
+
+Usage example:
+```typescript
+use_mcp_tool({
+  server_name: "web-search",
+  tool_name: "queryDocs",
+  arguments: {
+    libraryId: "/vercel/next.js",
+    query: "how to set up middleware with authentication"
+  }
+})
+```
+
+> **Note:** Both Context7 tools call the public REST API directly (no API key required at low rate limits). Set `CONTEXT7_API_KEY` for higher rate limits.
 
 <div align="center">
 

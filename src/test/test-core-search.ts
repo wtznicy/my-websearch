@@ -115,8 +115,8 @@ async function testSearchServiceExecution(): Promise<void> {
     assertEqual(result.partialFailures[0].code, 'engine_error', 'uses stable partial failure code');
     assertEqualArray(
         seenCalls.map(call => `${call.engine}:${call.query}:${call.limit}:${call.searchMode ?? 'none'}`),
-        ['bing:open web search:2:playwright', 'startpage:open web search:1:playwright'],
-        'passes trimmed query, distributed limits, and request-level search mode'
+        ['bing:open web search:2:playwright', 'startpage:open web search:1:playwright', 'startpage:open web search:1:playwright', 'startpage:open web search:1:playwright'],
+        'passes trimmed query, distributed limits, and request-level search mode (startpage retried 3x then failed)'
     );
 
     console.log('✅ search service executes with partial failures');
@@ -231,6 +231,30 @@ async function testSearchTtlCache(): Promise<void> {
     console.log('✅ SearchTtlCache deduplicates requests and expires');
 }
 
+async function testSearchZeroQuotaEngines(): Promise<void> {
+    // limit=1, 3 引擎 → 配额 [1,0,0]；后两个引擎虽配额为 0 但不应产生 partialFailures（它们"未被调用"）
+    const called: string[] = [];
+    const service = createSearchService({
+        bing: async (query, limit) => { called.push(`bing:${limit}`); return [{ title: 'a', url: 'https://a.com', description: '', source: 'a.com', engine: 'bing' }]; },
+        duckduckgo: async () => { called.push('duckduckgo'); return []; },
+        startpage: async () => { called.push('startpage'); return []; }
+    });
+
+    const result = await service.execute({ query: 'q', engines: ['bing', 'duckduckgo', 'startpage'], limit: 1 });
+
+    // 只有 bing 被调用（配额 1），duckduckgo/startpage 配额 0 不应被调用
+    assertEqualArray(called, ['bing:1'], 'only engines with non-zero quota are invoked');
+    // 未调用的引擎不应出现在 partialFailures（它们只是没被分配配额）
+    assertEqual(result.partialFailures.length, 0, 'zero-quota engines are not reported as failures');
+
+    // 相反：配额 >0 但返回空 → 应计入 partialFailures
+    const result2 = await service.execute({ query: 'q2', engines: ['bing', 'duckduckgo'], limit: 3 });
+    assertEqual(result2.partialFailures.length, 1, 'engine with quota but no results is reported');
+    assertEqual(result2.partialFailures[0].engine, 'duckduckgo', 'empty-result engine is identified');
+
+    console.log('✅ search service reports zero-quota engines distinctly from empty results');
+}
+
 async function main(): Promise<void> {
     testNormalizeEngineName();
     testDistributeLimit();
@@ -241,6 +265,7 @@ async function main(): Promise<void> {
     testNormalizeResultUrl();
     testMergeSearchResultsDedupAndRank();
     await testSearchTtlCache();
+    await testSearchZeroQuotaEngines();
     console.log('\nCore search tests passed.');
 }
 

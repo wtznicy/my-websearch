@@ -96,11 +96,9 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         },
         async ({query, limit = 10, searchMode, engines}) => {
             try {
-                const resolvedEngines = resolveRequestedEngines(
-                    engines ?? [runtime.config.defaultSearchEngine],
-                    runtime.config.allowedSearchEngines,
-                    runtime.config.defaultSearchEngine
-                ) as [SupportedSearchEngine, ...SupportedSearchEngine[]];
+                // 正常走 MCP 时 engines 已由 schema transform 解析；直接调用 handler 的场景
+                // （测试/程序化调用）engines 可能未定义，这里补一个兜底。
+                const resolvedEngines = (engines ?? [runtime.config.defaultSearchEngine]) as [SupportedSearchEngine, ...SupportedSearchEngine[]];
 
                 console.error(`Searching for "${query}" using engines: ${resolvedEngines.join(', ')}`);
 

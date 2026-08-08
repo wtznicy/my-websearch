@@ -47,6 +47,21 @@ export function isPrivateOrLocalHostname(hostname: string): boolean {
     }
 }
 
+// 0.0.0.0 及 0.0.0.0/8 段常被本地 DNS 屏蔽/污染时用作"黑洞地址"，
+// 严格说不是私有网段，单独判定以便给出更准确的错误提示。
+export function isBlackholeAddress(address: string): boolean {
+    const host = stripIpv6Brackets(address.trim().toLowerCase());
+    if (isIP(host) !== 4) {
+        return false;
+    }
+    try {
+        // 0.0.0.0/8 (RFC 1122: "This host on this network")
+        return ipaddr.parse(host).match(ipaddr.parseCIDR('0.0.0.0/8'));
+    } catch {
+        return false;
+    }
+}
+
 export function isPublicHttpUrl(url: string): boolean {
     try {
         const parsed = new URL(url);
@@ -77,6 +92,16 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
 
     const host = stripIpv6Brackets(parsed.hostname);
     if (isIP(host) !== 0) {
+        // 字面量 IP 直接做黑/私网检查；若命中黑洞地址给出专属提示
+        if (isBlackholeAddress(host)) {
+            throw new Error(`${label} points to 0.0.0.0/8 (blackhole), which is usually caused by local DNS blocking/pollution — check DNS or enable a proxy`);
+        }
+        return;
+    }
+
+    // 代理模式下 DNS 交由代理在远端解析，本地只做字面量/私网检查，
+    // 避免本机 DNS 被污染（如 raw.githubusercontent.com → 0.0.0.0）时误拦截。
+    if (config.useProxy) {
         return;
     }
 
@@ -85,6 +110,10 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
         resolved = await dnsLookupForSafety(host);
     } catch {
         throw new Error(`${label} could not be resolved`);
+    }
+    const blackholeHit = resolved.find((entry) => isBlackholeAddress(entry.address));
+    if (blackholeHit) {
+        throw new Error(`${label} resolves to ${blackholeHit.address} (0.0.0.0/8 blackhole) — likely local DNS blocking/pollution; check DNS or enable a proxy`);
     }
     if (resolved.some((entry) => isPrivateOrLocalHostname(entry.address) && !isAllowedFakeIp(entry.address))) {
         throw new Error(`${label} resolves to a private or local network target, which is not allowed`);
