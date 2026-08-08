@@ -6,12 +6,24 @@ import http from 'node:http';
 import https from 'node:https';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { AppConfig } from '../config.js';
 
 export type CliIo = {
     stdout: (text: string) => void;
     stderr: (text: string) => void;
 };
+
+// 从 package.json 读取真实版本号（编译后位于 build/cli/runCli.js，需上溯两级）
+function readServerVersion(): string {
+    try {
+        const packageJsonPath = fileURLToPath(new URL('../../package.json', import.meta.url));
+        return JSON.parse(readFileSync(packageJsonPath, 'utf8')).version as string;
+    } catch {
+        return 'unknown';
+    }
+}
 
 const COMMANDS_REQUIRING_RUNTIME = new Set([
     'search',
@@ -109,6 +121,7 @@ export type ParsedStatusArgs = {
 export type ParsedServeArgs = {
     host: string;
     port: number;
+    json: boolean;
 };
 
 type DaemonTransportArgs = {
@@ -423,7 +436,8 @@ export function parseStatusArgs(argv: string[]): ParsedStatusArgs {
     }
 
     return {
-        baseUrl,
+        // 去掉尾斜杠，避免与后续 /status 拼成 //status
+        baseUrl: baseUrl.replace(/\/+$/, ''),
         json
     };
 }
@@ -431,6 +445,7 @@ export function parseStatusArgs(argv: string[]): ParsedStatusArgs {
 export function parseServeArgs(argv: string[]): ParsedServeArgs {
     let host = process.env.OPEN_WEBSEARCH_DAEMON_HOST || '127.0.0.1';
     let port = Number(process.env.OPEN_WEBSEARCH_DAEMON_PORT || '3210');
+    let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
@@ -442,6 +457,11 @@ export function parseServeArgs(argv: string[]): ParsedServeArgs {
             }
             host = next;
             index += 1;
+            continue;
+        }
+
+        if (arg === '--json') {
+            json = true;
             continue;
         }
 
@@ -468,7 +488,8 @@ export function parseServeArgs(argv: string[]): ParsedServeArgs {
 
     return {
         host,
-        port
+        port,
+        json
     };
 }
 
@@ -778,7 +799,8 @@ function resolveServeArgsFromDaemonUrl(daemonUrl: string): ParsedServeArgs {
 
     return {
         host: hostname === 'localhost' ? '127.0.0.1' : hostname,
-        port
+        port,
+        json: false
     };
 }
 
@@ -1279,15 +1301,25 @@ export async function runCli(
             parsed = parseServeArgs(rest);
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            io.stderr(message);
-            io.stderr('Usage: open-websearch serve [--host HOST] [--port PORT]');
+            if (rest.includes('--json')) {
+                io.stdout(JSON.stringify(createErrorEnvelope(
+                    'invalid_arguments',
+                    message,
+                    { hint: 'Usage: open-websearch serve [--host HOST] [--port PORT] [--json]' }
+                ), null, 2));
+            } else {
+                io.stderr(message);
+                io.stderr('Usage: open-websearch serve [--host HOST] [--port PORT]');
+            }
             return 1;
         }
 
         try {
             const daemon = await startLocalDaemon(runtime, {
                 host: parsed.host,
-                port: parsed.port
+                port: parsed.port,
+                // 注入真实版本号，避免 daemon status 显示 'unknown'
+                version: readServerVersion()
             });
 
             io.stdout(`Local open-websearch daemon running at ${daemon.baseUrl}`);

@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { setupTools } from './tools/setupTools.js';
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import express from 'express';
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
@@ -103,6 +104,14 @@ async function main() {
     const app = express();
     app.use(express.json());
 
+    // DNS rebinding 保护：用 SDK 的 hostHeaderValidation 中间件（port-agnostic，
+    // 通过 URL API 解析 Host 头的 hostname 部分，兼容 127.0.0.1:3000 这种带端口的请求）。
+    // 默认仅放行本地回环；如需局域网/公网访问，用 OPEN_WEBSEARCH_ALLOWED_HOSTS 显式放行。
+    const allowedHostnames = process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS
+      ? process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS.split(',').map((host) => host.trim()).filter(Boolean)
+      : ['127.0.0.1', 'localhost', '[::1]'];
+    app.use(hostHeaderValidation(allowedHostnames));
+
     const mcpCorsOptions: CorsOptions = {
       origin: config.corsOrigin || '*',
       methods: ['GET', 'POST', 'DELETE'],
@@ -142,12 +151,6 @@ async function main() {
             // Store the transport by session ID
             transports.streamable[sessionId] = session;
           },
-          // DNS rebinding 保护默认开启：仅接受来自本地回环地址的请求。
-          // 若需要从局域网/公网访问，通过环境变量 OPEN_WEBSEARCH_ALLOWED_HOSTS 显式放行。
-          enableDnsRebindingProtection: true,
-          allowedHosts: process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS
-            ? process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS.split(',').map((host) => host.trim()).filter(Boolean)
-            : ['127.0.0.1', 'localhost'],
         });
 
         session.server = server;

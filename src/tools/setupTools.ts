@@ -76,6 +76,8 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         const enginesEnum = getEnginesEnum();
         return z.string()
             .min(1, "Engine value must not be empty")
+            // 把合法引擎列表写进 description，客户端/LLM 才能看到可选项
+            .describe(`Search engine name. Valid values (normalize alias to canonical name): ${[...SUPPORTED_SEARCH_ENGINES].join(', ')}`)
             .transform((engine) => normalizeEngineName(engine))
             .pipe(enginesEnum);
     };

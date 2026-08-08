@@ -131,6 +131,10 @@ let cachedLocalBrowserSessionOptions: {
     launchArgs: string[];
     options?: OpenPlaywrightBrowserOptions;
 } | null = null;
+// 活跃引用计数：并发请求获取本地浏览器 session 时 +1，release 时 -1。
+// destroyCachedLocalBrowserSession 只在前置计数为 0 时销毁，避免混合模式并发时
+// 一个请求换模式杀掉另一个请求正在用的浏览器。
+let localBrowserSessionRefCount = 0;
 let cleanupRegistered = false;
 let staleBrowserCleanupPerformed = false;
 const LOCAL_BROWSER_DOMAIN_METADATA_PREFIX = 'domain-session-';
@@ -1927,6 +1931,12 @@ async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionK
 }
 
 async function destroyCachedLocalBrowserSession(): Promise<void> {
+    // 有活跃使用者时不销毁共享浏览器，避免并发模式切换杀掉正在使用的会话。
+    // 由最后释放的调用方在生命周期结束（shutdownLocalPlaywrightBrowserSessions）时销毁。
+    if (localBrowserSessionRefCount > 0) {
+        return;
+    }
+
     if (localBrowserSessionPromise) {
         const inFlightPromise = localBrowserSessionPromise;
         localBrowserSessionPromise = null;
@@ -1946,6 +1956,8 @@ async function destroyCachedLocalBrowserSession(): Promise<void> {
 }
 
 export async function shutdownLocalPlaywrightBrowserSessions(): Promise<void> {
+    // 进程生命周期结束：无论是否有活跃引用都强制销毁，并重置引用计数
+    localBrowserSessionRefCount = 0;
     if (cachedLocalBrowserSession) {
         try {
             await closeLocalBrowserSession(cachedLocalBrowserSession);
@@ -2198,9 +2210,12 @@ export async function openPlaywrightBrowser(
     // 这里改为复用单个后台浏览器会话，只有会话失活或启动参数变化时才重建。
     // 对 Bing 的隐藏有头模式，还会复用同一个隐藏桌面上的浏览器进程，避免窗口闪现到用户桌面。
     const session = await getOrCreateLocalBrowserSession(playwright, headless, launchArgs, options);
+    // 获取共享浏览器句柄时引用计数 +1，防止并发模式下被 destroyCachedLocalBrowserSession 误杀
+    localBrowserSessionRefCount += 1;
     const release = async () => {
-        // 本地模式返回共享浏览器句柄，release 只释放调用方引用，
+        // 本地模式返回共享浏览器句柄，release 释放调用方引用（引用计数 -1），
         // 不真正关闭浏览器；真正销毁由 CLI/daemon 在生命周期结束时调用 shutdownLocalPlaywrightBrowserSessions()。
+        localBrowserSessionRefCount = Math.max(0, localBrowserSessionRefCount - 1);
         return Promise.resolve();
     };
 

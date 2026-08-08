@@ -239,7 +239,8 @@ function buildRequestOptions(cookieHeader?: string): any {
         maxBodyLength: MAX_DOWNLOAD_BYTES,
         maxContentLength: MAX_DOWNLOAD_BYTES,
         maxRedirects: 5,
-        responseType: 'text',
+        // arraybuffer 以便按页面声明的 charset 解码（axios 的 text 模式固定按 UTF-8，GBK 中文站会乱码）
+        responseType: 'arraybuffer',
         timeout: DEFAULT_TIMEOUT_MS,
     });
 
@@ -248,6 +249,44 @@ function buildRequestOptions(cookieHeader?: string): any {
     }
 
     return requestOptions;
+}
+
+/**
+ * 从 Content-Type 头或 HTML meta 中探测 charset，并用 TextDecoder 解码原始字节。
+ * 中文站点常用 GBK/GB2312，axios 的 text 模式固定按 UTF-8 会导致乱码。
+ */
+function decodeResponseBuffer(buffer: ArrayBuffer, contentType: string): string {
+    const bytes = new Uint8Array(buffer);
+
+    // 1) 从 Content-Type 头提取 charset
+    let charset = '';
+    const charsetMatch = contentType.match(/charset=["']?([\w-]+)["']?/i);
+    if (charsetMatch) {
+        charset = charsetMatch[1];
+    }
+
+    // 2) 从 HTML 前 1024 字节的 meta charset 提取
+    if (!charset) {
+        const headSample = new TextDecoder('utf-8', { fatal: false }).decode(bytes.slice(0, 1024));
+        const metaMatch = headSample.match(/<meta[^>]+charset=["']?([\w-]+)["']?/i);
+        if (metaMatch) {
+            charset = metaMatch[1];
+        }
+    }
+
+    // 3) 归一化并解码；GBK/GB2312/GB18030 都按 GB18030 处理（超集）
+    const normalized = charset.toLowerCase();
+    try {
+        if (normalized === 'gbk' || normalized === 'gb2312' || normalized === 'gb18030' || normalized === 'gb_2312') {
+            return new TextDecoder('gb18030').decode(bytes);
+        }
+        if (normalized && normalized !== 'utf-8' && normalized !== 'utf8') {
+            return new TextDecoder(normalized).decode(bytes);
+        }
+    } catch {
+        // 未知编码或 TextDecoder 不支持，回退 UTF-8
+    }
+    return new TextDecoder('utf-8').decode(bytes);
 }
 
 function shouldTryBrowserHtmlFallback(contentType: string, raw: string, extraction?: HtmlExtractionResult): boolean {
@@ -355,7 +394,8 @@ export async function fetchWebContent(
         }
         const status = error?.response?.status;
         // Some servers don't support HEAD correctly; continue and rely on GET download limits.
-        if (status !== undefined && ![400, 403, 404, 405, 406, 501].includes(status)) {
+        // 429（限流）与 5xx（服务端暂时故障）也不作为 HEAD 预检的致命错误——GET 可能成功或由上层重试处理。
+        if (status !== undefined && ![400, 403, 404, 405, 406, 429, 501].includes(status) && status < 500) {
             throw error;
         }
     }
@@ -363,6 +403,8 @@ export async function fetchWebContent(
     let response: any;
     let usedBrowserCookies = false;
     let retrievalMethod: FetchWebContentResult['retrievalMethod'] = 'request';
+    // 记录 cookie 重试失败时的原始 HTTP 状态（401/403/429），供最终错误分类使用
+    let httpErrorStatus: number | undefined;
 
     try {
         response = await requestWithSafeRedirects('GET', parsedUrl.toString(), requestOptions, 'Request URL');
@@ -378,6 +420,10 @@ export async function fetchWebContent(
             usedBrowserCookies = cookieRetry.usedBrowserCookies;
             retrievalMethod = 'request-with-browser-cookies';
         } else {
+            // cookie 重试失败：记录原始 HTTP 状态，降级为空 response 继续走浏览器 fallback。
+            // 若最终仍无内容，fetchWebContent 会在结尾用记录的 httpStatus 抛出带状态码的错误，
+            // 避免 401/403/429 被掩盖成笼统的 "No readable content"。
+            httpErrorStatus = status;
             response = {
                 headers: { 'content-type': 'text/html; charset=utf-8' },
                 data: '',
@@ -389,9 +435,12 @@ export async function fetchWebContent(
     let contentType = String(response.headers['content-type'] || '').toLowerCase();
     let finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
     assertPublicHttpUrl(finalUrl, 'Final URL');
-    let raw = typeof response.data === 'string'
-        ? response.data
-        : JSON.stringify(response.data, null, 2);
+    // responseType 是 arraybuffer：按页面 charset 解码；非字符串数据（JSON 等）转为格式化文本
+    let raw = response.data instanceof ArrayBuffer || response.data instanceof Uint8Array
+        ? decodeResponseBuffer(response.data, contentType)
+        : typeof response.data === 'string'
+            ? response.data
+            : JSON.stringify(response.data, null, 2);
 
     if (!usedBrowserCookies && looksLikeBotChallengePage(raw)) {
         const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
@@ -484,14 +533,30 @@ export async function fetchWebContent(
     }
 
     if (!extractedContent) {
+        // 若此前 cookie 重试曾遇 401/403/429，抛出带状态码的错误，便于上层分类为可重试的 upstream 错误
+        if (httpErrorStatus !== undefined) {
+            const httpError = new Error(
+                `Request failed with HTTP ${httpErrorStatus} and no readable content was extracted (${parsedUrl.toString()})`
+            );
+            (httpError as any).status = httpErrorStatus;
+            throw httpError;
+        }
         throw new Error('No readable content was extracted from this URL');
     }
 
     const totalLength = extractedContent.length;
+    // startIndex 越界时显式报错，避免静默返回空内容
+    if (startIndex >= totalLength) {
+        const outOfRangeError = new Error(
+            `startIndex ${startIndex} is beyond content length ${totalLength}; reset to 0 to read from the beginning`
+        );
+        (outOfRangeError as any).code = 'ERR_START_INDEX_OUT_OF_RANGE';
+        throw outOfRangeError;
+    }
     const pageContent = extractedContent.slice(startIndex, startIndex + targetMaxChars);
     const truncated = startIndex + targetMaxChars < totalLength;
     const content = truncated
-        ? `${pageContent}\n\n[...truncated ${totalLength - (startIndex + pageContent.length)} characters; call again with startIndex=${startIndex + pageContent.length} to continue]`
+        ? `${pageContent}\n\n[truncated; continue with startIndex=${startIndex + pageContent.length}]`
         : pageContent;
 
     return {

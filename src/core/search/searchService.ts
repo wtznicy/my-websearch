@@ -171,6 +171,9 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// 搜索级总时间预算：超过后未完成的引擎按超时处理，避免单个慢引擎（含重试）拖垮整次搜索
+export const SEARCH_DEADLINE_MS = 30000;
+
 export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: SearchTtlCache) {
     const ttlCache = cache ?? new SearchTtlCache();
 
@@ -190,6 +193,11 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             const limits = distributeLimit(limit, engines.length);
             const partialFailures: SearchExecutionFailure[] = [];
             const effectiveSearchMode = resolveSearchModeOverride(searchMode);
+
+            // 搜索级总时间预算：到点后未完成的引擎按超时处理，避免单个慢引擎拖垮整次搜索
+            const deadlineMs = SEARCH_DEADLINE_MS;
+            const deadlineAt = Date.now() + deadlineMs;
+            let deadlineHit = false;
 
             const tasks = engines.map(async (engine, index) => {
                 const executor = engineMap[engine];
@@ -241,7 +249,27 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 return [];
             });
 
-            const engineResults = await Promise.all(tasks);
+            // 每个引擎任务包一层 deadline：到点未完成按超时处理（记录 partialFailure，不阻塞整体）
+            const engineResults = await Promise.all(tasks.map((task, index) =>
+                Promise.race([
+                    task,
+                    new Promise<SearchResult[]>((resolve) => {
+                        const remaining = deadlineAt - Date.now();
+                        const wait = remaining > 0 ? remaining : 0;
+                        setTimeout(() => {
+                            deadlineHit = true;
+                            if (!partialFailures.some((failure) => failure.engine === engines[index])) {
+                                partialFailures.push({
+                                    engine: engines[index],
+                                    code: 'engine_error',
+                                    message: `Search deadline exceeded (${deadlineMs}ms total budget)`
+                                });
+                            }
+                            resolve([]);
+                        }, wait);
+                    })
+                ])
+            ));
             const merged = mergeSearchResults(engineResults).slice(0, limit);
 
             // 配额 >0 但引擎返回 0 条时，记录为可见的部分失败，便于 agent 区分
@@ -267,7 +295,11 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 partialFailures
             };
 
-            ttlCache.set({ query: cleanQuery, engines, limit, searchMode }, result);
+            // 失败/降级结果不缓存：有 partialFailures 或零结果时，下次相同查询应重试，
+            // 避免引擎临时故障被钉死在 TTL 内。
+            if (partialFailures.length === 0 && merged.length > 0) {
+                ttlCache.set({ query: cleanQuery, engines, limit, searchMode }, result);
+            }
 
             return result;
         }

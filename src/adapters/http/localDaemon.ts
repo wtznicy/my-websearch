@@ -46,7 +46,9 @@ function getCapabilities(): string[] {
         'fetch-web',
         'fetch-csdn',
         'fetch-juejin',
-        'fetch-github-readme'
+        'fetch-github-readme',
+        'resolve-library-id',
+        'query-docs'
     ];
 }
 
@@ -152,6 +154,53 @@ function parseStartIndex(value: unknown): number | undefined {
     return value;
 }
 
+type FetchErrorClassification = {
+    statusCode: number;
+    code: string;
+    message: string;
+    retryable: boolean;
+};
+
+/**
+ * 按错误特征分类抓取失败：区分"客户端参数错误"（400）与"可重试的服务/网络问题"（502/504）。
+ * 超时、网络错误、HTTP 5xx、限流（429）都标记 retryable，让 agent 知道可以重试。
+ */
+function classifyFetchError(error: unknown): FetchErrorClassification {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = (error as any)?.code;
+    const status = (error as any)?.status;
+
+    // SSRF 防护拒绝（私网/本地地址/非法协议）→ 400 客户端错误，不可重试
+    if (message === 'Invalid public HTTP(S) URL'
+        || (/private|local network|localhost|127\.0\.0\.1|blackhole|DNS blocking/i.test(message) && /reject|block|not allowed|points to|only public/i.test(message))) {
+        return { statusCode: 400, code: 'validation_failed', message, retryable: false };
+    }
+
+    // 明确的参数/越界错误 → 400，不可重试
+    if (code === 'ERR_START_INDEX_OUT_OF_RANGE') {
+        return { statusCode: 400, code: 'validation_failed', message, retryable: false };
+    }
+    if (code === 'ERR_RESPONSE_TOO_LARGE' || /too large/i.test(message)) {
+        return { statusCode: 413, code: 'payload_too_large', message, retryable: false };
+    }
+
+    // HTTP 状态错误：429 限流与 5xx 可重试；4xx 客户端错误不可重试
+    if (status !== undefined) {
+        if (status === 429 || status >= 500) {
+            return { statusCode: 502, code: 'upstream_error', message, retryable: true };
+        }
+        return { statusCode: 400, code: 'http_error', message, retryable: false };
+    }
+
+    // 超时 / 网络错误（ECONN*/ETIMEDOUT/ENOTFOUND/Socket hang up 等）→ 可重试
+    if (/timeout|timed out|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network|ENETUNREACH/i.test(message)) {
+        return { statusCode: 504, code: 'network_error', message, retryable: true };
+    }
+
+    // 其他（如 "No readable content"）→ 客户端不可重试，但归类为提取失败而非校验失败
+    return { statusCode: 422, code: 'extraction_failed', message, retryable: false };
+}
+
 export async function startLocalDaemon(
     runtime: OpenWebSearchRuntime,
     options: LocalDaemonOptions = {}
@@ -243,8 +292,9 @@ export async function startLocalDaemon(
             const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, raw, startIndex });
             res.json(createSuccessEnvelope(result));
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            sendError(res, 400, 'validation_failed', message, {
+            const classification = classifyFetchError(error);
+            sendError(res, classification.statusCode, classification.code, classification.message, {
+                retryable: classification.retryable,
                 hint: 'Use a public HTTP(S) URL, keep maxChars within the supported range, and pass readability/includeLinks/raw only as booleans and startIndex as a non-negative integer.'
             });
         }

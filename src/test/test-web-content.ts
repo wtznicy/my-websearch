@@ -216,7 +216,7 @@ async function main(): Promise<void> {
             run: async () => {
                 const result = await fetchWebContent('https://example.com/long.md', 1200);
                 assert(result.truncated === true, 'long content should be truncated');
-                assert(result.content.includes('[...truncated '), 'truncation marker should exist');
+                assert(result.content.includes('[truncated; continue with startIndex='), 'truncation marker should exist');
             }
         },
         {

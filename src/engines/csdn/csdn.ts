@@ -16,10 +16,10 @@ export async function searchCsdn(query: string, limit: number): Promise<SearchRe
             },
             headers: {
                 'Pragma': 'no-cache',
-                'Cookie': 'uuid_tt_dd=10_20283040220-1750745713898-623562; dc_session_id=10_1750745713898.508399; dc_sid=0aa6fae5250c4389fac68320b1cb43b2; waf_captcha_marker=1b4e9099857d7aedf0941f03fa70bfb22ea2153f7fa053b8101ed28dc1504b11; c_pref=default; c_ref=default; fid=20_93458541565-1750745714849-027048; c_first_ref=default; c_first_page=https%3A//so.csdn.net/so/search%3Fq%3Dweb%2520search%2520mcp; c_dsid=11_1750745714849.980720; c_segment=10; c_page_id=default; creative_btn_mp=1; log_Id_view=9; fe_request_id=1750745715289_2973_2073791; dc_tos=syck1f; log_Id_pv=1; log_Id_click=1; uuid_tt_dd=10_20283045860-1751096847125-425142; dc_session_id=10_1751096847125.891975',
-                'User-Agent': 'Apifox/1.0.0 (https://apifox.com)',
+                // 不再硬编码会话 Cookie（含 waf_captcha_marker 等抓包痕迹，会过期且属轻微凭据泄漏），
+                // 让服务端为新会话发 Cookie；UA 用与其它引擎一致的现代浏览器
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
                 'Accept': '*/*',
-                'Host': 'so.csdn.net',
                 'Connection': 'keep-alive'
             }
         }));

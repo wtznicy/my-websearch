@@ -1,4 +1,4 @@
-type SupportedEngine = 'csdn' | 'zhihu';
+type SupportedEngine = 'csdn';
 
 type CliArgs = {
     engine: SupportedEngine;
@@ -7,8 +7,7 @@ type CliArgs = {
 };
 
 const DEFAULT_URLS: Record<SupportedEngine, string> = {
-    csdn: 'https://blog.csdn.net/weixin_45801664/article/details/149000138',
-    zhihu: 'https://zhuanlan.zhihu.com/p/1922711555658744918'
+    csdn: 'https://blog.csdn.net/weixin_45801664/article/details/149000138'
 };
 
 function parseArgs(argv: string[]): CliArgs {
@@ -21,7 +20,7 @@ function parseArgs(argv: string[]): CliArgs {
     for (const arg of argv) {
         if (arg.startsWith('--engine=')) {
             const value = arg.slice('--engine='.length);
-            if (value === 'csdn' || value === 'zhihu') {
+            if (value === 'csdn') {
                 parsed.engine = value;
                 parsed.url = DEFAULT_URLS[value];
             }
@@ -39,13 +38,8 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 async function fetchArticle(args: CliArgs): Promise<{ content: string }> {
-    if (args.engine === 'csdn') {
-        const { fetchCsdnArticle } = await import('../engines/csdn/fetchCsdnArticle.js');
-        return fetchCsdnArticle(args.url);
-    }
-
-    const { fetchZhiHuArticle } = await import('../engines/zhihu/fetchZhihuArticle.js');
-    return fetchZhiHuArticle(args.url);
+    const { fetchCsdnArticle } = await import('../engines/csdn/fetchCsdnArticle.js');
+    return fetchCsdnArticle(args.url);
 }
 
 async function main(): Promise<void> {

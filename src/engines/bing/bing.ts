@@ -7,7 +7,8 @@ import { prepareStealthPage } from '../../utils/browserStealth.js';
 import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
 
-const BING_BASE_URL = 'https://cn.bing.com/search';
+// 默认面向大陆部署用 cn.bing.com；可通过 OPEN_WEBSEARCH_BING_HOST 覆盖为 www.bing.com 等获取国际区结果
+const BING_BASE_URL = (process.env.OPEN_WEBSEARCH_BING_HOST || 'https://cn.bing.com/search').replace(/\/$/, '');
 const BING_HOME_URL = 'https://www.bing.com/?mkt=zh-CN';
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const SEARCH_INPUT_SELECTORS = [
@@ -125,8 +126,11 @@ export function shouldSuggestRemovingSiteOperator(query: string, error: unknown)
 function buildBingSearchUrl(query: string, pageNumber: number): string {
     const url = new URL(BING_BASE_URL);
     url.searchParams.set('q', query);
-    url.searchParams.set('setlang', 'zh-CN');
-    url.searchParams.set('ensearch', '0');
+    // 仅在 cn.bing.com（面向大陆默认）时强制 zh-CN 区域；自定义 host（如 www.bing.com）让 Bing 按访问者自动定位
+    if (BING_BASE_URL.includes('cn.bing.com')) {
+        url.searchParams.set('setlang', 'zh-CN');
+        url.searchParams.set('ensearch', '0');
+    }
     url.searchParams.set('first', String(1 + pageNumber * 10));
     return url.toString();
 }

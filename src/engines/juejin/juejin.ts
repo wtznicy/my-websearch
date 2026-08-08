@@ -48,7 +48,7 @@ export async function searchJuejin(query: string, limit: number): Promise<Search
                 trustedStaticHost: true,
                 params: {
                     aid: '2608',
-                    uuid: '7259393293459605051',
+                    // 不再硬编码设备 uuid（所有安装共享同一 ID，易被识别）；让服务端生成
                     spider: '0',
                     query: query,
                     id_type: '0',
@@ -61,10 +61,9 @@ export async function searchJuejin(query: string, limit: number): Promise<Search
                 headers: {
                     'pragma': 'no-cache',
                     'priority': 'u=1, i',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
                     'content-type': 'application/json',
                     'Accept': '*/*',
-                    'Host': 'api.juejin.cn',
                     'Connection': 'keep-alive'
                 }
             }));

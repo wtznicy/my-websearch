@@ -9,6 +9,9 @@ import {
 import { config, getProxyUrl } from '../config.js';
 import { assertPublicHttpUrlResolved, isPrivateOrLocalHostname } from './urlSafety.js';
 
+// 默认请求超时：调用方未显式传 timeout 时使用，避免引擎请求永不超时拖垮整个搜索。
+export const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+
 type BuildAxiosRequestOptions = {
     allowInsecureTls?: boolean;
     decompress?: boolean;
@@ -96,7 +99,7 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         maxRedirects,
         params,
         responseType,
-        timeout,
+        timeout = DEFAULT_REQUEST_TIMEOUT_MS,
         trustedStaticHost = false,
         validateStatus
     } = options;

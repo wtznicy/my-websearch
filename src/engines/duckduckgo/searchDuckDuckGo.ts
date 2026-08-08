@@ -50,7 +50,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
       const requestOptions = buildAxiosRequestOptions({
         trustedStaticHost: true,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
           "Connection": "keep-alive",
           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
           "Accept-Encoding": "gzip, deflate, br",
@@ -123,7 +123,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
         const dataResponse = await axios.get(currentPageUrl, {
           ...requestOptions,
           headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
             "Connection": "keep-alive",
             "Accept": "*/*",
             "Accept-Encoding": "gzip, deflate, br",
@@ -203,15 +203,15 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
   const requestUrl = 'https://html.duckduckgo.com/html/';
   const results: SearchResult[] = [];
   let offset = 0;
+  let pageCount = 0;
 
     // Configure request options
     const requestOptions = buildAxiosRequestOptions({
     trustedStaticHost: true,
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'Apifox/1.0.0 (https://apifox.com)',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
       'Accept': '*/*',
-      'Host': 'html.duckduckgo.com',
       'Connection': 'keep-alive'
     },
   });
@@ -252,8 +252,13 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
       }
     });
 
-    while (results.length < maxResults && items.length > 0) {
+    while (results.length < maxResults && items.length > 0 && pageCount < 10) {
       offset += items.length;
+      pageCount += 1;
+
+      // 记录本页 URL 集合，用于检测服务端重复返回导致的无进展死循环
+      const beforeDedup = results.length;
+      const seenUrls = new Set(results.map((r) => r.url));
 
       response = await axios.post(
         requestUrl,
@@ -282,7 +287,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
         const sourceEl = $(el).find('.result__url');
         const source = sourceEl.text().trim();
 
-        if (title && url && !$(el).hasClass('result--ad')) {
+        if (title && url && !$(el).hasClass('result--ad') && !seenUrls.has(url)) {
           results.push({
             title,
             url,
@@ -292,6 +297,12 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
           });
         }
       });
+
+      // 安全阀：本页没有新增任何去重后的结果，说明分页无进展，终止循环避免死循环
+      if (results.length === beforeDedup) {
+        console.warn('⚠️ DuckDuckGo pagination made no progress, stopping to avoid infinite loop');
+        break;
+      }
     }
 
     return results.slice(0, maxResults);

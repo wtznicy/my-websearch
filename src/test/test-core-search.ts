@@ -221,6 +221,19 @@ async function testSearchTtlCache(): Promise<void> {
     await service.execute({ ...input, engines: ['bing', 'startpage'] });
     assertEqual(callCount, 2, 'different engines bypass cache');
 
+    // 失败结果不应被缓存：引擎第一次失败，第二次相同查询应重试
+    let failCount = 0;
+    const failingService = createSearchService({
+        bing: async (query, limit) => {
+            failCount += 1;
+            throw new Error('temporary outage');
+        }
+    });
+    const failingInput = { query: 'dont cache me', engines: ['bing'], limit: 1 };
+    await failingService.execute(failingInput);
+    await failingService.execute(failingInput);
+    assertEqual(failCount, 6, 'failed search results are not cached (retried on next identical query)');
+
     // 直接验证缓存类
     const cache = new SearchTtlCache(100);
     cache.set(input, { query: 'x', engines: ['bing'], totalResults: 0, results: [], partialFailures: [] });

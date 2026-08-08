@@ -13,6 +13,11 @@ async function testExaSearch() {
     const results = await searchExa(query, maxResults);
 
     console.log(`🎉 Search completed, retrieved ${results.length} results:`);
+    if (results.length === 0) {
+      console.error('❌ Test failed: no results returned (engine may be blocked or network unavailable)');
+      process.exit(1);
+    }
+
     results.forEach((result, index) => {
       console.log(`\n${index + 1}. ${result.title}`);
       console.log(`   🔗 ${result.url}`);
@@ -23,6 +28,7 @@ async function testExaSearch() {
     return results;
   } catch (error) {
     console.error('❌ Test failed:', error);
+    process.exit(1);
     return [];
   }
 }

@@ -18,7 +18,7 @@ startCommand:
       defaultSearchEngine:
         type: string
         default: duckduckgo
-        description: Default search engine (bing, baidu, duckduckgo, exa, brave, juejin)
+        description: Default search engine (bing, baidu, csdn, duckduckgo, exa, brave, juejin, startpage, sogou)
       useProxy:
         type: boolean
         default: false
@@ -26,7 +26,7 @@ startCommand:
       proxyUrl:
         type: string
         default: http://127.0.0.1:10809
-        description: Proxy server URL
+        description: Proxy server URL (only meaningful when useProxy is true; leave empty in hosted environments without an outbound proxy)
   exampleConfig:
     enableCors: false
     corsOrigin: "*"
