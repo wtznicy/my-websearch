@@ -1,6 +1,6 @@
 <div align="center">
 
-# Open-WebSearch
+# Open-WebSearch-wtznicy
 
 **中文 | [English](./README.md)**
 
@@ -179,17 +179,6 @@ PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium 
 ```
 
 **建议**：个人日常使用若不想为 Bing 反爬启动重浏览器（3-8 秒冷启动、约 400MB 内存），设置 `BING_PLAYWRIGHT_FALLBACK=false`，并在搜索时让引擎分担压力：`engines: ["duckduckgo", "brave"]`。
-
-## Docker 部署
-
-```bash
-docker run -d --name web-search -p 3211:3211 -e ENABLE_CORS=true -e CORS_ORIGIN=* \
-  ghcr.io/aas-ee/open-web-search:latest
-```
-
-或使用 Docker Compose（`docker compose up -d`）。
-
-> 注意：容器镜像（`node:20-alpine`）未内置 Chromium，Bing 的 Playwright 模式不可用。容器内建议 `-e DEFAULT_SEARCH_ENGINE=duckduckgo`。
 
 ## CLI 与本地 daemon
 

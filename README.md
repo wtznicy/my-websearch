@@ -1,6 +1,6 @@
 <div align="center">
 
-# Open-WebSearch
+# Open-WebSearch-wtznicy
 
 **[🇨🇳 中文](./README-zh.md) | 🇺🇸 English**
 
@@ -392,58 +392,6 @@ Proxy and TLS notes:
 }
 ```
 
-### Docker Deployment
-
-Quick deployment using Docker Compose:
-
-```bash
-docker-compose up -d
-```
-
-Or use Docker directly:
-```bash
-docker run -d --name web-search -p 3211:3211 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
-```
-
-> **Container note:** the `node:20-alpine` image ships no Chromium/Edge, so the Bing engine's Playwright mode is unavailable inside the container (it silently falls back to request mode, which cn.bing.com may rate-limit). In containers, prefer `-e DEFAULT_SEARCH_ENGINE=duckduckgo` (request-based), or point `PLAYWRIGHT_WS_ENDPOINT` / `PLAYWRIGHT_EXECUTABLE_PATH` at a browser reachable from the container.
-
-Environment variable configuration:
-
-| Variable | Default                 | Options | Description |
-|----------|-------------------------|---------|-------------|
-| `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
-| `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine |
-| `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
-| `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
-| `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
-| `BING_PLAYWRIGHT_FALLBACK` | `true` | `true`, `false` | In auto mode, when Bing request mode hits an anti-bot page: `true` = launch Playwright (unavailable in this image, falls back to request); `false` = surface the error so lighter engines cascade in via `minResults` |
-| `PORT` | `3211`                  | 1-65535 | Server port (MCP HTTP/S; CLI daemon uses 3210 by default) |
-
-Then configure in your MCP client:
-```json
-{
-  "mcpServers": {
-    "web-search": {
-      "name": "Web Search MCP",
-      "type": "streamableHttp",
-      "description": "Multi-engine web search with article fetching",
-      "isActive": true,
-      "baseUrl": "http://localhost:3211/mcp"
-    },
-    "web-search-sse": {
-      "transport": {
-        "name": "Web Search MCP",
-        "type": "sse",
-        "description": "Multi-engine web search with article fetching",
-        "isActive": true,
-        "url": "http://localhost:3211/sse"
-      }
-    }
-  }
-}
-```
-
 ## Usage Guide
 
 The server provides seven tools: `search`, `resolveLibraryId`, `queryDocs`, `fetchCsdnArticle`, `fetchGithubReadme`, `fetchJuejinArticle`, and `fetchWebContent`.
@@ -656,58 +604,6 @@ Since this tool works by scraping multi-engine search results, please note the f
 ## Contributing
 
 Welcome to submit issue reports and feature improvement suggestions!
-
-### Contributor Guide
-
-If you want to fork this repository and publish your own Docker image, you need to make the following configurations:
-
-#### GitHub Secrets Configuration
-
-To enable automatic Docker image building and publishing, please add the following secrets in your GitHub repository settings (Settings → Secrets and variables → Actions):
-
-**Required Secrets:**
-- `GITHUB_TOKEN`: Automatically provided by GitHub (no setup needed)
-
-**Optional Secrets (for Alibaba Cloud ACR):**
-- `ACR_REGISTRY`: Your Alibaba Cloud Container Registry URL (e.g., `registry.cn-hangzhou.aliyuncs.com`)
-- `ACR_USERNAME`: Your Alibaba Cloud ACR username
-- `ACR_PASSWORD`: Your Alibaba Cloud ACR password
-- `ACR_IMAGE_NAME`: Your image name in ACR (e.g., `your-namespace/open-web-search`)
-
-#### CI/CD Workflow
-
-The repository includes a GitHub Actions workflow (`.github/workflows/docker.yml`) that automatically:
-
-1. **Trigger Conditions**:
-    - Push to `main` branch
-    - Push version tags (`v*`)
-    - Manual workflow trigger
-
-2. **Build and Push to**:
-    - GitHub Container Registry (ghcr.io) - always enabled
-    - Alibaba Cloud Container Registry - only enabled when ACR secrets are configured
-
-3. **Image Tags**:
-    - `ghcr.io/your-username/open-web-search:latest`
-    - `your-acr-address/your-image-name:latest` (if ACR is configured)
-
-#### Fork and Publish Steps:
-
-1. **Fork the repository** to your GitHub account
-2. **Configure secrets** (if you need ACR publishing):
-    - Go to Settings → Secrets and variables → Actions in your forked repository
-    - Add the ACR-related secrets listed above
-3. **Push changes** to the `main` branch or create version tags
-4. **GitHub Actions will automatically build and push** your Docker image
-5. **Use your image**, update the Docker command:
-   ```bash
-   docker run -d --name web-search -p 3211:3211 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/your-username/open-web-search:latest
-   ```
-
-#### Notes:
-- If you don't configure ACR secrets, the workflow will only publish to GitHub Container Registry
-- Make sure your GitHub repository has Actions enabled
-- The workflow will use your GitHub username (converted to lowercase) as the GHCR image name
 
 ### resolveLibraryId Tool Usage
 
