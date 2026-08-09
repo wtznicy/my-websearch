@@ -9,6 +9,11 @@ export interface AppConfig {
     // Search mode: request only, auto request then fallback, or force Playwright
     // Currently only affects Bing.
     searchMode: 'request' | 'auto' | 'playwright';
+    // When searchMode=auto and Bing's request mode hits an anti-bot page, should we
+    // fall back to launching a Playwright browser (slow, ~400MB, hidden window)?
+    // Set BING_PLAYWRIGHT_FALLBACK=false to instead surface the error so the search
+    // service can cascade to lighter engines (duckduckgo/brave) via minResults.
+    bingPlaywrightFallback: boolean;
     // Proxy configuration
     proxyUrl?: string;
     useProxy: boolean;
@@ -43,6 +48,7 @@ export const config: AppConfig = {
         process.env.ALLOWED_SEARCH_ENGINES.split(',').map(e => e.trim()) :
         [],
     searchMode: (process.env.SEARCH_MODE as AppConfig['searchMode']) || 'auto',
+    bingPlaywrightFallback: process.env.BING_PLAYWRIGHT_FALLBACK !== 'false',
     // Proxy configuration
     proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:7890',
     useProxy: process.env.USE_PROXY === 'true',
@@ -153,6 +159,9 @@ if (!quietStartupLogs) {
         console.error(`🔍 No search engine restrictions, all available engines can be used`);
     }
     console.error(`🔍 Search mode: ${config.searchMode.toUpperCase()} (currently only affects Bing)`);
+    if (!config.bingPlaywrightFallback) {
+        console.error(`🔍 Bing Playwright fallback disabled (BING_PLAYWRIGHT_FALLBACK=false): anti-bot blocks surface as errors so lighter engines can cascade in`);
+    }
 
     if (config.useProxy) {
         console.error(`🌐 Using proxy: ${config.proxyUrl}`);

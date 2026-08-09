@@ -686,6 +686,13 @@ export async function searchBing(
     try {
         return await searchBingWithHttp(query, limit);
     } catch (requestError) {
+        // BING_PLAYWRIGHT_FALLBACK=false：反爬直接抛错，不启动重浏览器。
+        // 错误会进入 searchService 的 partialFailures，配合 minResults 级联
+        // 自动用更稳定的引擎（duckduckgo/brave）补位。
+        if (!config.bingPlaywrightFallback) {
+            throw requestError;
+        }
+
         const canUsePlaywright = await isPlaywrightAvailable();
         if (!canUsePlaywright) {
             throw requestError;

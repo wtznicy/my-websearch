@@ -22,6 +22,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         defaultSearchEngine: 'bing',
         allowedSearchEngines: [],
         searchMode: 'request',
+        bingPlaywrightFallback: true,
         proxyUrl: 'http://127.0.0.1:7890',
         useProxy: false,
         fakeIpCidrs: [],

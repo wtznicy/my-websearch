@@ -13,6 +13,7 @@ function createTestConfig(): AppConfig {
         defaultSearchEngine: 'bing',
         allowedSearchEngines: [],
         searchMode: 'request',
+        bingPlaywrightFallback: true,
         proxyUrl: 'http://127.0.0.1:7890',
         useProxy: false,
         fakeIpCidrs: [],

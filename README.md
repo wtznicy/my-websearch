@@ -131,6 +131,7 @@ Notes:
 - Bare `open-websearch` is the MCP server compatibility entrypoint, not the recommended daemon start command for agent automation.
 - For content extraction, prefer searching first and then fetching a more specific result page. Some homepages and JS-heavy landing pages may not expose readable article text through `fetch-web`.
 - `--min-results N` on `search` auto-runs additional engines (not already requested) until at least N results come back; defaults to off.
+- Bing's HTTP mode is the most anti-bot-prone engine. If you hit verification pages often: (a) spread load with `engines: ["duckduckgo", "brave"]` on Bing-unrelated queries, or (b) set `BING_PLAYWRIGHT_FALLBACK=false` plus `--min-results` so a blocked Bing automatically cascades to lighter engines instead of launching a Playwright browser.
 - `cache-clear` clears the in-memory search TTL cache — useful after an engine recovers from an outage or when a stale anti-bot page got cached:
   ```bash
   open-websearch cache-clear
@@ -185,6 +186,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `PORT` | `3211`                  | 1-65535 | Server port (MCP HTTP/S; CLI daemon uses 3210 by default) |
 | `ALLOWED_SEARCH_ENGINES` | empty (all available) | Comma-separated engine names | Limit which search engines can be used; if the default engine is not in this list, the first allowed engine becomes the default |
 | `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | Search strategy. Currently only affects Bing: request only, request then Playwright fallback, or force Playwright |
+| `BING_PLAYWRIGHT_FALLBACK` | `true` | `true`, `false` | In auto mode, when Bing's request mode hits an anti-bot page: `true` = launch a Playwright browser (slow, ~400MB); `false` = surface the error so the search service can cascade to lighter engines (e.g. duckduckgo/brave) via `minResults` |
 | `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | Which Playwright client package to resolve when browser mode is enabled |
 | `PLAYWRIGHT_MODULE_PATH` | empty | Absolute path or project-relative path | Reuse an existing Playwright client package outside this project |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | empty | Any valid browser binary path | Launch an existing Chromium/Chrome executable without installing bundled browsers |
@@ -437,6 +439,7 @@ Environment variable configuration:
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
 | `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
+| `BING_PLAYWRIGHT_FALLBACK` | `true` | `true`, `false` | In auto mode, when Bing request mode hits an anti-bot page: `true` = launch Playwright (unavailable in this image, falls back to request); `false` = surface the error so lighter engines cascade in via `minResults` |
 | `PORT` | `3211`                  | 1-65535 | Server port (MCP HTTP/S; CLI daemon uses 3210 by default) |
 
 Then configure in your MCP client:

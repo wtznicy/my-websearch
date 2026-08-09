@@ -53,6 +53,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         defaultSearchEngine: 'bing',
         allowedSearchEngines: [],
         searchMode: 'request',
+        bingPlaywrightFallback: true,
         proxyUrl: '',
         useProxy: false,
         fakeIpCidrs: [],
@@ -418,6 +419,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
                 defaultSearchEngine: config.defaultSearchEngine,
                 allowedSearchEngines: config.allowedSearchEngines,
                 searchMode: config.searchMode,
+                bingPlaywrightFallback: config.bingPlaywrightFallback,
                 useProxy: config.useProxy,
                 proxyUrl: config.proxyUrl,
                 getProxyUrl: getProxyUrl(),
@@ -441,6 +443,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         defaultSearchEngine: string;
         allowedSearchEngines: string[];
         searchMode: string;
+        bingPlaywrightFallback: boolean;
         useProxy: boolean;
         proxyUrl: string;
         getProxyUrl: string;
@@ -452,6 +455,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
     assertEqual(configPayload.defaultSearchEngine, 'duckduckgo', 'configured default search engine');
     assertEqual(configPayload.allowedSearchEngines.join(','), 'duckduckgo,bing,exa', 'configured allowed search engines');
     assertEqual(configPayload.searchMode, 'auto', 'configured search mode');
+    assertEqual(configPayload.bingPlaywrightFallback, true, 'BING_PLAYWRIGHT_FALLBACK defaults to true');
     assertEqual(configPayload.useProxy, true, 'configured useProxy');
     assertEqual(configPayload.proxyUrl, 'http://127.0.0.1:7890', 'configured proxyUrl');
     assertEqual(configPayload.getProxyUrl, 'http://127.0.0.1:7890', 'configured getProxyUrl');
@@ -478,6 +482,24 @@ function testConfigDrivenEngineSelectionAndMode(): void {
     };
     assertEqual(fallbackPayload.defaultSearchEngine, 'bing', 'default engine should fall back to first allowed engine');
     assertEqual(fallbackPayload.allowedSearchEngines.join(','), 'bing,exa', 'allowed search engines should remain stable');
+
+    const bingFallbackOffOutput = runModuleWithEnv(
+        `
+            const { config } = await import('./build/config.js');
+            console.log(JSON.stringify({ bingPlaywrightFallback: config.bingPlaywrightFallback }, null, 2));
+        `,
+        {
+            BING_PLAYWRIGHT_FALLBACK: 'false'
+        }
+    );
+    const bingFallbackOffPayload = parseJsonBlock(bingFallbackOffOutput) as {
+        bingPlaywrightFallback: boolean;
+    };
+    assertEqual(
+        bingFallbackOffPayload.bingPlaywrightFallback,
+        false,
+        'BING_PLAYWRIGHT_FALLBACK=false should disable the Playwright fallback'
+    );
 
     const descriptionOutput = runModuleWithEnv(
         `
