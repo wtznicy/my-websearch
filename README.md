@@ -14,22 +14,12 @@
 
 `open-websearch` provides an MCP server, CLI, and local daemon, and can also be paired with skill-guided agent workflows for live web search and content retrieval without API keys.
 
-## Sponsor
-
-<div align="center">
-  <a href="https://www.swiftproxy.net/?ref=openwebSearch" rel="sponsored">
-    <img src="./docs/assets/sponsors/a69c410018edd7c45bffd4864629e25b.png" alt="Swiftproxy" width="600">
-  </a>
-</div>
-
-> [**Swiftproxy**](https://www.swiftproxy.net/?ref=openwebSearch) provides high-quality static residential proxies with stable IPs for multi-account management, automation, web scraping, and secure online operations. Protect your accounts with clean IPs and reliable proxy infrastructure. Static proxy traffic is valid for 30 days with unlimited usage. Get **10% off** with code **`PROXY90`**.
 
 ## Features
 
 - Web search using multi-engine results
     - bing
     - baidu
-    - ~~linux.do~~ temporarily unsupported
     - csdn
     - duckduckgo
     - exa
@@ -138,12 +128,6 @@ Notes:
   ```
 
 For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`, `POST /fetch-*`, `POST /cache/clear`), see [docs/http-api.md](docs/http-api.md).
-
-## TODO
-- Support for ~~Bing~~ (already supported), ~~DuckDuckGo~~ (already supported), ~~Exa~~ (already supported), ~~Brave~~ (already supported), ~~Sogou~~ (already supported), Google and other search engines
-- Support for more blogs, forums, and social platforms
-- Optimize article content extraction, add support for more sites
-- ~~Support for GitHub README fetching~~ (already supported)
 
 ## Installation Guide
 
@@ -392,7 +376,7 @@ Proxy and TLS notes:
 - open-websearch now disables Axios environment-proxy auto-detection internally and only uses the explicit `USE_PROXY` + `PROXY_URL` path.
 - When `USE_PROXY=true`, all Axios-based network requests follow the configured `PROXY_URL` path instead of mixing direct requests with environment-proxy behavior.
 - If `PROXY_URL` points to a local rule-based proxy client, that client can still decide which destinations go `DIRECT` and which ones are proxied.
-- If `PROXY_URL` points to a fixed upstream proxy or overseas egress, region-sensitive sites such as Baidu, CSDN, Juejin, Linux.do, or GitHub may behave differently than before.
+- If `PROXY_URL` points to a fixed upstream proxy or overseas egress, region-sensitive sites such as Baidu, CSDN, Juejin, or GitHub may behave differently than before.
 - If your host machine already sets `HTTP_PROXY` or `HTTPS_PROXY`, they will no longer override the server's internal request behavior.
 - Prefer configuring `NODE_EXTRA_CA_CERTS` on Windows when a site has a missing intermediate CA.
 - Use `FETCH_WEB_INSECURE_TLS=true` only as a last resort for `fetchWebContent`, since it weakens TLS verification.
@@ -459,7 +443,7 @@ Then configure in your MCP client:
         "type": "sse",
         "description": "Multi-engine web search with article fetching",
         "isActive": true,
-        "url": "http://localhost:3000/sse"
+        "url": "http://localhost:3211/sse"
       }
     }
   }
@@ -723,7 +707,7 @@ The repository includes a GitHub Actions workflow (`.github/workflows/docker.yml
 4. **GitHub Actions will automatically build and push** your Docker image
 5. **Use your image**, update the Docker command:
    ```bash
-   docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/your-username/open-web-search:latest
+   docker run -d --name web-search -p 3211:3211 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/your-username/open-web-search:latest
    ```
 
 #### Notes:
@@ -780,12 +764,3 @@ use_mcp_tool({
 ```
 
 > **Note:** Both Context7 tools call the public REST API directly (no API key required at low rate limits). Set `CONTEXT7_API_KEY` for higher rate limits.
-
-<div align="center">
-
-## Star History
-If you find this project helpful, please consider giving it a ⭐ Star!
-
-[![Star History Chart](https://api.star-history.com/svg?repos=Aas-ee/open-webSearch&type=Date)](https://www.star-history.com/#Aas-ee/open-webSearch&Date)
-
-</div>
