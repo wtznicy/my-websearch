@@ -508,9 +508,8 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         'search description should reflect allowed engines'
     );
     assert(
-        descriptionPayload.searchDescription.includes('omit or set auto to use the server configured SEARCH_MODE') &&
-        descriptionPayload.searchDescription.includes('request forces request-based search') &&
-        descriptionPayload.searchDescription.includes('playwright forces browser-based search'),
+        descriptionPayload.searchDescription.includes('searchMode: omit/auto = server SEARCH_MODE') &&
+        descriptionPayload.searchDescription.includes('request/playwright force that mode'),
         'search description should explain searchMode enum meanings'
     );
 

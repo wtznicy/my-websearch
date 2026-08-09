@@ -18,7 +18,7 @@ export async function searchExa(query: string, limit: number): Promise<SearchRes
             "Connection": "keep-alive",
             "Accept": "*/*",
             "Accept-Encoding": "gzip, deflate, br",
-            "sec-ch-ua": "\"Chromium\";v=\"112\", \"Google Chrome\";v=\"112\", \"Not:A-Brand\";v=\"99\"",
+            "sec-ch-ua": "\"Chromium\";v=\"133\", \"Google Chrome\";v=\"133\", \"Not:A-Brand\";v=\"99\"",
             "content-type": "text/plain;charset=UTF-8",
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": "\"Windows\"",
@@ -72,11 +72,12 @@ export async function searchExa(query: string, limit: number): Promise<SearchRes
         return allResults.slice(0, limit);
 
     } catch (error) {
-        // @ts-ignore
-        console.error('❌ Error fetching search results from Exa.ai:', error.message);
+        console.error('❌ Error fetching search results from Exa.ai:', error instanceof Error ? error.message : String(error));
         if (axios.isAxiosError(error) && error.response) {
             console.error('API Error Response:', error.response.data);
         }
-        return [];
+        // 向上抛错，由 searchService 的重试 + partialFailures 机制接管；
+        // 不能 return []，否则引擎失败会被伪装成"没有结果"。
+        throw error;
     }
 }

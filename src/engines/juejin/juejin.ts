@@ -116,11 +116,12 @@ export async function searchJuejin(query: string, limit: number): Promise<Search
         return allResults.slice(0, limit);
 
     } catch (error) {
-        console.error('❌ Juejin search failed:', error);
+        console.error('❌ Juejin search failed:', error instanceof Error ? error.message : String(error));
         if (axios.isAxiosError(error)) {
             console.error('Response status:', error.response?.status);
             console.error('Response data:', error.response?.data);
         }
-        return [];
+        // 向上抛错，由 searchService 的重试 + partialFailures 机制接管
+        throw error;
     }
 }

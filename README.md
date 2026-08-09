@@ -130,8 +130,13 @@ npm run search:cli -- "open web search" --json
 Notes:
 - Bare `open-websearch` is the MCP server compatibility entrypoint, not the recommended daemon start command for agent automation.
 - For content extraction, prefer searching first and then fetching a more specific result page. Some homepages and JS-heavy landing pages may not expose readable article text through `fetch-web`.
+- `--min-results N` on `search` auto-runs additional engines (not already requested) until at least N results come back; defaults to off.
+- `cache-clear` clears the in-memory search TTL cache — useful after an engine recovers from an outage or when a stale anti-bot page got cached:
+  ```bash
+  open-websearch cache-clear
+  ```
 
-For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`, `POST /fetch-*`), see [docs/http-api.md](docs/http-api.md).
+For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`, `POST /fetch-*`, `POST /cache/clear`), see [docs/http-api.md](docs/http-api.md).
 
 ## TODO
 - Support for ~~Bing~~ (already supported), ~~DuckDuckGo~~ (already supported), ~~Exa~~ (already supported), ~~Brave~~ (already supported), ~~Sogou~~ (already supported), Google and other search engines
@@ -177,7 +182,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
 | `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | Disable TLS certificate verification for `fetchWebContent` only. Use only when a target site has a broken certificate chain |
 | `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
-| `PORT` | `3000`                  | 1-65535 | Server port |
+| `PORT` | `3211`                  | 1-65535 | Server port (MCP HTTP/S; CLI daemon uses 3210 by default) |
 | `ALLOWED_SEARCH_ENGINES` | empty (all available) | Comma-separated engine names | Limit which search engines can be used; if the default engine is not in this list, the first allowed engine becomes the default |
 | `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | Search strategy. Currently only affects Bing: request only, request then Playwright fallback, or force Playwright |
 | `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | Which Playwright client package to resolve when browser mode is enabled |
@@ -298,7 +303,7 @@ npm run build
       "type": "streamableHttp",
       "description": "Multi-engine web search with article fetching",
       "isActive": true,
-      "baseUrl": "http://localhost:3000/mcp"
+      "baseUrl": "http://localhost:3211/mcp"
     }
   }
 }
@@ -311,13 +316,13 @@ npm run build
     "web-search": {
       "transport": {
         "type": "streamableHttp",
-        "url": "http://localhost:3000/mcp"
+        "url": "http://localhost:3211/mcp"
       }
     },
     "web-search-sse": {
       "transport": {
         "type": "sse",
-        "url": "http://localhost:3000/sse"
+        "url": "http://localhost:3211/sse"
       }
     }
   }
@@ -330,11 +335,11 @@ npm run build
   "mcpServers": {
     "web-search": {
       "type": "http",
-      "url": "http://localhost:3000/mcp"
+      "url": "http://localhost:3211/mcp"
     },
     "web-search-sse": {
       "type": "sse",
-      "url": "http://localhost:3000/sse"
+      "url": "http://localhost:3211/sse"
     }
   }
 }
@@ -417,8 +422,10 @@ docker-compose up -d
 
 Or use Docker directly:
 ```bash
-docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
+docker run -d --name web-search -p 3211:3211 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
 ```
+
+> **Container note:** the `node:20-alpine` image ships no Chromium/Edge, so the Bing engine's Playwright mode is unavailable inside the container (it silently falls back to request mode, which cn.bing.com may rate-limit). In containers, prefer `-e DEFAULT_SEARCH_ENGINE=duckduckgo` (request-based), or point `PLAYWRIGHT_WS_ENDPOINT` / `PLAYWRIGHT_EXECUTABLE_PATH` at a browser reachable from the container.
 
 Environment variable configuration:
 
@@ -430,7 +437,7 @@ Environment variable configuration:
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
 | `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
-| `PORT` | `3000`                  | 1-65535 | Server port |
+| `PORT` | `3211`                  | 1-65535 | Server port (MCP HTTP/S; CLI daemon uses 3210 by default) |
 
 Then configure in your MCP client:
 ```json
@@ -441,7 +448,7 @@ Then configure in your MCP client:
       "type": "streamableHttp",
       "description": "Multi-engine web search with article fetching",
       "isActive": true,
-      "baseUrl": "http://localhost:3000/mcp"
+      "baseUrl": "http://localhost:3211/mcp"
     },
     "web-search-sse": {
       "transport": {

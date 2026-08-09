@@ -105,7 +105,7 @@ async function main() {
     app.use(express.json());
 
     // DNS rebinding 保护：用 SDK 的 hostHeaderValidation 中间件（port-agnostic，
-    // 通过 URL API 解析 Host 头的 hostname 部分，兼容 127.0.0.1:3000 这种带端口的请求）。
+    // 通过 URL API 解析 Host 头的 hostname 部分，兼容 127.0.0.1:3211 这种带端口的请求）。
     // 默认仅放行本地回环；如需局域网/公网访问，用 OPEN_WEBSEARCH_ALLOWED_HOSTS 显式放行。
     const allowedHostnames = process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS
       ? process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS.split(',').map((host) => host.trim()).filter(Boolean)
@@ -269,8 +269,9 @@ async function main() {
       }
     });
 
-    // Read the port number from the environment variable; use the default port 3000 if it is not set.
-    const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+    // Read the port number from the environment variable; use the default port 3211 if it is not set.
+    // 3211 与 CLI daemon 的默认端口 3210 相邻，避免与常见的前端 dev server（3000）等撞端口。
+    const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3211;
 
     // 默认只绑定回环地址，避免端口暴露到局域网/公网（配合上面的 DNS rebinding 保护）。
     // 如需局域网/公网访问，设置 OPEN_WEBSEARCH_HOST=0.0.0.0 显式放开。

@@ -240,6 +240,14 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
         assertEqual(invalidSearchResult.payload.status, 'error', 'daemon /search invalid payload status');
         assertEqual(invalidSearchResult.payload.error.code, 'invalid_request', 'daemon /search invalid error code');
 
+        const cacheClearResult = await postJson<{
+            status: string;
+            data: { cleared: boolean; cacheSize: number };
+        }>(daemon.baseUrl, '/cache/clear', {});
+        assertEqual(cacheClearResult.response.status, 200, 'daemon /cache/clear http status');
+        assertEqual(cacheClearResult.payload.status, 'ok', 'daemon /cache/clear payload status');
+        assertEqual(cacheClearResult.payload.data.cleared, true, 'daemon /cache/clear cleared flag');
+
         console.log('✅ local daemon operation routes');
     } finally {
         await daemon.close();

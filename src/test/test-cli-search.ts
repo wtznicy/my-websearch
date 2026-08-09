@@ -888,6 +888,55 @@ async function testRunCliNoArgsFallsThrough(): Promise<void> {
     console.log('✅ CLI runCli no-args fallthrough');
 }
 
+async function testRunCliCacheClear(): Promise<void> {
+    const runtime = createStubRuntime();
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runCli(
+        ['cache-clear', '--json'],
+        runtime,
+        {
+            stdout: (text) => stdout.push(text),
+            stderr: (text) => stderr.push(text)
+        }
+    );
+
+    assertEqual(exitCode, 0, 'CLI cache-clear exit code');
+    assertEqual(stderr.length, 0, 'CLI cache-clear stderr');
+    const payload = JSON.parse(stdout[0]) as {
+        status: string;
+        data: { cleared: boolean; cacheSize: number };
+    };
+    assertEqual(payload.status, 'ok', 'CLI cache-clear status');
+    assertEqual(payload.data.cleared, true, 'CLI cache-clear cleared flag');
+
+    console.log('✅ CLI runCli cache-clear');
+}
+
+async function testRunCliSearchMinResults(): Promise<void> {
+    const runtime = createStubRuntime();
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runCli(
+        ['search', 'min results test', '--limit', '5', '--min-results', '3', '--engine', 'bing', '--json'],
+        runtime,
+        {
+            stdout: (text) => stdout.push(text),
+            stderr: (text) => stderr.push(text)
+        }
+    );
+
+    assertEqual(exitCode, 0, 'CLI search with --min-results exit code');
+    const payload = JSON.parse(stdout[0]) as {
+        status: string;
+        data: { results: Array<{ description: string }> };
+    };
+    assertEqual(payload.status, 'ok', 'CLI search --min-results status');
+    assert(Array.isArray(payload.data.results), 'CLI search --min-results returns results array');
+
+    console.log('✅ CLI runCli search --min-results');
+}
+
 async function main(): Promise<void> {
     testParseSearchArgs();
     testParseFetchArgs();
@@ -911,6 +960,8 @@ async function main(): Promise<void> {
             await testRunCliUnknownMcpStyleCommandHint();
             await testRunCliHelp();
             await testRunCliNoArgsFallsThrough();
+            await testRunCliCacheClear();
+            await testRunCliSearchMinResults();
         });
     });
     await testRunCliPrefersDaemonWhenAvailable();

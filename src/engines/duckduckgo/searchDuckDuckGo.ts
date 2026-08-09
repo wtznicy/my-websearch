@@ -307,7 +307,8 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
 
     return results.slice(0, maxResults);
   } catch (error) {
-    console.error('DuckDuckGo HTML search failed:', error);
-    return [];
+    console.error('DuckDuckGo HTML search failed:', error instanceof Error ? error.message : String(error));
+    // 向上抛错，由 searchService 的重试 + partialFailures 机制接管
+    throw error;
   }
 }

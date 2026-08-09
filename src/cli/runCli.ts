@@ -31,6 +31,7 @@ const COMMANDS_REQUIRING_RUNTIME = new Set([
     'fetch-github-readme',
     'fetch-csdn',
     'fetch-juejin',
+    'cache-clear',
     'serve'
 ]);
 
@@ -61,8 +62,10 @@ function formatCliHelp(): string {
         '    Check daemon status. `status` uses --base-url, not --daemon-url.',
         '',
         'One-shot action commands:',
-        '  open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--daemon-url URL] [--spawn] [--json]',
-        '    Search the web. `--search-mode` is request|auto|playwright and currently only affects Bing.',
+        '  open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--min-results N] [--daemon-url URL] [--spawn] [--json]',
+        '    Search the web. `--search-mode` is request|auto|playwright and currently only affects Bing. `--min-results N` auto-runs additional engines when fewer than N results come back.',
+        '  open-websearch cache-clear [--daemon-url URL] [--spawn] [--json]',
+        '    Clear the search TTL cache (engine just recovered, stale results cached, etc.).',
         '  open-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--daemon-url URL] [--spawn] [--json]',
         '    Fetch readable page content. `--readability` enables Mozilla Readability extraction; `--include-links` returns preserved article links; `--raw` returns the raw response body; `--start-index N` continues reading from character offset N.',
         '  open-websearch fetch-github-readme <url> [--daemon-url URL] [--spawn] [--json]',
@@ -95,6 +98,8 @@ export type ParsedSearchArgs = {
     limit: number;
     engines: SupportedSearchEngine[];
     searchMode?: AppConfig['searchMode'];
+    /** 结果数低于此值时自动用其他引擎补位（0 = 不启用） */
+    minResults: number;
     json: boolean;
 };
 
@@ -207,6 +212,7 @@ export function parseSearchArgs(argv: string[], runtime: OpenWebSearchRuntime): 
     const requestedEngines: string[] = [];
     let limit = 10;
     let searchMode: AppConfig['searchMode'] | undefined;
+    let minResults = 0;
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -260,6 +266,20 @@ export function parseSearchArgs(argv: string[], runtime: OpenWebSearchRuntime): 
             continue;
         }
 
+        if (arg === '--min-results') {
+            const next = argv[index + 1];
+            if (!next || isFlag(next)) {
+                throw new Error('Missing value for --min-results');
+            }
+            const parsed = Number(next);
+            if (!Number.isInteger(parsed) || parsed < 0) {
+                throw new Error('--min-results must be a non-negative integer');
+            }
+            minResults = parsed;
+            index += 1;
+            continue;
+        }
+
         if (isFlag(arg)) {
             throw new Error(`Unknown argument: ${arg}`);
         }
@@ -289,6 +309,7 @@ export function parseSearchArgs(argv: string[], runtime: OpenWebSearchRuntime): 
         limit,
         engines: resolvedEngines,
         searchMode,
+        minResults,
         json
     };
 }
@@ -886,7 +907,8 @@ export async function runCli(
                     query: parsed.query,
                     engines: parsed.engines,
                     limit: parsed.limit,
-                    searchMode: parsed.searchMode
+                    searchMode: parsed.searchMode,
+                    minResults: parsed.minResults
                 },
                 options
             );
@@ -908,7 +930,8 @@ export async function runCli(
                 query: parsed.query,
                 engines: parsed.engines,
                 limit: parsed.limit,
-                searchMode: parsed.searchMode
+                searchMode: parsed.searchMode,
+                minResults: parsed.minResults
             });
 
             if (parsed.json) {
@@ -927,6 +950,72 @@ export async function runCli(
                 ), null, 2));
             } else {
                 io.stderr(`${getDaemonCliErrorLabel(error, 'Search failed')}: ${message}`);
+            }
+            return 1;
+        }
+    }
+
+    if (command === 'cache-clear') {
+        const json = rest.includes('--json');
+        let transport: DaemonTransportArgs;
+        try {
+            transport = extractDaemonTransportArgs(rest);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (json) {
+                io.stdout(JSON.stringify(createErrorEnvelope(
+                    'invalid_arguments',
+                    message,
+                    { hint: 'Use `open-websearch cache-clear [--daemon-url URL] [--spawn] [--json]`.' }
+                ), null, 2));
+            } else {
+                io.stderr(message);
+                io.stderr('Usage: open-websearch cache-clear [--daemon-url URL] [--spawn] [--json]');
+            }
+            return 1;
+        }
+
+        try {
+            const daemonResult = await tryDaemonRequest<{ cleared: boolean; cacheSize: number }>(
+                transport,
+                '/cache/clear',
+                {},
+                options
+            );
+            if (daemonResult) {
+                if (json) {
+                    io.stdout(JSON.stringify(daemonResult, null, 2));
+                } else if (isSuccessEnvelope(daemonResult)) {
+                    io.stdout(`Search cache cleared (${daemonResult.data?.cacheSize ?? 0} entries remaining).`);
+                } else {
+                    io.stderr(`Failed to clear search cache: ${daemonResult.error?.message ?? 'Unknown error'}`);
+                    if (daemonResult.hint) {
+                        io.stderr(daemonResult.hint);
+                    }
+                }
+                return daemonResult.status === 'ok' ? 0 : 1;
+            }
+
+            runtime.services.search.clearCache();
+            if (json) {
+                io.stdout(JSON.stringify(createSuccessEnvelope({
+                    cleared: true,
+                    cacheSize: runtime.services.search.cacheSize
+                }), null, 2));
+            } else {
+                io.stdout('Search cache cleared.');
+            }
+            return 0;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (json) {
+                io.stdout(JSON.stringify(createErrorEnvelope(
+                    getDaemonCliErrorCode(error),
+                    message,
+                    { hint: getDaemonCliErrorHint(error) }
+                ), null, 2));
+            } else {
+                io.stderr(`${getDaemonCliErrorLabel(error, 'Failed to clear search cache')}: ${message}`);
             }
             return 1;
         }

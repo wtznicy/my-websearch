@@ -154,6 +154,16 @@ function parseStartIndex(value: unknown): number | undefined {
     return value;
 }
 
+function parseMinResults(value: unknown): number | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+        throw new Error('minResults must be a non-negative integer');
+    }
+    return value;
+}
+
 type FetchErrorClassification = {
     statusCode: number;
     code: string;
@@ -240,6 +250,21 @@ export async function startLocalDaemon(
         res.json(createSuccessEnvelope(getStatus()));
     });
 
+    app.post('/cache/clear', async (_req, res) => {
+        try {
+            runtime.services.search.clearCache();
+            res.json(createSuccessEnvelope({
+                cleared: true,
+                cacheSize: runtime.services.search.cacheSize
+            }));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            sendError(res, 500, 'engine_error', message, {
+                hint: 'Restart the daemon if the cache cannot be cleared.'
+            });
+        }
+    });
+
     app.post('/search', async (req, res) => {
         try {
             const query = typeof req.body?.query === 'string' ? req.body.query.trim() : '';
@@ -257,11 +282,13 @@ export async function startLocalDaemon(
             const limit = parseLimit(req.body?.limit);
             const engines = parseRequestedEngines(runtime, req.body?.engines);
             const searchMode = parseSearchMode(req.body?.searchMode);
+            const minResults = parseMinResults(req.body?.minResults);
             const result = await runtime.services.search.execute({
                 query,
                 limit,
                 engines,
-                searchMode
+                searchMode,
+                minResults
             });
             res.json(createSuccessEnvelope(result));
         } catch (error) {

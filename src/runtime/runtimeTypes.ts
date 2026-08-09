@@ -5,6 +5,10 @@ import { Context7DocsResult, Context7Library } from '../engines/context7/context
 
 export type SearchService = {
     execute(input: SearchExecutionInput): Promise<SearchExecutionResult>;
+    /** 清空搜索 TTL 缓存 */
+    clearCache(): void;
+    /** 当前缓存条目数 */
+    readonly cacheSize: number;
 };
 
 export type FetchArticleService = {

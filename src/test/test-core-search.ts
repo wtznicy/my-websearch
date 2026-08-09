@@ -268,6 +268,88 @@ async function testSearchZeroQuotaEngines(): Promise<void> {
     console.log('✅ search service reports zero-quota engines distinctly from empty results');
 }
 
+async function testSearchServiceMinResultsCascade(): Promise<void> {
+    const called: string[] = [];
+    const engineMap: SearchEngineExecutorMap = {
+        bing: async (query, limit) => {
+            called.push(`bing:${limit}`);
+            // bing 只返回 1 条（配额 3 却只有 1 条），迫使 minResults 触发级联
+            return [createResult('bing', 1)];
+        },
+        startpage: async (query, limit) => {
+            called.push(`startpage:${limit}`);
+            throw new Error('startpage blocked');
+        },
+        duckduckgo: async (query, limit) => {
+            called.push(`duckduckgo:${limit}`);
+            return Array.from({ length: limit }, (_, index) => createResult('duckduckgo', index + 1));
+        }
+    };
+
+    const service = createSearchService(engineMap);
+    const result = await service.execute({
+        query: 'cascade me',
+        engines: ['bing', 'startpage'],
+        limit: 5,
+        minResults: 3
+    });
+
+    assert(result.totalResults >= 3, 'minResults cascade should fill up to at least 3 results');
+    assert(result.cascadedEngines?.includes('duckduckgo'), 'cascade should record the compensating engine');
+    assert(called.includes('duckduckgo:2'), 'cascade should run the compensating engine with the gap quota');
+    assertEqual(result.partialFailures.length, 1, 'only the originally failed engine is a partial failure');
+    assertEqual(result.partialFailures[0].engine, 'startpage', 'failed engine recorded');
+
+    // minResults 默认（不传）= 0，不触发级联
+    const noCascade = await service.execute({
+        query: 'cascade me',
+        engines: ['bing'],
+        limit: 5
+    });
+    assert(!noCascade.cascadedEngines, 'no cascade when minResults is not set');
+
+    console.log('✅ search service minResults cascade fills missing results with other engines');
+}
+
+async function testSearchServiceClearCache(): Promise<void> {
+    let callCount = 0;
+    const service = createSearchService({
+        bing: async (query, limit) => {
+            callCount += 1;
+            return Array.from({ length: limit }, (_, index) => createResult('bing', index + 1));
+        }
+    });
+
+    const input = { query: 'clear me', engines: ['bing'], limit: 2 };
+    await service.execute(input);
+    await service.execute(input);
+    assertEqual(callCount, 1, 'first two identical queries share cache');
+
+    service.clearCache();
+    await service.execute(input);
+    assertEqual(callCount, 2, 'after clearCache the same query re-executes');
+    assertEqual(service.cacheSize, 1, 'cache repopulates after clear');
+
+    console.log('✅ search service clearCache invalidates TTL cache');
+}
+
+async function testPartialFailuresCarryHint(): Promise<void> {
+    const service = createSearchService({
+        bing: async (query, limit) => {
+            throw new Error('temporary outage');
+        }
+    });
+
+    const result = await service.execute({ query: 'hint me', engines: ['bing'], limit: 1 });
+    assertEqual(result.partialFailures.length, 1, 'one failure recorded');
+    assert(
+        result.partialFailures[0].message.includes('Hint:'),
+        'failure message should carry an actionable hint for the LLM'
+    );
+
+    console.log('✅ partial failure messages carry actionable hints');
+}
+
 async function main(): Promise<void> {
     testNormalizeEngineName();
     testDistributeLimit();
@@ -279,6 +361,9 @@ async function main(): Promise<void> {
     testMergeSearchResultsDedupAndRank();
     await testSearchTtlCache();
     await testSearchZeroQuotaEngines();
+    await testSearchServiceMinResultsCascade();
+    await testSearchServiceClearCache();
+    await testPartialFailuresCarryHint();
     console.log('\nCore search tests passed.');
 }
 

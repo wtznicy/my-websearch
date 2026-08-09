@@ -13,7 +13,52 @@ import {
     validatePublicWebUrl
 } from '../core/validation/targetValidation.js';
 import { OpenWebSearchRuntime } from '../runtime/runtimeTypes.js';
+import { FetchWebContentResult } from '../engines/web/fetchWebContent.js';
 export { normalizeEngineName };
+
+/**
+ * MCP 单次响应硬上限（字节）。防止 fetchWebContent 在 raw/大 maxChars 场景下
+ * 把数 MB JSON 塞进 MCP response 浪费客户端 token。默认 60KB，可配置。
+ */
+const RESPONSE_CAP_BYTES = Number(process.env.OPEN_WEBSEARCH_RESPONSE_CAP_BYTES ?? 60000);
+
+/** 给 MCP 错误文本追加一行 Hint，帮助 LLM/用户决定下一步 */
+function withErrorHint(message: string, hint: string): string {
+    return `${message}\nHint: ${hint}`;
+}
+
+/**
+ * 序列化 fetchWebContent 结果，超出硬上限时分两级收敛：
+ * 1) 丢弃低价值中间字段（readableHtml / raw）；
+ * 2) 截断 content 并保留分页指针（startIndex/nextStartIndex/hasMore），
+ *    调用方可用 startIndex 继续读完整个文档。
+ */
+function serializeFetchWebResult(result: FetchWebContentResult): string {
+    const full = JSON.stringify(result, null, 2);
+    if (full.length <= RESPONSE_CAP_BYTES) {
+        return full;
+    }
+
+    const { readableHtml, raw, ...core } = result as unknown as Record<string, unknown> & { content?: string; startIndex?: number; totalLength?: number };
+    const trimmed = JSON.stringify(core, null, 2);
+    if (trimmed.length <= RESPONSE_CAP_BYTES) {
+        return trimmed;
+    }
+
+    const content = core.content ?? '';
+    const overhead = trimmed.length - content.length;
+    const room = Math.max(0, RESPONSE_CAP_BYTES - overhead - 256);
+    const cut = Math.min(content.length, room);
+    const startIndex = core.startIndex ?? 0;
+    return JSON.stringify({
+        ...core,
+        content: `${content.slice(0, cut)}\n[truncated by response cap; use startIndex=${startIndex + cut} to continue]`,
+        truncated: true,
+        hasMore: true,
+        nextStartIndex: startIndex + cut,
+        totalLength: core.totalLength ?? content.length
+    }, null, 2);
+}
 
 // 获取工具名称，优先使用环境变量，否则使用默认值
 function getToolName(envVarName: string, defaultName: string): string {
@@ -39,12 +84,11 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
     const fetchWebToolName = getToolName('MCP_TOOL_FETCH_WEB_NAME', 'fetchWebContent');
 
     // 搜索工具
-    // 生成搜索工具的动态描述
+    // 生成搜索工具的动态描述（精简版；engines 合法值在参数描述里，LLM 可见）
     const getSearchDescription = () => {
-        // 明确 auto/省略会使用服务端 SEARCH_MODE，只有 request/playwright 才是强制覆盖。
-        const searchModeDescription = ' searchMode meanings: omit or set auto to use the server configured SEARCH_MODE; request forces request-based search; playwright forces browser-based search.';
+        const searchModeDescription = ' searchMode: omit/auto = server SEARCH_MODE; request/playwright force that mode.';
         if (runtime.config.allowedSearchEngines.length === 0) {
-            return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗)) with no API key required.${searchModeDescription}`;
+            return `Search the web across multiple engines with no API key required.${searchModeDescription}`;
         } else {
             const enginesText = runtime.config.allowedSearchEngines.map(e => {
                 switch (e) {
@@ -89,6 +133,8 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
             query: z.string().min(1, "Search query must not be empty"),
             limit: z.number().min(1).max(50).default(10),
             searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
+            minResults: z.number().int().min(0).optional()
+                .describe("Auto-run additional engines when fewer than this many results come back (default: disabled)"),
             engines: z.array(getEngineInputSchema()).min(1).default([runtime.config.defaultSearchEngine])
                 .transform(requestedEngines => resolveRequestedEngines(
                     requestedEngines,
@@ -96,7 +142,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                     runtime.config.defaultSearchEngine
                 ) as [SupportedSearchEngine, ...SupportedSearchEngine[]])
         },
-        async ({query, limit = 10, searchMode, engines}) => {
+        async ({query, limit = 10, searchMode, engines, minResults}) => {
             try {
                 // 正常走 MCP 时 engines 已由 schema transform 解析；直接调用 handler 的场景
                 // （测试/程序化调用）engines 可能未定义，这里补一个兜底。
@@ -108,7 +154,8 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                     query,
                     engines: resolvedEngines,
                     limit,
-                    searchMode
+                    searchMode,
+                    minResults: minResults ?? 0
                 });
                 for (const failure of searchResult.partialFailures) {
                     console.error(`Search failed for engine ${failure.engine}:`, failure.message);
@@ -131,7 +178,10 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 return {
                     content: [{
                         type: 'text',
-                        text: `Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        text: withErrorHint(
+                            `Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            '可尝试换用其他引擎（engines 参数）、降低 limit，或稍后重试。'
+                        )
                     }],
                     isError: true
                 };
@@ -165,7 +215,10 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 return {
                     content: [{
                         type: 'text',
-                        text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        text: withErrorHint(
+                            `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            '可稍后重试，或确认 URL 是 blog.csdn.net 下的 /article/details/ 文章链接。'
+                        )
                     }],
                     isError: true
                 };
@@ -209,7 +262,10 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 return {
                     content: [{
                         type: 'text',
-                        text: `Failed to fetch README: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        text: withErrorHint(
+                            `Failed to fetch README: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            '若仓库存在但抓取失败，可尝试用 fetchWebContent 抓取 raw.githubusercontent.com 镜像或稍后重试。'
+                        )
                     }],
                     isError: true
                 };
@@ -240,7 +296,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 return {
                     content: [{
                         type: 'text',
-                        text: JSON.stringify(result, null, 2)
+                        text: serializeFetchWebResult(result)
                     }]
                 };
             } catch (error) {
@@ -248,7 +304,10 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 return {
                     content: [{
                         type: 'text',
-                        text: `Failed to fetch web content: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        text: withErrorHint(
+                            `Failed to fetch web content: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            '可降低 maxChars，或用 startIndex 分页继续读取长文档。'
+                        )
                     }],
                     isError: true
                 };
@@ -282,7 +341,10 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 return {
                     content: [{
                         type: 'text',
-                        text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        text: withErrorHint(
+                            `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            '可稍后重试，或确认 URL 是 juejin.cn 下的 /post/ 文章链接。'
+                        )
                     }],
                     isError: true
                 };
@@ -293,7 +355,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
     // 查找库文档（context7 融合）——按库名搜索官方文档索引
     server.tool(
         "resolveLibraryId",
-        "Resolve a general library/package name into a Context7-compatible library ID (e.g. /vercel/next.js). Returns matching libraries with reputation and quality scores so the agent can pick the authoritative one.",
+        "Resolve a library/package name to a Context7 library ID (e.g. /vercel/next.js) for docs queries.",
         {
             libraryName: z.string().min(1).describe("The library or package name to search for (e.g. 'Next.js', 'express', 'prisma')"),
             query: z.string().min(1).describe("The user's question or task, used to rank results by relevance (e.g. 'how to implement authentication')"),
@@ -315,7 +377,10 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 return {
                     content: [{
                         type: 'text',
-                        text: `Failed to resolve library: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        text: withErrorHint(
+                            `Failed to resolve library: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            '可检查网络连通性（context7.com），或稍后重试。'
+                        )
                     }],
                     isError: true
                 };
@@ -326,7 +391,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
     // 获取库文档（context7 融合）——按库 ID 获取官方文档片段与代码示例
     server.tool(
         "queryDocs",
-        "Retrieve up-to-date, version-specific documentation snippets and code examples for a library using a Context7 library ID (e.g. /vercel/next.js). Use resolveLibraryId first if unsure of the ID.",
+        "Get up-to-date, version-specific docs and code snippets for a Context7 library ID (e.g. /vercel/next.js).",
         {
             libraryId: z.string().min(1).describe("Exact Context7-compatible library ID (e.g. /vercel/next.js, /packages/express; optional version like /vercel/next.js@v15.1.8)"),
             query: z.string().min(1).describe("The question or task to get relevant documentation for (e.g. 'how to set up middleware with auth')"),
@@ -348,7 +413,10 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 return {
                     content: [{
                         type: 'text',
-                        text: `Failed to fetch docs: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        text: withErrorHint(
+                            `Failed to fetch docs: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            '可先用 resolveLibraryId 确认 libraryId 正确，或稍后重试。'
+                        )
                     }],
                     isError: true
                 };
