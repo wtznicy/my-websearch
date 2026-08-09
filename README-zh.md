@@ -24,13 +24,13 @@
 
 ```bash
 # 基本使用（默认 stdio 模式，供 MCP 客户端连接）
-npx open-websearch@latest
+npx open-websearch-wtznicy@latest
 ```
 
 ### 全局安装
 
 ```bash
-npm install -g open-websearch
+npm install -g open-websearch-wtznicy
 open-websearch
 ```
 
@@ -45,7 +45,7 @@ open-websearch
   "mcpServers": {
     "open-websearch": {
       "command": "npx",
-      "args": ["-y", "open-websearch@latest"],
+      "args": ["-y", "open-websearch-wtznicy@latest"],
       "env": {
         "MODE": "stdio",
         "DEFAULT_SEARCH_ENGINE": "duckduckgo"
@@ -95,7 +95,7 @@ open-websearch
   "mcpServers": {
     "open-websearch": {
       "command": "npx",
-      "args": ["-y", "open-websearch@latest"],
+      "args": ["-y", "open-websearch-wtznicy@latest"],
       "env": {
         "MODE": "stdio"
       }
@@ -111,7 +111,7 @@ open-websearch
   "mcpServers": {
     "open-websearch": {
       "command": "npx",
-      "args": ["-y", "open-websearch@latest"],
+      "args": ["-y", "open-websearch-wtznicy@latest"],
       "env": {
         "MODE": "stdio"
       }
@@ -152,13 +152,13 @@ open-websearch
 
 ```bash
 # 启用代理（网络受限地区）
-USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch@latest
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch-wtznicy@latest
 
 # 默认引擎改为 duckduckgo（更稳定，降低 Bing 反爬影响）
-DEFAULT_SEARCH_ENGINE=duckduckgo npx open-websearch@latest
+DEFAULT_SEARCH_ENGINE=duckduckgo npx open-websearch-wtznicy@latest
 
 # 关闭 Bing 的 Playwright 兜底，反爬时自动级联其他引擎
-BING_PLAYWRIGHT_FALLBACK=false npx open-websearch@latest
+BING_PLAYWRIGHT_FALLBACK=false npx open-websearch-wtznicy@latest
 ```
 
 ## 可选：Playwright 浏览器增强
@@ -168,14 +168,14 @@ Bing 的 `playwright` 模式（以及部分网站的 cookie/渲染兜底）需�
 ```bash
 npm install playwright
 npx playwright install chromium
-SEARCH_MODE=auto npx open-websearch@latest
+SEARCH_MODE=auto npx open-websearch-wtznicy@latest
 ```
 
 或者只装精简客户端、复用现有浏览器：
 
 ```bash
 npm install playwright-core
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium SEARCH_MODE=auto npx open-websearch@latest
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium SEARCH_MODE=auto npx open-websearch-wtznicy@latest
 ```
 
 **建议**：个人日常使用若不想为 Bing 反爬启动重浏览器（3-8 秒冷启动、约 400MB 内存），设置 `BING_PLAYWRIGHT_FALLBACK=false`，并在搜索时让引擎分担压力：`engines: ["duckduckgo", "brave"]`。

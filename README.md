@@ -66,7 +66,7 @@ Keep installation proxy settings separate from runtime proxy settings:
   - In restricted networks, npm-specific flags or npm config often work better than generic shell proxy variables, for example:
 
 ```bash
-npm --proxy http://127.0.0.1:7890 --https-proxy http://127.0.0.1:7890 install -g open-websearch
+npm --proxy http://127.0.0.1:7890 --https-proxy http://127.0.0.1:7890 install -g open-websearch-wtznicy
 ```
 
 - Runtime proxy
@@ -133,19 +133,19 @@ The fastest way to get started:
 
 ```bash
 # Basic usage
-npx open-websearch@latest
+npx open-websearch-wtznicy@latest
 
 # With environment variables (Linux/macOS)
-DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true npx open-websearch@latest
+DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true npx open-websearch-wtznicy@latest
 
 # Windows PowerShell
-$env:DEFAULT_SEARCH_ENGINE="duckduckgo"; $env:ENABLE_CORS="true"; npx open-websearch@latest
+$env:DEFAULT_SEARCH_ENGINE="duckduckgo"; $env:ENABLE_CORS="true"; npx open-websearch-wtznicy@latest
 
 # Windows CMD
-set MODE=stdio && set DEFAULT_SEARCH_ENGINE=duckduckgo && npx open-websearch@latest
+set MODE=stdio && set DEFAULT_SEARCH_ENGINE=duckduckgo && npx open-websearch-wtznicy@latest
 
 # Cross-platform (requires cross-env, Used for local development)
-npm install -g open-websearch
+npm install -g open-websearch-wtznicy
 npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 ```
 
@@ -181,19 +181,19 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 **Common configurations:**
 ```bash
 # Enable proxy for restricted regions
-USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch@latest
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch-wtznicy@latest
 
 # Only if a target website has a broken certificate chain
-FETCH_WEB_INSECURE_TLS=true npx open-websearch@latest
+FETCH_WEB_INSECURE_TLS=true npx open-websearch-wtznicy@latest
 
 # Request first, then fallback to Playwright if available
-SEARCH_MODE=auto npx open-websearch@latest
+SEARCH_MODE=auto npx open-websearch-wtznicy@latest
 
 # Force request-only Bing search
-SEARCH_MODE=request npx open-websearch@latest
+SEARCH_MODE=request npx open-websearch-wtznicy@latest
 
 # Full configuration
-DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch@latest
+DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch-wtznicy@latest
 ```
 
 Browser-enhanced Bing fallback is opt-in. The published package does not bundle Playwright anymore. Enable it manually with one of these setups:
@@ -202,24 +202,24 @@ Browser-enhanced Bing fallback is opt-in. The published package does not bundle 
 ```bash
 npm install playwright
 npx playwright install chromium
-SEARCH_MODE=auto npx open-websearch@latest
+SEARCH_MODE=auto npx open-websearch-wtznicy@latest
 ```
 
 2. Reuse an existing browser binary with a slim client:
 ```bash
 npm install playwright-core
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium SEARCH_MODE=auto npx open-websearch@latest
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium SEARCH_MODE=auto npx open-websearch-wtznicy@latest
 ```
 
 3. Reuse a Playwright package that already exists elsewhere on the machine:
 ```bash
-PLAYWRIGHT_MODULE_PATH=/absolute/path/to/node_modules/playwright SEARCH_MODE=playwright npx open-websearch@latest
+PLAYWRIGHT_MODULE_PATH=/absolute/path/to/node_modules/playwright SEARCH_MODE=playwright npx open-websearch-wtznicy@latest
 ```
 
 4. Connect to an existing remote browser:
 ```bash
 npm install playwright-core
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ SEARCH_MODE=auto npx open-websearch@latest
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ SEARCH_MODE=auto npx open-websearch-wtznicy@latest
 ```
 
 5. Reuse a local Chrome/Chromium session over CDP:
@@ -230,7 +230,7 @@ npm install playwright-core
 chrome --remote-debugging-port=9222 --user-data-dir=/tmp/open-websearch-chrome
 
 # Then connect through CDP
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_CDP_ENDPOINT=http://127.0.0.1:9222 SEARCH_MODE=auto npx open-websearch@latest
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_CDP_ENDPOINT=http://127.0.0.1:9222 SEARCH_MODE=auto npx open-websearch-wtznicy@latest
 ```
 This is the most practical setup when you want to reuse your own logged-in or previously verified browser session.
 
@@ -245,7 +245,7 @@ npm install playwright-core
 $env:PLAYWRIGHT_PACKAGE="playwright-core"
 $env:PLAYWRIGHT_CDP_ENDPOINT="http://127.0.0.1:9222"
 $env:SEARCH_MODE="auto"
-npx open-websearch@latest
+npx open-websearch-wtznicy@latest
 ```
 
 Mode behavior:
@@ -331,7 +331,7 @@ npm run build
   "mcpServers": {
     "web-search": {
       "args": [
-        "open-websearch@latest"
+        "open-websearch-wtznicy@latest"
       ],
       "command": "npx",
       "env": {
@@ -354,7 +354,7 @@ Windows NPX configuration:
         "/c",
         "npx",
         "-y",
-        "open-websearch@latest"
+        "open-websearch-wtznicy@latest"
       ],
       "env": {
         "MODE": "stdio",
