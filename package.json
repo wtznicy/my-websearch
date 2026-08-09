@@ -2,6 +2,24 @@
   "name": "open-websearch-wtznicy",
   "version": "2.1.11",
   "description": "web search the internet",
+  "license": "Apache-2.0",
+  "author": "wtznicy",
+  "repository": {
+    "type": "git",
+    "url": "https://gitee.com/wtznicy/open-websearch.git"
+  },
+  "homepage": "https://gitee.com/wtznicy/open-websearch",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "web-search",
+    "search",
+    "bing",
+    "duckduckgo",
+    "baidu",
+    "csdn",
+    "context7"
+  ],
   "type": "module",
   "bin": {
     "open-websearch": "build/index.js"
