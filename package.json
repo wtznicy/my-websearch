@@ -4,7 +4,7 @@
   "description": "web search the internet",
   "type": "module",
   "bin": {
-    "open-websearch": "./build/index.js"
+    "open-websearch": "build/index.js"
   },
   "files": [
     "build"
