@@ -2,12 +2,6 @@
 
 # Open-WebSearch
 
-[![ModelScope](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Aas-ee/3af09e0f4c7821fb2e9acb96483a5ff0/raw/badge.json&color=%23de5a16)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
-[![smithery badge](https://smithery.ai/badge/@Aas-ee/open-websearch)](https://smithery.ai/server/@Aas-ee/open-websearch)
-![Version](https://img.shields.io/github/v/release/Aas-ee/open-websearch)
-![License](https://img.shields.io/github/license/Aas-ee/open-websearch)
-![Issues](https://img.shields.io/github/issues/Aas-ee/open-websearch)
-
 **[🇨🇳 中文](./README-zh.md) | 🇺🇸 English**
 
 </div>
@@ -53,7 +47,7 @@
 Install the `open-websearch` skill for your agent first:
 
 ```bash
-npx skills add https://github.com/Aas-ee/open-webSearch --skill open-websearch
+npx skills add https://gitee.com/wtznicy/open-websearch --skill open-websearch
 ```
 
 On first use, the skill typically follows this path: detect whether a usable `open-websearch` path already exists, guide setup/enablement if it does not, validate that the capability is active, and only then continue with search or fetch through the smallest working path.
@@ -539,7 +533,7 @@ use_mcp_tool({
   server_name: "web-search",
   tool_name: "fetchGithubReadme",
   arguments: {
-    url: "https://github.com/Aas-ee/open-webSearch"
+    url: "https://gitee.com/wtznicy/open-websearch"
   }
 })
 ```
@@ -576,7 +570,7 @@ use_mcp_tool({
   server_name: "web-search",
   tool_name: "fetchWebContent",
   arguments: {
-    url: "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
+    url: "https://gitee.com/wtznicy/open-websearch/raw/main/README.md",
     maxChars: 12000
   }
 })
@@ -585,8 +579,8 @@ use_mcp_tool({
 Response example:
 ```json
 {
-  "url": "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
-  "finalUrl": "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
+  "url": "https://gitee.com/wtznicy/open-websearch/raw/main/README.md",
+  "finalUrl": "https://gitee.com/wtznicy/open-websearch/raw/main/README.md",
   "contentType": "text/plain; charset=utf-8",
   "title": "",
   "truncated": false,
@@ -764,3 +758,13 @@ use_mcp_tool({
 ```
 
 > **Note:** Both Context7 tools call the public REST API directly (no API key required at low rate limits). Set `CONTEXT7_API_KEY` for higher rate limits.
+
+## Author & Acknowledgements
+
+**Author: wtznicy**
+
+This project is a modified fork of **Open-WebSearch** (originally by Aas-ee) — thanks to the original author for the great work.
+
+Thanks also to these open-source projects:
+- **context7** (Upstash): powers the `resolveLibraryId` / `queryDocs` library-docs lookup
+- **fetch** (official MCP servers): reference for the `fetchWebContent` web-fetching design

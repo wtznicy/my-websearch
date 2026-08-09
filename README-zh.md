@@ -2,12 +2,6 @@
 
 # Open-WebSearch
 
-[![ModelScope](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Aas-ee/3af09e0f4c7821fb2e9acb96483a5ff0/raw/badge.json&color=%23de5a16)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
-[![smithery badge](https://smithery.ai/badge/@Aas-ee/open-websearch)](https://smithery.ai/server/@Aas-ee/open-websearch)
-![Version](https://img.shields.io/github/v/release/Aas-ee/open-websearch)
-![License](https://img.shields.io/github/license/Aas-ee/open-websearch)
-![Issues](https://img.shields.io/github/issues/Aas-ee/open-websearch)
-
 **中文 | [English](./README.md)**
 
 </div>
@@ -252,7 +246,7 @@ MCP 共提供 7 个工具：
 
 ```json
 {
-  "url": "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
+  "url": "https://gitee.com/wtznicy/open-websearch/raw/main/README.md",
   "maxChars": 12000
 }
 ```
@@ -267,6 +261,15 @@ MCP 共提供 7 个工具：
 
 ## 相关链接
 
-- GitHub 上游：https://github.com/Aas-ee/open-webSearch
 - HTTP API 文档：[docs/http-api.md](docs/http-api.md)
 - 使用 skill 与 agent 工作流：仓库内 `skills/open-websearch/` 提供 `open-websearch` skill（`npx skills add` 安装），可引导 agent 执行搜索、抓取与多步分析
+
+## 作者与致谢
+
+**作者：wtznicy**
+
+本项目基于 **Open-WebSearch**（原作者 Aas-ee）修改而来，感谢原作者的出色工作。
+
+同时感谢以下开源项目：
+- **context7**（Upstash）：为 `resolveLibraryId` / `queryDocs` 提供库/框架官方文档检索能力
+- **fetch**（MCP 官方 servers）：为 `fetchWebContent` 的网页抓取设计提供参考
