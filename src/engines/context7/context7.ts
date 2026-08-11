@@ -54,6 +54,44 @@ export type Context7SearchResult = {
     results: Context7Library[];
 };
 
+
+// 上游 context7 API 可能不返回页面标题（值为 "Unknown" 或缺失），
+// 此时用 codeId（GitHub 原文链接）的最后一段文件名作为 fallback 标题；
+// 若 URL 也提取不出，则省略 pageTitle 字段，避免输出无意义噪音。
+export type Context7RawCodeSnippet = Context7CodeSnippet & {
+    pageTitle?: string;
+    codeId?: string;
+};
+
+export function extractTitleFromCodeId(codeId: string | undefined): string | undefined {
+    if (!codeId) {
+        return undefined;
+    }
+    try {
+        const last = codeId.split('/').filter(Boolean).pop();
+        if (!last) {
+            return undefined;
+        }
+        const name = last.replace(/\.[a-z0-9]+$/i, '').replace(/[-_]+/g, ' ').trim();
+        return name || undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
+
+export function normalizeCodeSnippetPageTitle(snippet: Context7RawCodeSnippet): Context7RawCodeSnippet {
+    const { pageTitle, ...rest } = snippet;
+    if (pageTitle && pageTitle !== 'Unknown') {
+        return snippet;
+    }
+    const fallback = extractTitleFromCodeId(snippet.codeId);
+    if (fallback) {
+        return { ...rest, pageTitle: fallback };
+    }
+    // 提取不到：省略 pageTitle 字段
+    return rest;
+}
 export type Context7DocsResult = {
     libraryId: string;
     query: string;
@@ -156,7 +194,7 @@ export async function fetchContext7Docs(
     return {
         libraryId: cleanLibraryId,
         query: cleanQuery,
-        codeSnippets: (data.codeSnippets ?? []).slice(0, limit),
+        codeSnippets: (data.codeSnippets ?? []).slice(0, limit).map((snippet) => normalizeCodeSnippetPageTitle(snippet as Context7RawCodeSnippet)),
         infoSnippets: (data.infoSnippets ?? []).slice(0, limit),
         ...(data.redirectUrl ? { redirectUrl: data.redirectUrl } : {})
     };

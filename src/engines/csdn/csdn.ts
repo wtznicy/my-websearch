@@ -8,7 +8,7 @@ export async function searchCsdn(query: string, limit: number): Promise<SearchRe
     let pn = 1;
 
     while (allResults.length < limit) {
-        const response = await axios.get('https://so.csdn.net/api/v3/search', buildAxiosRequestOptions({
+        const response = await axios.get('https://so.csdn.net/api/v3/search', buildAxiosRequestOptions({ engine: 'csdn',
             trustedStaticHost: true,
             params: {
                 q: query,

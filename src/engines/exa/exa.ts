@@ -14,7 +14,7 @@ interface ExaResult {
 // exa.ai 官方搜索 API（需 EXA_API_KEY）。官方文档: https://docs.exa.ai/reference/search
 // 响应示例: { "results": [{ "id": "...", "url": "...", "title": "...", "publishedDate": "...", "author": "...", "text": "...", "score": 0.99 }] }
 async function searchExaOfficial(query: string, limit: number, apiKey: string): Promise<SearchResult[]> {
-    const requestOptions = buildAxiosRequestOptions({
+    const requestOptions = buildAxiosRequestOptions({ engine: 'exa',
         trustedStaticHost: true,
         headers: {
             "x-api-key": apiKey,
@@ -61,7 +61,7 @@ async function searchExaOfficial(query: string, limit: number, apiKey: string): 
 // 注意：上游 exa.ai 前端重构后该端点可能返回 HTML/失效（2026-08 实测已失效），
 // 无 key 场景大概率拿不到结果——仅作为尽力而为的 fallback。
 async function searchExaLegacy(query: string, limit: number): Promise<SearchResult[]> {
-    const requestOptions = buildAxiosRequestOptions({
+    const requestOptions = buildAxiosRequestOptions({ engine: 'exa',
         trustedStaticHost: true,
         headers: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",

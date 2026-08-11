@@ -112,7 +112,7 @@ async function fetchSogouHtml(initialUrl: string): Promise<string> {
     let cookieHeader = '';
 
     for (let redirects = 0; redirects <= 5; redirects += 1) {
-        const response = await sogouHttpGet(currentUrl, buildAxiosRequestOptions({
+        const response = await sogouHttpGet(currentUrl, buildAxiosRequestOptions({ engine: 'sogou',
             trustedStaticHost: true,
             headers: {
                 ...COMMON_HEADERS,

@@ -19,7 +19,7 @@ async function resolveBaiduRedirectUrl(linkUrl: string): Promise<string> {
     }
 
     try {
-        const response = await axios.head(linkUrl, buildAxiosRequestOptions({
+        const response = await axios.head(linkUrl, buildAxiosRequestOptions({ engine: 'baidu',
             trustedStaticHost: true,
             headers: {
                 'User-Agent': BAIDU_USER_AGENT
@@ -50,7 +50,7 @@ export async function searchBaidu(query: string, limit: number): Promise<SearchR
     let pn = 0;
 
     while (allResults.length < limit) {
-        const response = await axios.get('https://www.baidu.com/s', buildAxiosRequestOptions({
+        const response = await axios.get('https://www.baidu.com/s', buildAxiosRequestOptions({ engine: 'baidu',
             trustedStaticHost: true,
             params: {
                 wd: query,

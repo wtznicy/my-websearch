@@ -6,7 +6,7 @@ import {
     RequestFilteringHttpAgent,
     RequestFilteringHttpsAgent
 } from 'request-filtering-agent';
-import { config, getProxyUrl } from '../config.js';
+import { config, getProxyUrl, engineShouldUseProxy } from '../config.js';
 import { assertPublicHttpUrlResolved, isPrivateOrLocalHostname } from './urlSafety.js';
 
 // 默认请求超时：调用方未显式传 timeout 时使用，避免引擎请求永不超时拖垮整个搜索。
@@ -14,6 +14,9 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 
 type BuildAxiosRequestOptions = {
     allowInsecureTls?: boolean;
+    // 搜索引擎名（如 'bing'/'baidu'）。传入后按 PROXY_ENGINES 白名单决定是否挂代理；
+    // 不传（undefined）则跟随全局 USE_PROXY 开关（旧行为）。
+    engine?: string;
     decompress?: boolean;
     headers?: RawAxiosRequestHeaders;
     maxBodyLength?: number;
@@ -92,6 +95,7 @@ function getInsecureTrustedStaticHttpsAgent(): https.Agent {
 export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {}): AxiosRequestConfig {
     const {
         allowInsecureTls = false,
+        engine,
         decompress,
         headers,
         maxBodyLength,
@@ -147,7 +151,9 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         }
     };
 
-    const effectiveProxyUrl = getProxyUrl();
+    const effectiveProxyUrl = engine !== undefined
+        ? (engineShouldUseProxy(engine) ? getProxyUrl() : undefined)
+        : getProxyUrl();
     if (effectiveProxyUrl) {
         const proxyAgent = getProxyAgent(effectiveProxyUrl, allowInsecureTls);
         requestOptions.httpAgent = proxyAgent;

@@ -17,6 +17,9 @@ export interface AppConfig {
     // Proxy configuration
     proxyUrl?: string;
     useProxy: boolean;
+    // Engines that route through the proxy when USE_PROXY=true (comma-separated in PROXY_ENGINES).
+    // Empty list = all engines use proxy (legacy global-proxy behavior).
+    proxyEngines: string[];
     fakeIpCidrs: string[];
     fetchWebAllowInsecureTls: boolean;
     // Playwright configuration
@@ -52,6 +55,9 @@ export const config: AppConfig = {
     // Proxy configuration
     proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:7890',
     useProxy: process.env.USE_PROXY === 'true',
+    proxyEngines: process.env.PROXY_ENGINES ?
+        process.env.PROXY_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
+        [],
     fakeIpCidrs: process.env.FAKE_IP_CIDRS ?
         process.env.FAKE_IP_CIDRS.split(',').map(cidr => cidr.trim()).filter(Boolean) :
         [],
@@ -210,4 +216,16 @@ if (!quietStartupLogs) {
  */
 export function getProxyUrl(): string | undefined {
     return config.useProxy ? encodeURI(<string>config.proxyUrl) : undefined;
+}
+
+// 判断某个引擎是否应走代理：USE_PROXY=true 时，若 PROXY_ENGINES 白名单为空则全部走代理（兼容旧全局行为），
+// 否则仅白名单内的引擎走代理（国内引擎如 bing/baidu 保持直连，避免绕行国外节点导致超时/重定向）。
+export function engineShouldUseProxy(engine: string): boolean {
+    if (!config.useProxy) {
+        return false;
+    }
+    if (config.proxyEngines.length === 0) {
+        return true;
+    }
+    return config.proxyEngines.includes(engine);
 }

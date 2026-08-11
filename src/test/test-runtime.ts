@@ -16,6 +16,7 @@ function createTestConfig(): AppConfig {
         bingPlaywrightFallback: true,
         proxyUrl: 'http://127.0.0.1:7890',
         useProxy: false,
+        proxyEngines: [],
         fakeIpCidrs: [],
         fetchWebAllowInsecureTls: false,
         playwrightPackage: 'auto',

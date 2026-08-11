@@ -173,7 +173,7 @@ function analyzeBlockedPage(html: string): { blocked: boolean; hasResults: boole
 }
 
 function buildBingAxiosRequestOptions(): any {
-    return buildSharedAxiosRequestOptions({
+    return buildSharedAxiosRequestOptions({ engine: 'bing',
         trustedStaticHost: true,
         headers: buildBingAntiDetectionHeaders(),
         timeout: config.playwrightNavigationTimeoutMs

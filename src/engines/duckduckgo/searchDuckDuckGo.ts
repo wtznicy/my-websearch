@@ -47,7 +47,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
 
     try {
       // Configure request options
-      const requestOptions = buildAxiosRequestOptions({
+      const requestOptions = buildAxiosRequestOptions({ engine: 'duckduckgo',
         trustedStaticHost: true,
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
@@ -206,7 +206,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
   let pageCount = 0;
 
     // Configure request options
-    const requestOptions = buildAxiosRequestOptions({
+    const requestOptions = buildAxiosRequestOptions({ engine: 'duckduckgo',
     trustedStaticHost: true,
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',

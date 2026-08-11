@@ -56,6 +56,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         bingPlaywrightFallback: true,
         proxyUrl: '',
         useProxy: false,
+        proxyEngines: [],
         fakeIpCidrs: [],
         fetchWebAllowInsecureTls: false,
         playwrightPackage: 'auto',

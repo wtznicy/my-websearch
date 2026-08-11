@@ -44,7 +44,7 @@ export async function searchJuejin(query: string, limit: number): Promise<Search
         while (allResults.length < limit) {
             console.error(`🔍 Searching Juejin with query: "${query}", cursor: ${cursor}`);
 
-            const response = await axios.get<JuejinSearchResponse>('https://api.juejin.cn/search_api/v1/search', buildAxiosRequestOptions({
+            const response = await axios.get<JuejinSearchResponse>('https://api.juejin.cn/search_api/v1/search', buildAxiosRequestOptions({ engine: 'juejin',
                 trustedStaticHost: true,
                 params: {
                     aid: '2608',
