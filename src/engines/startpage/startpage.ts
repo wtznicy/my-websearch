@@ -14,6 +14,7 @@ const COMMON_HEADERS = {
 };
 
 let cachedScCode: string | undefined;
+let cachedCookies: string | undefined;
 let cachedScAt = 0;
 
 function isCaptchaPage(html: string): boolean {
@@ -71,37 +72,72 @@ function extractInterstitialPayload(html: string): Record<string, string> | unde
     }
 }
 
+// startpage 自 2025 年起部署 Anubis 反爬（proof-of-work + JS 执行，专防 AI/LLM 爬虫），
+// 纯 HTTP 请求无法获取搜索 token（返回 "Verifying your request..." 或 "Startpage Blocked"）。
+// 实测 headless 模式会被 startpage 直接屏蔽（返回 captcha-block 页 "Startpage Blocked"），
+// 只有 headed/hidden-headed（隐藏有头）模式能完成 Anubis 挑战拿到搜索表单。
+// 方案：用 Playwright hidden-headed 模式打开首页完成 Anubis 挑战，
+// 提取放行 cookie（spchal-auth 等）+ sc token 并缓存复用；cookie 失效时重新预热。
+async function warmupStartpageSession(): Promise<void> {
+    let session: { browser: any; release(): Promise<void> } | undefined;
+    let releasePage: (() => Promise<void>) | undefined;
+    try {
+        const { openPlaywrightBrowser, acquirePooledPlaywrightPage } = await import('../../utils/playwrightClient.js');
+        const { prepareStealthPage } = await import('../../utils/browserStealth.js');
+
+        // 复用项目统一的 Playwright 基础设施（openPlaywrightBrowser + 页面池 + stealth 反检测），
+        // 自动处理：浏览器路径/WS/CDP 端点、按引擎代理、指纹伪装。
+        // 注意：playwright 1.62+ 已移除 page.setUserAgent，需通过 contextOptions.userAgent 设置。
+        // startpage 会屏蔽 headless 浏览器，必须用 hidden-headed（隐藏有头）模式打开。
+        session = await openPlaywrightBrowser(false, [], { hideWindow: true });
+        const pooled = await acquirePooledPlaywrightPage(session.browser, {
+            poolKey: 'startpage-warmup',
+            contextOptions: {
+                userAgent: COMMON_HEADERS['User-Agent'],
+                locale: 'en-US',
+                viewport: { width: 1920, height: 1080 }
+            },
+            preparePage: prepareStealthPage
+        });
+        releasePage = pooled.releasePage;
+        const page = pooled.page;
+        await page.goto(`${STARTPAGE_BASE_URL}/`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        // 等待 Anubis PoW 完成：搜索表单出现即放行
+        await page.waitForSelector('form[action="/sp/search"]', { timeout: 30000 });
+        const scCode = await page.locator('form[action="/sp/search"] input[name="sc"]').first()
+            .getAttribute('value')
+            .catch(() => null);
+        if (!scCode) {
+            throw new Error('Failed to extract Startpage search token after Anubis challenge');
+        }
+        const cookies = await page.context().cookies(STARTPAGE_BASE_URL);
+        const cookieStr = cookies.map((cookie: { name: string; value: string }) => `${cookie.name}=${cookie.value}`).join('; ');
+        if (!cookieStr) {
+            throw new Error('Failed to extract Startpage session cookies after Anubis challenge');
+        }
+        cachedScCode = scCode;
+        cachedCookies = cookieStr;
+        cachedScAt = Date.now();
+    } finally {
+        if (releasePage) {
+            await releasePage().catch(() => undefined);
+        }
+        if (session) {
+            await session.release().catch(() => undefined);
+        }
+    }
+}
+
 async function getScCode(): Promise<string> {
     const now = Date.now();
     if (cachedScCode && now - cachedScAt < STARTPAGE_SC_TTL_MS) {
         return cachedScCode;
     }
-
-    const response = await axios.get(
-        `${STARTPAGE_BASE_URL}/`,
-        buildAxiosRequestOptions({ engine: 'startpage',
-            trustedStaticHost: true,
-            headers: {
-                ...COMMON_HEADERS,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-            },
-            timeout: 15000
-        })
-    );
-
-    const html = String(response.data || '');
-    if (isCaptchaPage(html)) {
-        throw new Error('Startpage returned a verification or anti-bot page while requesting the search token');
-    }
-
-    const scCode = extractScCode(html);
-    if (!scCode) {
+    await warmupStartpageSession();
+    if (!cachedScCode) {
         throw new Error('Failed to extract Startpage search token');
     }
-
-    cachedScCode = scCode;
-    cachedScAt = now;
-    return scCode;
+    return cachedScCode;
 }
 
 function extractResultsFromHtml(html: string): SearchResult[] {
@@ -170,7 +206,8 @@ async function searchStartpagePage(query: string, page: number): Promise<SearchR
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Origin': STARTPAGE_BASE_URL,
-                'Referer': `${STARTPAGE_BASE_URL}/`
+                'Referer': `${STARTPAGE_BASE_URL}/`,
+                ...(cachedCookies ? { 'Cookie': cachedCookies } : {})
             },
             timeout: 20000
         })
@@ -189,7 +226,8 @@ async function searchStartpagePage(query: string, page: number): Promise<SearchR
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'Origin': STARTPAGE_BASE_URL,
-                    'Referer': STARTPAGE_SEARCH_URL
+                    'Referer': STARTPAGE_SEARCH_URL,
+                    ...(cachedCookies ? { 'Cookie': cachedCookies } : {})
                 },
                 timeout: 20000
             })
