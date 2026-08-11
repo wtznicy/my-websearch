@@ -12,15 +12,8 @@
 ## Features
 
 - Web search using multi-engine results
-    - bing
-    - baidu
-    - csdn
-    - duckduckgo
-    - exa
-    - brave
-    - juejin
-    - startpage
-    - sogou
+    - Domestic engines (no proxy needed): bing, baidu, csdn, juejin, sogou
+    - Overseas engines (⚠️ **proxy required in mainland China**): duckduckgo, exa, brave, startpage
 - HTTP proxy configuration support for accessing restricted resources
 - No API keys or authentication required
 - Returns structured results with titles, URLs, and descriptions
@@ -158,6 +151,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true open-websearch
 | `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
+| `PROXY_ENGINES` | empty (all engines) | Comma-separated engine names | With `USE_PROXY=true`, **only** the engines in this whitelist route through the proxy; others stay direct. Empty = all engines proxied (legacy global behavior). Recommended for mainland China: `PROXY_ENGINES=duckduckgo,exa,brave,startpage` (overseas engines via proxy, domestic engines direct) |
 | `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
 | `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | Disable TLS certificate verification for `fetchWebContent` only. Use only when a target site has a broken certificate chain |
 | `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
@@ -195,6 +189,18 @@ SEARCH_MODE=request npx open-websearch-wtznicy@latest
 # Full configuration
 DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch-wtznicy@latest
 ```
+
+**Proxy guidance for mainland China:**
+
+`duckduckgo`, `exa`, `brave`, and `startpage` are overseas engines and **cannot be reached without a proxy from mainland China** — they will time out or return errors. Domestic engines (`bing`, `baidu`, `csdn`, `juejin`, `sogou`) work without a proxy.
+
+Use `PROXY_ENGINES` to keep domestic engines on a fast direct connection while routing only the overseas engines through the proxy (avoiding the redirects/timeouts that a global proxy causes for Chinese engines):
+
+```bash
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brave,startpage npx open-websearch-wtznicy@latest
+```
+
+If a search includes overseas engines but the proxy is off, those engines will fail with `partialFailures` entries (the rest of the results still return) — that is expected behavior.
 
 Browser-enhanced Bing fallback is opt-in. The published package does not bundle Playwright anymore. Enable it manually with one of these setups:
 
@@ -404,7 +410,7 @@ For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`,
 {
   "query": string,        // Search query
   "limit": number,        // Optional: Number of results to return (default: 10)
-  "engines": string[],    // Optional: Engines to use (bing,baidu,csdn,duckduckgo,exa,brave,juejin,startpage,sogou) default runtime-configured engine
+  "engines": string[],    // Optional: Engines to use (bing,baidu,csdn,duckduckgo,exa,brave,juejin,startpage,sogou) default runtime-configured engine. Note: duckduckgo/exa/brave/startpage need a proxy from mainland China (see PROXY_ENGINES)
   "searchMode": string    // Optional: request, auto, or playwright (currently only affects Bing)
 }
 ```
@@ -593,12 +599,14 @@ Since this tool works by scraping multi-engine search results, please note the f
 4. **Search Engine Configuration**:
    - Default search engine can be set via the `DEFAULT_SEARCH_ENGINE` environment variable
    - Supported engines: bing, duckduckgo, exa, brave, baidu, csdn, juejin, startpage, sogou
+   - Overseas engines (duckduckgo, exa, brave, startpage) require a proxy from mainland China (see `PROXY_ENGINES`); domestic engines (bing, baidu, csdn, juejin, sogou) work direct
    - The default engine is used when searching specific websites
 
 5. **Proxy Configuration**:
    - HTTP proxy can be configured when certain search engines are unavailable in specific regions
    - Enable proxy with environment variable `USE_PROXY=true`
    - Configure proxy server address with `PROXY_URL`
+   - With `USE_PROXY=true`, `PROXY_ENGINES` (comma-separated whitelist) limits which engines route through the proxy; empty = all engines proxied. Overseas engines (`duckduckgo`, `exa`, `brave`, `startpage`) require a proxy from mainland China, while domestic engines stay direct — recommended: `PROXY_ENGINES=duckduckgo,exa,brave,startpage`
    - For Clash fake-ip / TUN setups, configure synthetic DNS ranges with `FAKE_IP_CIDRS` (for example `198.18.0.0/15`)
 
 ## Contributing

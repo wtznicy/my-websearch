@@ -10,8 +10,10 @@
 
 ## 功能特性
 
-- 多引擎搜索：`bing`、`baidu`、`csdn`、`duckduckgo`、`exa`、`brave`、`juejin`、`startpage`、`sogou`
-- 支持 HTTP 代理，无 API Key、无需注册
+- 多引擎搜索：
+  - 国内引擎（直连即可）：`bing`、`baidu`、`csdn`、`juejin`、`sogou`
+  - 境外引擎（⚠️ **中国大陆用户需开启代理**）：`duckduckgo`、`exa`、`brave`、`startpage`
+- 支持 HTTP 代理（按引擎白名单路由，`PROXY_ENGINES`），无 API Key、无需注册
 - 跨引擎结果去重融合 + TTL 缓存（5 分钟，可手动清空）
 - `minResults` 级联：某引擎失败时自动用其他引擎补足结果数
 - 正文抓取：CSDN 文章、掘金文章、GitHub README、任意 HTTP(S) 网页 / Markdown
@@ -132,6 +134,7 @@ open-websearch
 | `CORS_ORIGIN` | `*` | 任意来源 | CORS 来源配置 |
 | `USE_PROXY` | `false` | `true`, `false` | 启用 HTTP 代理 |
 | `PROXY_URL` | `http://127.0.0.1:7890` | 任意有效 URL | 代理服务器 URL |
+| `PROXY_ENGINES` | 空（全部引擎） | 逗号分隔的引擎名 | `USE_PROXY=true` 时**仅白名单内的引擎走代理**，其余直连；空 = 全部引擎走代理（旧全局行为）。中国大陆用户推荐：`PROXY_ENGINES=duckduckgo,exa,brave,startpage`（境外引擎走代理、国内引擎直连，避免国内引擎绕行代理导致超时/301） |
 | `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点证书异常时临时用） |
 | `MODE` | `both` | `both`, `http`, `stdio` | 服务器模式：HTTP+STDIO / 仅 HTTP / 仅 STDIO |
 | `PORT` | `3211` | 1-65535 | HTTP 模式端口（CLI daemon 默认 3210） |
@@ -153,6 +156,9 @@ open-websearch
 ```bash
 # 启用代理（网络受限地区）
 USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch-wtznicy@latest
+
+# 按引擎代理（推荐，中国大陆）：仅境外引擎走代理，国内引擎直连
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brave,startpage npx open-websearch-wtznicy@latest
 
 # 默认引擎使用 bing
 DEFAULT_SEARCH_ENGINE=bing npx open-websearch-wtznicy@latest
@@ -244,6 +250,7 @@ MCP 共提供 7 个工具：
 
 ## 使用限制
 
+- **中国大陆网络**：`duckduckgo`、`exa`、`brave`、`startpage` 为境外引擎，**不开代理会直接超时/失败**；`bing`、`baidu`、`csdn`、`juejin`、`sogou` 可直连。建议配置 `USE_PROXY=true` + `PROXY_ENGINES=duckduckgo,exa,brave,startpage`，让境外引擎走代理、国内引擎保持直连。若搜索时未开代理而包含境外引擎，它们会以 `partialFailures` 形式报错，其余结果仍正常返回——属预期行为
 - 搜索引擎为免费接口，可能遇到反爬/限流；Bing 最常见。应对：多引擎分担（`engines`）、`minResults` 级联、`BING_PLAYWRIGHT_FALLBACK=false`、或设置代理
 - 依赖浏览器 cookie / JS 渲染的页面，需安装 Playwright 才能兜底抓取
 - 国内网络下 GitHub 相关域名可能无法直接解析，可用 `fetchWebContent` + jsDelivr 镜像（`https://cdn.jsdelivr.net/gh/<owner>/<repo>@<branch>/README.md`）
