@@ -136,17 +136,17 @@ The fastest way to get started:
 npx open-websearch-wtznicy@latest
 
 # With environment variables (Linux/macOS)
-DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true npx open-websearch-wtznicy@latest
+DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true npx open-websearch-wtznicy@latest
 
 # Windows PowerShell
-$env:DEFAULT_SEARCH_ENGINE="duckduckgo"; $env:ENABLE_CORS="true"; npx open-websearch-wtznicy@latest
+$env:DEFAULT_SEARCH_ENGINE="bing"; $env:ENABLE_CORS="true"; npx open-websearch-wtznicy@latest
 
 # Windows CMD
-set MODE=stdio && set DEFAULT_SEARCH_ENGINE=duckduckgo && npx open-websearch-wtznicy@latest
+set MODE=stdio && set DEFAULT_SEARCH_ENGINE=bing && npx open-websearch-wtznicy@latest
 
 # Cross-platform (requires cross-env, Used for local development)
 npm install -g open-websearch-wtznicy
-npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
+npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true open-websearch
 ```
 
 **Environment Variables:**
@@ -193,7 +193,7 @@ SEARCH_MODE=auto npx open-websearch-wtznicy@latest
 SEARCH_MODE=request npx open-websearch-wtznicy@latest
 
 # Full configuration
-DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch-wtznicy@latest
+DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch-wtznicy@latest
 ```
 
 Browser-enhanced Bing fallback is opt-in. The published package does not bundle Playwright anymore. Enable it manually with one of these setups:
@@ -336,8 +336,8 @@ npm run build
       "command": "npx",
       "env": {
         "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "duckduckgo",
-        "ALLOWED_SEARCH_ENGINES": "duckduckgo,bing,exa"
+        "DEFAULT_SEARCH_ENGINE": "bing",
+        "ALLOWED_SEARCH_ENGINES": "bing,duckduckgo,exa"
       }
     }
   }
@@ -358,7 +358,7 @@ Windows NPX configuration:
       ],
       "env": {
         "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "duckduckgo",
+        "DEFAULT_SEARCH_ENGINE": "bing",
         "SYSTEMROOT": "C:/Windows"
       }
     }
@@ -384,8 +384,8 @@ Proxy and TLS notes:
       "args": ["C:/path/to/your/project/build/index.js"],
       "env": {
         "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "duckduckgo",
-        "ALLOWED_SEARCH_ENGINES": "duckduckgo,bing,exa"
+        "DEFAULT_SEARCH_ENGINE": "bing",
+        "ALLOWED_SEARCH_ENGINES": "bing,duckduckgo,exa"
       }
     }
   }

@@ -48,7 +48,7 @@ open-websearch
       "args": ["-y", "open-websearch-wtznicy@latest"],
       "env": {
         "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "duckduckgo"
+        "DEFAULT_SEARCH_ENGINE": "bing"
       }
     }
   }
@@ -65,7 +65,7 @@ open-websearch
       "args": ["C:/你的路径/open-websearch/build/index.js"],
       "env": {
         "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "duckduckgo"
+        "DEFAULT_SEARCH_ENGINE": "bing"
       }
     }
   }
@@ -154,8 +154,8 @@ open-websearch
 # 启用代理（网络受限地区）
 USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch-wtznicy@latest
 
-# 默认引擎改为 duckduckgo（更稳定，降低 Bing 反爬影响）
-DEFAULT_SEARCH_ENGINE=duckduckgo npx open-websearch-wtznicy@latest
+# 默认引擎使用 bing
+DEFAULT_SEARCH_ENGINE=bing npx open-websearch-wtznicy@latest
 
 # 关闭 Bing 的 Playwright 兜底，反爬时自动级联其他引擎
 BING_PLAYWRIGHT_FALLBACK=false npx open-websearch-wtznicy@latest
