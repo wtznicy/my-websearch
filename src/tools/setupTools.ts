@@ -358,7 +358,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         "Resolve a library/package name to a Context7 library ID (e.g. /vercel/next.js) for docs queries.",
         {
             libraryName: z.string().min(1).describe("The library or package name to search for (e.g. 'Next.js', 'express', 'prisma')"),
-            query: z.string().min(1).describe("The user's question or task, used to rank results by relevance (e.g. 'how to implement authentication')"),
+            query: z.string().min(1).optional().describe("The user's question or task, used to rank results by relevance (optional; defaults to the library name when omitted, e.g. 'how to implement authentication')"),
             limit: z.number().int().min(1).max(10).optional().describe("Maximum number of library matches to return (default 5)")
         },
         async ({libraryName, query, limit}) => {
@@ -394,7 +394,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         "Get up-to-date, version-specific docs and code snippets for a Context7 library ID (e.g. /vercel/next.js).",
         {
             libraryId: z.string().min(1).describe("Exact Context7-compatible library ID (e.g. /vercel/next.js, /packages/express; optional version like /vercel/next.js@v15.1.8)"),
-            query: z.string().min(1).describe("The question or task to get relevant documentation for (e.g. 'how to set up middleware with auth')"),
+            query: z.string().min(1).optional().describe("The question or task to get relevant documentation for (optional; defaults to an overview when omitted, e.g. 'how to set up middleware with auth')"),
             limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets to return (default 5)")
         },
         async ({libraryId, query, limit}) => {

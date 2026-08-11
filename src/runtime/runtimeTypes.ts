@@ -31,7 +31,7 @@ export type FetchWebService = {
 };
 
 export type Context7LibrariesService = {
-    execute(input: { libraryName: string; query: string; limit?: number }): Promise<{
+    execute(input: { libraryName: string; query?: string; limit?: number }): Promise<{
         query: string;
         libraryName: string;
         results: Context7Library[];
@@ -39,7 +39,7 @@ export type Context7LibrariesService = {
 };
 
 export type Context7DocsService = {
-    execute(input: { libraryId: string; query: string; limit?: number }): Promise<Context7DocsResult>;
+    execute(input: { libraryId: string; query?: string; limit?: number }): Promise<Context7DocsResult>;
 };
 
 export type OpenWebSearchRuntimeServices = {

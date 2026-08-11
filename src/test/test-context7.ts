@@ -43,10 +43,28 @@ async function testFetchDocsInvalidId(): Promise<void> {
     console.log('✅ fetchContext7Docs rejects invalid library id');
 }
 
+async function testSearchLibrariesWithoutQuery(): Promise<void> {
+    // query 可选：只传 libraryName 也应成功（query 兜底为 libraryName）
+    const result = await searchContext7Libraries('express', undefined, 3);
+    assert(result.results.length > 0, 'should return at least one library without query');
+    assert(result.query === '', 'query echo should be empty string when omitted');
+    console.log(`✅ searchContext7Libraries without query (${result.results.length} matches, top: ${result.results[0]?.id})`);
+}
+
+async function testFetchDocsWithoutQuery(): Promise<void> {
+    // query 可选：只传 libraryId 也应成功（query 兜底为 overview）
+    const result = await fetchContext7Docs('/vercel/next.js', undefined, 2);
+    assert(Array.isArray(result.codeSnippets), 'should return codeSnippets without query');
+    assert(result.query === '', 'query echo should be empty string when omitted');
+    console.log(`✅ fetchContext7Docs without query (${result.codeSnippets.length} code snippets)`);
+}
+
 async function main(): Promise<void> {
     await testSearchLibraries();
     await testFetchDocs();
     await testFetchDocsInvalidId();
+    await testSearchLibrariesWithoutQuery();
+    await testFetchDocsWithoutQuery();
     console.log('\nContext7 integration tests passed.');
 }
 

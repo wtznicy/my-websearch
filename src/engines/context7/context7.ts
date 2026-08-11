@@ -93,26 +93,27 @@ function context7RequestOptions(): any {
  */
 export async function searchContext7Libraries(
     libraryName: string,
-    query: string,
+    query: string | undefined,
     limit: number = 5
 ): Promise<Context7SearchResult> {
     const cleanLibraryName = libraryName.trim();
     if (!cleanLibraryName) {
         throw new Error('Library name cannot be empty');
     }
+    const cleanQuery = (query ?? '').trim();
 
     const url = `${CONTEXT7_BASE_URL}/api/${CONTEXT7_API_VERSION}/libs/search`;
     const response = await axios.get(url, {
         ...context7RequestOptions(),
         params: {
             libraryName: cleanLibraryName,
-            query: query.trim() || cleanLibraryName
+            query: cleanQuery || cleanLibraryName
         }
     });
 
     const data = response.data as { results?: Context7Library[] };
     return {
-        query: query.trim(),
+        query: cleanQuery,
         libraryName: cleanLibraryName,
         results: (data.results ?? []).slice(0, limit)
     };
@@ -124,7 +125,7 @@ export async function searchContext7Libraries(
  */
 export async function fetchContext7Docs(
     libraryId: string,
-    query: string,
+    query: string | undefined,
     limit: number = 5
 ): Promise<Context7DocsResult> {
     const cleanLibraryId = libraryId.trim();
@@ -134,13 +135,14 @@ export async function fetchContext7Docs(
     if (!cleanLibraryId.startsWith('/')) {
         throw new Error('Library ID must start with "/" (e.g. /vercel/next.js)');
     }
+    const cleanQuery = (query ?? '').trim();
 
     const url = `${CONTEXT7_BASE_URL}/api/${CONTEXT7_API_VERSION}/context`;
     const response = await axios.get(url, {
         ...context7RequestOptions(),
         params: {
             libraryId: cleanLibraryId,
-            query: query.trim() || 'overview',
+            query: cleanQuery || 'overview',
             type: 'json'
         }
     });
@@ -153,7 +155,7 @@ export async function fetchContext7Docs(
 
     return {
         libraryId: cleanLibraryId,
-        query: query.trim(),
+        query: cleanQuery,
         codeSnippets: (data.codeSnippets ?? []).slice(0, limit),
         infoSnippets: (data.infoSnippets ?? []).slice(0, limit),
         ...(data.redirectUrl ? { redirectUrl: data.redirectUrl } : {})
