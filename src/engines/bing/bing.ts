@@ -5,6 +5,7 @@ import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { prepareStealthPage } from '../../utils/browserStealth.js';
 import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
+import { sleep } from '../../utils/timing.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 // 默认面向大陆部署用 cn.bing.com；可通过 OPEN_WEBSEARCH_BING_HOST 覆盖为 www.bing.com 等获取国际区结果
@@ -87,9 +88,6 @@ function buildBingAntiDetectionHeaders(): Record<string, string> {
     };
 }
 
-function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
 const BOT_DETECTION_KEYWORDS = [
     'captcha',
     'verification',
@@ -135,14 +133,17 @@ function buildBingSearchUrl(query: string, pageNumber: number): string {
     return url.toString();
 }
 
-function analyzeBlockedPage(html: string): { blocked: boolean; hasResults: boolean; detectedKeywords: string[]; title: string } {
+/**
+ * 判断 Bing 页面是否被反爬拦截。复用调用方已 load 的 cheerio 文档实例，
+ * 避免与正式提取重复解析同一页 HTML（原实现每页 load 3 次）。
+ */
+function analyzeBlockedPage($: any, html: string): { blocked: boolean; hasResults: boolean; detectedKeywords: string[]; title: string } {
     const normalized = html.toLowerCase();
-    const $ = cheerio.load(html);
     const title = $('title').first().text().trim().toLowerCase();
     const detectedKeywords = BOT_DETECTION_KEYWORDS.filter((keyword) => normalized.includes(keyword));
     const resultSelector = '#b_results .b_algo, #b_results li.b_algo, .b_algo, .b_ans';
     const hasStructuredResults = $(resultSelector).length > 0;
-    const hasParsedResults = parseBingSearchResults(html, 1).length > 0;
+    const hasParsedResults = hasStructuredResults || parseBingSearchResults(html, 1, $).length > 0;
     const hasResults = hasStructuredResults || hasParsedResults;
     const hasCaptchaUi = $([
         'iframe[src*="captcha"]',
@@ -561,8 +562,10 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
 
         const response = await axios.get(buildBingSearchUrl(query, pageNumber), buildBingAxiosRequestOptions());
         const html = String(response.data || '');
+        // 每页只 cheerio.load 一次，analyzeBlockedPage 与正式提取共用同一文档实例
+        const $ = cheerio.load(html);
 
-        const pageState = analyzeBlockedPage(html);
+        const pageState = analyzeBlockedPage($, html);
         if (pageState.blocked) {
             throw new Error(`Bing returned a verification or anti-bot page (title: ${pageState.title || 'unknown'}, keywords: ${pageState.detectedKeywords.join(', ') || 'none'})`);
         }
@@ -570,7 +573,7 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
             console.warn(`Bing page contains suspicious keywords but also has results, skipping block detection: ${pageState.detectedKeywords.join(', ')}`);
         }
 
-        const results = parseBingSearchResults(html, limit - allResults.length);
+        const results = parseBingSearchResults(html, limit - allResults.length, $);
         allResults = allResults.concat(results);
 
         if (results.length === 0) {
@@ -624,7 +627,9 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
                 }
 
                 const html = await page.content();
-                const pageState = analyzeBlockedPage(html);
+                // 每页只 cheerio.load 一次，analyzeBlockedPage 与正式提取共用同一文档实例
+                const $ = cheerio.load(html);
+                const pageState = analyzeBlockedPage($, html);
                 if (pageState.blocked) {
                     throw new Error(`Bing returned a verification or anti-bot page in Playwright mode (title: ${pageState.title || 'unknown'}, keywords: ${pageState.detectedKeywords.join(', ') || 'none'})`);
                 }
@@ -632,7 +637,7 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
                     console.warn(`Playwright Bing page contains suspicious keywords but also has results, skipping block detection: ${pageState.detectedKeywords.join(', ')}`);
                 }
 
-                const pageResults = parseBingSearchResults(html, limit - allResults.length)
+                const pageResults = parseBingSearchResults(html, limit - allResults.length, $)
                     .filter((result) => {
                         if (seenUrls.has(result.url)) {
                             return false;

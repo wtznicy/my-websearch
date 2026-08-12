@@ -51,7 +51,9 @@ export type FetchWebContentOptions = {
 
 const DEFAULT_TIMEOUT_MS = 20000;
 const DEFAULT_MAX_CHARS = 30000;
-const MIN_MAX_CHARS = 1000;
+// 执行层允许的最小 maxChars 为 100（CLI 直调可抓小片段）；
+// MCP 工具 schema 层面仍限制 1000，不影响 MCP 调用契约
+const MIN_MAX_CHARS = 100;
 const MAX_MAX_CHARS = 200000;
 const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024;
 const MIN_METADATA_FALLBACK_CHARS = 200;
@@ -289,6 +291,19 @@ function decodeResponseBuffer(buffer: ArrayBuffer, contentType: string): string 
     return new TextDecoder('utf-8').decode(bytes);
 }
 
+/**
+ * 统一把响应体解码为字符串：responseType 为 arraybuffer 时按页面 charset 解码；
+ * 字符串原样返回；其他类型（JSON 等）转为格式化文本。
+ * 主请求与 cookie 重试都必须走这里，否则 Buffer 会被 JSON.stringify 成数字数组。
+ */
+function decodeRawResponse(response: any, contentType: string): string {
+    return response.data instanceof ArrayBuffer || response.data instanceof Uint8Array
+        ? decodeResponseBuffer(response.data, contentType)
+        : typeof response.data === 'string'
+            ? response.data
+            : JSON.stringify(response.data, null, 2);
+}
+
 function shouldTryBrowserHtmlFallback(contentType: string, raw: string, extraction?: HtmlExtractionResult): boolean {
     if (looksLikeBotChallengePage(raw)) {
         return true;
@@ -435,12 +450,7 @@ export async function fetchWebContent(
     let contentType = String(response.headers['content-type'] || '').toLowerCase();
     let finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
     assertPublicHttpUrl(finalUrl, 'Final URL');
-    // responseType 是 arraybuffer：按页面 charset 解码；非字符串数据（JSON 等）转为格式化文本
-    let raw = response.data instanceof ArrayBuffer || response.data instanceof Uint8Array
-        ? decodeResponseBuffer(response.data, contentType)
-        : typeof response.data === 'string'
-            ? response.data
-            : JSON.stringify(response.data, null, 2);
+    let raw = decodeRawResponse(response, contentType);
 
     if (!usedBrowserCookies && looksLikeBotChallengePage(raw)) {
         const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
@@ -451,9 +461,7 @@ export async function fetchWebContent(
             contentType = String(response.headers['content-type'] || '').toLowerCase();
             finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
             assertPublicHttpUrl(finalUrl, 'Final URL');
-            raw = typeof response.data === 'string'
-                ? response.data
-                : JSON.stringify(response.data, null, 2);
+            raw = decodeRawResponse(response, contentType);
         }
     }
 

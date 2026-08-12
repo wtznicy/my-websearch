@@ -1,6 +1,7 @@
 import { SearchResult } from '../../types.js';
 import { AppConfig } from '../../config.js';
 import { distributeLimit, SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
+import { sleep } from '../../utils/timing.js';
 
 export type SearchExecutionContext = {
     searchMode?: AppConfig['searchMode'];
@@ -11,7 +12,7 @@ export type SearchEngineExecutorMap = Partial<Record<string, SearchEngineExecuto
 
 export type SearchExecutionFailure = {
     engine: string;
-    code: 'engine_error' | 'unsupported_engine';
+    code: 'engine_error' | 'unsupported_engine' | 'no_results';
     message: string;
 };
 
@@ -57,6 +58,16 @@ export function normalizeResultUrl(url: string): string {
                 parsed.searchParams.delete(key);
             }
         }
+        // 等价 URL 归一化：统一 https、去 www. 前缀、根路径去掉尾斜杠，
+        // 避免 http/https、www 前缀、尾斜杠差异让同一页被当成两条结果
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            parsed.protocol = 'https:';
+            const hostname = parsed.hostname.toLowerCase();
+            parsed.hostname = hostname.startsWith('www.') ? hostname.slice(4) : hostname;
+            if (parsed.pathname === '/') {
+                parsed.pathname = '';
+            }
+        }
         return parsed.toString();
     } catch {
         return url.trim();
@@ -64,10 +75,29 @@ export function normalizeResultUrl(url: string): string {
 }
 
 /**
+ * 空描述占位结果：description 无实质内容（空串或纯占位符号 "..." / "…" / "-"）
+ * 且 title 过短（<10 字符）时，对 LLM 没有信息量（如 "YouTube" + "..." 这类卡片占位），
+ * 属于噪音，融合后过滤掉。
+ */
+function isPlaceholderResult(result: SearchResult): boolean {
+    const description = (result.description ?? '').trim();
+    const hasSubstantiveDescription = description.length > 0 && !/^[\s.…·-]*$/.test(description);
+    if (hasSubstantiveDescription) {
+        return false;
+    }
+    const title = (result.title ?? '').trim();
+    const hasSubstantiveTitle = title.length > 0 && !/^[\s.…·-]*$/.test(title);
+    if (!hasSubstantiveTitle) {
+        return true;
+    }
+    return title.length < 10;
+}
+
+/**
  * 跨引擎融合：按规范化 URL 去重，并按"被多少个引擎命中"加权排序。
  * - 命中引擎数越多，排名越靠前（多数引擎认为相关 => 更可信）
  * - 同分时保留先到的引擎结果（保持原始顺序稳定）
- * - 每个结果记录它来自哪些引擎（searchResult.source / engine 字段保留首个）
+ * - 去重结果保留先到的引擎（source / engine 字段），不合并多引擎来源
  */
 export function mergeSearchResults(engineResults: SearchResult[][]): SearchResult[] {
     const seen = new Map<string, { result: SearchResult; hits: number; order: number }>();
@@ -95,6 +125,21 @@ export function mergeSearchResults(engineResults: SearchResult[][]): SearchResul
 // TTL 缓存
 // ---------------------------------------------------------------------------
 
+/**
+ * limit 档位归一化：limit=5 与 limit=10 的同一查询共享缓存。
+ * LLM 客户端常随机传 limit，原始 limit 作键会让缓存几乎永远 miss。
+ * >10 不归一化（保留原值），避免缓存不足量的结果（如 limit=50 只拿到 20 条）。
+ */
+function normalizeLimitBucket(limit: number): number {
+    if (limit <= 5) {
+        return 5;
+    }
+    if (limit <= 10) {
+        return 10;
+    }
+    return limit;
+}
+
 type CacheEntry = {
     value: SearchExecutionResult;
     expiresAt: number;
@@ -121,7 +166,7 @@ export class SearchTtlCache {
         return JSON.stringify({
             q: input.query.trim().toLowerCase(),
             e: [...input.engines].sort(),
-            l: input.limit,
+            l: normalizeLimitBucket(input.limit),
             m: normalizedSearchMode,
             r: input.minResults ?? 0
         });
@@ -136,6 +181,14 @@ export class SearchTtlCache {
         if (Date.now() > entry.expiresAt) {
             this.cache.delete(key);
             return undefined;
+        }
+        // limit 归一化后缓存可能比请求多（如 limit=5 命中 limit=10 的档位）：按请求 limit 截断，保持语义
+        if (entry.value.results.length > input.limit) {
+            return {
+                ...entry.value,
+                totalResults: input.limit,
+                results: entry.value.results.slice(0, input.limit)
+            };
         }
         return entry.value;
     }
@@ -172,8 +225,26 @@ export class SearchTtlCache {
 // 服务
 // ---------------------------------------------------------------------------
 
-function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+/** 4xx（除 429 限流）不重试——参数/请求本身有问题，重试只会白耗时间；5xx、网络/超时错误重试 */
+function isRetryableEngineError(error: unknown): boolean {
+    const status = (error as any)?.response?.status;
+    if (typeof status === 'number') {
+        return status === 429 || status >= 500;
+    }
+    return true;
+}
+
+/** 429 用更长退避并尊重 Retry-After；其他错误用短退避；都带少量 jitter 避免并发重试再碰撞 */
+function computeRetryBackoff(error: unknown, attempt: number): number {
+    const status = (error as any)?.response?.status;
+    if (status === 429) {
+        const retryAfter = Number((error as any)?.response?.headers?.['retry-after']);
+        if (Number.isFinite(retryAfter) && retryAfter > 0) {
+            return retryAfter * 1000;
+        }
+        return 1000 * (2 ** attempt) + Math.random() * 250;
+    }
+    return 300 * (2 ** attempt) + Math.random() * 100;
 }
 
 /**
@@ -214,7 +285,6 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // 搜索级总时间预算：到点后未完成的引擎按超时处理，避免单个慢引擎拖垮整次搜索
             const deadlineMs = SEARCH_DEADLINE_MS;
             const deadlineAt = Date.now() + deadlineMs;
-            let deadlineHit = false;
 
             const tasks = engines.map(async (engine, index) => {
                 const executor = engineMap[engine];
@@ -239,7 +309,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                     await sleep(index * 150);
                 }
 
-                // 失败指数退避：最多重试 2 次（300ms/600ms 间隔）
+                // 失败指数退避：最多重试 2 次（4xx 除 429 外不重试）
                 let lastError: unknown;
                 for (let attempt = 0; attempt < 3; attempt += 1) {
                     try {
@@ -250,10 +320,12 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                         return results;
                     } catch (error) {
                         lastError = error;
-                        if (attempt < 2) {
-                            const backoff = 300 * (2 ** attempt);
+                        if (attempt < 2 && isRetryableEngineError(error)) {
+                            const backoff = computeRetryBackoff(error, attempt);
                             console.error(`⚠️ Engine ${engine} failed (attempt ${attempt + 1}/3), retrying in ${backoff}ms:`, error instanceof Error ? error.message : String(error));
                             await sleep(backoff);
+                        } else {
+                            break;
                         }
                     }
                 }
@@ -266,101 +338,140 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 return [];
             });
 
-            // 每个引擎任务包一层 deadline：到点未完成按超时处理（记录 partialFailure，不阻塞整体）
-            const engineResults = await Promise.all(tasks.map((task, index) =>
-                Promise.race([
-                    task,
-                    new Promise<SearchResult[]>((resolve) => {
-                        const remaining = deadlineAt - Date.now();
-                        const wait = remaining > 0 ? remaining : 0;
-                        setTimeout(() => {
-                            deadlineHit = true;
-                            if (!partialFailures.some((failure) => failure.engine === engines[index])) {
-                                partialFailures.push({
-                                    engine: engines[index],
-                                    code: 'engine_error',
-                                    message: buildHintedMessage(engines[index], `Search deadline exceeded (${deadlineMs}ms total budget)`)
-                                });
-                            }
-                            resolve([]);
-                        }, wait);
-                    })
-                ])
-            ));
-            let merged = mergeSearchResults(engineResults).slice(0, limit);
+            // 每个引擎任务包一层 deadline：到点未完成按超时处理（记录 partialFailure，不阻塞整体）。
+            // 注意：task 提前完成时必须 clearTimeout，否则 30s 的 ref'd timer 会阻止 Node 进程退出
+            // （CLI 一次性命令会白白多挂近 30 秒），同时也能避免 timer 回调对已 settle 的 race 做无用功。
+            const engineResults = await Promise.all(tasks.map((task, index) => {
+                const remaining = deadlineAt - Date.now();
+                const wait = remaining > 0 ? remaining : 0;
+                return new Promise<SearchResult[]>((resolve) => {
+                    let done = false;
+                    const timer = setTimeout(() => {
+                        done = true;
+                        if (!partialFailures.some((failure) => failure.engine === engines[index])) {
+                            partialFailures.push({
+                                engine: engines[index],
+                                code: 'engine_error',
+                                message: buildHintedMessage(engines[index], `Search deadline exceeded (${deadlineMs}ms total budget)`)
+                            });
+                        }
+                        resolve([]);
+                    }, wait);
+                    task.then((results) => {
+                        if (done) {
+                            return;
+                        }
+                        done = true;
+                        clearTimeout(timer);
+                        resolve(results);
+                    });
+                });
+            }));
+            let merged = mergeSearchResults(engineResults)
+                .filter((result) => !isPlaceholderResult(result))
+                .slice(0, limit);
 
             // 配额 >0 但引擎返回 0 条时，记录为可见的部分失败，便于 agent 区分
-            // "该引擎没结果" 与 "该引擎没被调用"（配额 0 的情况）。
+            // "该引擎没结果"（no_results，属正常空结果）与 "该引擎没被调用"（配额 0 的情况）。
+            // 注意：不能把正常空结果报成 engine_error——冷门查询所有引擎都 0 条时会刷一墙误导性"故障"。
             engines.forEach((engine, index) => {
                 const executor = engineMap[engine];
                 if (executor && limits[index] > 0 && engineResults[index].length === 0) {
                     if (!partialFailures.some((failure) => failure.engine === engine)) {
                         partialFailures.push({
                             engine,
-                            code: 'engine_error',
-                            message: buildHintedMessage(engine, 'Engine returned no results for the allocated quota')
+                            code: 'no_results',
+                            message: 'Engine returned no results for the allocated quota'
                         });
                     }
                 }
             });
 
-            // 级联补位：minResults 已设且结果不足时，用未请求的可用引擎按序补跑，
-            // 直到凑足 minResults 或候选耗尽/预算超时。默认不启用（minResults 为 0）。
+            // 级联补位：minResults 已设且结果不足时，用未请求的可用引擎补跑直到凑足。
+            // 候选按批次并行（每批最多 CASCADE_BATCH_SIZE 个），避免逐串行累积延迟。
+            // 每批开始前重算 deadline 余量：剩余预算不足一个批次的最坏成本时停止，
+            // 避免海外引擎 15s 超时把总时长拉成多倍 deadline；全部候选返回但去重后
+            // 0 新增时也立即停止（结果集已收敛，继续尝试没有意义）。
+            // 默认不启用（minResults 为 0）。
             const cascadedEngines: string[] = [];
+            const CASCADE_BATCH_SIZE = 2;
+            const MIN_CASCADE_BATCH_BUDGET_MS = 3000;
             if (minResults && minResults > merged.length) {
                 const usedEngines = new Set(engines);
                 const candidates = SUPPORTED_SEARCH_ENGINES.filter(
                     (engine) => !usedEngines.has(engine) && typeof engineMap[engine] === 'function'
                 );
-                for (const candidate of candidates) {
-                    if (merged.length >= minResults) {
-                        break;
-                    }
+                for (let cursor = 0; cursor < candidates.length && merged.length < minResults; cursor += CASCADE_BATCH_SIZE) {
                     const remaining = deadlineAt - Date.now();
-                    if (remaining <= 0) {
+                    if (remaining < MIN_CASCADE_BATCH_BUDGET_MS) {
                         break;
                     }
+                    const batch = candidates.slice(cursor, cursor + CASCADE_BATCH_SIZE);
                     const gap = minResults - merged.length;
-                    let resolvedByEngine = false;
-                    try {
-                        const cascaded = await Promise.race([
-                            (async () => {
-                                const results = await engineMap[candidate]!(cleanQuery, gap, { searchMode: effectiveSearchMode });
-                                resolvedByEngine = true;
-                                return results;
-                            })(),
-                            new Promise<SearchResult[]>((resolve) => {
-                                setTimeout(() => {
-                                    if (resolvedByEngine) {
-                                        resolve([]);
-                                        return;
-                                    }
-                                    partialFailures.push({
-                                        engine: candidate,
-                                        code: 'engine_error',
-                                        message: buildHintedMessage(candidate, `Search deadline exceeded (${deadlineMs}ms total budget)`)
-                                    });
-                                    resolve([]);
-                                }, remaining);
-                            })
-                        ]);
-                        if (cascaded.length > 0) {
-                            cascadedEngines.push(candidate);
-                            engineResults.push(cascaded);
-                            merged = mergeSearchResults(engineResults).slice(0, limit);
-                        } else {
+                    // 与引擎 deadline 同理：候选提前完成时必须 clearTimeout，否则泄漏的 30s timer 延迟 Node 进程退出
+                    const runCandidate = (candidate: string): Promise<SearchResult[]> => new Promise((resolve, reject) => {
+                        let done = false;
+                        const timer = setTimeout(() => {
+                            done = true;
                             partialFailures.push({
                                 engine: candidate,
                                 code: 'engine_error',
-                                message: buildHintedMessage(candidate, 'Engine returned no results for the cascaded quota')
+                                message: buildHintedMessage(candidate, `Search deadline exceeded (${deadlineMs}ms total budget)`)
                             });
-                        }
-                    } catch (error) {
-                        partialFailures.push({
-                            engine: candidate,
-                            code: 'engine_error',
-                            message: buildHintedMessage(candidate, error instanceof Error ? error.message : String(error))
+                            resolve([]);
+                        }, remaining);
+
+                        (async () => {
+                            const results = await engineMap[candidate]!(cleanQuery, gap, { searchMode: effectiveSearchMode });
+                            if (!done) {
+                                done = true;
+                                clearTimeout(timer);
+                                resolve(results);
+                            }
+                        })().catch((error) => {
+                            if (!done) {
+                                done = true;
+                                clearTimeout(timer);
+                                reject(error);
+                            }
                         });
+                    });
+
+                    const batchStartLength = merged.length;
+                    let batchAllReturnedNonEmpty = true;
+                    let batchNewResults = 0;
+                    const settled = await Promise.allSettled(batch.map((candidate) => runCandidate(candidate)));
+                    for (let index = 0; index < settled.length; index += 1) {
+                        const candidate = batch[index];
+                        const outcome = settled[index];
+                        if (outcome.status === 'fulfilled' && outcome.value.length > 0) {
+                            const before = merged.length;
+                            cascadedEngines.push(candidate);
+                            engineResults.push(outcome.value);
+                            merged = mergeSearchResults(engineResults)
+                                .filter((result) => !isPlaceholderResult(result))
+                                .slice(0, limit);
+                            batchNewResults += merged.length - before;
+                        } else {
+                            batchAllReturnedNonEmpty = false;
+                            if (outcome.status === 'fulfilled') {
+                                partialFailures.push({
+                                    engine: candidate,
+                                    code: 'no_results',
+                                    message: 'Engine returned no results for the cascaded quota'
+                                });
+                            } else {
+                                partialFailures.push({
+                                    engine: candidate,
+                                    code: 'engine_error',
+                                    message: buildHintedMessage(candidate, outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason))
+                                });
+                            }
+                        }
+                    }
+                    // 所有候选都返回了结果但去重后 0 新增：继续尝试其他引擎只会重复同样的事
+                    if (batchAllReturnedNonEmpty && batchNewResults === 0 && merged.length === batchStartLength) {
+                        break;
                     }
                 }
             }

@@ -1,12 +1,16 @@
-import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
+import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+
+function shouldDebug(): boolean {
+    return process.env.OPEN_WEBSEARCH_DEBUG === '1';
+}
 
 export async function fetchJuejinArticle(url: string): Promise<{ content: string }> {
     try {
         console.error(`🔍 Fetching Juejin article: ${url}`);
 
-        const response = await axios.get(url, buildAxiosRequestOptions({
+        // 走统一的安全重定向链路（每跳 DNS 校验），与 fetchCsdnArticle / fetchWebContent 保持一致
+        const response = await requestWithSafeRedirects('GET', url, buildAxiosRequestOptions({
             headers: {
                 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
                 'Connection': 'keep-alive',
@@ -24,7 +28,7 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
             },
             timeout: 30000,
             decompress: true
-        }));
+        }), 'Juejin article URL');
 
         const $ = cheerio.load(response.data);
 
@@ -44,10 +48,14 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
 
         // 尝试多个选择器
         for (const selector of selectors) {
-            console.error(`🔍 Trying selector: ${selector}`);
+            if (shouldDebug()) {
+                console.error(`🔍 Trying selector: ${selector}`);
+            }
             const element = $(selector);
             if (element.length > 0) {
-                console.error(`✅ Found content with selector: ${selector}`);
+                if (shouldDebug()) {
+                    console.error(`✅ Found content with selector: ${selector}`);
+                }
                 // 移除脚本和样式标签
                 element.find('script, style, .code-block-extension, .hljs-ln-numbers').remove();
                 content = element.text().trim();
@@ -60,16 +68,23 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
 
         // 如果所有选择器都失败，尝试提取页面主要文本内容
         if (!content || content.length < 100) {
-            console.error('⚠️ All selectors failed, trying fallback extraction');
+            if (shouldDebug()) {
+                console.error('⚠️ All selectors failed, trying fallback extraction');
+            }
             $('script, style, nav, header, footer, .sidebar, .comment').remove();
             content = $('body').text().trim();
+        }
+
+        // 内容仍为空时抛错，而不是静默返回成功——空成功响应会让 LLM 误以为抓到了文章
+        if (!content) {
+            throw new Error('No readable Juejin article content was extracted');
         }
 
         console.error(`✅ Successfully extracted ${content.length} characters`);
         return { content };
 
     } catch (error) {
-        console.error('❌ 获取掘金文章失败:', error);
+        console.error('❌ 获取掘金文章失败:', error instanceof Error ? error.message : String(error));
         throw new Error(`获取掘金文章失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
 }

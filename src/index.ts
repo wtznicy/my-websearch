@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// 必须先于其他 import：在静态依赖链（playwrightClient → config）求值前决定是否静默启动日志
+import './utils/startupQuiet.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { setupTools } from './tools/setupTools.js';
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
@@ -44,24 +46,9 @@ function createServer(runtime: OpenWebSearchRuntime): McpServer {
   return server;
 }
 
-function shouldSuppressStartupLogs(argv: string[]): boolean {
-  if (argv.length === 0) {
-    return false;
-  }
-
-  const [command] = argv;
-  if (command === '--help' || command === '-h' || command === 'help' || command === 'status') {
-    return true;
-  }
-
-  return argv.includes('--json');
-}
-
 async function main() {
   const argv = process.argv.slice(2);
-  if (shouldSuppressStartupLogs(argv)) {
-    process.env.OPEN_WEBSEARCH_QUIET_STARTUP = 'true';
-  }
+  // 启动日志静默已由 ./utils/startupQuiet.js（首个 import）按参数决定
   const { config } = await import('./config.js');
   const runtime = shouldCreateFullRuntimeForInvocation(argv)
     ? (await import('./runtime/createRuntime.js')).createOpenWebSearchRuntime()

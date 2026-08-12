@@ -1,6 +1,8 @@
 import axios from 'axios';
+import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
+import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 
 interface JuejinSearchResponse {
     err_no: number;
@@ -36,6 +38,14 @@ interface JuejinSearchResponse {
     has_more: boolean;
 }
 
+/** 把 highlight HTML 转成纯文本：剥掉 <em> 高亮标签并解码 HTML 实体（&#34; → " 等） */
+function highlightToText(html: string): string {
+    if (!html) {
+        return '';
+    }
+    return cheerio.load(html).root().text().trim();
+}
+
 export async function searchJuejin(query: string, limit: number): Promise<SearchResult[]> {
     let allResults: SearchResult[] = [];
     let cursor = '0';
@@ -61,7 +71,7 @@ export async function searchJuejin(query: string, limit: number): Promise<Search
                 headers: {
                     'pragma': 'no-cache',
                     'priority': 'u=1, i',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+                    'User-Agent': BROWSER_USER_AGENT,
                     'content-type': 'application/json',
                     'Accept': '*/*',
                     'Connection': 'keep-alive'
@@ -84,9 +94,9 @@ export async function searchJuejin(query: string, limit: number): Promise<Search
                 const { result_model, title_highlight, content_highlight } = item;
                 const { article_info, author_user_info, category, tags } = result_model;
 
-                // 移除HTML标签的高亮标记
-                const cleanTitle = title_highlight.replace(/<\/?em>/g, '');
-                const cleanContent = content_highlight.replace(/<\/?em>/g, '');
+                // 高亮片段转纯文本：去 <em> 标签并解码 HTML 实体
+                const cleanTitle = highlightToText(title_highlight);
+                const cleanContent = highlightToText(content_highlight);
 
                 // 构建描述信息
                 const tagNames = tags.map(tag => tag.tag_name).join(', ');

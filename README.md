@@ -171,6 +171,8 @@ npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true open-websearch
 | `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | Valid MCP tool name | Custom name for the GitHub README fetch tool |
 | `MCP_TOOL_FETCH_JUEJIN_NAME` | `fetchJuejinArticle` | Valid MCP tool name | Custom name for the Juejin article fetch tool |
 | `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | Valid MCP tool name | Custom name for generic web/Markdown fetch tool |
+| `LOG_LEVEL` | `normal` | `normal`, `quiet` | `quiet` 抑制启动配置日志（MCP stdio 裸启动默认已静默；诊断时可用 `LOG_LEVEL=normal` 恢复） |
+| `OPEN_WEBSEARCH_QUIET_STARTUP` | `false` | `true`, `false` | 抑制启动配置日志（兼容开关，`LOG_LEVEL=quiet` 与之等价） |
 
 **Common configurations:**
 ```bash

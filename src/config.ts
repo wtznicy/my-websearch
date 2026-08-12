@@ -81,7 +81,8 @@ export const config: AppConfig = {
 const validSearchEngines = ['bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'juejin', 'startpage', 'sogou'];
 const validSearchModes = ['request', 'auto', 'playwright'];
 const validPlaywrightPackages = ['auto', 'playwright', 'playwright-core'];
-const quietStartupLogs = process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true';
+const quietStartupLogs = process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true'
+    || (process.env.LOG_LEVEL ?? '').toLowerCase() === 'quiet';
 
 // Validate default search engine
 if (!validSearchEngines.includes(config.defaultSearchEngine)) {

@@ -1,60 +1,75 @@
 import axios from 'axios';
-import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
+import { BROWSER_USER_AGENT } from '../../utils/constants.js';
+import { paginateSearch } from '../../utils/pagination.js';
+
+/** CSDN 搜索结果里的 <em> 高亮标签，剥离后返回纯文本 */
+function stripHighlightTags(value: string): string {
+    if (!value) {
+        return '';
+    }
+    return String(value).replace(/<\/?em>/g, '').trim();
+}
 
 export async function searchCsdn(query: string, limit: number): Promise<SearchResult[]> {
-    let allResults: SearchResult[] = [];
-    let pn = 1;
+    const seenUrls = new Set<string>();
 
-    while (allResults.length < limit) {
-        const response = await axios.get('https://so.csdn.net/api/v3/search', buildAxiosRequestOptions({ engine: 'csdn',
-            trustedStaticHost: true,
-            params: {
-                q: query,
-                p: pn
-            },
-            headers: {
-                'Pragma': 'no-cache',
-                // 不再硬编码会话 Cookie（含 waf_captcha_marker 等抓包痕迹，会过期且属轻微凭据泄漏），
-                // 让服务端为新会话发 Cookie；UA 用与其它引擎一致的现代浏览器
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-                'Accept': '*/*',
-                'Connection': 'keep-alive'
+    return paginateSearch({
+        limit,
+        fetchPage: async (pageIndex) => {
+            const pn = pageIndex + 1;
+            const response = await axios.get('https://so.csdn.net/api/v3/search', buildAxiosRequestOptions({ engine: 'csdn',
+                trustedStaticHost: true,
+                params: {
+                    q: query,
+                    p: pn
+                },
+                headers: {
+                    'Pragma': 'no-cache',
+                    // 不再硬编码会话 Cookie（含 waf_captcha_marker 等抓包痕迹，会过期且属轻微凭据泄漏），
+                    // 让服务端为新会话发 Cookie；UA 用与其它引擎一致的现代浏览器
+                    'User-Agent': BROWSER_USER_AGENT,
+                    'Accept': '*/*',
+                    'Connection': 'keep-alive'
+                }
+            }));
+
+            const payload = response.data;
+            // 反爬/异常时 CSDN 可能返回 HTML 文本而非 JSON：直接解构会得到 undefined 并静默 break，
+            // 首页失败应抛错，让 partialFailures 暴露真实原因（而非伪装成"没有结果"）
+            if (typeof payload !== 'object' || payload === null) {
+                if (pn === 1) {
+                    throw new Error('CSDN search returned a non-JSON response (likely blocked or rate-limited)');
+                }
+                return [];
             }
-        }));
+            const { result_vos } = payload;
+            if (!Array.isArray(result_vos)) {
+                if (pn === 1) {
+                    throw new Error('CSDN search response missing result_vos (likely blocked or rate-limited)');
+                }
+                return [];
+            }
 
-        const { result_vos } = response.data
+            const results: SearchResult[] = [];
+            for (const re of result_vos) {
+                const { digest, title, url_location, nickname } = re;
+                const url = url_location || '';
+                if (!url || seenUrls.has(url)) {
+                    continue;
+                }
+                seenUrls.add(url);
+                results.push({
+                    title: stripHighlightTags(title),
+                    url,
+                    description: stripHighlightTags(digest),
+                    source: nickname || '',
+                    engine: 'csdn'
+                });
+            }
 
-        if (!Array.isArray(result_vos)) {
-            break
+            return results;
         }
-
-        const results: SearchResult[] = [];
-
-
-        result_vos.forEach(re => {
-
-            const { digest, title, url_location,nickname } = re
-
-            results.push ({
-                title: title,
-                url: url_location,
-                description: digest,
-                source: nickname,
-                engine: "csdn"
-            });
-        });
-
-        allResults = allResults.concat(results);
-
-        if (results.length === 0) {
-            console.error('⚠️ No more results, ending early....');
-            break;
-        }
-
-        pn += 1;
-    }
-
-    return allResults.slice(0, limit); // 截取最多 limit 个
+    });
 }

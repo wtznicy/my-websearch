@@ -1,15 +1,17 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
-import {buildAxiosRequestOptions} from "../../utils/httpRequest.js";
+import { buildAxiosRequestOptions } from "../../utils/httpRequest.js";
+import { BROWSER_USER_AGENT } from '../../utils/constants.js';
+import { paginateSearch } from '../../utils/pagination.js';
 
 export async function searchBrave(query: string, limit: number): Promise<SearchResult[]> {
-    let allResults: SearchResult[] = [];
-    let pn = 0;
+    const seenUrls = new Set<string>();
+    const encodedQuery = encodeURIComponent(query);
     const requestOptions = buildAxiosRequestOptions({ engine: 'brave',
         trustedStaticHost: true,
         headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+            "User-Agent": BROWSER_USER_AGENT,
             "Connection": "keep-alive",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
             "Accept-Encoding": "gzip, deflate, br",
@@ -26,61 +28,53 @@ export async function searchBrave(query: string, limit: number): Promise<SearchR
         }
     });
 
-    const encodedQuery = encodeURIComponent(query);
-    while (allResults.length < limit) {
-        const response = await axios.get(`https://search.brave.com/search?q=${encodedQuery}&source=web&offset=${pn}`, requestOptions)
+    return paginateSearch({
+        limit,
+        fetchPage: async (pageIndex) => {
+            const response = await axios.get(`https://search.brave.com/search?q=${encodedQuery}&source=web&offset=${pageIndex}`, requestOptions)
 
-        const $ = cheerio.load(response.data);
-        const results: SearchResult[] = [];
+            const $ = cheerio.load(response.data);
+            const results: SearchResult[] = [];
 
+            // Brave now uses SvelteKit SSR. The page structure is:
+            // #results > .snippet.svelte-* (top-level result card)
+            //   └── .result-content
+            //        ├── > a (main link with href)
+            //        │   ├── .site-name-wrapper (source)
+            //        │   └── .search-snippet-title (title)
+            //        └── .generic-snippet (description)
+            $('#results .snippet').each((index, element) => {
+                const resultElement = $(element);
+                const content = resultElement.find('.result-content').first();
+                if (content.length === 0) return;
 
-        // Brave now uses SvelteKit SSR. The page structure is:
-        // #results > .snippet.svelte-* (top-level result card)
-        //   └── .result-content
-        //        ├── > a (main link with href)
-        //        │   ├── .site-name-wrapper (source)
-        //        │   └── .search-snippet-title (title)
-        //        └── .generic-snippet (description)
-        $('#results .snippet').each((index, element) => {
-            const resultElement = $(element);
-            const content = resultElement.find('.result-content').first();
-            if (content.length === 0) return;
+                // The first <a> inside .result-content is the main link
+                const mainLink = content.find('> a').first();
+                const url = mainLink.attr('href');
 
-            // The first <a> inside .result-content is the main link
-            const mainLink = content.find('> a').first();
-            const url = mainLink.attr('href');
+                // Title is inside .search-snippet-title
+                const title = mainLink.find('.search-snippet-title').text().trim();
 
-            // Title is inside .search-snippet-title
-            const title = mainLink.find('.search-snippet-title').text().trim();
+                // Description is in .generic-snippet
+                const description = content.find('.generic-snippet').text().trim() || '';
 
-            // Description is in .generic-snippet
-            const description = content.find('.generic-snippet').text().trim() || '';
+                // Source/site name is in .site-name-wrapper
+                const source = mainLink.find('.site-name-wrapper').first().text().trim() || '';
 
-            // Source/site name is in .site-name-wrapper
-            const source = mainLink.find('.site-name-wrapper').first().text().trim() || '';
+                // Ensure that we have a valid title and URL before adding
+                if (title && url && !seenUrls.has(url)) {
+                    seenUrls.add(url);
+                    results.push({
+                        title: title,
+                        url: url,
+                        description: description,
+                        source: source,
+                        engine: 'brave'
+                    });
+                }
+            });
 
-            // Ensure that we have a valid title and URL before adding
-            if (title && url) {
-                results.push({
-                    title: title,
-                    url: url,
-                    description: description,
-                    source: source,
-                    engine: 'brave'
-                });
-            }
-        });
-
-
-        allResults = allResults.concat(results);
-
-        if (results.length === 0) {
-            console.error('⚠️ No more results, ending early....');
-            break;
+            return results;
         }
-
-        pn += 1;
-    }
-
-    return allResults.slice(0, limit); // 截取最多 limit 个
+    });
 }

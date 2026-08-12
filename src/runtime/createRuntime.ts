@@ -54,6 +54,8 @@ export function createOpenWebSearchRuntime(options: CreateOpenWebSearchRuntimeOp
     const runtimeConfig = options.config ?? config;
     const dependencies = options.dependencies ?? {};
     const searchExecutors = dependencies.searchExecutors ?? createDefaultSearchExecutors();
+    // 只实例化一次 context7 服务，libraries/docs 共享同一份缓存
+    const context7 = createContext7Services();
 
     return {
         config: runtimeConfig,
@@ -63,8 +65,8 @@ export function createOpenWebSearchRuntime(options: CreateOpenWebSearchRuntimeOp
             fetchJuejinArticle: createArticleFetchService('juejin', dependencies.fetchJuejinArticle ?? fetchJuejinArticle),
             fetchGithubReadme: createGithubReadmeService(dependencies.fetchGithubReadme ?? fetchGithubReadme),
             fetchWeb: createWebFetchService(dependencies.fetchWebContent ?? fetchWebContent),
-            context7Libraries: createContext7Services().libraries,
-            context7Docs: createContext7Services().docs
+            context7Libraries: context7.libraries,
+            context7Docs: context7.docs
         }
     };
 }

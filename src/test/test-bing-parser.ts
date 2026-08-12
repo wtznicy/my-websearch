@@ -51,6 +51,24 @@ assert(fallbackResults.length === 1, 'fallback layout should yield one result');
 assert(fallbackResults[0].title === 'Fallback title', 'fallback link title should parse');
 assert(fallbackResults[0].url === 'https://fallback.example.dev/path', 'fallback link url should parse');
 
+// 回归测试：新版结果页的 .b_tpcn 里同时有站点名（.tptt）和可见 URL slug 文本节点，
+// extractSource 若取整个 .b_tpcn 的 text()，会把两者无分隔拼成 "zhihu.comhttps://zhuanlan.zhihu.com"。
+const sourceConcatHtml = `
+<ol id="b_results">
+  <li class="b_algo">
+    <div class="b_tpcn">
+      <a class="tilk" href="https://zhuanlan.zhihu.com/p/29001189476"><span class="tptt">zhihu.com</span></a>
+      <div class="b_attribution" aria-label="zhuanlan.zhihu.com/p/29001189476">https://zhuanlan.zhihu.com</div>
+    </div>
+    <h2><a href="https://zhuanlan.zhihu.com/p/29001189476">MCP（Model Context Protocol）一篇就够了</a></h2>
+    <div class="b_snippet">A snippet.</div>
+  </li>
+</ol>`;
+const sourceResults = parseBingSearchResults(sourceConcatHtml, 5);
+assert(sourceResults.length === 1, 'source regression fixture should yield one result');
+assert(sourceResults[0].source === 'zhihu.com', 'source should be the .tptt site name, not concatenated with the URL slug');
+assert(!sourceResults[0].source.includes('https://'), 'source must not contain a concatenated URL');
+
 assert(hasSiteOperator('site:blink.new blink.new') === true, 'site operator should be detected');
 assert(hasSiteOperator('blink.new AI App Builder') === false, 'plain query should not be treated as site-restricted');
 assert(

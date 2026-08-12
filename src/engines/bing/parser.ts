@@ -1,6 +1,9 @@
 import { Buffer } from 'node:buffer';
 import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
+import { normalizeText as normalizeWhitespace } from '../../utils/text.js';
+
+type LoadedDoc = ReturnType<typeof cheerio.load>;
 
 const RESULT_SELECTORS = [
     '#b_results > li.b_algo',
@@ -11,10 +14,6 @@ const RESULT_SELECTORS = [
     '.b_algo',
     '.b_ans'
 ];
-
-function normalizeWhitespace(value: string): string {
-    return value.replace(/\s+/g, ' ').trim();
-}
 
 function decodeBingRedirectTarget(url: URL): string {
     const encodedTarget = url.searchParams.get('u')?.trim();
@@ -129,8 +128,11 @@ function extractDescription(element: any, title: string): string {
 }
 
 function extractSource(element: any, url: string): string {
+    // 只取 .b_tpcn 内的 .tptt（站点名），不要用整个 .b_tpcn 的 text()：
+    // 新版结果页的 .b_tpcn 里除 .tptt 外还含可见的 URL slug 文本节点，
+    // cheerio 会把它们无分隔拼成 "zhihu.comhttps://zhuanlan.zhihu.com" 这类脏数据。
     const sourceText = normalizeWhitespace(
-        element.find('.b_tpcn').first().text() ||
+        element.find('.b_tpcn .tptt').first().text() ||
         element.find('.b_attribution cite').first().text() ||
         element.find('cite').first().text()
     );
@@ -179,8 +181,13 @@ function collectFallbackLinks($: any, limit: number, seenUrls: Set<string>, resu
     });
 }
 
-export function parseBingSearchResults(htmlContent: string, limit: number): SearchResult[] {
-    const $ = cheerio.load(htmlContent);
+/**
+ * 解析 Bing 结果页。
+ * @param loadedDoc 可选：调用方已 cheerio.load 好的文档实例，避免同一页被重复解析
+ *                  （analyzeBlockedPage + 正式提取各 load 一次 = 每页 3 次 HTML 解析）
+ */
+export function parseBingSearchResults(htmlContent: string, limit: number, loadedDoc?: LoadedDoc): SearchResult[] {
+    const $ = loadedDoc ?? cheerio.load(htmlContent);
     const results: SearchResult[] = [];
     const seenUrls = new Set<string>();
 

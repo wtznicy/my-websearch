@@ -377,8 +377,10 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
     if (!url) {
         throw new Error('Target URL is required');
     }
-    if (!Number.isInteger(maxChars) || maxChars < 1000 || maxChars > 200000) {
-        throw new Error('maxChars must be an integer between 1000 and 200000');
+    // CLI 下限放宽到 100（MCP 工具 schema 仍保持 1000，这里只影响命令行直接调用，
+    // 方便临时抓取小片段文本）；上限与 MCP 保持一致
+    if (!Number.isInteger(maxChars) || maxChars < 100 || maxChars > 200000) {
+        throw new Error('maxChars must be an integer between 100 and 200000');
     }
     if (!Number.isInteger(startIndex) || startIndex < 0) {
         throw new Error('startIndex must be a non-negative integer');

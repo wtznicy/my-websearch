@@ -20,11 +20,42 @@ export { normalizeEngineName };
  * MCP 单次响应硬上限（字节）。防止 fetchWebContent 在 raw/大 maxChars 场景下
  * 把数 MB JSON 塞进 MCP response 浪费客户端 token。默认 60KB，可配置。
  */
-const RESPONSE_CAP_BYTES = Number(process.env.OPEN_WEBSEARCH_RESPONSE_CAP_BYTES ?? 60000);
+const rawResponseCap = Number(process.env.OPEN_WEBSEARCH_RESPONSE_CAP_BYTES ?? 60000);
+const RESPONSE_CAP_BYTES = Number.isFinite(rawResponseCap) && rawResponseCap > 0 ? rawResponseCap : 60000;
 
 /** 给 MCP 错误文本追加一行 Hint，帮助 LLM/用户决定下一步 */
 function withErrorHint(message: string, hint: string): string {
     return `${message}\nHint: ${hint}`;
+}
+
+/**
+ * 只输出安全的错误摘要（message + HTTP status + code），
+ * 不要把整个 AxiosError 打进日志——其 config.headers 里含
+ * CONTEXT7_API_KEY 的 Authorization 头和浏览器 Cookie，会泄露凭据。
+ */
+function logSafeError(context: string, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    const details: string[] = [];
+    const status = (error as any)?.response?.status;
+    const code = (error as any)?.code;
+    if (status !== undefined) {
+        details.push(`HTTP ${status}`);
+    }
+    if (code) {
+        details.push(code);
+    }
+    console.error(`${context}: ${message}${details.length > 0 ? ` (${details.join(', ')})` : ''}`);
+}
+
+/**
+ * 纯文本响应封顶：超出 RESPONSE_CAP_BYTES 时截断并标注，
+ * 防止超长文章/README 把数 MB 文本塞进 MCP response。
+ */
+function capTextResponse(text: string): string {
+    if (text.length <= RESPONSE_CAP_BYTES) {
+        return text;
+    }
+    return `${text.slice(0, RESPONSE_CAP_BYTES)}\n[truncated by response cap (${RESPONSE_CAP_BYTES} chars); article too long to return in full]`;
 }
 
 /**
@@ -174,7 +205,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                     }]
                 };
             } catch (error) {
-                console.error('Search tool execution failed:', error);
+                logSafeError('Search tool execution failed', error);
                 return {
                     content: [{
                         type: 'text',
@@ -207,11 +238,11 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 return {
                     content: [{
                         type: 'text',
-                        text: result.content
+                        text: capTextResponse(result.content)
                     }]
                 };
             } catch (error) {
-                console.error('Failed to fetch CSDN article:', error);
+                logSafeError('Failed to fetch CSDN article', error);
                 return {
                     content: [{
                         type: 'text',
@@ -231,7 +262,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         fetchGithubToolName,
         "Fetch README content from a GitHub repository URL",
         {
-            url: z.string().min(1).refine(
+            url: z.string().min(1).max(2048).refine(
                 (url) => validateGithubRepositoryUrl(url),
                 "URL must be a valid GitHub repository URL (supports HTTPS, SSH formats)"
             )
@@ -245,7 +276,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                     return {
                         content: [{
                             type: 'text',
-                            text: result
+                            text: capTextResponse(result)
                         }]
                     };
                 } else {
@@ -258,7 +289,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                     };
                 }
             } catch (error) {
-                console.error('Failed to fetch GitHub README:', error);
+                logSafeError('Failed to fetch GitHub README', error);
                 return {
                     content: [{
                         type: 'text',
@@ -300,7 +331,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                     }]
                 };
             } catch (error) {
-                console.error('Failed to fetch web content:', error);
+                logSafeError('Failed to fetch web content', error);
                 return {
                     content: [{
                         type: 'text',
@@ -333,11 +364,11 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 return {
                     content: [{
                         type: 'text',
-                        text: result.content
+                        text: capTextResponse(result.content)
                     }]
                 };
             } catch (error) {
-                console.error('Failed to fetch Juejin article:', error);
+                logSafeError('Failed to fetch Juejin article', error);
                 return {
                     content: [{
                         type: 'text',
@@ -373,7 +404,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                     }]
                 };
             } catch (error) {
-                console.error('Failed to resolve library via Context7:', error);
+                logSafeError('Failed to resolve library via Context7', error);
                 return {
                     content: [{
                         type: 'text',
@@ -393,7 +424,10 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         "queryDocs",
         "Get up-to-date, version-specific docs and code snippets for a Context7 library ID (e.g. /vercel/next.js).",
         {
-            libraryId: z.string().min(1).describe("Exact Context7-compatible library ID (e.g. /vercel/next.js, /packages/express; optional version like /vercel/next.js@v15.1.8)"),
+            libraryId: z.string().min(1).refine(
+                (v) => v.startsWith('/'),
+                "libraryId must start with '/' (e.g. /vercel/next.js)"
+            ).describe("Exact Context7-compatible library ID (e.g. /vercel/next.js, /packages/express; optional version like /vercel/next.js@v15.1.8)"),
             query: z.string().min(1).optional().describe("The question or task to get relevant documentation for (optional; defaults to an overview when omitted, e.g. 'how to set up middleware with auth')"),
             limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets to return (default 5)")
         },
@@ -409,7 +443,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                     }]
                 };
             } catch (error) {
-                console.error('Failed to fetch docs via Context7:', error);
+                logSafeError('Failed to fetch docs via Context7', error);
                 return {
                     content: [{
                         type: 'text',

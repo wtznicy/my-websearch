@@ -3,6 +3,7 @@ import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
+import { normalizeText } from '../../utils/text.js';
 
 const SOGOU_SEARCH_URL = 'https://www.sogou.com/web';
 const SOGOU_PAGE_SIZE = 10;
@@ -20,10 +21,6 @@ let sogouHttpGet: SogouHttpGet = (url, options) => axios.get(url, options);
 
 export function __setSogouHttpGetForTests(impl?: SogouHttpGet): void {
     sogouHttpGet = impl ?? ((url, options) => axios.get(url, options));
-}
-
-function normalizeText(value: string): string {
-    return value.replace(/\s+/g, ' ').trim();
 }
 
 function isSogouChallengePage(html: string): boolean {
@@ -62,7 +59,9 @@ function resolveResultUrl(rawUrl: string): string {
 
 function extractSource(url: string, sourceText: string): string {
     const cleanedSource = normalizeText(sourceText);
-    if (cleanedSource) {
+    // sogou 跳转链的 hostname 占位不是真实来源；真实 URL 解析出来后应改用真实域名
+    const isSogouPlaceholder = cleanedSource === 'sogou.com' || cleanedSource === 'www.sogou.com';
+    if (cleanedSource && !isSogouPlaceholder) {
         return cleanedSource;
     }
 
@@ -71,6 +70,62 @@ function extractSource(url: string, sourceText: string): string {
     } catch {
         return '';
     }
+}
+
+/**
+ * 跟随 sogou.com/link 跳转链拿到真实目标 URL。
+ * 搜狗把每个结果包成 /link?url=<加密> 的跳转链接，url 参数是加密的无法直接解出明文；
+ * 且跳转不是 HTTP 3xx，而是页面内 JS 完成的（HTTP 200 + window.location.replace，
+ * noscript 下是 meta refresh）。这里抓 body 里的跳转目标；失败时保留原链接，不影响整页结果。
+ */
+async function resolveSogouLinkUrl(linkUrl: string): Promise<string> {
+    try {
+        const parsed = new URL(linkUrl);
+        if (!parsed.pathname.startsWith('/link')) {
+            return linkUrl;
+        }
+    } catch {
+        return linkUrl;
+    }
+
+    try {
+        const response = await sogouHttpGet(linkUrl, buildAxiosRequestOptions({ engine: 'sogou',
+            trustedStaticHost: true,
+            headers: COMMON_HEADERS,
+            timeout: 8000,
+            validateStatus: (status) => status >= 200 && status < 400
+        }));
+        const html = String(response.data || '');
+        // 跳转页格式：<script>window.location.replace("https://real-target")</script>
+        // 或 <noscript><META http-equiv="refresh" content="0;URL='https://real-target'"></noscript>
+        const replaceMatch = html.match(/window\.location\.replace\(\s*["']([^"']+)["']\s*\)/i);
+        const refreshMatch = html.match(/http-equiv=["']refresh["'][^>]*content=["']\d*;\s*URL=['"]?([^'">\s]+)/i);
+        const target = (replaceMatch?.[1] ?? refreshMatch?.[1] ?? '').trim();
+        if (/^https?:\/\//i.test(target)) {
+            const targetParsed = new URL(target);
+            if (!isAllowedSogouRedirectUrl(targetParsed)) {
+                return target;
+            }
+        }
+    } catch {
+        // 解析失败保留原链接
+    }
+    return linkUrl;
+}
+
+/** 限制并发数地批量解析（N+1 串行请求会拖慢整页） */
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    let next = 0;
+    const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+        while (next < items.length) {
+            const index = next;
+            next += 1;
+            results[index] = await fn(items[index]);
+        }
+    });
+    await Promise.all(workers);
+    return results;
 }
 
 function isAllowedSogouRedirectUrl(url: URL): boolean {
@@ -173,7 +228,13 @@ export function parseSogouSearchResults(html: string): SearchResult[] {
             return;
         }
 
-        const description = normalizeText(card.find('.str_info, .ft, .text-layout, .fz-mid, p').first().text());
+        let description = normalizeText(card.find('.str_info, .ft, .text-layout, .fz-mid, p').first().text());
+        // 搜狗结果卡片尾部常附加 "站点名https://..." 形式的 footer（含真实 URL 与日期），
+        // 从首个 http(s):// 处截断，避免描述混入跳转噪声。
+        const urlStart = description.search(/https?:\/\//);
+        if (urlStart > 0) {
+            description = description.slice(0, urlStart).trim();
+        }
         const source = extractSource(url, card.find('cite, .citeurl, .g, .url').first().text());
 
         seenUrls.add(url);
@@ -195,7 +256,16 @@ async function searchSogouPage(query: string, page: number): Promise<SearchResul
     url.searchParams.set('page', String(page));
     url.searchParams.set('ie', 'utf8');
 
-    return parseSogouSearchResults(await fetchSogouHtml(url.toString()));
+    const parsed = parseSogouSearchResults(await fetchSogouHtml(url.toString()));
+    // 跳转链并发解析成真实 URL；source 跟随真实 URL 重新提取（跳转链时只会是 www.sogou.com）
+    return mapWithConcurrency(parsed, 4, async (result) => {
+        const resolvedUrl = await resolveSogouLinkUrl(result.url);
+        return {
+            ...result,
+            url: resolvedUrl,
+            source: extractSource(resolvedUrl, result.source)
+        };
+    });
 }
 
 export async function searchSogou(query: string, limit: number): Promise<SearchResult[]> {

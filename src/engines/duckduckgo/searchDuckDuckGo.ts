@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import {SearchResult} from "../../types.js";
 import {buildAxiosRequestOptions} from "../../utils/httpRequest.js";
+import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 
 export function isTrustedDuckDuckGoPreloadUrl(value: string): boolean {
   try {
@@ -32,7 +33,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
       return results;
     }
   } catch (error) {
-    console.warn('预加载URL方法失败，尝试HTML方法:', error);
+    console.warn('预加载URL方法失败，尝试HTML方法:', error instanceof Error ? error.message : String(error));
   }
 
   return await searchDuckDuckGoHtml(query, limit);
@@ -50,7 +51,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
       const requestOptions = buildAxiosRequestOptions({ engine: 'duckduckgo',
         trustedStaticHost: true,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+          "User-Agent": BROWSER_USER_AGENT,
           "Connection": "keep-alive",
           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
           "Accept-Encoding": "gzip, deflate, br",
@@ -123,7 +124,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
         const dataResponse = await axios.get(currentPageUrl, {
           ...requestOptions,
           headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+            "User-Agent": BROWSER_USER_AGENT,
             "Connection": "keep-alive",
             "Accept": "*/*",
             "Accept-Encoding": "gzip, deflate, br",
@@ -194,8 +195,10 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
 
       return results.slice(0, maxResults);
     } catch (error) {
-      console.error('DuckDuckGo预加载URL搜索失败:', error);
-      return [];
+      // 不要静默吞成"0 结果"：re-throw 让主入口 fallback 到 HTML 路径，
+      // 若 HTML 也失败，真实原因（网络/限流/解析）能通过 partialFailures 暴露出来
+      console.error('DuckDuckGo预加载URL搜索失败:', error instanceof Error ? error.message : String(error));
+      throw error;
     }
   }
 
@@ -210,7 +213,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
     trustedStaticHost: true,
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+      'User-Agent': BROWSER_USER_AGENT,
       'Accept': '*/*',
       'Connection': 'keep-alive'
     },
