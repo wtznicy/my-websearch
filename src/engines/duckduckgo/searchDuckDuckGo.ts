@@ -18,6 +18,18 @@ export function isTrustedDuckDuckGoPreloadUrl(value: string): boolean {
   }
 }
 
+/**
+ * preload 路径（JSONP）返回的 title/description/source 是 HTML 片段：
+ * 含 <b> 高亮标签和 &#x27; 等实体（如 "<b>MCP</b> is... Whether you&#x27;re"），
+ * 统一转纯文本（剥标签 + 解码实体），与 HTML 路径的 cheerio .text() 结果保持一致。
+ */
+function cleanHighlightedText(html: string): string {
+  if (!html) {
+    return '';
+  }
+  return cheerio.load(html).root().text().trim();
+}
+
 
 /**
  * Search DuckDuckGo and return results
@@ -166,10 +178,10 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
               if (results.length >= maxResults) return;
 
               results.push({
-                title: item.t || '',
+                title: cleanHighlightedText(item.t || ''),
                 url: item.u || '',
-                description: item.a || '',
-                source: item.i || item.sn || '',
+                description: cleanHighlightedText(item.a || ''),
+                source: cleanHighlightedText(item.i || item.sn || ''),
                 engine: 'duckduckgo'
               });
             });

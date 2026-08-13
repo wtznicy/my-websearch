@@ -57,74 +57,16 @@ async function searchExaOfficial(query: string, limit: number, apiKey: string): 
     }));
 }
 
-// exa.ai 网页版内部端点（免 key，供无 EXA_API_KEY 时降级使用）。
-// 注意：上游 exa.ai 前端重构后该端点可能返回 HTML/失效（2026-08 实测已失效），
-// 无 key 场景大概率拿不到结果——仅作为尽力而为的 fallback。
-async function searchExaLegacy(query: string, limit: number): Promise<SearchResult[]> {
-    const requestOptions = buildAxiosRequestOptions({ engine: 'exa',
-        trustedStaticHost: true,
-        headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
-            "Connection": "keep-alive",
-            "Accept": "*/*",
-            "Accept-Encoding": "gzip, deflate, br",
-            "sec-ch-ua": "\"Chromium\";v=\"133\", \"Google Chrome\";v=\"133\", \"Not:A-Brand\";v=\"99\"",
-            "content-type": "text/plain;charset=UTF-8",
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": "\"Windows\"",
-            "origin": "https://exa.ai",
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-dest": "empty",
-            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8"
-        }
-    });
-
-    // The payload for the POST request
-    const data = {
-        "numResults": limit,
-        "query": query,
-        "type": "auto",
-        "useAutoprompt": true,
-        "domainFilterType": "include",
-        "text": true,
-        "density": "compact",
-        "resolvedSearchType": "neural",
-        "moderation": true,
-        "fastMode": false,
-        "rerankerType": "default"
-    };
-
-    const response = await axios.post<{ results: ExaResult[] }>(
-        `https://exa.ai/search/api/search-fast`,
-        data,
-        requestOptions
-    );
-
-    const apiResults = response.data.results;
-
-    if (!apiResults || apiResults.length === 0) {
-        console.error('⚠️ No results returned from Exa.ai API.');
-        return [];
-    }
-
-    const allResults: SearchResult[] = apiResults.map((item: ExaResult) => {
-        return {
-            title: item.title || 'No title',
-            url: item.url,
-            description: `Author: ${item.author || 'N/A'}. Published: ${item.publishedDate ? new Date(item.publishedDate).toLocaleDateString() : 'N/A'}`,
-            source: new URL(item.url).hostname,
-            engine: 'exa'
-        };
-    });
-
-    return allResults.slice(0, limit);
-}
-
 export async function searchExa(query: string, limit: number): Promise<SearchResult[]> {
     const apiKey = process.env.EXA_API_KEY?.trim();
-    if (apiKey) {
-        return searchExaOfficial(query, limit, apiKey);
+    if (!apiKey) {
+        // 旧版免 key 的网页端内部端点（exa.ai/search/api/search-fast）自 2026-08 起已失效（返回 500）。
+        // 无 key 直接给出明确配置指引，避免每次调用都白打失效端点并触发多层重试。
+        throw new Error(
+            'Exa engine requires EXA_API_KEY. Get one at https://dashboard.exa.ai/api-keys, ' +
+            'then set it in your MCP client server env (e.g. "EXA_API_KEY": "exa_xxx" in Claude Desktop / Cherry Studio / ZCode MCP config), ' +
+            'or run the CLI with the env prefix: EXA_API_KEY=exa_xxx open-websearch search ...'
+        );
     }
-    return searchExaLegacy(query, limit);
+    return searchExaOfficial(query, limit, apiKey);
 }

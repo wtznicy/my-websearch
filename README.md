@@ -171,8 +171,53 @@ npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true open-websearch
 | `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | Valid MCP tool name | Custom name for the GitHub README fetch tool |
 | `MCP_TOOL_FETCH_JUEJIN_NAME` | `fetchJuejinArticle` | Valid MCP tool name | Custom name for the Juejin article fetch tool |
 | `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | Valid MCP tool name | Custom name for generic web/Markdown fetch tool |
+| `EXA_API_KEY` | empty | Any valid Exa API key | **可选**（仅 exa 引擎需要）。exa 的免 key 网页端点已失效，想用 exa 引擎时在 [https://dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) 免费申请并配置到 MCP 客户端 env；不配置只影响 exa 一个引擎，其余引擎不受影响 |
 | `LOG_LEVEL` | `normal` | `normal`, `quiet` | `quiet` 抑制启动配置日志（MCP stdio 裸启动默认已静默；诊断时可用 `LOG_LEVEL=normal` 恢复） |
 | `OPEN_WEBSEARCH_QUIET_STARTUP` | `false` | `true`, `false` | 抑制启动配置日志（兼容开关，`LOG_LEVEL=quiet` 与之等价） |
+
+**Optional: configure EXA_API_KEY (only needed if you want to use the exa engine)**
+
+`EXA_API_KEY` is **optional** — every other engine (bing, baidu, csdn, juejin, sogou, duckduckgo, brave, startpage) works without it. Only configure it if you want to use `exa`: its old keyless web endpoint has been shut down by upstream (returns 500), so exa needs a free key from [https://dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys), configured in your MCP client:
+
+**Claude Desktop** (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "web-search": {
+      "command": "npx",
+      "args": ["-y", "open-websearch-wtznicy@latest"],
+      "env": {
+        "MODE": "stdio",
+        "EXA_API_KEY": "exa_xxxxxxxx"
+      }
+    }
+  }
+}
+```
+
+**Cherry Studio / VSCode (Claude Dev):** same `env` field, add `"EXA_API_KEY": "exa_xxxxxxxx"` to the server's environment variables.
+
+**ZCode** (`~/.zcode/cli/config.json` → `mcp.servers`):
+```json
+"open-websearch": {
+  "type": "stdio",
+  "command": "D:\\nodejs\\node.exe",
+  "args": ["D:\\path\\to\\build\\index.js"],
+  "env": {
+    "MODE": "stdio",
+    "EXA_API_KEY": "exa_xxxxxxxx"
+  }
+}
+```
+
+**CLI one-shot (no config file needed):**
+```bash
+EXA_API_KEY=exa_xxxxxxxx open-websearch search "query" --engines exa
+# Windows PowerShell:
+# $env:EXA_API_KEY="exa_xxxxxxxx"; open-websearch search "query" --engines exa
+```
+
+If the key is missing, the exa engine fails fast with an error message that includes these instructions instead of silently returning nothing.
 
 **Common configurations:**
 ```bash
