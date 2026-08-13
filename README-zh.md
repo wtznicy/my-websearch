@@ -13,7 +13,7 @@
 - 多引擎搜索：
   - 国内引擎（直连即可）：`bing`、`baidu`、`csdn`、`juejin`、`sogou`
   - 境外引擎（⚠️ **中国大陆用户需开启代理**）：`duckduckgo`、`exa`、`brave`、`startpage`
-- 支持 HTTP 代理（按引擎白名单路由，`PROXY_ENGINES`），无 API Key、无需注册
+- 支持 HTTP 代理（按引擎白名单路由，`PROXY_ENGINES`），除 exa 外无需 API Key、无需注册（exa 可选配置 `EXA_API_KEY`，见下文）
 - 跨引擎结果去重融合 + TTL 缓存（5 分钟，可手动清空）
 - `minResults` 级联：某引擎失败时自动用其他引擎补足结果数
 - 正文抓取：CSDN 文章、掘金文章、GitHub README、任意 HTTP(S) 网页 / Markdown
@@ -150,6 +150,53 @@ open-websearch
 | `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | 合法 MCP 工具名 | 自定义 GitHub README 工具名 |
 | `MCP_TOOL_FETCH_JUEJIN_NAME` | `fetchJuejinArticle` | 合法 MCP 工具名 | 自定义掘金抓取工具名 |
 | `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | 合法 MCP 工具名 | 自定义网页抓取工具名 |
+| `EXA_API_KEY` | 空 | 任意有效 Exa API key | **可选**（仅 exa 引擎需要）。exa 的免 key 网页端点已失效，想用 exa 引擎时在 [https://dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) 免费申请并配置到 MCP 客户端 env；不配置只影响 exa 一个引擎，其余引擎不受影响 |
+| `LOG_LEVEL` | `normal` | `normal`, `quiet` | `quiet` 抑制启动配置日志（MCP stdio 裸启动默认已静默；诊断时可用 `LOG_LEVEL=normal` 恢复） |
+| `OPEN_WEBSEARCH_QUIET_STARTUP` | `false` | `true`, `false` | 抑制启动配置日志（兼容开关，`LOG_LEVEL=quiet` 与之等价） |
+
+### 可选：配置 EXA_API_KEY（仅想用 exa 引擎时需要）
+
+`EXA_API_KEY` 是**可选配置**——其余引擎（bing、baidu、csdn、juejin、sogou、duckduckgo、brave、startpage）都不需要它。只有想用 `exa` 时才配置：exa 的旧免 key 网页端点已被上游关闭（返回 500），需要在 [https://dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) 免费申请 key，并配置到你的 MCP 客户端：
+
+**Claude Desktop**（`claude_desktop_config.json`）：
+```json
+{
+  "mcpServers": {
+    "web-search": {
+      "command": "npx",
+      "args": ["-y", "open-websearch-wtznicy@latest"],
+      "env": {
+        "MODE": "stdio",
+        "EXA_API_KEY": "exa_xxxxxxxx"
+      }
+    }
+  }
+}
+```
+
+**Cherry Studio / VSCode（Claude Dev）**：同样在 server 的 `env` 字段加 `"EXA_API_KEY": "exa_xxxxxxxx"`。
+
+**ZCode**（`~/.zcode/cli/config.json` → `mcp.servers`）：
+```json
+"open-websearch": {
+  "type": "stdio",
+  "command": "D:\\nodejs\\node.exe",
+  "args": ["D:\\path\\to\\build\\index.js"],
+  "env": {
+    "MODE": "stdio",
+    "EXA_API_KEY": "exa_xxxxxxxx"
+  }
+}
+```
+
+**CLI 一次性使用（无需配置文件）**：
+```bash
+EXA_API_KEY=exa_xxxxxxxx open-websearch search "query" --engines exa
+# Windows PowerShell：
+# $env:EXA_API_KEY="exa_xxxxxxxx"; open-websearch search "query" --engines exa
+```
+
+未配置 key 时，exa 引擎会快速失败并返回包含以上配置指引的错误信息，而不是静默返回空结果。
 
 ### 常用配置示例
 
