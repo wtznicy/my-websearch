@@ -167,14 +167,14 @@ open-websearch
       "args": ["-y", "open-websearch-wtznicy@latest"],
       "env": {
         "MODE": "stdio",
-        "EXA_API_KEY": "exa_xxxxxxxx"
+        "EXA_API_KEY": "<your-key>"
       }
     }
   }
 }
 ```
 
-**Cherry Studio / VSCode（Claude Dev）**：同样在 server 的 `env` 字段加 `"EXA_API_KEY": "exa_xxxxxxxx"`。
+**Cherry Studio / VSCode（Claude Dev）**：同样在 server 的 `env` 字段加 `"EXA_API_KEY": "<your-key>"`。
 
 **ZCode**（`~/.zcode/cli/config.json` → `mcp.servers`）：
 ```json
@@ -184,16 +184,16 @@ open-websearch
   "args": ["D:\\path\\to\\build\\index.js"],
   "env": {
     "MODE": "stdio",
-    "EXA_API_KEY": "exa_xxxxxxxx"
+    "EXA_API_KEY": "<your-key>"
   }
 }
 ```
 
 **CLI 一次性使用（无需配置文件）**：
 ```bash
-EXA_API_KEY=exa_xxxxxxxx open-websearch search "query" --engines exa
+EXA_API_KEY=<your-key> open-websearch search "query" --engines exa
 # Windows PowerShell：
-# $env:EXA_API_KEY="exa_xxxxxxxx"; open-websearch search "query" --engines exa
+# $env:EXA_API_KEY="<your-key>"; open-websearch search "query" --engines exa
 ```
 
 未配置 key 时，exa 引擎会快速失败并返回包含以上配置指引的错误信息，而不是静默返回空结果。

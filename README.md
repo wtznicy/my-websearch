@@ -188,14 +188,14 @@ npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true open-websearch
       "args": ["-y", "open-websearch-wtznicy@latest"],
       "env": {
         "MODE": "stdio",
-        "EXA_API_KEY": "exa_xxxxxxxx"
+        "EXA_API_KEY": "<your-key>"
       }
     }
   }
 }
 ```
 
-**Cherry Studio / VSCode (Claude Dev):** same `env` field, add `"EXA_API_KEY": "exa_xxxxxxxx"` to the server's environment variables.
+**Cherry Studio / VSCode (Claude Dev):** same `env` field, add `"EXA_API_KEY": "<your-key>"` to the server's environment variables.
 
 **ZCode** (`~/.zcode/cli/config.json` → `mcp.servers`):
 ```json
@@ -205,16 +205,16 @@ npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true open-websearch
   "args": ["D:\\path\\to\\build\\index.js"],
   "env": {
     "MODE": "stdio",
-    "EXA_API_KEY": "exa_xxxxxxxx"
+    "EXA_API_KEY": "<your-key>"
   }
 }
 ```
 
 **CLI one-shot (no config file needed):**
 ```bash
-EXA_API_KEY=exa_xxxxxxxx open-websearch search "query" --engines exa
+EXA_API_KEY=<your-key> open-websearch search "query" --engines exa
 # Windows PowerShell:
-# $env:EXA_API_KEY="exa_xxxxxxxx"; open-websearch search "query" --engines exa
+# $env:EXA_API_KEY="<your-key>"; open-websearch search "query" --engines exa
 ```
 
 If the key is missing, the exa engine fails fast with an error message that includes these instructions instead of silently returning nothing.

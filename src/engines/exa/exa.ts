@@ -64,8 +64,8 @@ export async function searchExa(query: string, limit: number): Promise<SearchRes
         // 无 key 直接给出明确配置指引，避免每次调用都白打失效端点并触发多层重试。
         throw new Error(
             'Exa engine requires EXA_API_KEY. Get one at https://dashboard.exa.ai/api-keys, ' +
-            'then set it in your MCP client server env (e.g. "EXA_API_KEY": "exa_xxx" in Claude Desktop / Cherry Studio / ZCode MCP config), ' +
-            'or run the CLI with the env prefix: EXA_API_KEY=exa_xxx open-websearch search ...'
+            'then set it in your MCP client server env (e.g. "EXA_API_KEY": "<your-key>" in Claude Desktop / Cherry Studio / ZCode MCP config), ' +
+            'or run the CLI with the env prefix: EXA_API_KEY=<your-key> open-websearch search ...'
         );
     }
     return searchExaOfficial(query, limit, apiKey);
