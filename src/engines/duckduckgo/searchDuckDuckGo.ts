@@ -3,6 +3,7 @@ import * as cheerio from 'cheerio';
 import {SearchResult} from "../../types.js";
 import {buildAxiosRequestOptions} from "../../utils/httpRequest.js";
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
+import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 
 export function isTrustedDuckDuckGoPreloadUrl(value: string): boolean {
   try {
@@ -38,6 +39,8 @@ function cleanHighlightedText(html: string): string {
  * @returns Array of search results
  */
 export async function searchDuckDuckGo(query: string, limit: number): Promise<SearchResult[]> {
+  // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂 15s 超时拖累整次搜索
+  await assertOverseasEngineUsable('duckduckgo');
   // Try using the preloaded URL method
   try {
     const results = await searchDuckDuckGoPreloadUrl(query, limit);

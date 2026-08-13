@@ -247,7 +247,7 @@ Use `PROXY_ENGINES` to keep domestic engines on a fast direct connection while r
 USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brave,startpage npx open-websearch-wtznicy@latest
 ```
 
-If a search includes overseas engines but the proxy is off, those engines will fail with `partialFailures` entries (the rest of the results still return) — that is expected behavior.
+If a search includes overseas engines but the proxy is off, those engines will fail fast instead of hanging until timeout: open-websearch probes direct connectivity to `duckduckgo`/`brave`/`startpage` (3s timeout, one retry, result cached for 5 minutes) — unreachable engines immediately return a "proxy required, or use domestic engines" error, while reachable engines (e.g. overseas users) work normally. `exa` is excluded from probing because `api.exa.ai` is directly reachable from mainland China. When the proxy is on, engines in `PROXY_ENGINES` are never probed — they go straight through the proxy.
 
 Browser-enhanced Bing fallback is opt-in. The published package does not bundle Playwright anymore. Enable it manually with one of these setups:
 

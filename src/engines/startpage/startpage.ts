@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
+import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 
 const STARTPAGE_BASE_URL = 'https://www.startpage.com';
 const STARTPAGE_SEARCH_URL = `${STARTPAGE_BASE_URL}/sp/search`;
@@ -240,6 +241,8 @@ async function searchStartpagePage(query: string, page: number): Promise<SearchR
 }
 
 export async function searchStartpage(query: string, limit: number): Promise<SearchResult[]> {
+    // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂超时拖累整次搜索
+    await assertOverseasEngineUsable('startpage');
     const allResults: SearchResult[] = [];
     const seenUrls = new Set<string>();
     const maxPage = Math.max(1, Math.ceil(limit / DEFAULT_PAGE_SIZE));

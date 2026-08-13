@@ -298,6 +298,7 @@ MCP 共提供 7 个工具：
 ## 使用限制
 
 - **中国大陆网络**：`duckduckgo`、`exa`、`brave`、`startpage` 为境外引擎，**不开代理会直接超时/失败**；`bing`、`baidu`、`csdn`、`juejin`、`sogou` 可直连。建议配置 `USE_PROXY=true` + `PROXY_ENGINES=duckduckgo,exa,brave,startpage`，让境外引擎走代理、国内引擎保持直连。若搜索时未开代理而包含境外引擎，它们会以 `partialFailures` 形式报错，其余结果仍正常返回——属预期行为
+- 未开代理时境外引擎（`duckduckgo`/`brave`/`startpage`）会**快速失败**而不是挂满超时：程序会先探测直连可达性（3 秒超时、失败重试 1 次、结果缓存 5 分钟），不可达立即返回"需要代理，或改用国内引擎"；海外直连用户不受影响。`exa` 不参与探测——`api.exa.ai` 国内可直连（仅需 `EXA_API_KEY`）。已配置代理的引擎不探测，直接走代理
 - 搜索引擎为免费接口，可能遇到反爬/限流；Bing 最常见。应对：多引擎分担（`engines`）、`minResults` 级联、`BING_PLAYWRIGHT_FALLBACK=false`、或设置代理
 - 依赖浏览器 cookie / JS 渲染的页面，需安装 Playwright 才能兜底抓取
 - 国内网络下 GitHub 相关域名可能无法直接解析，可用 `fetchWebContent` + jsDelivr 镜像（`https://cdn.jsdelivr.net/gh/<owner>/<repo>@<branch>/README.md`）

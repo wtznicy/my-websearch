@@ -4,6 +4,7 @@ import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from "../../utils/httpRequest.js";
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { paginateSearch } from '../../utils/pagination.js';
+import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 
 /** Brave 拦截/验证页的标题关键词（反爬时页面 title 变为这些） */
 const BRAVE_BLOCKED_TITLE_KEYWORDS = [
@@ -35,7 +36,9 @@ function buildBraveErrorMessage(error: unknown): Error {
 }
 
 export async function searchBrave(query: string, limit: number): Promise<SearchResult[]> {
-    const seenUrls = new Set<string>();
+  // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂超时拖累整次搜索
+  await assertOverseasEngineUsable('brave');
+  const seenUrls = new Set<string>();
     const encodedQuery = encodeURIComponent(query);
     const requestOptions = buildAxiosRequestOptions({ engine: 'brave',
         trustedStaticHost: true,
