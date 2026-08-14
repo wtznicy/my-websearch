@@ -634,6 +634,7 @@ Since this tool works by scraping multi-engine search results, please note the f
         - Maintain reasonable search frequency
         - Use the limit parameter judiciously
         - Add delays between searches when necessary
+    - **Brave is the strictest**: it throttles consecutive automated requests aggressively — a burst of searches triggers HTTP 429 for minutes (even from residential proxy IPs), and the block window outlasts short cooldowns. Use brave at low frequency; prefer `duckduckgo` / `startpage` as the daily overseas engines (they are stable and of similar quality). A 429 on brave fails fast and `minResults` cascade automatically falls back to other engines.
 
 2. **Result Accuracy**:
     - Depends on the HTML structure of corresponding engines, may fail when engines update
