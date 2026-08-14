@@ -2,6 +2,8 @@
 
 startCommand:
   type: http
+  buildCommand: npm install && npm run build
+  startCommand: MODE=http node build/index.js
   configSchema:
     # JSON Schema defining the configuration options for the MCP.
     type: object
@@ -22,14 +24,16 @@ startCommand:
       useProxy:
         type: boolean
         default: false
-        description: Enable HTTP proxy
+        description: Enable HTTP proxy (only meaningful in self-hosted environments; the Smithery cloud can reach overseas engines directly)
       proxyUrl:
         type: string
-        default: http://127.0.0.1:10809
-        description: Proxy server URL (only meaningful when useProxy is true; leave empty in hosted environments without an outbound proxy)
+        default: http://127.0.0.1:7890
+        description: Proxy server URL (only meaningful when useProxy is true)
+      exaApiKey:
+        type: string
+        default: ""
+        description: Optional Exa API key (https://dashboard.exa.ai/api-keys) — only needed for the exa engine
   exampleConfig:
     enableCors: false
     corsOrigin: "*"
     defaultSearchEngine: duckduckgo
-    useProxy: true
-    proxyUrl: http://your-proxy-server:port
