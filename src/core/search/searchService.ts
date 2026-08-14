@@ -225,8 +225,13 @@ export class SearchTtlCache {
 // 服务
 // ---------------------------------------------------------------------------
 
-/** 4xx（除 429 限流）不重试——参数/请求本身有问题，重试只会白耗时间；5xx、网络/超时错误重试 */
+/** 4xx（除 429 限流）不重试——参数/请求本身有问题，重试只会白耗时间；5xx、网络/超时错误重试。
+ * 引擎可显式标记 error.retryable = false（如"未配置 API key""海外引擎无代理不可达"等确定性错误），
+ * 多引擎搜索时让该引擎立即失败，不占用重试退避时间、不影响其他引擎。 */
 function isRetryableEngineError(error: unknown): boolean {
+    if ((error as any)?.retryable === false) {
+        return false;
+    }
     const status = (error as any)?.response?.status;
     if (typeof status === 'number') {
         return status === 429 || status >= 500;
