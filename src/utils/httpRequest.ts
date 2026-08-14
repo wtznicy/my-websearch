@@ -8,9 +8,19 @@ import {
 } from 'request-filtering-agent';
 import { config, getProxyUrl, engineShouldUseProxy } from '../config.js';
 import { assertPublicHttpUrlResolved, isPrivateOrLocalHostname } from './urlSafety.js';
+import { cachedDnsLookup } from './dnsCache.js';
 
 // 默认请求超时：调用方未显式传 timeout 时使用，避免引擎请求永不超时拖垮整个搜索。
 export const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+
+// keepAlive + 并发上限：同一 agent 的多次请求（sogou link 解析、baidu redirect、分页、MCP 会话内多次搜索）
+// 复用 TCP/TLS 连接，省掉重复握手；lookup 走进程内 DNS 缓存（60s TTL），
+// request-filtering-agent 会继续对解析结果做私网过滤，SSRF 防护不削弱。
+const AGENT_KEEPALIVE_OPTIONS = {
+    keepAlive: true,
+    maxSockets: 16,
+    lookup: cachedDnsLookup
+} as const;
 
 type BuildAxiosRequestOptions = {
     allowInsecureTls?: boolean;
@@ -51,7 +61,10 @@ function getFilteringHttpAgent(): RequestFilteringHttpAgent {
     if (cached) {
         return cached;
     }
-    const agent = new RequestFilteringHttpAgent(buildFakeIpAllowlistOptions());
+    const agent = new RequestFilteringHttpAgent({
+        ...buildFakeIpAllowlistOptions(),
+        ...AGENT_KEEPALIVE_OPTIONS
+    });
     filteringHttpAgents.set(cacheKey, agent);
     return agent;
 }
@@ -65,7 +78,8 @@ function getFilteringHttpsAgent(allowInsecureTls: boolean): RequestFilteringHttp
     }
     const agent = new RequestFilteringHttpsAgent({
         ...buildFakeIpAllowlistOptions(),
-        rejectUnauthorized: !allowInsecureTls
+        rejectUnauthorized: !allowInsecureTls,
+        ...AGENT_KEEPALIVE_OPTIONS
     });
     cache.set(cacheKey, agent);
     return agent;
@@ -79,7 +93,9 @@ function getProxyAgent(proxyUrl: string, allowInsecureTls: boolean): HttpsProxyA
     }
 
     const agent = new HttpsProxyAgent(proxyUrl, {
-        rejectUnauthorized: !allowInsecureTls
+        rejectUnauthorized: !allowInsecureTls,
+        keepAlive: true,
+        maxSockets: 16
     });
     proxyAgents.set(cacheKey, agent);
     return agent;
@@ -87,7 +103,11 @@ function getProxyAgent(proxyUrl: string, allowInsecureTls: boolean): HttpsProxyA
 
 function getInsecureTrustedStaticHttpsAgent(): https.Agent {
     if (!insecureTrustedStaticHttpsAgent) {
-        insecureTrustedStaticHttpsAgent = new https.Agent({ rejectUnauthorized: false });
+        insecureTrustedStaticHttpsAgent = new https.Agent({
+            rejectUnauthorized: false,
+            keepAlive: true,
+            maxSockets: 16
+        });
     }
     return insecureTrustedStaticHttpsAgent;
 }
