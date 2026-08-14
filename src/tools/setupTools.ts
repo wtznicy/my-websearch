@@ -116,10 +116,13 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
 
     // 搜索工具
     // 生成搜索工具的动态描述（精简版；engines 合法值在参数描述里，LLM 可见）
+    // 附带的引导语帮助 LLM 选对工具：官方文档优先 Context7（可靠、免代理），
+    // 站点定向查询用 site: 操作符（否则通用搜索容易召回无关首页/教程）
+    const DOCS_GUIDANCE = ' For OFFICIAL library/framework documentation, prefer resolveLibraryId + queryDocs (more reliable, works without proxy). Use the site: operator for site-specific queries (e.g. "update site:docs.elastic.co").';
     const getSearchDescription = () => {
         const searchModeDescription = ' searchMode: omit/auto = server SEARCH_MODE; request/playwright force that mode.';
         if (runtime.config.allowedSearchEngines.length === 0) {
-            return `Search the web across multiple engines with no API key required.${searchModeDescription}`;
+            return `Search the web across multiple engines with no API key required.${searchModeDescription}${DOCS_GUIDANCE}`;
         } else {
             const enginesText = runtime.config.allowedSearchEngines.map(e => {
                 switch (e) {
@@ -133,7 +136,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }
             }).join(', ');
-            return `Search the web using these engines: ${enginesText} (no API key required).${searchModeDescription}`;
+            return `Search the web using these engines: ${enginesText} (no API key required).${searchModeDescription}${DOCS_GUIDANCE}`;
         }
     };
 
@@ -386,7 +389,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
     // 查找库文档（context7 融合）——按库名搜索官方文档索引
     server.tool(
         "resolveLibraryId",
-        "Resolve a library/package name to a Context7 library ID (e.g. /vercel/next.js) for docs queries.",
+        "PREFERRED for official docs: resolve a library/package name to a Context7 library ID (e.g. /vercel/next.js). Use this (then queryDocs) FIRST when the task needs official library/framework documentation — more reliable than web search and works without a proxy.",
         {
             libraryName: z.string().min(1).describe("The library or package name to search for (e.g. 'Next.js', 'express', 'prisma')"),
             query: z.string().min(1).optional().describe("The user's question or task, used to rank results by relevance (optional; defaults to the library name when omitted, e.g. 'how to implement authentication')"),
@@ -422,7 +425,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
     // 获取库文档（context7 融合）——按库 ID 获取官方文档片段与代码示例
     server.tool(
         "queryDocs",
-        "Get up-to-date, version-specific docs and code snippets for a Context7 library ID (e.g. /vercel/next.js).",
+        "Get up-to-date, version-specific official docs and code snippets for a Context7 library ID (e.g. /vercel/next.js, version-pinnable like /vercel/next.js@v15.1.8). Use with resolveLibraryId for official documentation lookups — direct, reliable, no proxy needed.",
         {
             libraryId: z.string().min(1).refine(
                 (v) => v.startsWith('/'),

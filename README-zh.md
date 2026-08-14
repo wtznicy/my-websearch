@@ -267,7 +267,7 @@ MCP 共提供 7 个工具：
 |------|------|
 | `search` | 多引擎搜索，返回去重融合结果；支持 `engines`、`limit`、`searchMode`、`minResults` |
 | `fetchCsdnArticle` | 抓取 CSDN 文章全文 |
-| `fetchGithubReadme` | 抓取 GitHub 仓库 README |
+| `fetchGithubReadme` | 抓取 GitHub / Gitee 仓库 README（Gitee 走官方 API，无需代理） |
 | `fetchWebContent` | 抓取任意 HTTP(S) 网页 / Markdown，支持编码探测与分页 |
 | `fetchJuejinArticle` | 抓取掘金文章全文 |
 | `resolveLibraryId` | 把库/框架名解析为 context7 库 ID（带信誉/质量评分） |

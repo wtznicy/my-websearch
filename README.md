@@ -520,11 +520,11 @@ Response example:
 
 ### fetchGithubReadme Tool Usage
 
-Used to fetch README content from GitHub repositories.
+Used to fetch README content from GitHub or Gitee repositories (Gitee uses the official API, reachable without a proxy).
 
 ```typescript
 {
-  "url": string    // GitHub repository URL (supports HTTPS, SSH formats)
+  "url": string    // GitHub/Gitee repository URL (supports HTTPS, SSH formats)
 }
 ```
 
@@ -540,10 +540,12 @@ use_mcp_tool({
 ```
 
 Supported URL formats:
-- HTTPS: `https://github.com/owner/repo`
-- HTTPS with .git: `https://github.com/owner/repo.git`
-- SSH: `git@github.com:owner/repo.git`
+- GitHub HTTPS: `https://github.com/owner/repo`
+- GitHub HTTPS with .git: `https://github.com/owner/repo.git`
+- GitHub SSH: `git@github.com:owner/repo.git`
 - URLs with parameters: `https://github.com/owner/repo?tab=readme`
+- Gitee HTTPS: `https://gitee.com/owner/repo`
+- Gitee SSH: `git@gitee.com:owner/repo.git`
 
 Response example:
 ```json

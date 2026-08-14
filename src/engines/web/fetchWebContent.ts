@@ -49,7 +49,9 @@ export type FetchWebContentOptions = {
     startIndex?: number;
 };
 
-const DEFAULT_TIMEOUT_MS = 20000;
+// 请求超时 10s：快速失败优先——慢页面（如部分海外站点直连）10s 内不响应就报错，
+// 让 LLM 及时转 Context7 / 其他路径，而不是占用客户端 30s MCP 超时上限
+const DEFAULT_TIMEOUT_MS = 10000;
 const DEFAULT_MAX_CHARS = 30000;
 // 执行层允许的最小 maxChars 为 100（CLI 直调可抓小片段）；
 // MCP 工具 schema 层面仍限制 1000，不影响 MCP 调用契约

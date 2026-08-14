@@ -13,6 +13,28 @@ function normalizeExtractedText(text: string): string {
         .trim();
 }
 
+/**
+ * CSDN 文章正文尾部常混入社区推广段落（如"九天&菜菜…30+套原创系统教程…扫🐎进入大模型技术社区"）。
+ * 按段落（\n\n）拆分后剔除命中推广特征词的段落，避免广告噪音进入抓取结果。
+ */
+const CSDN_PROMO_KEYWORDS = [
+    '扫码', '扫🐎', '扫马',              // 二维码引导
+    '大模型技术社区',                     // 推广社区名
+    '原创系统教程',                       // 教程推广
+    '免费公开',                           // 推广句式
+    '项目源码包',                         // 源码获取引导
+    '完整视频讲解'                        // 视频推广
+];
+
+function stripPromotionSections(text: string): string {
+    if (!text) {
+        return text;
+    }
+    const paragraphs = text.split('\n\n');
+    const kept = paragraphs.filter((paragraph) => !CSDN_PROMO_KEYWORDS.some((keyword) => paragraph.includes(keyword)));
+    return kept.join('\n\n').trim();
+}
+
 function buildRequestOptions(cookieHeader?: string): any {
     const headers: Record<string, string> = {
         'Accept': '*/*',
@@ -33,7 +55,7 @@ function extractArticleContent(html: string): string {
     const $ = cheerio.load(html);
     const article = $('#content_views').first();
     article.find('script, style, noscript').remove();
-    return normalizeExtractedText(article.text());
+    return stripPromotionSections(normalizeExtractedText(article.text()));
 }
 
 function shouldRetryWithBrowser(html: string, content: string): boolean {

@@ -22,13 +22,17 @@ export function validateGithubRepositoryUrl(url: string): boolean {
     try {
         const trimmedUrl = url.trim();
 
-        if (/^git@github\.com:/.test(trimmedUrl)) {
-            return /^git@github\.com:[^\/]+\/[^\/]+/.test(trimmedUrl);
+        // GitHub / Gitee 的 HTTPS 与 SSH 格式
+        if (/^git@(github|gitee)\.com:/.test(trimmedUrl)) {
+            return /^git@(github|gitee)\.com:[^\/]+\/[^\/]+/.test(trimmedUrl);
         }
 
         const urlObj = new URL(trimmedUrl);
-        const isHttpsGithub = urlObj.hostname === 'github.com' || urlObj.hostname === 'www.github.com';
-        if (!isHttpsGithub) {
+        const isSupportedHost = urlObj.hostname === 'github.com'
+            || urlObj.hostname === 'www.github.com'
+            || urlObj.hostname === 'gitee.com'
+            || urlObj.hostname === 'www.gitee.com';
+        if (!isSupportedHost) {
             return false;
         }
 
