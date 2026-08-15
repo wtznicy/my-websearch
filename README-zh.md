@@ -288,7 +288,7 @@ MCP 共提供 7 个工具：
 
 ```json
 {
-  "url": "https://gitee.com/wtznicy/open-websearch/raw/main/README.md",
+  "url": "https://gitee.com/wtznicy/my-websearch/raw/main/README.md",
   "maxChars": 12000
 }
 ```

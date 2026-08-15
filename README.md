@@ -40,7 +40,7 @@
 Install the `my-websearch` skill for your agent first:
 
 ```bash
-npx skills add https://gitee.com/wtznicy/open-websearch --skill my-websearch
+npx skills add https://gitee.com/wtznicy/my-websearch --skill my-websearch
 ```
 
 On first use, the skill typically follows this path: detect whether a usable `my-websearch` path already exists, guide setup/enablement if it does not, validate that the capability is active, and only then continue with search or fetch through the smallest working path.
@@ -534,7 +534,7 @@ use_mcp_tool({
   server_name: "web-search",
   tool_name: "fetchGithubReadme",
   arguments: {
-    url: "https://gitee.com/wtznicy/open-websearch"
+    url: "https://gitee.com/wtznicy/my-websearch"
   }
 })
 ```
@@ -573,7 +573,7 @@ use_mcp_tool({
   server_name: "web-search",
   tool_name: "fetchWebContent",
   arguments: {
-    url: "https://gitee.com/wtznicy/open-websearch/raw/main/README.md",
+    url: "https://gitee.com/wtznicy/my-websearch/raw/main/README.md",
     maxChars: 12000
   }
 })
@@ -582,8 +582,8 @@ use_mcp_tool({
 Response example:
 ```json
 {
-  "url": "https://gitee.com/wtznicy/open-websearch/raw/main/README.md",
-  "finalUrl": "https://gitee.com/wtznicy/open-websearch/raw/main/README.md",
+  "url": "https://gitee.com/wtznicy/my-websearch/raw/main/README.md",
+  "finalUrl": "https://gitee.com/wtznicy/my-websearch/raw/main/README.md",
   "contentType": "text/plain; charset=utf-8",
   "title": "",
   "truncated": false,

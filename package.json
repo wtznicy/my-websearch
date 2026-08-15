@@ -6,9 +6,9 @@
   "author": "wtznicy",
   "repository": {
     "type": "git",
-    "url": "https://gitee.com/wtznicy/open-websearch.git"
+    "url": "https://gitee.com/wtznicy/my-websearch.git"
   },
-  "homepage": "https://gitee.com/wtznicy/open-websearch",
+  "homepage": "https://gitee.com/wtznicy/my-websearch",
   "keywords": [
     "mcp",
     "model-context-protocol",
