@@ -2,7 +2,7 @@
  * Context7 文档检索客户端。
  *
  * 直接调用 context7 的公开 REST API（https://context7.com/docs/api-guide），
- * 让 open-websearch 具备"官方文档直达 + 来源信誉评分"的能力，无需依赖
+ * 让 my-websearch 具备"官方文档直达 + 来源信誉评分"的能力，无需依赖
  * context7 的 MCP 进程（该进程在本机网络下启动缓慢且易超时）。
  *
  * API 特性：
@@ -107,7 +107,7 @@ function getApiKey(): string | undefined {
 
 function buildHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
-        'User-Agent': 'OpenWebSearch/2.1 (MCP; context7-integration)'
+        'User-Agent': 'MyWebSearch/2.1 (MCP; context7-integration)'
     };
     const apiKey = getApiKey();
     if (apiKey) {

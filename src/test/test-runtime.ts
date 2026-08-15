@@ -1,5 +1,5 @@
 import { AppConfig } from '../config.js';
-import { createOpenWebSearchRuntime } from '../runtime/createRuntime.js';
+import { createMyWebSearchRuntime } from '../runtime/createRuntime.js';
 import { shouldCreateFullRuntimeForInvocation } from '../runtime/runtimeSelection.js';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -30,7 +30,7 @@ function createTestConfig(): AppConfig {
 
 async function testRuntimeUsesInjectedDependencies(): Promise<void> {
     const seenCalls: string[] = [];
-    const runtime = createOpenWebSearchRuntime({
+    const runtime = createMyWebSearchRuntime({
         config: createTestConfig(),
         dependencies: {
             searchExecutors: {

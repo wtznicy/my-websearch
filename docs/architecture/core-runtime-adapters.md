@@ -103,10 +103,10 @@ Provide reusable checks for:
 ## Current file mapping
 
 Likely extraction sources:
-- [src/tools/setupTools.ts](/mnt/d/env/webstorm/webstromproject/open-websearch/src/tools/setupTools.ts)
-- [src/config.ts](/mnt/d/env/webstorm/webstromproject/open-websearch/src/config.ts)
-- [src/utils/httpRequest.ts](/mnt/d/env/webstorm/webstromproject/open-websearch/src/utils/httpRequest.ts)
-- [src/utils/playwrightClient.ts](/mnt/d/env/webstorm/webstromproject/open-websearch/src/utils/playwrightClient.ts)
+- [src/tools/setupTools.ts](/mnt/d/env/webstorm/webstromproject/my-websearch/src/tools/setupTools.ts)
+- [src/config.ts](/mnt/d/env/webstorm/webstromproject/my-websearch/src/config.ts)
+- [src/utils/httpRequest.ts](/mnt/d/env/webstorm/webstromproject/my-websearch/src/utils/httpRequest.ts)
+- [src/utils/playwrightClient.ts](/mnt/d/env/webstorm/webstromproject/my-websearch/src/utils/playwrightClient.ts)
 
 Likely engine-specific dependencies remain under:
 - `src/engines/*`
@@ -132,7 +132,7 @@ src/adapters/
 Possible runtime constructor:
 
 ```ts
-type OpenWebSearchRuntime = {
+type MyWebSearchRuntime = {
   config: AppConfig;
   services: {
     search: SearchService;

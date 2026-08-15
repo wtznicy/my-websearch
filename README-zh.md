@@ -1,12 +1,12 @@
 <div align="center">
 
-# Open-WebSearch-wtznicy
+# MyWebSearch
 
 **中文 | [English](./README.md)**
 
 </div>
 
-`open-websearch` 是一个**免 API Key 的多引擎联网搜索 MCP server**，同时提供 CLI 与本地 daemon。内置 Bing、百度、CSDN、DuckDuckGo、Exa、Brave、掘金、Startpage、搜狗等多个搜索引擎，以及 CSDN/掘金/GitHub README/通用网页的正文抓取能力。
+`my-websearch` 是一个**免 API Key 的多引擎联网搜索 MCP server**，同时提供 CLI 与本地 daemon。内置 Bing、百度、CSDN、DuckDuckGo、Exa、Brave、掘金、Startpage、搜狗等多个搜索引擎，以及 CSDN/掘金/GitHub README/通用网页的正文抓取能力。
 
 ## 功能特性
 
@@ -26,14 +26,14 @@
 
 ```bash
 # 基本使用（默认 stdio 模式，供 MCP 客户端连接）
-npx open-websearch-wtznicy@latest
+npx my-websearch@latest
 ```
 
 ### 全局安装
 
 ```bash
-npm install -g open-websearch-wtznicy
-open-websearch
+npm install -g my-websearch
+my-websearch
 ```
 
 ## 在 MCP 客户端中配置
@@ -45,9 +45,9 @@ open-websearch
 ```json
 {
   "mcpServers": {
-    "open-websearch": {
+    "my-websearch": {
       "command": "npx",
-      "args": ["-y", "open-websearch-wtznicy@latest"],
+      "args": ["-y", "my-websearch@latest"],
       "env": {
         "MODE": "stdio",
         "DEFAULT_SEARCH_ENGINE": "bing"
@@ -62,9 +62,9 @@ open-websearch
 ```json
 {
   "mcpServers": {
-    "open-websearch-local": {
+    "my-websearch-local": {
       "command": "node",
-      "args": ["C:/你的路径/open-websearch/build/index.js"],
+      "args": ["C:/你的路径/my-websearch/build/index.js"],
       "env": {
         "MODE": "stdio",
         "DEFAULT_SEARCH_ENGINE": "bing"
@@ -95,9 +95,9 @@ open-websearch
 ```json
 {
   "mcpServers": {
-    "open-websearch": {
+    "my-websearch": {
       "command": "npx",
-      "args": ["-y", "open-websearch-wtznicy@latest"],
+      "args": ["-y", "my-websearch@latest"],
       "env": {
         "MODE": "stdio"
       }
@@ -111,9 +111,9 @@ open-websearch
 ```json
 {
   "mcpServers": {
-    "open-websearch": {
+    "my-websearch": {
       "command": "npx",
-      "args": ["-y", "open-websearch-wtznicy@latest"],
+      "args": ["-y", "my-websearch@latest"],
       "env": {
         "MODE": "stdio"
       }
@@ -164,7 +164,7 @@ open-websearch
   "mcpServers": {
     "web-search": {
       "command": "npx",
-      "args": ["-y", "open-websearch-wtznicy@latest"],
+      "args": ["-y", "my-websearch@latest"],
       "env": {
         "MODE": "stdio",
         "EXA_API_KEY": "<your-key>"
@@ -178,7 +178,7 @@ open-websearch
 
 **ZCode**（`~/.zcode/cli/config.json` → `mcp.servers`）：
 ```json
-"open-websearch": {
+"my-websearch": {
   "type": "stdio",
   "command": "D:\\nodejs\\node.exe",
   "args": ["D:\\path\\to\\build\\index.js"],
@@ -191,9 +191,9 @@ open-websearch
 
 **CLI 一次性使用（无需配置文件）**：
 ```bash
-EXA_API_KEY=<your-key> open-websearch search "query" --engines exa
+EXA_API_KEY=<your-key> my-websearch search "query" --engines exa
 # Windows PowerShell：
-# $env:EXA_API_KEY="<your-key>"; open-websearch search "query" --engines exa
+# $env:EXA_API_KEY="<your-key>"; my-websearch search "query" --engines exa
 ```
 
 未配置 key 时，exa 引擎会快速失败并返回包含以上配置指引的错误信息，而不是静默返回空结果。
@@ -202,16 +202,16 @@ EXA_API_KEY=<your-key> open-websearch search "query" --engines exa
 
 ```bash
 # 启用代理（网络受限地区）
-USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch-wtznicy@latest
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx my-websearch@latest
 
 # 按引擎代理（推荐，中国大陆）：仅境外引擎走代理，国内引擎直连
-USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brave,startpage npx open-websearch-wtznicy@latest
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brave,startpage npx my-websearch@latest
 
 # 默认引擎使用 bing
-DEFAULT_SEARCH_ENGINE=bing npx open-websearch-wtznicy@latest
+DEFAULT_SEARCH_ENGINE=bing npx my-websearch@latest
 
 # 关闭 Bing 的 Playwright 兜底，反爬时自动级联其他引擎
-BING_PLAYWRIGHT_FALLBACK=false npx open-websearch-wtznicy@latest
+BING_PLAYWRIGHT_FALLBACK=false npx my-websearch@latest
 ```
 
 ## 可选：Playwright 浏览器增强
@@ -221,14 +221,14 @@ Bing 的 `playwright` 模式（以及部分网站的 cookie/渲染兜底）需�
 ```bash
 npm install playwright
 npx playwright install chromium
-SEARCH_MODE=auto npx open-websearch-wtznicy@latest
+SEARCH_MODE=auto npx my-websearch@latest
 ```
 
 或者只装精简客户端、复用现有浏览器：
 
 ```bash
 npm install playwright-core
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium SEARCH_MODE=auto npx open-websearch-wtznicy@latest
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium SEARCH_MODE=auto npx my-websearch@latest
 ```
 
 **建议**：个人日常使用若不想为 Bing 反爬启动重浏览器（3-8 秒冷启动、约 400MB 内存），设置 `BING_PLAYWRIGHT_FALLBACK=false`，并在搜索时让引擎分担压力：`engines: ["duckduckgo", "brave"]`。
@@ -242,19 +242,19 @@ CLI 适合一次性执行；本地 daemon 是常驻 HTTP 服务，适合反复�
 npm run build
 
 # 启动 daemon
-open-websearch serve
+my-websearch serve
 
 # 查看状态
-open-websearch status --json
+my-websearch status --json
 
 # 一次性搜索
-open-websearch search "open web search" --limit 5 --json
+my-websearch search "open web search" --limit 5 --json
 
 # 结果不足 8 条时自动用其他引擎补位
-open-websearch search "open web search" --min-results 8 --json
+my-websearch search "open web search" --min-results 8 --json
 
 # 清空搜索 TTL 缓存（引擎刚恢复时用）
-open-websearch cache-clear
+my-websearch cache-clear
 ```
 
 daemon HTTP API（`GET /health`、`POST /search`、`POST /fetch-*`、`POST /cache/clear`）详见 [docs/http-api.md](docs/http-api.md)。
@@ -307,7 +307,7 @@ MCP 共提供 7 个工具：
 ## 相关链接
 
 - HTTP API 文档：[docs/http-api.md](docs/http-api.md)
-- 使用 skill 与 agent 工作流：仓库内 `skills/open-websearch/` 提供 `open-websearch` skill（`npx skills add` 安装），可引导 agent 执行搜索、抓取与多步分析
+- 使用 skill 与 agent 工作流：仓库内 `skills/my-websearch/` 提供 `my-websearch` skill（`npx skills add` 安装），可引导 agent 执行搜索、抓取与多步分析
 
 ## 作者与致谢
 

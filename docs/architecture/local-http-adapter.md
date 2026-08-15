@@ -101,10 +101,10 @@ This is necessary so CLI and skill flows can say:
 ## Serve and status commands
 
 Current command relationship:
-- `open-websearch serve`
+- `my-websearch serve`
   - starts the local HTTP adapter
   - stays in the foreground until interrupted
-- `open-websearch status`
+- `my-websearch status`
   - checks `/status`
 - action commands like `search` or `fetch-web`
   - call local HTTP routes

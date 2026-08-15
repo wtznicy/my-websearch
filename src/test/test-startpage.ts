@@ -4,7 +4,7 @@ async function testStartpageSearch() {
   console.log('🔍 Starting Startpage search test...');
 
   try {
-    const query = 'open-websearch';
+    const query = 'my-websearch';
     const maxResults = 20;
 
     console.log(`📝 Search query: ${query}`);

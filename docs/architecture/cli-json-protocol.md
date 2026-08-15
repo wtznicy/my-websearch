@@ -11,14 +11,14 @@ This document defines the current machine-readable contract for the CLI control 
 
 ## Commands in scope
 
-- `open-websearch search`
-- `open-websearch fetch-web`
-- `open-websearch fetch-csdn`
-- `open-websearch fetch-juejin`
-- `open-websearch fetch-linuxdo`
-- `open-websearch fetch-github-readme`
-- `open-websearch status`
-- `open-websearch serve`
+- `my-websearch search`
+- `my-websearch fetch-web`
+- `my-websearch fetch-csdn`
+- `my-websearch fetch-juejin`
+- `my-websearch fetch-linuxdo`
+- `my-websearch fetch-github-readme`
+- `my-websearch status`
+- `my-websearch serve`
 
 ## Output modes
 
@@ -62,11 +62,11 @@ Failed output:
   "data": null,
   "error": {
     "code": "daemon_unavailable",
-    "message": "Local open-websearch service is not running",
+    "message": "Local my-websearch service is not running",
     "retryable": true,
     "details": {}
   },
-  "hint": "Run `open-websearch serve` or retry with --spawn"
+  "hint": "Run `my-websearch serve` or retry with --spawn"
 }
 ```
 
@@ -236,12 +236,12 @@ CLI search arguments also support:
 
 ## Serve and status lifecycle
 
-- `open-websearch serve`
+- `my-websearch serve`
   - starts the local daemon in the foreground
   - prints the daemon base URL
   - remains alive until `SIGINT` or `SIGTERM`
   - closes the daemon cleanly before exit
-- `open-websearch status`
+- `my-websearch status`
   - probes `/status`
   - returns success or a structured daemon error envelope
 

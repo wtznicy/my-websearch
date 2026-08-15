@@ -12,7 +12,7 @@ import {
     validateGithubRepositoryUrl,
     validatePublicWebUrl
 } from '../core/validation/targetValidation.js';
-import { OpenWebSearchRuntime } from '../runtime/runtimeTypes.js';
+import { MyWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { FetchWebContentResult } from '../engines/web/fetchWebContent.js';
 export { normalizeEngineName };
 
@@ -106,7 +106,7 @@ function getToolName(envVarName: string, defaultName: string): string {
     return defaultName;
 }
 
-export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): void => {
+export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void => {
     // Get configurable tool names from environment variables
     const searchToolName = getToolName('MCP_TOOL_SEARCH_NAME', 'search');
     const fetchCsdnToolName = getToolName('MCP_TOOL_FETCH_CSDN_NAME', 'fetchCsdnArticle');

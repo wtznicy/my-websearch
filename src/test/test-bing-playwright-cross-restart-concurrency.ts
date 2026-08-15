@@ -11,7 +11,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { createOpenWebSearchRuntime } from '../runtime/createRuntime.js';
+import { createMyWebSearchRuntime } from '../runtime/createRuntime.js';
 import { startLocalDaemon } from '../adapters/http/localDaemon.js';
 import { SearchResult } from '../types.js';
 
@@ -213,7 +213,7 @@ const queryExpectations = new Map<string, QueryExpectation>([
 ]);
 
 const LOCAL_BROWSER_DOMAIN_METADATA_PREFIX = 'domain-session-';
-const CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR = path.join(tmpdir(), 'open-websearch-browser-session-locks');
+const CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR = path.join(tmpdir(), 'my-websearch-browser-session-locks');
 const LOCAL_BROWSER_DOMAIN_METADATA_FILE_PATTERN = new RegExp(
     `^${LOCAL_BROWSER_DOMAIN_METADATA_PREFIX}(headed|headless|hidden-headed)-[a-f0-9]+\\.json$`,
     'u'
@@ -627,7 +627,7 @@ async function searchOnce(baseUrl: string, query: string): Promise<SearchRespons
 }
 
 async function runHiddenRoundChild(label: string, queries: string[]): Promise<void> {
-    const runtime = createOpenWebSearchRuntime();
+    const runtime = createMyWebSearchRuntime();
     const daemon = await startLocalDaemon(runtime, { port: 0, version: `hidden-${label}` });
 
     try {

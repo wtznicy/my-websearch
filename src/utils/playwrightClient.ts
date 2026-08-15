@@ -138,8 +138,8 @@ let localBrowserSessionRefCount = 0;
 let cleanupRegistered = false;
 let staleBrowserCleanupPerformed = false;
 const LOCAL_BROWSER_DOMAIN_METADATA_PREFIX = 'domain-session-';
-const CROSS_PROCESS_POOL_LOCK_DIR = path.join(tmpdir(), 'open-websearch-page-pool-locks');
-const CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR = path.join(tmpdir(), 'open-websearch-browser-session-locks');
+const CROSS_PROCESS_POOL_LOCK_DIR = path.join(tmpdir(), 'my-websearch-page-pool-locks');
+const CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR = path.join(tmpdir(), 'my-websearch-browser-session-locks');
 const browserPlaywrightPagePools = new WeakMap<any, Map<string, BrowserPlaywrightPagePool>>();
 
 // 用 CDP targetId（浏览器内全局唯一且跨连接稳定）作为锁文件标识，

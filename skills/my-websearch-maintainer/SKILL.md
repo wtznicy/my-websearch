@@ -1,13 +1,13 @@
 ---
-name: open-websearch-maintainer
-description: Maintain and extend the open-websearch MCP server. Trigger when changing search engines, proxy or TLS behavior, tool registration, live parsing behavior, or compatibility and regression behavior inside this repository.
+name: my-websearch-maintainer
+description: Maintain and extend the my-websearch MCP server. Trigger when changing search engines, proxy or TLS behavior, tool registration, live parsing behavior, or compatibility and regression behavior inside this repository.
 version: 1.2.0
 version_note: Routes changes by surface area, keeps scope tight, preserves shared networking and tool contracts, and treats current repository behavior as the source of truth.
 ---
 
 # Open WebSearch Maintainer
 
-Use this skill when modifying the `open-websearch` codebase itself.
+Use this skill when modifying the `my-websearch` codebase itself.
 
 If this skill and the current repository behavior disagree, trust the repository code, tests, and intended change scope, then update the skill or docs before finishing.
 

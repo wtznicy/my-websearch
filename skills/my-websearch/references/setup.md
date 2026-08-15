@@ -1,19 +1,19 @@
 # Setup
 
-Use these setup paths only when the current workspace does not yet have a usable `open-websearch` path.
+Use these setup paths only when the current workspace does not yet have a usable `my-websearch` path.
 
 ## Choose the smallest matching path
 
-- Prefer validation or reconnection if the user already configured `open-websearch` and the issue is only that the current workspace is not seeing it.
-- Prefer local CLI/daemon mode when the runtime can launch `open-websearch` directly and no better existing path is already active.
+- Prefer validation or reconnection if the user already configured `my-websearch` and the issue is only that the current workspace is not seeing it.
+- Prefer local CLI/daemon mode when the runtime can launch `my-websearch` directly and no better existing path is already active.
 - Prefer existing MCP validation or reconnection when the workspace is supposed to expose the tools already.
-- Prefer an existing HTTP endpoint if the user already has a reachable `open-websearch` server.
+- Prefer an existing HTTP endpoint if the user already has a reachable `my-websearch` server.
 - Prefer local source/build mode if the user already has a local checkout with a usable entrypoint.
 
 ## Local CLI/daemon mode
 
 Use when:
-- the runtime can launch `open-websearch` directly
+- the runtime can launch `my-websearch` directly
 - the user wants the lowest-friction local setup
 - there is no already-working MCP or HTTP path to reuse
 
@@ -29,25 +29,25 @@ Stage script:
 3. Perform the smallest matching action.
    - If the command already exists, reuse it.
    - If package installation is needed, guide installation before writing config.
-   - Start or validate the local daemon path with explicit commands: `open-websearch serve` to start and `open-websearch status` to check readiness.
-   - Do not treat bare `open-websearch` as the recommended daemon start command for agent automation.
+   - Start or validate the local daemon path with explicit commands: `my-websearch serve` to start and `my-websearch status` to check readiness.
+   - Do not treat bare `my-websearch` as the recommended daemon start command for agent automation.
    - If the host runtime still needs MCP exposure, only then add or adjust MCP/client config.
 4. Validate.
-   - Confirm daemon readiness with `open-websearch status`.
+   - Confirm daemon readiness with `my-websearch status`.
    - If possible, run a minimal one-shot smoke check.
    - Do not treat installation alone as completion.
-5. If package installation hangs, times out, or fails on network access, suspect proxy or mirror configuration before treating it as an `open-websearch` failure.
+5. If package installation hangs, times out, or fails on network access, suspect proxy or mirror configuration before treating it as an `my-websearch` failure.
 
 Useful npm-oriented guidance:
 - One-shot proxied installs may work better with explicit npm flags such as `npm --proxy ... --https-proxy ... install ...`.
 - Persistent npm access may work better with `npm config set proxy`, `npm config set https-proxy`, and `npm config set registry`.
-- Do not assume runtime env vars like `USE_PROXY` or `PROXY_URL` will fix npm package downloads; they are for `open-websearch` runtime traffic, not npm registry access.
-- Keep that distinction explicit: npm proxy or registry settings help installation, while runtime proxy settings affect the networked search/fetch work that happens after `open-websearch serve`.
+- Do not assume runtime env vars like `USE_PROXY` or `PROXY_URL` will fix npm package downloads; they are for `my-websearch` runtime traffic, not npm registry access.
+- Keep that distinction explicit: npm proxy or registry settings help installation, while runtime proxy settings affect the networked search/fetch work that happens after `my-websearch serve`.
 
 ## Existing MCP mode
 
 Use when:
-- the workspace already should expose `open-websearch` tools
+- the workspace already should expose `my-websearch` tools
 - the likely problem is validation, reconnection, or reload
 
 Stage script:
@@ -85,7 +85,7 @@ Stage script:
 ## Existing HTTP endpoint mode
 
 Use when:
-- the user already has a reachable `open-websearch` HTTP endpoint
+- the user already has a reachable `my-websearch` HTTP endpoint
 - the goal is to connect the current workspace, not create a new local server
 
 Stage script:
@@ -129,7 +129,7 @@ Stage script:
 ## Validation target
 
 After any setup path:
-- check whether the runtime exposes a usable `open-websearch` path
+- check whether the runtime exposes a usable `my-websearch` path
 - check whether core tools such as `search`, `fetchWebContent`, and `fetchGithubReadme` are available
 - if using a local daemon path, confirm `status` or an equivalent readiness check first
 - if possible, run a minimal smoke check

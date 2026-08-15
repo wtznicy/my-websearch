@@ -1,6 +1,6 @@
 # Tools
 
-These tool-selection notes apply after the `open-websearch` MCP capability is available in the current workspace.
+These tool-selection notes apply after the `my-websearch` MCP capability is available in the current workspace.
 
 ## `search`
 

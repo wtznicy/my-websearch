@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { AppConfig } from '../config.js';
-import { createOpenWebSearchRuntime } from '../runtime/createRuntime.js';
+import { createMyWebSearchRuntime } from '../runtime/createRuntime.js';
 import { setupTools } from '../tools/setupTools.js';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -17,7 +17,7 @@ function assertEqual<T>(actual: T, expected: T, label: string): void {
 }
 
 function createStubRuntime() {
-    return createOpenWebSearchRuntime({
+    return createMyWebSearchRuntime({
         dependencies: {
             searchExecutors: {
                 bing: async (query, limit) => [{
@@ -126,7 +126,7 @@ async function testSearchToolReturnsCompatiblePayload(): Promise<void> {
 }
 
 async function testSetupToolsUsesRuntimeConfigDefaults(): Promise<void> {
-    const runtime = createOpenWebSearchRuntime({
+    const runtime = createMyWebSearchRuntime({
         config: createTestConfig({
             defaultSearchEngine: 'startpage',
             allowedSearchEngines: ['startpage', 'bing', 'sogou']
@@ -201,7 +201,7 @@ async function testSetupToolsUsesRuntimeConfigDefaults(): Promise<void> {
 
 async function testSearchToolPassesSearchModeOverride(): Promise<void> {
     const seenCalls: Array<{ searchMode?: string }> = [];
-    const runtime = createOpenWebSearchRuntime({
+    const runtime = createMyWebSearchRuntime({
         config: createTestConfig(),
         dependencies: {
             searchExecutors: {
@@ -256,7 +256,7 @@ async function testSearchToolPassesSearchModeOverride(): Promise<void> {
 
 async function testSearchToolAutoModeUsesRuntimeDefault(): Promise<void> {
     const seenCalls: Array<{ searchMode?: string }> = [];
-    const runtime = createOpenWebSearchRuntime({
+    const runtime = createMyWebSearchRuntime({
         config: createTestConfig({ searchMode: 'playwright' }),
         dependencies: {
             searchExecutors: {
@@ -311,7 +311,7 @@ async function testSearchToolAutoModeUsesRuntimeDefault(): Promise<void> {
 
 async function testFetchWebToolPassesReadabilityFlags(): Promise<void> {
     const seenCalls: Array<{ readability?: boolean; includeLinks?: boolean }> = [];
-    const runtime = createOpenWebSearchRuntime({
+    const runtime = createMyWebSearchRuntime({
         config: createTestConfig(),
         dependencies: {
             searchExecutors: {
@@ -374,9 +374,9 @@ function testCustomToolNamesAndFallbacks(): void {
     const validOutput = runModuleWithEnv(
         `
             import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-            const { createOpenWebSearchRuntime } = await import('./build/runtime/createRuntime.js');
+            const { createMyWebSearchRuntime } = await import('./build/runtime/createRuntime.js');
             const { setupTools } = await import('./build/tools/setupTools.js');
-            const runtime = createOpenWebSearchRuntime();
+            const runtime = createMyWebSearchRuntime();
             const server = new McpServer({ name: 'test', version: '1.0.0' });
             setupTools(server, runtime);
             console.log(JSON.stringify({ names: Object.keys(server._registeredTools) }, null, 2));
@@ -393,9 +393,9 @@ function testCustomToolNamesAndFallbacks(): void {
     const invalidOutput = runModuleWithEnv(
         `
             import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-            const { createOpenWebSearchRuntime } = await import('./build/runtime/createRuntime.js');
+            const { createMyWebSearchRuntime } = await import('./build/runtime/createRuntime.js');
             const { setupTools } = await import('./build/tools/setupTools.js');
-            const runtime = createOpenWebSearchRuntime();
+            const runtime = createMyWebSearchRuntime();
             const server = new McpServer({ name: 'test', version: '1.0.0' });
             setupTools(server, runtime);
             console.log(JSON.stringify({ names: Object.keys(server._registeredTools) }, null, 2));
@@ -505,9 +505,9 @@ function testConfigDrivenEngineSelectionAndMode(): void {
     const descriptionOutput = runModuleWithEnv(
         `
             import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-            const { createOpenWebSearchRuntime } = await import('./build/runtime/createRuntime.js');
+            const { createMyWebSearchRuntime } = await import('./build/runtime/createRuntime.js');
             const { setupTools } = await import('./build/tools/setupTools.js');
-            const runtime = createOpenWebSearchRuntime();
+            const runtime = createMyWebSearchRuntime();
             const server = new McpServer({ name: 'test', version: '1.0.0' });
             setupTools(server, runtime);
             console.log(JSON.stringify({

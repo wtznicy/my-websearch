@@ -42,7 +42,7 @@ export type Context7DocsService = {
     execute(input: { libraryId: string; query?: string; limit?: number }): Promise<Context7DocsResult>;
 };
 
-export type OpenWebSearchRuntimeServices = {
+export type MyWebSearchRuntimeServices = {
     search: SearchService;
     fetchCsdnArticle: FetchArticleService;
     fetchJuejinArticle: FetchArticleService;
@@ -52,7 +52,7 @@ export type OpenWebSearchRuntimeServices = {
     context7Docs: Context7DocsService;
 };
 
-export type OpenWebSearchRuntime = {
+export type MyWebSearchRuntime = {
     config: AppConfig;
-    services: OpenWebSearchRuntimeServices;
+    services: MyWebSearchRuntimeServices;
 };

@@ -21,7 +21,7 @@ import { createSearchService, SearchEngineExecutorMap } from '../core/search/sea
     GithubReadmeFetcher,
     WebFetcher
 } from '../core/fetch/fetchServices.js';
-import { OpenWebSearchRuntime } from './runtimeTypes.js';
+import { MyWebSearchRuntime } from './runtimeTypes.js';
 
 export type RuntimeDependencies = {
     searchExecutors?: SearchEngineExecutorMap;
@@ -31,7 +31,7 @@ export type RuntimeDependencies = {
     fetchWebContent?: WebFetcher;
 };
 
-export type CreateOpenWebSearchRuntimeOptions = {
+export type CreateMyWebSearchRuntimeOptions = {
     config?: AppConfig;
     dependencies?: RuntimeDependencies;
 };
@@ -50,7 +50,7 @@ function createDefaultSearchExecutors(): SearchEngineExecutorMap {
     };
 }
 
-export function createOpenWebSearchRuntime(options: CreateOpenWebSearchRuntimeOptions = {}): OpenWebSearchRuntime {
+export function createMyWebSearchRuntime(options: CreateMyWebSearchRuntimeOptions = {}): MyWebSearchRuntime {
     const runtimeConfig = options.config ?? config;
     const dependencies = options.dependencies ?? {};
     const searchExecutors = dependencies.searchExecutors ?? createDefaultSearchExecutors();

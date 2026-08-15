@@ -1,6 +1,6 @@
 import { AppConfig } from '../config.js';
 import { runCli } from '../cli/runCli.js';
-import { createOpenWebSearchRuntime } from '../runtime/createRuntime.js';
+import { createMyWebSearchRuntime } from '../runtime/createRuntime.js';
 import { startLocalDaemon } from '../adapters/http/localDaemon.js';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
@@ -43,7 +43,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 }
 
 function createStubRuntime() {
-    return createOpenWebSearchRuntime({
+    return createMyWebSearchRuntime({
         config: createTestConfig(),
         dependencies: {
             searchExecutors: {

@@ -1,12 +1,12 @@
 <div align="center">
 
-# Open-WebSearch-wtznicy
+# MyWebSearch
 
 **[🇨🇳 中文](./README-zh.md) | 🇺🇸 English**
 
 </div>
 
-`open-websearch` provides an MCP server, CLI, and local daemon, and can also be paired with skill-guided agent workflows for live web search and content retrieval without API keys.
+`my-websearch` provides an MCP server, CLI, and local daemon, and can also be paired with skill-guided agent workflows for live web search and content retrieval without API keys.
 
 
 ## Features
@@ -27,54 +27,54 @@
 ## Choose the Right Path
 
 - `MCP`
-  - Best when you want to connect `open-websearch` to Claude Desktop, Cherry Studio, Cursor, or another MCP client.
+  - Best when you want to connect `my-websearch` to Claude Desktop, Cherry Studio, Cursor, or another MCP client.
 - `CLI`
   - Best for one-shot local commands, shell scripts, and direct terminal usage.
 - `Local daemon`
-  - Best when you want a reusable long-lived local HTTP service exposing `status`, `GET /health`, and `POST /search` / `POST /fetch-*`. Start it explicitly with `open-websearch serve` and check it with `open-websearch status`.
+  - Best when you want a reusable long-lived local HTTP service exposing `status`, `GET /health`, and `POST /search` / `POST /fetch-*`. Start it explicitly with `my-websearch serve` and check it with `my-websearch status`.
 - `Skill`
   - Best as an agent-facing guidance layer for setup and usage. A skill does not replace MCP, CLI, or the local daemon; it typically works together with the CLI and/or local daemon to help an agent discover, activate, and use the smallest working path.
 
 ## Use with a Skill
 
-Install the `open-websearch` skill for your agent first:
+Install the `my-websearch` skill for your agent first:
 
 ```bash
-npx skills add https://gitee.com/wtznicy/open-websearch --skill open-websearch
+npx skills add https://gitee.com/wtznicy/open-websearch --skill my-websearch
 ```
 
-On first use, the skill typically follows this path: detect whether a usable `open-websearch` path already exists, guide setup/enablement if it does not, validate that the capability is active, and only then continue with search or fetch through the smallest working path.
+On first use, the skill typically follows this path: detect whether a usable `my-websearch` path already exists, guide setup/enablement if it does not, validate that the capability is active, and only then continue with search or fetch through the smallest working path.
 
 If the current environment cannot complete setup or activation automatically, you can explicitly have the agent start the local daemon first:
 
 ```bash
-open-websearch serve
-open-websearch status
+my-websearch serve
+my-websearch status
 ```
 
 Keep installation proxy settings separate from runtime proxy settings:
 
 - Installation proxy / mirror
-  - Use this when the skill or agent is installing `open-websearch`, `playwright`, or other npm packages.
+  - Use this when the skill or agent is installing `my-websearch`, `playwright`, or other npm packages.
   - In restricted networks, npm-specific flags or npm config often work better than generic shell proxy variables, for example:
 
 ```bash
-npm --proxy http://127.0.0.1:7890 --https-proxy http://127.0.0.1:7890 install -g open-websearch-wtznicy
+npm --proxy http://127.0.0.1:7890 --https-proxy http://127.0.0.1:7890 install -g my-websearch
 ```
 
 - Runtime proxy
   - Use this when the daemon is already installed and is about to perform live `search` / `fetch` work.
-  - This affects the `open-websearch` network traffic after `serve` starts, for example:
+  - This affects the `my-websearch` network traffic after `serve` starts, for example:
 
 ```bash
-USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 open-websearch serve
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 my-websearch serve
 ```
 
 If the agent can only get through the package-install step with npm proxy settings, but live search/fetch also needs a proxy after startup, those are two separate configuration steps and should be handled separately.
 
 ## CLI and Local Daemon
 
-CLI is for one-shot execution. The local daemon is a long-lived local HTTP service for repeated calls with lower startup friction. Use `open-websearch serve` as the explicit daemon start command and `open-websearch status` as the explicit daemon status command.
+CLI is for one-shot execution. The local daemon is a long-lived local HTTP service for repeated calls with lower startup friction. Use `my-websearch serve` as the explicit daemon start command and `my-websearch status` as the explicit daemon status command.
 
 Action commands such as `search` and `fetch-web` try the default local daemon first when it is available. If you pass `--daemon-url`, that daemon path becomes explicit and silent fallback to direct execution is disabled.
 
@@ -88,14 +88,14 @@ Start the local daemon:
 
 ```bash
 npm run serve
-# globally installed: open-websearch serve
+# globally installed: my-websearch serve
 ```
 
 Check status:
 
 ```bash
 npm run status -- --json
-# globally installed: open-websearch status --json
+# globally installed: my-websearch status --json
 ```
 
 Run a one-shot local CLI search:
@@ -105,20 +105,20 @@ npm run search:cli -- "open web search" --json
 ```
 
 Notes:
-- Bare `open-websearch` is the MCP server compatibility entrypoint, not the recommended daemon start command for agent automation.
+- Bare `my-websearch` is the MCP server compatibility entrypoint, not the recommended daemon start command for agent automation.
 - For content extraction, prefer searching first and then fetching a more specific result page. Some homepages and JS-heavy landing pages may not expose readable article text through `fetch-web`.
 - `--min-results N` on `search` auto-runs additional engines (not already requested) until at least N results come back; defaults to off.
 - Bing's HTTP mode is the most anti-bot-prone engine. If you hit verification pages often: (a) spread load with `engines: ["duckduckgo", "brave"]` on Bing-unrelated queries, or (b) set `BING_PLAYWRIGHT_FALLBACK=false` plus `--min-results` so a blocked Bing automatically cascades to lighter engines instead of launching a Playwright browser.
 - `cache-clear` clears the in-memory search TTL cache — useful after an engine recovers from an outage or when a stale anti-bot page got cached:
   ```bash
-  open-websearch cache-clear
+  my-websearch cache-clear
   ```
 
 For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`, `POST /fetch-*`, `POST /cache/clear`), see [docs/http-api.md](docs/http-api.md).
 
 ## Installation Guide
 
-If you are using `open-websearch` as an MCP server, continue with the MCP-oriented setup below.
+If you are using `my-websearch` as an MCP server, continue with the MCP-oriented setup below.
 
 ### NPX Quick Start (Recommended)
 
@@ -126,20 +126,20 @@ The fastest way to get started:
 
 ```bash
 # Basic usage
-npx open-websearch-wtznicy@latest
+npx my-websearch@latest
 
 # With environment variables (Linux/macOS)
-DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true npx open-websearch-wtznicy@latest
+DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true npx my-websearch@latest
 
 # Windows PowerShell
-$env:DEFAULT_SEARCH_ENGINE="bing"; $env:ENABLE_CORS="true"; npx open-websearch-wtznicy@latest
+$env:DEFAULT_SEARCH_ENGINE="bing"; $env:ENABLE_CORS="true"; npx my-websearch@latest
 
 # Windows CMD
-set MODE=stdio && set DEFAULT_SEARCH_ENGINE=bing && npx open-websearch-wtznicy@latest
+set MODE=stdio && set DEFAULT_SEARCH_ENGINE=bing && npx my-websearch@latest
 
 # Cross-platform (requires cross-env, Used for local development)
-npm install -g open-websearch-wtznicy
-npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true open-websearch
+npm install -g my-websearch
+npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true my-websearch
 ```
 
 **Environment Variables:**
@@ -185,7 +185,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true open-websearch
   "mcpServers": {
     "web-search": {
       "command": "npx",
-      "args": ["-y", "open-websearch-wtznicy@latest"],
+      "args": ["-y", "my-websearch@latest"],
       "env": {
         "MODE": "stdio",
         "EXA_API_KEY": "<your-key>"
@@ -199,7 +199,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true open-websearch
 
 **ZCode** (`~/.zcode/cli/config.json` → `mcp.servers`):
 ```json
-"open-websearch": {
+"my-websearch": {
   "type": "stdio",
   "command": "D:\\nodejs\\node.exe",
   "args": ["D:\\path\\to\\build\\index.js"],
@@ -212,9 +212,9 @@ npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true open-websearch
 
 **CLI one-shot (no config file needed):**
 ```bash
-EXA_API_KEY=<your-key> open-websearch search "query" --engines exa
+EXA_API_KEY=<your-key> my-websearch search "query" --engines exa
 # Windows PowerShell:
-# $env:EXA_API_KEY="<your-key>"; open-websearch search "query" --engines exa
+# $env:EXA_API_KEY="<your-key>"; my-websearch search "query" --engines exa
 ```
 
 If the key is missing, the exa engine fails fast with an error message that includes these instructions instead of silently returning nothing.
@@ -222,19 +222,19 @@ If the key is missing, the exa engine fails fast with an error message that incl
 **Common configurations:**
 ```bash
 # Enable proxy for restricted regions
-USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch-wtznicy@latest
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx my-websearch@latest
 
 # Only if a target website has a broken certificate chain
-FETCH_WEB_INSECURE_TLS=true npx open-websearch-wtznicy@latest
+FETCH_WEB_INSECURE_TLS=true npx my-websearch@latest
 
 # Request first, then fallback to Playwright if available
-SEARCH_MODE=auto npx open-websearch-wtznicy@latest
+SEARCH_MODE=auto npx my-websearch@latest
 
 # Force request-only Bing search
-SEARCH_MODE=request npx open-websearch-wtznicy@latest
+SEARCH_MODE=request npx my-websearch@latest
 
 # Full configuration
-DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch-wtznicy@latest
+DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx my-websearch@latest
 ```
 
 **Proxy guidance for mainland China:**
@@ -244,10 +244,10 @@ DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.
 Use `PROXY_ENGINES` to keep domestic engines on a fast direct connection while routing only the overseas engines through the proxy (avoiding the redirects/timeouts that a global proxy causes for Chinese engines):
 
 ```bash
-USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brave,startpage npx open-websearch-wtznicy@latest
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brave,startpage npx my-websearch@latest
 ```
 
-If a search includes overseas engines but the proxy is off, those engines will fail fast instead of hanging until timeout: open-websearch probes direct connectivity to `duckduckgo`/`brave`/`startpage` (3s timeout, one retry, result cached for 5 minutes) — unreachable engines immediately return a "proxy required, or use domestic engines" error, while reachable engines (e.g. overseas users) work normally. `exa` is excluded from probing because `api.exa.ai` is directly reachable from mainland China. When the proxy is on, engines in `PROXY_ENGINES` are never probed — they go straight through the proxy.
+If a search includes overseas engines but the proxy is off, those engines will fail fast instead of hanging until timeout: my-websearch probes direct connectivity to `duckduckgo`/`brave`/`startpage` (3s timeout, one retry, result cached for 5 minutes) — unreachable engines immediately return a "proxy required, or use domestic engines" error, while reachable engines (e.g. overseas users) work normally. `exa` is excluded from probing because `api.exa.ai` is directly reachable from mainland China. When the proxy is on, engines in `PROXY_ENGINES` are never probed — they go straight through the proxy.
 
 Browser-enhanced Bing fallback is opt-in. The published package does not bundle Playwright anymore. Enable it manually with one of these setups:
 
@@ -255,24 +255,24 @@ Browser-enhanced Bing fallback is opt-in. The published package does not bundle 
 ```bash
 npm install playwright
 npx playwright install chromium
-SEARCH_MODE=auto npx open-websearch-wtznicy@latest
+SEARCH_MODE=auto npx my-websearch@latest
 ```
 
 2. Reuse an existing browser binary with a slim client:
 ```bash
 npm install playwright-core
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium SEARCH_MODE=auto npx open-websearch-wtznicy@latest
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium SEARCH_MODE=auto npx my-websearch@latest
 ```
 
 3. Reuse a Playwright package that already exists elsewhere on the machine:
 ```bash
-PLAYWRIGHT_MODULE_PATH=/absolute/path/to/node_modules/playwright SEARCH_MODE=playwright npx open-websearch-wtznicy@latest
+PLAYWRIGHT_MODULE_PATH=/absolute/path/to/node_modules/playwright SEARCH_MODE=playwright npx my-websearch@latest
 ```
 
 4. Connect to an existing remote browser:
 ```bash
 npm install playwright-core
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ SEARCH_MODE=auto npx open-websearch-wtznicy@latest
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ SEARCH_MODE=auto npx my-websearch@latest
 ```
 
 5. Reuse a local Chrome/Chromium session over CDP:
@@ -280,10 +280,10 @@ PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ S
 npm install playwright-core
 
 # Start Chrome/Chromium with a debugging port first
-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/open-websearch-chrome
+chrome --remote-debugging-port=9222 --user-data-dir=/tmp/my-websearch-chrome
 
 # Then connect through CDP
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_CDP_ENDPOINT=http://127.0.0.1:9222 SEARCH_MODE=auto npx open-websearch-wtznicy@latest
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_CDP_ENDPOINT=http://127.0.0.1:9222 SEARCH_MODE=auto npx my-websearch@latest
 ```
 This is the most practical setup when you want to reuse your own logged-in or previously verified browser session.
 
@@ -293,12 +293,12 @@ npm install playwright-core
 
 & "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe" `
   --remote-debugging-port=9222 `
-  --user-data-dir="$env:TEMP\open-websearch-chrome"
+  --user-data-dir="$env:TEMP\my-websearch-chrome"
 
 $env:PLAYWRIGHT_PACKAGE="playwright-core"
 $env:PLAYWRIGHT_CDP_ENDPOINT="http://127.0.0.1:9222"
 $env:SEARCH_MODE="auto"
-npx open-websearch-wtznicy@latest
+npx my-websearch@latest
 ```
 
 Mode behavior:
@@ -384,7 +384,7 @@ npm run build
   "mcpServers": {
     "web-search": {
       "args": [
-        "open-websearch-wtznicy@latest"
+        "my-websearch@latest"
       ],
       "command": "npx",
       "env": {
@@ -407,7 +407,7 @@ Windows NPX configuration:
         "/c",
         "npx",
         "-y",
-        "open-websearch-wtznicy@latest"
+        "my-websearch@latest"
       ],
       "env": {
         "MODE": "stdio",
@@ -420,7 +420,7 @@ Windows NPX configuration:
 ```
 
 Proxy and TLS notes:
-- open-websearch now disables Axios environment-proxy auto-detection internally and only uses the explicit `USE_PROXY` + `PROXY_URL` path.
+- my-websearch now disables Axios environment-proxy auto-detection internally and only uses the explicit `USE_PROXY` + `PROXY_URL` path.
 - When `USE_PROXY=true`, all Axios-based network requests follow the configured `PROXY_URL` path instead of mixing direct requests with environment-proxy behavior.
 - If `PROXY_URL` points to a local rule-based proxy client, that client can still decide which destinations go `DIRECT` and which ones are proxied.
 - If `PROXY_URL` points to a fixed upstream proxy or overseas egress, region-sensitive sites such as Baidu, CSDN, Juejin, or GitHub may behave differently than before.
@@ -432,7 +432,7 @@ Proxy and TLS notes:
 ```json
 {
   "mcpServers": {
-    "open-websearch-local": {
+    "my-websearch-local": {
       "command": "node",
       "args": ["C:/path/to/your/project/build/index.js"],
       "env": {
@@ -551,7 +551,7 @@ Response example:
 ```json
 [
   {
-    "content": "<div align=\"center\">\n\n# Open-WebSearch MCP Server..."
+    "content": "<div align=\"center\">\n\n# MyWebSearch MCP Server..."
   }
 ]
 ```
@@ -587,7 +587,7 @@ Response example:
   "contentType": "text/plain; charset=utf-8",
   "title": "",
   "truncated": false,
-  "content": "# Open-WebSearch MCP Server ..."
+  "content": "# MyWebSearch MCP Server ..."
 }
 ```
 
@@ -619,7 +619,7 @@ Response example:
 ```json
 [
   {
-    "content": "🚀 开源 AI 联网搜索工具：Open-WebSearch MCP 全新升级，支持多引擎 + 流式响应..."
+    "content": "🚀 开源 AI 联网搜索工具：MyWebSearch MCP 全新升级，支持多引擎 + 流式响应..."
   }
 ]
 ```

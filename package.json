@@ -1,7 +1,7 @@
 {
-  "name": "open-websearch-wtznicy",
-  "version": "2.1.21",
-  "description": "web search the internet",
+  "name": "my-websearch",
+  "version": "1.0.0",
+  "description": "MyWebSearch - multi-engine web search MCP server, CLI and local daemon. No API keys required.",
   "license": "Apache-2.0",
   "author": "wtznicy",
   "repository": {
@@ -22,7 +22,7 @@
   ],
   "type": "module",
   "bin": {
-    "open-websearch": "build/index.js"
+    "my-websearch": "build/index.js"
   },
   "files": [
     "build"

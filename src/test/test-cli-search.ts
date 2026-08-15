@@ -1,5 +1,5 @@
 import { AppConfig } from '../config.js';
-import { createOpenWebSearchRuntime } from '../runtime/createRuntime.js';
+import { createMyWebSearchRuntime } from '../runtime/createRuntime.js';
 import { startLocalDaemon } from '../adapters/http/localDaemon.js';
 import type { LocalDaemonHandle } from '../adapters/http/localDaemon.js';
 import {
@@ -47,7 +47,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 }
 
 function createStubRuntime(configOverrides: Partial<AppConfig> = {}) {
-    return createOpenWebSearchRuntime({
+    return createMyWebSearchRuntime({
         config: createTestConfig(configOverrides),
         dependencies: {
             searchExecutors: {
@@ -196,7 +196,7 @@ async function testRunCliJsonSuccess(): Promise<void> {
 
 async function testRunCliSearchModeOverride(): Promise<void> {
     const seenCalls: Array<{ searchMode?: string }> = [];
-    const runtime = createOpenWebSearchRuntime({
+    const runtime = createMyWebSearchRuntime({
         config: createTestConfig(),
         dependencies: {
             searchExecutors: {
@@ -296,7 +296,7 @@ async function testRunCliInvalidArguments(): Promise<void> {
     assertEqual(payload.status, 'error', 'CLI invalid arguments status');
     assertEqual(payload.error.code, 'invalid_arguments', 'CLI invalid arguments code');
     assert(payload.error.message.includes('Search query is required'), 'CLI invalid arguments message');
-    assert(payload.hint.includes('open-websearch search'), 'CLI invalid arguments hint');
+    assert(payload.hint.includes('my-websearch search'), 'CLI invalid arguments hint');
 
     console.log('✅ CLI runCli invalid arguments');
 }
@@ -373,7 +373,7 @@ async function testRunCliWrongStatusFlag(): Promise<void> {
     };
     assertEqual(payload.status, 'error', 'CLI wrong status flag status');
     assertEqual(payload.error.code, 'invalid_arguments', 'CLI wrong status flag code');
-    assert(payload.error.message.includes('Use --base-url with `open-websearch status`'), 'CLI wrong status flag message');
+    assert(payload.error.message.includes('Use --base-url with `my-websearch status`'), 'CLI wrong status flag message');
 
     console.log('✅ CLI wrong status flag');
 }
@@ -564,7 +564,7 @@ async function testRunCliFetchCsdnValidationFailure(): Promise<void> {
 
 async function testRunCliPrefersDaemonWhenAvailable(): Promise<void> {
     const localRuntime = createStubRuntime();
-    const daemonRuntime = createOpenWebSearchRuntime({
+    const daemonRuntime = createMyWebSearchRuntime({
         config: createTestConfig(),
         dependencies: {
             searchExecutors: {
@@ -653,7 +653,7 @@ async function testRunCliExplicitDaemonUnavailable(): Promise<void> {
 
 async function testRunCliExplicitDaemonTimeout(): Promise<void> {
     const localRuntime = createStubRuntime();
-    const delayedRuntime = createOpenWebSearchRuntime({
+    const delayedRuntime = createMyWebSearchRuntime({
         config: createTestConfig(),
         dependencies: {
             searchExecutors: {
@@ -720,7 +720,7 @@ async function testRunCliExplicitDaemonTimeout(): Promise<void> {
 
 async function testRunCliSpawnStartsDaemon(): Promise<void> {
     const runtime = createStubRuntime();
-    const daemonRuntime = createOpenWebSearchRuntime({
+    const daemonRuntime = createMyWebSearchRuntime({
         config: createTestConfig(),
         dependencies: {
             searchExecutors: {
@@ -856,8 +856,8 @@ async function testRunCliHelp(): Promise<void> {
 
     assertEqual(exitCode, 0, 'CLI help exit code');
     assertEqual(stderr.length, 0, 'CLI help stderr');
-    assert(stdout[0].includes('open-websearch CLI'), 'CLI help header');
-    assert(stdout[0].includes('open-websearch serve'), 'CLI help serve usage');
+    assert(stdout[0].includes('my-websearch CLI'), 'CLI help header');
+    assert(stdout[0].includes('my-websearch serve'), 'CLI help serve usage');
     assert(stdout[0].includes('fetchWebContent -> fetch-web'), 'CLI help should distinguish MCP tool names');
     assert(stdout[0].includes('--daemon-url URL'), 'CLI help should mention daemon-url');
     assert(stdout[0].includes('--spawn'), 'CLI help should mention spawn');

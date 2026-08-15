@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 import type { CorsOptions } from 'cors';
 import { runCli } from './cli/runCli.js';
-import type { OpenWebSearchRuntime } from './runtime/runtimeTypes.js';
+import type { MyWebSearchRuntime } from './runtime/runtimeTypes.js';
 import { shouldCreateFullRuntimeForInvocation } from './runtime/runtimeSelection.js';
 import { shutdownLocalPlaywrightBrowserSessions } from './utils/playwrightClient.js';
 
@@ -36,7 +36,7 @@ type SseSession = {
   closed: boolean;
 };
 
-function createServer(runtime: OpenWebSearchRuntime): McpServer {
+function createServer(runtime: MyWebSearchRuntime): McpServer {
   const server = new McpServer({
     name: 'web-search',
     version: serverVersion
@@ -51,11 +51,11 @@ async function main() {
   // 启动日志静默已由 ./utils/startupQuiet.js（首个 import）按参数决定
   const { config } = await import('./config.js');
   const runtime = shouldCreateFullRuntimeForInvocation(argv)
-    ? (await import('./runtime/createRuntime.js')).createOpenWebSearchRuntime()
+    ? (await import('./runtime/createRuntime.js')).createMyWebSearchRuntime()
     : ({
         config,
-        services: {} as OpenWebSearchRuntime['services']
-      } satisfies OpenWebSearchRuntime);
+        services: {} as MyWebSearchRuntime['services']
+      } satisfies MyWebSearchRuntime);
   const cliExitCode = await runCli(argv, runtime, {
     stdout: (text) => console.log(text),
     stderr: (text) => console.error(text)

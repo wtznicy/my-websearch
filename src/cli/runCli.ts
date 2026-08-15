@@ -1,5 +1,5 @@
 import { SupportedSearchEngine, normalizeEngineName, resolveRequestedEngines } from '../core/search/searchEngines.js';
-import { OpenWebSearchRuntime } from '../runtime/runtimeTypes.js';
+import { MyWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { CliEnvelope, createErrorEnvelope, createSuccessEnvelope } from './protocol.js';
 import { startLocalDaemon } from '../adapters/http/localDaemon.js';
 import http from 'node:http';
@@ -53,24 +53,24 @@ export function commandNeedsRuntime(argv: string[]): boolean {
 
 function formatCliHelp(): string {
     return [
-        'open-websearch CLI',
+        'my-websearch CLI',
         '',
         'Daemon control:',
-        '  open-websearch serve [--host HOST] [--port PORT]',
+        '  my-websearch serve [--host HOST] [--port PORT]',
         '    Start the local daemon in the foreground.',
-        '  open-websearch status [--base-url URL] [--json]',
+        '  my-websearch status [--base-url URL] [--json]',
         '    Check daemon status. `status` uses --base-url, not --daemon-url.',
         '',
         'One-shot action commands:',
-        '  open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--min-results N] [--daemon-url URL] [--spawn] [--json]',
+        '  my-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--min-results N] [--daemon-url URL] [--spawn] [--json]',
         '    Search the web. `--search-mode` is request|auto|playwright and currently only affects Bing. `--min-results N` auto-runs additional engines when fewer than N results come back.',
-        '  open-websearch cache-clear [--daemon-url URL] [--spawn] [--json]',
+        '  my-websearch cache-clear [--daemon-url URL] [--spawn] [--json]',
         '    Clear the search TTL cache (engine just recovered, stale results cached, etc.).',
-        '  open-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--daemon-url URL] [--spawn] [--json]',
+        '  my-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--daemon-url URL] [--spawn] [--json]',
         '    Fetch readable page content. `--readability` enables Mozilla Readability extraction; `--include-links` returns preserved article links; `--raw` returns the raw response body; `--start-index N` continues reading from character offset N.',
-        '  open-websearch fetch-github-readme <url> [--daemon-url URL] [--spawn] [--json]',
-        '  open-websearch fetch-csdn <url> [--daemon-url URL] [--spawn] [--json]',
-        '  open-websearch fetch-juejin <url> [--daemon-url URL] [--spawn] [--json]',
+        '  my-websearch fetch-github-readme <url> [--daemon-url URL] [--spawn] [--json]',
+        '  my-websearch fetch-csdn <url> [--daemon-url URL] [--spawn] [--json]',
+        '  my-websearch fetch-juejin <url> [--daemon-url URL] [--spawn] [--json]',
         '',
         'Common action flags:',
         '  --daemon-url URL',
@@ -81,12 +81,12 @@ function formatCliHelp(): string {
         '    Output only the structured JSON envelope for scripting or agent use.',
         '',
         'Execution model:',
-        '  - Use `open-websearch serve` to start the local daemon.',
-        '  - Use `open-websearch status` to check daemon status.',
+        '  - Use `my-websearch serve` to start the local daemon.',
+        '  - Use `my-websearch status` to check daemon status.',
         '  - `status` uses --base-url. Action commands such as `search` and `fetch-web` use --daemon-url.',
         '  - Action commands try the default local daemon first when available.',
         '  - `--daemon-url` makes the daemon path explicit and disables silent fallback to direct execution.',
-        '  - Bare `open-websearch` starts the MCP server compatibility path, not the recommended daemon path.',
+        '  - Bare `my-websearch` starts the MCP server compatibility path, not the recommended daemon path.',
         '  - MCP tool names differ from CLI commands. For example:',
         '      fetchWebContent -> fetch-web',
         '      fetchGithubReadme -> fetch-github-readme'
@@ -181,7 +181,7 @@ function extractDaemonTransportArgs(argv: string[]): DaemonTransportArgs {
         }
 
         if (arg === '--base-url') {
-            throw new Error('--base-url is only valid with `open-websearch status`. Use --daemon-url for search and fetch commands.');
+            throw new Error('--base-url is only valid with `my-websearch status`. Use --daemon-url for search and fetch commands.');
         }
 
         if (arg === '--daemon-url') {
@@ -207,7 +207,7 @@ function extractDaemonTransportArgs(argv: string[]): DaemonTransportArgs {
     };
 }
 
-export function parseSearchArgs(argv: string[], runtime: OpenWebSearchRuntime): ParsedSearchArgs {
+export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): ParsedSearchArgs {
     const positional: string[] = [];
     const requestedEngines: string[] = [];
     let limit = 10;
@@ -438,7 +438,7 @@ export function parseStatusArgs(argv: string[]): ParsedStatusArgs {
         }
 
         if (arg === '--daemon-url') {
-            throw new Error('--daemon-url is only valid for search and fetch commands. Use --base-url with `open-websearch status`.');
+            throw new Error('--daemon-url is only valid for search and fetch commands. Use --base-url with `my-websearch status`.');
         }
 
         if (arg === '--base-url') {
@@ -516,7 +516,7 @@ export function parseServeArgs(argv: string[]): ParsedServeArgs {
     };
 }
 
-function formatSearchHumanReadable(result: Awaited<ReturnType<OpenWebSearchRuntime['services']['search']['execute']>>): string {
+function formatSearchHumanReadable(result: Awaited<ReturnType<MyWebSearchRuntime['services']['search']['execute']>>): string {
     const lines = [
         `Search completed for "${result.query}"`,
         `Engines: ${result.engines.join(', ')}`,
@@ -537,7 +537,7 @@ function formatSearchHumanReadable(result: Awaited<ReturnType<OpenWebSearchRunti
     return lines.join('\n');
 }
 
-function formatFetchWebHumanReadable(result: Awaited<ReturnType<OpenWebSearchRuntime['services']['fetchWeb']['execute']>>): string {
+function formatFetchWebHumanReadable(result: Awaited<ReturnType<MyWebSearchRuntime['services']['fetchWeb']['execute']>>): string {
     const lines = [
         `Fetched web content from ${result.finalUrl}`,
         `Title: ${result.title ?? '(none)'}`,
@@ -761,7 +761,7 @@ function getDaemonCliErrorCode(error: unknown): string {
 
 function getDaemonCliErrorHint(error: unknown): string {
     if (error instanceof DaemonUnavailableError) {
-        return 'Start the local daemon with `open-websearch serve`, or remove --daemon-url to use direct execution.';
+        return 'Start the local daemon with `my-websearch serve`, or remove --daemon-url to use direct execution.';
     }
 
     if (error instanceof DaemonRequestTimeoutError) {
@@ -865,7 +865,7 @@ async function defaultSpawnDaemon(args: ParsedServeArgs): Promise<void> {
 
 export async function runCli(
     argv: string[],
-    runtime: OpenWebSearchRuntime,
+    runtime: MyWebSearchRuntime,
     io: CliIo,
     options: RunCliOptions = {}
 ): Promise<number | null> {
@@ -892,17 +892,17 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     'invalid_arguments',
                     message,
-                    { hint: 'Use `open-websearch search <query> [--limit N] [--engine NAME] [--search-mode MODE] [--json]`.' }
+                    { hint: 'Use `my-websearch search <query> [--limit N] [--engine NAME] [--search-mode MODE] [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--json]');
+                io.stderr('Usage: my-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--json]');
             }
             return 1;
         }
 
         try {
-            const daemonResult = await tryDaemonRequest<Awaited<ReturnType<OpenWebSearchRuntime['services']['search']['execute']>>>(
+            const daemonResult = await tryDaemonRequest<Awaited<ReturnType<MyWebSearchRuntime['services']['search']['execute']>>>(
                 transport,
                 '/search',
                 {
@@ -968,11 +968,11 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     'invalid_arguments',
                     message,
-                    { hint: 'Use `open-websearch cache-clear [--daemon-url URL] [--spawn] [--json]`.' }
+                    { hint: 'Use `my-websearch cache-clear [--daemon-url URL] [--spawn] [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: open-websearch cache-clear [--daemon-url URL] [--spawn] [--json]');
+                io.stderr('Usage: my-websearch cache-clear [--daemon-url URL] [--spawn] [--json]');
             }
             return 1;
         }
@@ -1035,17 +1035,17 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     'invalid_arguments',
                     message,
-                    { hint: 'Use `open-websearch fetch-web <url> [--max-chars N] [--json]`.' }
+                    { hint: 'Use `my-websearch fetch-web <url> [--max-chars N] [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: open-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--json]');
+                io.stderr('Usage: my-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--json]');
             }
             return 1;
         }
 
         try {
-            const daemonResult = await tryDaemonRequest<Awaited<ReturnType<OpenWebSearchRuntime['services']['fetchWeb']['execute']>>>(
+            const daemonResult = await tryDaemonRequest<Awaited<ReturnType<MyWebSearchRuntime['services']['fetchWeb']['execute']>>>(
                 transport,
                 '/fetch-web',
                 {
@@ -1116,11 +1116,11 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     'invalid_arguments',
                     message,
-                    { hint: 'Use `open-websearch fetch-github-readme <repository-url> [--json]`.' }
+                    { hint: 'Use `my-websearch fetch-github-readme <repository-url> [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: open-websearch fetch-github-readme <repository-url> [--json]');
+                io.stderr('Usage: my-websearch fetch-github-readme <repository-url> [--json]');
             }
             return 1;
         }
@@ -1198,11 +1198,11 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     'invalid_arguments',
                     message,
-                    { hint: 'Use `open-websearch fetch-csdn <article-url> [--json]`.' }
+                    { hint: 'Use `my-websearch fetch-csdn <article-url> [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: open-websearch fetch-csdn <article-url> [--json]');
+                io.stderr('Usage: my-websearch fetch-csdn <article-url> [--json]');
             }
             return 1;
         }
@@ -1267,11 +1267,11 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     'invalid_arguments',
                     message,
-                    { hint: 'Use `open-websearch fetch-juejin <article-url> [--json]`.' }
+                    { hint: 'Use `my-websearch fetch-juejin <article-url> [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: open-websearch fetch-juejin <article-url> [--json]');
+                io.stderr('Usage: my-websearch fetch-juejin <article-url> [--json]');
             }
             return 1;
         }
@@ -1334,11 +1334,11 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     'invalid_arguments',
                     message,
-                    { hint: 'Use `open-websearch status [--base-url URL] [--json]`.' }
+                    { hint: 'Use `my-websearch status [--base-url URL] [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: open-websearch status [--base-url URL] [--json]');
+                io.stderr('Usage: my-websearch status [--base-url URL] [--json]');
             }
             return 1;
         }
@@ -1358,7 +1358,7 @@ export async function runCli(
                 }
             } else {
                 if (!parsed.json) {
-                    io.stderr(`Local open-websearch daemon returned an error: ${formatEnvelopeError(payload)}`);
+                    io.stderr(`Local my-websearch daemon returned an error: ${formatEnvelopeError(payload)}`);
                     if (payload.hint) {
                         io.stderr(payload.hint);
                     }
@@ -1372,15 +1372,15 @@ export async function runCli(
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     'daemon_unavailable',
-                    `Local open-websearch daemon is not reachable: ${message}`,
+                    `Local my-websearch daemon is not reachable: ${message}`,
                     {
                         retryable: true,
-                        hint: 'Run `open-websearch serve` first, or point `--base-url` to a reachable daemon.'
+                        hint: 'Run `my-websearch serve` first, or point `--base-url` to a reachable daemon.'
                     }
                 ), null, 2));
             } else {
-                io.stderr(`Local open-websearch daemon is not reachable: ${message}`);
-                io.stderr('Run `open-websearch serve` first, or point `--base-url` to a reachable daemon.');
+                io.stderr(`Local my-websearch daemon is not reachable: ${message}`);
+                io.stderr('Run `my-websearch serve` first, or point `--base-url` to a reachable daemon.');
             }
             return 1;
         }
@@ -1396,11 +1396,11 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     'invalid_arguments',
                     message,
-                    { hint: 'Usage: open-websearch serve [--host HOST] [--port PORT] [--json]' }
+                    { hint: 'Usage: my-websearch serve [--host HOST] [--port PORT] [--json]' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: open-websearch serve [--host HOST] [--port PORT]');
+                io.stderr('Usage: my-websearch serve [--host HOST] [--port PORT]');
             }
             return 1;
         }
@@ -1413,7 +1413,7 @@ export async function runCli(
                 version: readServerVersion()
             });
 
-            io.stdout(`Local open-websearch daemon running at ${daemon.baseUrl}`);
+            io.stdout(`Local my-websearch daemon running at ${daemon.baseUrl}`);
             const signalSource = options.signalSource ?? process;
 
             return await new Promise<number>((resolve) => {
@@ -1451,7 +1451,7 @@ export async function runCli(
 
     const unknownCommandMessage = getUnknownCommandMessage(command);
     const unknownCommandHint = [
-        'Use `open-websearch --help` to see CLI commands.',
+        'Use `my-websearch --help` to see CLI commands.',
         'MCP tool names are not always the same as CLI commands.'
     ].join(' ');
 

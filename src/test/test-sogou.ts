@@ -30,7 +30,7 @@ function testParseSogouResults(): void {
             <div id="main">
               <div class="vrwrap">
                 <h3 class="vr-title">
-                  <a href="https://example.com/open-websearch"> Open-WebSearch </a>
+                  <a href="https://example.com/my-websearch"> MyWebSearch </a>
                 </h3>
                 <div class="str_info"> MCP server and CLI search demo. </div>
                 <cite>example.com</cite>
@@ -43,7 +43,7 @@ function testParseSogouResults(): void {
               </div>
               <div class="vrwrap">
                 <h3 class="vr-title">
-                  <a href="https://example.com/open-websearch"> Duplicate </a>
+                  <a href="https://example.com/my-websearch"> Duplicate </a>
                 </h3>
                 <div class="str_info">Duplicate should be skipped.</div>
               </div>
@@ -61,8 +61,8 @@ function testParseSogouResults(): void {
     const results = parseSogouSearchResults(html);
 
     assertEqual(results.length, 2, 'parsed result count');
-    assertEqual(results[0].title, 'Open-WebSearch', 'first title');
-    assertEqual(results[0].url, 'https://example.com/open-websearch', 'first url');
+    assertEqual(results[0].title, 'MyWebSearch', 'first title');
+    assertEqual(results[0].url, 'https://example.com/my-websearch', 'first url');
     assertEqual(results[0].description, 'MCP server and CLI search demo.', 'first description');
     assertEqual(results[0].source, 'example.com', 'first source');
     assertEqual(results[0].engine, 'sogou', 'first engine');

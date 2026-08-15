@@ -1,6 +1,6 @@
 # Local Daemon HTTP API
 
-This document describes the current user-facing HTTP API exposed by the local `open-websearch` daemon.
+This document describes the current user-facing HTTP API exposed by the local `my-websearch` daemon.
 
 This API is intended for:
 - local scripts

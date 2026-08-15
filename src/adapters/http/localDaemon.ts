@@ -1,7 +1,7 @@
 import express from 'express';
 import http from 'node:http';
 import { AppConfig } from '../../config.js';
-import { OpenWebSearchRuntime } from '../../runtime/runtimeTypes.js';
+import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
@@ -66,7 +66,7 @@ function sendError(
     res.status(statusCode).json(createErrorEnvelope(code, message, options));
 }
 
-function parseRequestedEngines(runtime: OpenWebSearchRuntime, engines: unknown): SupportedSearchEngine[] {
+function parseRequestedEngines(runtime: MyWebSearchRuntime, engines: unknown): SupportedSearchEngine[] {
     if (engines === undefined) {
         return [runtime.config.defaultSearchEngine as SupportedSearchEngine];
     }
@@ -212,7 +212,7 @@ function classifyFetchError(error: unknown): FetchErrorClassification {
 }
 
 export async function startLocalDaemon(
-    runtime: OpenWebSearchRuntime,
+    runtime: MyWebSearchRuntime,
     options: LocalDaemonOptions = {}
 ): Promise<LocalDaemonHandle> {
     const host = options.host ?? DEFAULT_HOST;
