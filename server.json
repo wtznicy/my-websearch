@@ -1,0 +1,29 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.wtznicy/my-websearch",
+  "description": "MyWebSearch - multi-engine web search MCP server, CLI and local daemon. No API keys required.",
+  "repository": {
+    "url": "https://github.com/wtznicy/my-websearch",
+    "source": "github"
+  },
+  "version": "1.0.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "my-websearch",
+      "version": "1.0.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "EXA_API_KEY",
+          "description": "Optional Exa API key (https://dashboard.exa.ai/api-keys) — only needed for the exa search engine",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

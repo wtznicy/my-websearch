@@ -4,6 +4,11 @@
 
 **中文 | [English](./README.md)**
 
+![npm version](https://img.shields.io/npm/v/my-websearch)
+![npm downloads](https://img.shields.io/npm/dm/my-websearch)
+![license](https://img.shields.io/npm/l/my-websearch)
+![GitHub stars](https://img.shields.io/github/stars/wtznicy/my-websearch)
+
 </div>
 
 `my-websearch` 是一个**免 API Key 的多引擎联网搜索 MCP server**，同时提供 CLI 与本地 daemon。内置 Bing、百度、CSDN、DuckDuckGo、Exa、Brave、掘金、Startpage、搜狗等多个搜索引擎，以及 CSDN/掘金/GitHub README/通用网页的正文抓取能力。

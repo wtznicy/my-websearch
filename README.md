@@ -4,6 +4,11 @@
 
 **[🇨🇳 中文](./README-zh.md) | 🇺🇸 English**
 
+![npm version](https://img.shields.io/npm/v/my-websearch)
+![npm downloads](https://img.shields.io/npm/dm/my-websearch)
+![license](https://img.shields.io/npm/l/my-websearch)
+![GitHub stars](https://img.shields.io/github/stars/wtznicy/my-websearch)
+
 </div>
 
 `my-websearch` provides an MCP server, CLI, and local daemon, and can also be paired with skill-guided agent workflows for live web search and content retrieval without API keys.
