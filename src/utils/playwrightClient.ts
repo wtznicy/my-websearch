@@ -1908,12 +1908,15 @@ async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionK
         }
     }
 
-    // 非 Windows：使用 Playwright 自带 launch
+    // 非 Windows：使用 Playwright 自带 launch。
+    // executablePath 与 Windows 分支保持一致：显式配置优先，否则自动探测系统
+    // Chrome/Edge（playwright-core 默认只找 ms-playwright 缓存的浏览器，找不到会
+    // 静默失败/报错，而系统浏览器探测在无配置环境下也能直接复用已安装的浏览器）。
     const browser = await playwright.chromium.launch({
         headless,
         proxy: buildPlaywrightProxy(),
         args: launchArgs,
-        executablePath: config.playwrightExecutablePath
+        executablePath: config.playwrightExecutablePath || getLocalBrowserExecutablePath()
     });
 
     const forceKill = createForceKill(undefined, undefined, browser);
