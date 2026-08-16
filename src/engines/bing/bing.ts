@@ -4,6 +4,7 @@ import { AppConfig, config } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { prepareStealthPage } from '../../utils/browserStealth.js';
+import { isImpersonateAvailable, searchBingWithImpersonate } from './impersonate.js';
 import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
 import { sleep } from '../../utils/timing.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
@@ -552,6 +553,16 @@ async function isPlaywrightAvailable(): Promise<boolean> {
 }
 
 async function searchBingWithHttp(query: string, limit: number): Promise<SearchResult[]> {
+    // 首选 curl-cffi-node（Chrome TLS/HTTP2 指纹模拟，规避纯 HTTP 请求被软降级为
+    // 无关结果）；原生模块不可用或请求失败时回退到 axios 路径，不影响现有行为。
+    if (await isImpersonateAvailable()) {
+        try {
+            return await searchBingWithImpersonate(query, limit);
+        } catch (error) {
+            console.warn('Bing impersonate request failed, falling back to axios:', error instanceof Error ? error.message : String(error));
+        }
+    }
+
     let allResults: SearchResult[] = [];
     let pageNumber = 0;
 

@@ -134,6 +134,7 @@ my-websearch
 | `DEFAULT_SEARCH_ENGINE` | `bing` | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | 默认搜索引擎 |
 | `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名 | 限制可用的搜索引擎；默认引擎不在列表时取第一个 |
 | `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | 仅对 Bing 生效：仅请求 / 请求失败回退 Playwright / 强制 Playwright |
+| `BING_IMPERSONATE_TARGET` | `chrome131` | curl-cffi-node 支持的目标（如 `chrome131`、`chrome124`、`chrome116`） | Bing HTTP 模式的浏览器指纹目标。Bing 会按 TLS/HTTP2 指纹对纯 HTTP 请求软降级（返回无关结果）；此选项启用 Chrome 指纹模拟（实测约 2/3 请求拿到完整结果，默认客户端则稳定降级）。原生模块不可用时自动回退默认 HTTP 客户端 |
 | `BING_PLAYWRIGHT_FALLBACK` | `true` | `true`, `false` | `false` 时 Bing 被反爬直接报错，交给 `minResults` 级联换轻量引擎，不启动 Playwright 浏览器 |
 | `ENABLE_CORS` | `false` | `true`, `false` | 启用 CORS |
 | `CORS_ORIGIN` | `*` | 任意来源 | CORS 来源配置 |

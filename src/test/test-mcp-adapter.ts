@@ -54,6 +54,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         allowedSearchEngines: [],
         searchMode: 'request',
         bingPlaywrightFallback: true,
+        bingImpersonateTarget: 'chrome131',
         proxyUrl: '',
         useProxy: false,
         proxyEngines: [],

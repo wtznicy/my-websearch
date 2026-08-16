@@ -1,6 +1,6 @@
 {
   "name": "my-websearch",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "mcpName": "io.github.wtznicy/my-websearch",
   "description": "MyWebSearch - multi-engine web search MCP server, CLI and local daemon. No API keys required.",
   "license": "Apache-2.0",
@@ -70,6 +70,7 @@
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
     "cors": "^2.8.5",
+    "curl-cffi-node": "^0.1.8",
     "express": "^4.22.1",
     "https-proxy-agent": "^7.0.6",
     "ipaddr.js": "^2.3.0",

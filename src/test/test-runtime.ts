@@ -14,6 +14,7 @@ function createTestConfig(): AppConfig {
         allowedSearchEngines: [],
         searchMode: 'request',
         bingPlaywrightFallback: true,
+        bingImpersonateTarget: 'chrome131',
         proxyUrl: 'http://127.0.0.1:7890',
         useProxy: false,
         proxyEngines: [],
