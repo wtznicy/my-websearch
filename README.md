@@ -206,8 +206,8 @@ npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true my-websearch
 ```json
 "my-websearch": {
   "type": "stdio",
-  "command": "D:\\nodejs\\node.exe",
-  "args": ["D:\\path\\to\\build\\index.js"],
+  "command": "D:/nodejs/node.exe",
+  "args": ["D:/path/to/build/index.js"],
   "env": {
     "MODE": "stdio",
     "EXA_API_KEY": "<your-key>"
