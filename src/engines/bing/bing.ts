@@ -4,7 +4,6 @@ import { AppConfig, config } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { prepareStealthPage } from '../../utils/browserStealth.js';
-import { isQueryDrift } from '../../utils/queryGuard.js';
 import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
 import { sleep } from '../../utils/timing.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
@@ -33,47 +32,28 @@ const SEARCH_SUBMIT_SELECTORS = [
     'button[aria-label="搜索"]',
     'button[aria-label="Search"]'
 ];
-// 更接近真实浏览器的请求头集合（EnhancedBing 同款反爬对抗）。
-// 注意：UA/语言/Sec-CH-UA 组成"固定指纹池"轮换使用，而非每次全随机——
-// 随机指纹会让每次请求的"身份"都不同，Bing 对匿名请求可能按指纹软降级
-// （不触发验证码但返回无关的低质量结果），全随机等于每次重新抽签，
-// 结果质量不稳定；固定池轮换则可在检测到结果漂移时"换下一组指纹"重试。
-type BingFingerprint = {
-    userAgent: string;
-    acceptLanguage: string;
-    secChUa: string;
-};
-
-const BING_FINGERPRINTS: BingFingerprint[] = [
-    {
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-        acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
-        secChUa: '"Not_A Brand";v="8", "Chromium";v="133", "Google Chrome";v="133"'
-    },
-    {
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        acceptLanguage: 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
-        secChUa: '"Not_A Brand";v="8", "Chromium";v="131", "Google Chrome";v="131"'
-    },
-    {
-        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-        acceptLanguage: 'zh-CN,zh-Hans;q=0.9,en;q=0.8',
-        secChUa: '"Not_A Brand";v="99", "Chromium";v="132", "Google Chrome";v="132"'
-    },
-    {
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0',
-        acceptLanguage: 'zh-CN,zh;q=0.8,en-US;q=0.7,en;q=0.6',
-        secChUa: '"Not_A Brand";v="8", "Chromium";v="133", "Google Chrome";v="133"'
-    }
+// 更接近真实浏览器的请求头集合（EnhancedBing 同款反爬对抗）：
+// 随机 UA/语言、全套 Sec-Fetch 头、随机 MUID cookie，降低被 Bing 反爬拦截的概率。
+const BROWSER_USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0'
+];
+const ACCEPT_LANGUAGES = [
+    'zh-CN,zh;q=0.9,en;q=0.8',
+    'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+    'zh-CN,zh-Hans;q=0.9,en;q=0.8',
+    'zh-CN,zh;q=0.8,en-US;q=0.7,en;q=0.6'
+];
+const SEC_CH_UA_VARIANTS = [
+    '"Not_A Brand";v="8", "Chromium";v="133", "Google Chrome";v="133"',
+    '"Not_A Brand";v="8", "Chromium";v="131", "Google Chrome";v="131"',
+    '"Not_A Brand";v="99", "Chromium";v="132", "Google Chrome";v="132"'
 ];
 
-let fingerprintCursor = 0;
-
-/** 按轮换游标取下一组指纹（首调用取第 0 组，重试自然取到不同组合） */
-function nextBingFingerprint(): BingFingerprint {
-    const fingerprint = BING_FINGERPRINTS[fingerprintCursor % BING_FINGERPRINTS.length];
-    fingerprintCursor += 1;
-    return fingerprint;
+function pickRandom<T>(items: readonly T[]): T {
+    return items[Math.floor(Math.random() * items.length)];
 }
 
 function generateMuid(): string {
@@ -81,11 +61,15 @@ function generateMuid(): string {
     return `${Math.random().toString(36).substring(2, 10)}${Math.random().toString(36).substring(2, 10)}`;
 }
 
-function buildBingAntiDetectionHeaders(fingerprint: BingFingerprint): Record<string, string> {
+function buildBingAntiDetectionHeaders(): Record<string, string> {
+    const userAgent = pickRandom(BROWSER_USER_AGENTS);
+    const acceptLanguage = pickRandom(ACCEPT_LANGUAGES);
+    const secChUa = pickRandom(SEC_CH_UA_VARIANTS);
+
     return {
-        'User-Agent': fingerprint.userAgent,
+        'User-Agent': userAgent,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'Accept-Language': fingerprint.acceptLanguage,
+        'Accept-Language': acceptLanguage,
         'Accept-Encoding': 'gzip, deflate, br',
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
@@ -95,7 +79,7 @@ function buildBingAntiDetectionHeaders(fingerprint: BingFingerprint): Record<str
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'none',
         'Sec-Fetch-User': '?1',
-        'Sec-Ch-Ua': fingerprint.secChUa,
+        'Sec-Ch-Ua': secChUa,
         'Sec-Ch-Ua-Mobile': '?0',
         'Sec-Ch-Ua-Platform': '"Windows"',
         'DNT': '1',
@@ -189,10 +173,10 @@ function analyzeBlockedPage($: any, html: string): { blocked: boolean; hasResult
     };
 }
 
-function buildBingAxiosRequestOptions(fingerprint: BingFingerprint): any {
+function buildBingAxiosRequestOptions(): any {
     return buildSharedAxiosRequestOptions({ engine: 'bing',
         trustedStaticHost: true,
-        headers: buildBingAntiDetectionHeaders(fingerprint),
+        headers: buildBingAntiDetectionHeaders(),
         timeout: config.playwrightNavigationTimeoutMs
     });
 }
@@ -567,7 +551,7 @@ async function isPlaywrightAvailable(): Promise<boolean> {
     return playwrightAvailabilityPromise;
 }
 
-async function fetchBingHttpOnce(query: string, limit: number, fingerprint: BingFingerprint): Promise<SearchResult[]> {
+async function searchBingWithHttp(query: string, limit: number): Promise<SearchResult[]> {
     let allResults: SearchResult[] = [];
     let pageNumber = 0;
 
@@ -576,7 +560,7 @@ async function fetchBingHttpOnce(query: string, limit: number, fingerprint: Bing
         const delay = Math.random() * 900 + 300;
         await sleep(delay);
 
-        const response = await axios.get(buildBingSearchUrl(query, pageNumber), buildBingAxiosRequestOptions(fingerprint));
+        const response = await axios.get(buildBingSearchUrl(query, pageNumber), buildBingAxiosRequestOptions());
         const html = String(response.data || '');
         // 每页只 cheerio.load 一次，analyzeBlockedPage 与正式提取共用同一文档实例
         const $ = cheerio.load(html);
@@ -601,22 +585,6 @@ async function fetchBingHttpOnce(query: string, limit: number, fingerprint: Bing
     }
 
     return allResults.slice(0, limit);
-}
-
-async function searchBingWithHttp(query: string, limit: number): Promise<SearchResult[]> {
-    // 首轮用当前指纹。Bing 对匿名请求可能按请求指纹软降级（不触发验证码但返回
-    // 与查询无关的低质量结果，如查询"硅基流动"返回"硅（化学元素）"百科）——
-    // 漂移检测命中时换下一组指纹重试一次；重试仍漂移则保留首轮结果保底，不恶化体验。
-    const firstPass = await fetchBingHttpOnce(query, limit, nextBingFingerprint());
-    if (isQueryDrift(firstPass, query)) {
-        console.warn(`⚠️ Bing results look off-topic for query "${query}", retrying with a different fingerprint...`);
-        const retried = await fetchBingHttpOnce(query, limit, nextBingFingerprint());
-        if (!isQueryDrift(retried, query)) {
-            return retried;
-        }
-        console.warn('⚠️ Bing retry results are still off-topic, keeping first-pass results as fallback.');
-    }
-    return firstPass;
 }
 
 async function searchBingWithPlaywright(query: string, limit: number): Promise<SearchResult[]> {
