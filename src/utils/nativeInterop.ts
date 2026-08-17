@@ -3,13 +3,30 @@ import { createRequire } from 'module';
 
 const esmRequire = createRequire(import.meta.url);
 
-// koffi 延迟加载：仅在首次调用 native 函数时加载
+// koffi 延迟加载：仅在首次调用 native 函数时加载。
+// koffi 是 optionalDependencies（原生 FFI 模块），安装失败/被忽略时必须降级，
+// 不能拖垮整个模块：文件锁降级为 no-op（锁只用于浏览器会话域的跨进程互斥，
+// 降级最多导致并发重复启动浏览器，不影响正确性）。
 let _koffi: typeof import('koffi') | undefined;
+let _koffiLoadFailed = false;
 function koffi(): typeof import('koffi') {
+    if (_koffiLoadFailed) {
+        throw new Error('koffi native module is unavailable (optional dependency not installed); native file locks disabled');
+    }
     if (!_koffi) {
-        _koffi = esmRequire('koffi');
+        try {
+            _koffi = esmRequire('koffi');
+        } catch (error) {
+            _koffiLoadFailed = true;
+            console.warn(`koffi native module unavailable (${error instanceof Error ? error.message : String(error)}); native file locks will be no-ops`);
+            throw new Error('koffi native module is unavailable (optional dependency not installed); native file locks disabled');
+        }
     }
     return _koffi!;
+}
+
+function isKoffiUnavailable(error: unknown): boolean {
+    return error instanceof Error && error.message.includes('koffi native module is unavailable');
 }
 
 // ===== Windows kernel32/user32 绑定（延迟初始化） =====
@@ -222,10 +239,17 @@ const LOCK_NB = 4;
  * - Linux/macOS: open + flock(LOCK_EX) (OS 级锁，进程死亡后自动释放)
  */
 export function withNativeFileLock<T>(lockFilePath: string, operation: () => T): T {
-    if (process.platform === 'win32') {
-        return withWindowsFileLock(lockFilePath, operation);
+    try {
+        if (process.platform === 'win32') {
+            return withWindowsFileLock(lockFilePath, operation);
+        }
+        return withUnixFileLock(lockFilePath, operation);
+    } catch (error) {
+        if (isKoffiUnavailable(error)) {
+            return operation();
+        }
+        throw error;
     }
-    return withUnixFileLock(lockFilePath, operation);
 }
 
 /**
@@ -233,10 +257,17 @@ export function withNativeFileLock<T>(lockFilePath: string, operation: () => T):
  * 锁的获取本身是阻塞的（LockFileEx / flock），但 operation 可以是异步的。
  */
 export async function withNativeFileLockAsync<T>(lockFilePath: string, operation: () => Promise<T>): Promise<T> {
-    if (process.platform === 'win32') {
-        return withWindowsFileLockAsync(lockFilePath, operation);
+    try {
+        if (process.platform === 'win32') {
+            return await withWindowsFileLockAsync(lockFilePath, operation);
+        }
+        return await withUnixFileLockAsync(lockFilePath, operation);
+    } catch (error) {
+        if (isKoffiUnavailable(error)) {
+            return operation();
+        }
+        throw error;
     }
-    return withUnixFileLockAsync(lockFilePath, operation);
 }
 
 function withWindowsFileLock<T>(lockFilePath: string, operation: () => T): T {
@@ -343,24 +374,38 @@ export interface NativeFileLockHandle {
 
 /**
  * 阻塞获取 OS 级独占文件锁，返回锁句柄。调用 release() 释放。
- * 进程崩溃后锁由 OS 自动释放。
+ * 进程崩溃后锁由 OS 自动释放。koffi 缺失时降级为 no-op 锁。
  */
 export function acquireNativeFileLock(lockFilePath: string): NativeFileLockHandle {
-    if (process.platform === 'win32') {
-        return acquireWindowsFileLock(lockFilePath);
+    try {
+        if (process.platform === 'win32') {
+            return acquireWindowsFileLock(lockFilePath);
+        }
+        return acquireUnixFileLock(lockFilePath);
+    } catch (error) {
+        if (isKoffiUnavailable(error)) {
+            return { release: () => undefined };
+        }
+        throw error;
     }
-    return acquireUnixFileLock(lockFilePath);
 }
 
 /**
  * 非阻塞尝试获取 OS 级独占文件锁。
- * 成功返回锁句柄，失败（锁已被持有）返回 null。
+ * 成功返回锁句柄，失败（锁已被持有）返回 null。koffi 缺失时降级为 no-op 锁。
  */
 export function tryNativeFileLock(lockFilePath: string): NativeFileLockHandle | null {
-    if (process.platform === 'win32') {
-        return tryWindowsFileLock(lockFilePath);
+    try {
+        if (process.platform === 'win32') {
+            return tryWindowsFileLock(lockFilePath);
+        }
+        return tryUnixFileLock(lockFilePath);
+    } catch (error) {
+        if (isKoffiUnavailable(error)) {
+            return { release: () => undefined };
+        }
+        throw error;
     }
-    return tryUnixFileLock(lockFilePath);
 }
 
 function acquireWindowsFileLock(lockFilePath: string): NativeFileLockHandle {

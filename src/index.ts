@@ -108,6 +108,11 @@ async function main() {
 
     // 是否启用跨域
     if (config.enableCors) {
+      // CORS 开启但 origin 保持默认 *：与 localhost-only 的主机校验（见上方 hostHeaderValidation）
+      // 的安全意图存在矛盾——任何站点都能通过浏览器发起跨域调用。打警告提示收紧。
+      if (!config.corsOrigin || config.corsOrigin === '*') {
+        console.warn('CORS is enabled with default origin "*" — any website can call this local MCP server from the browser. Consider setting CORS_ORIGIN to a specific origin.');
+      }
       app.use(cors(mcpCorsOptions));
       app.options('*', cors(mcpCorsOptions));
     }

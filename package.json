@@ -66,16 +66,12 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.11.2",
     "@mozilla/readability": "^0.6.0",
-    "@types/cheerio": "^0.22.35",
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
     "cors": "^2.8.5",
-    "curl-cffi-node": "^0.1.8",
     "express": "^4.22.1",
     "https-proxy-agent": "^7.0.6",
     "ipaddr.js": "^2.3.0",
-    "jsdom": "^26.1.0",
-    "koffi": "^2.16.0",
     "request-filtering-agent": "^3.2.0",
     "zod": "^3.25.76"
   },
@@ -85,5 +81,10 @@
     "@types/jsdom": "^21.1.7",
     "@types/node": "^20.17.10",
     "typescript": "^5.3.3"
+  },
+  "optionalDependencies": {
+    "koffi": "^2.16.0",
+    "curl-cffi-node": "^0.1.8",
+    "jsdom": "^26.1.0"
   }
 }

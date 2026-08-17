@@ -48,13 +48,27 @@ async function searchExaOfficial(query: string, limit: number, apiKey: string): 
     return apiResults.slice(0, limit).map((item: ExaResult) => ({
         title: item.title || 'No title',
         url: item.url,
-        // 官方 API 带正文时优先用正文，否则退回 Author/Published 摘要
+        // 官方 API 带正文时优先用正文，否则退回 Author/Published 摘要。
+        // 正文可能含 HTML 标签（<b>、<em> 等），统一清洗为纯文本。
         description: item.text
-            ? item.text.trim().substring(0, 500)
+            ? cleanExaDescription(item.text)
             : `Author: ${item.author || 'N/A'}. Published: ${item.publishedDate ? new Date(item.publishedDate).toLocaleDateString() : 'N/A'}`,
         source: new URL(item.url).hostname,
         engine: 'exa'
     }));
+}
+
+/** 清洗 Exa 正文摘要：剥 HTML 标签、解码实体、压缩空白、限长 */
+function cleanExaDescription(text: string): string {
+    const stripped = text
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&[a-zA-Z#0-9]+;/g, (entity) => {
+            const named: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' };
+            return named[entity] ?? ' ';
+        })
+        .replace(/\s+/g, ' ')
+        .trim();
+    return stripped.substring(0, 500);
 }
 
 export async function searchExa(query: string, limit: number): Promise<SearchResult[]> {

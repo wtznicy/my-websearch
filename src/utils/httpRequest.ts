@@ -37,7 +37,36 @@ type BuildAxiosRequestOptions = {
     timeout?: number;
     trustedStaticHost?: boolean;
     validateStatus?: AxiosRequestConfig['validateStatus'];
+    // 目标请求 URL。allowInsecureTls + trustedStaticHost 组合时必填，
+    // 用于白名单校验（见 TRUSTED_INSECURE_HOSTS）。
+    requestUrl?: string;
 };
+
+/**
+ * 允许 allowInsecureTls + trustedStaticHost 组合（关闭 TLS 证书校验）的固定可信域名白名单。
+ * 该组合会关掉全部 TLS 防护，绝不允许用于用户输入 URL——只能用于代码内硬编码的
+ * 引擎固定域名。未来新增使用点必须先把域名加进此白名单，否则运行时抛错。
+ */
+const TRUSTED_INSECURE_HOSTS = new Set([
+    'cn.bing.com',
+    'www.bing.com',
+    'www.baidu.com',
+    'search.brave.com',
+    'duckduckgo.com',
+    'html.duckduckgo.com',
+    'so.csdn.net',
+    'blog.csdn.net',
+    'api.exa.ai',
+    'api.github.com',
+    'raw.githubusercontent.com',
+    'gitee.com',
+    'api.gitee.com',
+    'juejin.cn',
+    'api.juejin.cn',
+    'www.sogou.com',
+    'www.startpage.com',
+    'cdn.jsdelivr.net'
+]);
 
 const filteringHttpAgents = new Map<string, RequestFilteringHttpAgent>();
 const secureFilteringHttpsAgents = new Map<string, RequestFilteringHttpsAgent>();
@@ -183,6 +212,20 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         // 100.64.0.0/10 这类运营商/代理地址而被 request-filtering-agent 拦截。
         // 该开关只允许用于调用方生成的固定可信 host，并强制禁用重定向，避免扩大 SSRF 面。
         if (allowInsecureTls) {
+            // 安全断言：该组合会关闭 TLS 证书校验，只允许用于显式声明的固定可信域名，
+            // 防止未来某段代码把用户输入的 URL 传入（中间人/降级攻击面）。
+            if (!options.requestUrl) {
+                throw new Error('allowInsecureTls + trustedStaticHost requires an explicit requestUrl for the trusted-host whitelist check');
+            }
+            let host: string;
+            try {
+                host = new URL(options.requestUrl).hostname.toLowerCase();
+            } catch {
+                throw new Error(`allowInsecureTls + trustedStaticHost: invalid requestUrl "${options.requestUrl}"`);
+            }
+            if (!TRUSTED_INSECURE_HOSTS.has(host)) {
+                throw new Error(`allowInsecureTls + trustedStaticHost is not allowed for host "${host}". Allowed hosts: ${[...TRUSTED_INSECURE_HOSTS].join(', ')}`);
+            }
             requestOptions.httpsAgent = getInsecureTrustedStaticHttpsAgent();
         }
     } else {

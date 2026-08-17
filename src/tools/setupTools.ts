@@ -29,6 +29,20 @@ function withErrorHint(message: string, hint: string): string {
 }
 
 /**
+ * 工具级日志门控：LOG_LEVEL=quiet（或 OPEN_WEBSEARCH_QUIET_STARTUP=true）时
+ * 静默所有工具执行日志（搜索词、URL、库名等），避免噪音与隐私信息写入宿主日志。
+ * 现有 LOG_LEVEL 只控制启动日志，这里扩展为全局级别。
+ */
+const quietToolLogs = (process.env.LOG_LEVEL ?? '').toLowerCase() === 'quiet'
+    || process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true';
+
+function logTool(message: string): void {
+    if (!quietToolLogs) {
+        console.error(message);
+    }
+}
+
+/**
  * 只输出安全的错误摘要（message + HTTP status + code），
  * 不要把整个 AxiosError 打进日志——其 config.headers 里含
  * CONTEXT7_API_KEY 的 Authorization 头和浏览器 Cookie，会泄露凭据。
@@ -44,18 +58,24 @@ function logSafeError(context: string, error: unknown): void {
     if (code) {
         details.push(code);
     }
-    console.error(`${context}: ${message}${details.length > 0 ? ` (${details.join(', ')})` : ''}`);
+    logTool(`${context}: ${message}${details.length > 0 ? ` (${details.join(', ')})` : ''}`);
 }
 
 /**
- * 纯文本响应封顶：超出 RESPONSE_CAP_BYTES 时截断并标注，
+ * 纯文本响应封顶：超出 RESPONSE_CAP_BYTES（字节）时截断并标注，
  * 防止超长文章/README 把数 MB 文本塞进 MCP response。
+ * 按 UTF-8 字节计量（中文 1 字 = 3 字节），并避免切断多字节字符。
  */
 function capTextResponse(text: string): string {
-    if (text.length <= RESPONSE_CAP_BYTES) {
+    if (Buffer.byteLength(text, 'utf8') <= RESPONSE_CAP_BYTES) {
         return text;
     }
-    return `${text.slice(0, RESPONSE_CAP_BYTES)}\n[truncated by response cap (${RESPONSE_CAP_BYTES} chars); article too long to return in full]`;
+    let truncated = Buffer.from(text, 'utf8').subarray(0, RESPONSE_CAP_BYTES).toString('utf8');
+    // 截断点可能落在多字节字符中间，去掉因此产生的替换符（U+FFFD）
+    while (truncated.endsWith('\uFFFD')) {
+        truncated = truncated.slice(0, -1);
+    }
+    return `${truncated}\n[truncated by response cap (${RESPONSE_CAP_BYTES} bytes); article too long to return in full]`;
 }
 
 /**
@@ -100,7 +120,7 @@ function getToolName(envVarName: string, defaultName: string): string {
             console.warn(`Invalid tool name "${configuredName}" from environment variable ${envVarName}. Using default: "${defaultName}"`);
             return defaultName;
         }
-        console.error(`Using custom tool name "${configuredName}" for ${envVarName}`);
+        logTool(`Using custom tool name "${configuredName}" for ${envVarName}`);
         return configuredName;
     }
     return defaultName;
@@ -182,7 +202,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                 // （测试/程序化调用）engines 可能未定义，这里补一个兜底。
                 const resolvedEngines = (engines ?? [runtime.config.defaultSearchEngine]) as [SupportedSearchEngine, ...SupportedSearchEngine[]];
 
-                console.error(`Searching for "${query}" using engines: ${resolvedEngines.join(', ')}`);
+                logTool(`Searching for "${query}" using engines: ${resolvedEngines.join(', ')}`);
 
                 const searchResult = await runtime.services.search.execute({
                     query,
@@ -192,7 +212,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                     minResults: minResults ?? 0
                 });
                 for (const failure of searchResult.partialFailures) {
-                    console.error(`Search failed for engine ${failure.engine}:`, failure.message);
+                    logTool(`Search failed for engine ${failure.engine}: ${failure.message}`);
                 }
 
                 return {
@@ -235,7 +255,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
         },
         async ({url}) => {
             try {
-                console.error(`Fetching CSDN article: ${url}`);
+                logTool(`Fetching CSDN article: ${url}`);
                 const result = await runtime.services.fetchCsdnArticle.execute({ url });
 
                 return {
@@ -272,7 +292,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
         },
         async ({url}) => {
             try {
-                console.error(`Fetching GitHub README: ${url}`);
+                logTool(`Fetching GitHub README: ${url}`);
                 const result = await runtime.services.fetchGithubReadme.execute({ url });
 
                 if (result) {
@@ -324,7 +344,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
         },
         async ({url, maxChars = 30000, readability, includeLinks, raw, startIndex}) => {
             try {
-                console.error(`Fetching web content: ${url}`);
+                logTool(`Fetching web content: ${url}`);
                 const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, raw, startIndex });
 
                 return {
@@ -361,7 +381,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
         },
         async ({url}) => {
             try {
-                console.error(`Fetching Juejin article: ${url}`);
+                logTool(`Fetching Juejin article: ${url}`);
                 const result = await runtime.services.fetchJuejinArticle.execute({ url });
 
                 return {
@@ -397,7 +417,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
         },
         async ({libraryName, query, limit}) => {
             try {
-                console.error(`Context7 resolving library: ${libraryName}`);
+                logTool(`Context7 resolving library: ${libraryName}`);
                 const result = await runtime.services.context7Libraries.execute({ libraryName, query, limit });
 
                 return {
@@ -436,7 +456,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
         },
         async ({libraryId, query, limit}) => {
             try {
-                console.error(`Context7 fetching docs for: ${libraryId}`);
+                logTool(`Context7 fetching docs for: ${libraryId}`);
                 const result = await runtime.services.context7Docs.execute({ libraryId, query, limit });
 
                 return {

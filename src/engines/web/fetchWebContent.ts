@@ -1,5 +1,4 @@
 import * as cheerio from 'cheerio';
-import { JSDOM } from 'jsdom';
 import { config } from '../../config.js';
 import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/urlSafety.js';
@@ -8,6 +7,21 @@ import {
     getBrowserCookieHeader,
     looksLikeBotChallengePage
 } from '../../utils/browserCookies.js';
+
+// jsdom 是 optionalDependencies（仅 readability/链接提取使用）：
+// 延迟加载，缺失时相关功能报明确错误，不拖垮整个模块加载。
+let jsdomModulePromise: Promise<typeof import('jsdom')> | null = null;
+function loadJsdom(): Promise<typeof import('jsdom')> {
+    if (!jsdomModulePromise) {
+        jsdomModulePromise = import('jsdom').catch((error) => {
+            if (error instanceof Error && /Cannot find package|Cannot find module|ERR_MODULE_NOT_FOUND/.test(error.message)) {
+                throw new Error('jsdom is not available (optional dependency not installed); readability/link extraction is disabled');
+            }
+            throw error;
+        });
+    }
+    return jsdomModulePromise;
+}
 
 export interface FetchWebContentResult {
     url: string;
@@ -47,6 +61,8 @@ export type FetchWebContentOptions = {
     raw?: boolean;
     /** Start reading at this character offset (for paging through long content). */
     startIndex?: number;
+    /** Include the full Readability DOM HTML in the response (default off — it can be tens of KB of tokens). */
+    includeReadableHtml?: boolean;
 };
 
 // 请求超时 10s：快速失败优先——慢页面（如部分海外站点直连）10s 内不响应就报错，
@@ -57,7 +73,14 @@ const DEFAULT_MAX_CHARS = 30000;
 // MCP 工具 schema 层面仍限制 1000，不影响 MCP 调用契约
 const MIN_MAX_CHARS = 100;
 const MAX_MAX_CHARS = 200000;
+/** 响应体硬上限：2MB（与 maxBodyLength/maxContentLength 一致） */
 const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024;
+
+/** 按 URL 路径扩展名判断"明显的小文件"：跳过 HEAD 预检（见 fetchWebContent） */
+function isLikelySmallFile(parsedUrl: URL): boolean {
+    const path = parsedUrl.pathname.toLowerCase();
+    return /\.(md|markdown|txt|text|json|csv|xml|ya?ml|html?|png|jpe?g|gif|webp|svg|ico|css|js|pdf)$/.test(path);
+}
 const MIN_METADATA_FALLBACK_CHARS = 200;
 
 type HtmlExtractionResult = {
@@ -127,6 +150,7 @@ let readabilityParser: (html: string, finalUrl: string) => Promise<ReadabilityAr
     try {
         const moduleName = '@mozilla/readability';
         const readabilityModule = await import(moduleName);
+        const { JSDOM } = await loadJsdom();
         const dom = new JSDOM(html, { url: finalUrl });
         return new readabilityModule.Readability(dom.window.document).parse();
     } catch (error) {
@@ -191,12 +215,14 @@ function extractMainTextFromHtml(html: string): HtmlExtractionResult {
     return { title, text: selectedText, mode };
 }
 
-function extractReadableTextFromHtml(html: string): string {
+async function extractReadableTextFromHtml(html: string): Promise<string> {
+    const { JSDOM } = await loadJsdom();
     const dom = new JSDOM(html);
     return normalizeText(dom.window.document.body.textContent || '');
 }
 
-function extractReadableLinks(html: string, finalUrl: string): ExtractedLink[] {
+async function extractReadableLinks(html: string, finalUrl: string): Promise<ExtractedLink[]> {
+    const { JSDOM } = await loadJsdom();
     const dom = new JSDOM(html, { url: finalUrl });
     const anchors = Array.from(dom.window.document.querySelectorAll('a[href]'));
     const seen = new Set<string>();
@@ -343,6 +369,7 @@ export function __setReadabilityParserForTests(parser?: (html: string, finalUrl:
         try {
             const moduleName = '@mozilla/readability';
             const readabilityModule = await import(moduleName);
+            const { JSDOM } = await loadJsdom();
             const dom = new JSDOM(html, { url: finalUrl });
             return new readabilityModule.Readability(dom.window.document).parse();
         } catch (error) {
@@ -393,27 +420,32 @@ export async function fetchWebContent(
     const requestOptions = buildRequestOptions();
 
     // Pre-flight check to avoid downloading oversized payloads when Content-Length is present.
-    try {
-        const headResponse = await requestWithSafeRedirects('HEAD', parsedUrl.toString(), {
-            ...requestOptions,
-            responseType: 'json',
-            validateStatus: (status: number) => status >= 200 && status < 400
-        }, 'Request URL');
-        const headLength = Number(headResponse.headers['content-length']);
-        if (Number.isFinite(headLength) && headLength > MAX_DOWNLOAD_BYTES) {
-            const tooLargeError = new Error(`Response body too large (${headLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
-            (tooLargeError as any).code = 'ERR_RESPONSE_TOO_LARGE';
-            throw tooLargeError;
-        }
-    } catch (error: any) {
-        if (error?.code === 'ERR_RESPONSE_TOO_LARGE') {
-            throw error;
-        }
-        const status = error?.response?.status;
-        // Some servers don't support HEAD correctly; continue and rely on GET download limits.
-        // 429（限流）与 5xx（服务端暂时故障）也不作为 HEAD 预检的致命错误——GET 可能成功或由上层重试处理。
-        if (status !== undefined && ![400, 403, 404, 405, 406, 429, 501].includes(status) && status < 500) {
-            throw error;
+    // 明显的小文件（.md/.txt/.json 等）跳过 HEAD 预检：HEAD 一次延迟翻倍，
+    // 这些类型超 2MB 上限的概率极低，且部分站点禁 HEAD 会白等超时。
+    // GET 请求自带 maxBodyLength 硬上限兜底（见 buildRequestOptions）。
+    if (!isLikelySmallFile(parsedUrl)) {
+        try {
+            const headResponse = await requestWithSafeRedirects('HEAD', parsedUrl.toString(), {
+                ...requestOptions,
+                responseType: 'json',
+                validateStatus: (status: number) => status >= 200 && status < 400
+            }, 'Request URL');
+            const headLength = Number(headResponse.headers['content-length']);
+            if (Number.isFinite(headLength) && headLength > MAX_DOWNLOAD_BYTES) {
+                const tooLargeError = new Error(`Response body too large (${headLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
+                (tooLargeError as any).code = 'ERR_RESPONSE_TOO_LARGE';
+                throw tooLargeError;
+            }
+        } catch (error: any) {
+            if (error?.code === 'ERR_RESPONSE_TOO_LARGE') {
+                throw error;
+            }
+            const status = error?.response?.status;
+            // Some servers don't support HEAD correctly; continue and rely on GET download limits.
+            // 429（限流）与 5xx（服务端暂时故障）也不作为 HEAD 预检的致命错误——GET 可能成功或由上层重试处理。
+            if (status !== undefined && ![400, 403, 404, 405, 406, 429, 501].includes(status) && status < 500) {
+                throw error;
+            }
         }
     }
 
@@ -518,11 +550,11 @@ export async function fetchWebContent(
             try {
                 const article = await readabilityParser(raw, finalUrl);
                 if (article?.content) {
-                    const readableText = normalizeText(article.textContent || extractReadableTextFromHtml(article.content));
+                    const readableText = normalizeText(article.textContent || await extractReadableTextFromHtml(article.content));
                     if (readableText) {
                         readabilityApplied = true;
                         readableHtml = article.content;
-                        links = options.includeLinks ? extractReadableLinks(article.content, finalUrl) : undefined;
+                        links = options.includeLinks ? await extractReadableLinks(article.content, finalUrl) : undefined;
                         byline = article.byline?.trim() || undefined;
                         excerpt = article.excerpt?.trim() || undefined;
                         siteName = article.siteName?.trim() || undefined;
@@ -582,7 +614,7 @@ export async function fetchWebContent(
         startIndex,
         ...(truncated ? { hasMore: true, nextStartIndex: startIndex + pageContent.length } : {}),
         ...(options.readability ? { readabilityApplied } : {}),
-        ...(readableHtml ? { readableHtml } : {}),
+        ...(options.includeReadableHtml && readableHtml ? { readableHtml } : {}),
         ...(links ? { links } : {}),
         ...(byline ? { byline } : {}),
         ...(excerpt ? { excerpt } : {}),

@@ -92,10 +92,16 @@ function isAntiBotPage(html: string): boolean {
 }
 
 /** 记录 TLS 验证是否曾在当前进程失败过（如 Windows 找不到系统 CA）。
- * 失败过一次后直接跳过 verify:true，避免每次请求都先失败再重试。 */
+ * 失败后直接跳过 verify:true 避免每次请求都先失败再重试；
+ * 带冷却期：冷却结束后重置标志，允许重新尝试证书验证（系统 CA 可能已修复）。 */
 let tlsVerificationFailed = false;
+let tlsVerificationFailedAt = 0;
+const TLS_VERIFY_RETRY_MS = 10 * 60 * 1000;
 
 async function requestWithTlsFallback(sessionFactory: (verify: boolean) => ImpersonateSession, url: string): Promise<ImpersonateResponse> {
+    if (tlsVerificationFailed && Date.now() - tlsVerificationFailedAt > TLS_VERIFY_RETRY_MS) {
+        tlsVerificationFailed = false;
+    }
     const verify = !tlsVerificationFailed;
     try {
         return await sessionFactory(verify).get(url);
@@ -104,6 +110,7 @@ async function requestWithTlsFallback(sessionFactory: (verify: boolean) => Imper
         // curl 60 = 证书验证失败；部分平台 curl-impersonate 找不到系统 CA（如 Windows）
         if (verify && (message.includes('(60)') || /SSL|CERT_|certificate/i.test(message))) {
             tlsVerificationFailed = true;
+            tlsVerificationFailedAt = Date.now();
             console.warn('Bing impersonate TLS verification failed (likely missing system CA), retrying without verification: ' + message);
             return await sessionFactory(false).get(url);
         }

@@ -118,7 +118,7 @@ export function mergeSearchResults(engineResults: SearchResult[][]): SearchResul
 
     return [...seen.values()]
         .sort((a, b) => b.hits - a.hits || a.order - b.order)
-        .map(({ result }) => result);
+        .map(({ result, hits }) => (hits > 1 ? { ...result, engineHits: hits } : result));
 }
 
 // ---------------------------------------------------------------------------
