@@ -57,6 +57,10 @@ export function normalizeResultUrl(url: string): string {
             if (key.startsWith('utm_') || key === 'fbclid' || key === 'gclid' || key === 'ref' || key === 'spm') {
                 parsed.searchParams.delete(key);
             }
+            // GitHub/Gitee 页面标签参数（?tab=readme-ov-file 等）不改变内容，视为同页
+            if ((key === 'tab' || key === 'spm') && (parsed.hostname === 'github.com' || parsed.hostname === 'gitee.com')) {
+                parsed.searchParams.delete(key);
+            }
         }
         // 等价 URL 归一化：统一 https、去 www. 前缀、根路径去掉尾斜杠，
         // 避免 http/https、www 前缀、尾斜杠差异让同一页被当成两条结果

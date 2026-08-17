@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { config } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
@@ -80,6 +81,11 @@ function extractInterstitialPayload(html: string): Record<string, string> | unde
 // 方案：用 Playwright hidden-headed 模式打开首页完成 Anubis 挑战，
 // 提取放行 cookie（spchal-auth 等）+ sc token 并缓存复用；cookie 失效时重新预热。
 async function warmupStartpageSession(): Promise<void> {
+    // STARTPAGE_PLAYWRIGHT_FALLBACK=false：不启动浏览器（hidden-headed 预热约 400MB 内存 +
+    // 秒级延迟），HTTP 被反爬直接报错，配合 minResults 级联自动换引擎。
+    if (!config.startpagePlaywrightFallback) {
+        throw new Error('Startpage requires a Playwright browser session (Anubis anti-bot), but STARTPAGE_PLAYWRIGHT_FALLBACK=false. Enable the fallback, or use another engine (e.g. bing/baidu/sogou).');
+    }
     let session: { browser: any; release(): Promise<void> } | undefined;
     let releasePage: (() => Promise<void>) | undefined;
     try {

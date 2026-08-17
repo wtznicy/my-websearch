@@ -1595,7 +1595,8 @@ function createForceKill(browserPid?: number, tempDir?: string, browser?: any, d
         if (browserPid) {
             if (process.platform === 'win32') {
                 try {
-                    execFileSync('taskkill', ['/F', '/T', '/PID', String(browserPid)], { windowsHide: true, timeout: 5000 });
+                    // stdio: 'ignore'：taskkill 的 stderr（"没有找到进程"等）绝不外泄到宿主日志
+                    execFileSync('taskkill', ['/F', '/T', '/PID', String(browserPid)], { windowsHide: true, timeout: 5000, stdio: 'ignore' });
                 } catch {
                     // Ignore kill errors.
                 }

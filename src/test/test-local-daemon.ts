@@ -24,6 +24,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         searchMode: 'request',
         bingPlaywrightFallback: true,
         bingImpersonateTarget: 'chrome131',
+        startpagePlaywrightFallback: true,
         proxyUrl: 'http://127.0.0.1:7890',
         useProxy: false,
         proxyEngines: [],

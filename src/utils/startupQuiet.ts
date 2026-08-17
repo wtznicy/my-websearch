@@ -19,3 +19,37 @@ const isQuietInvocation =
 if (isQuietInvocation) {
     process.env.OPEN_WEBSEARCH_QUIET_STARTUP = 'true';
 }
+
+/**
+ * Windows 旧控制台（GBK 代码页 936）下 emoji 会乱码（如 🌐 → 馃Л）。
+ * 在最早加载的模块里探测代码页，非 UTF-8 时把 console 输出的常见 emoji
+ * 替换为 ASCII 标签，保证日志可读。
+ */
+if (process.platform === 'win32' && process.env.OPEN_WEBSEARCH_NO_EMOJI !== 'true') {
+    let isGbkConsole = false;
+    try {
+        // 延迟 require 避免引入额外依赖；chcp 无参数时输出 "活动代码页: 936"
+        const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+        const chcpOutput = execFileSync('chcp', { encoding: 'utf8', windowsHide: true, stdio: 'pipe' }).toString();
+        const codePage = Number(/\d+/.exec(chcpOutput)?.[0]);
+        isGbkConsole = Number.isFinite(codePage) && codePage !== 65001;
+    } catch {
+        // 探测失败（无 chcp/无控制台）不处理
+    }
+
+    if (isGbkConsole) {
+        const EMOJI_TO_ASCII: Record<string, string> = {
+            '🔎': '[search]', '🧭': '[playwright]', '🌐': '[proxy]', '🔐': '[tls]',
+            '🖥️': '[server]', '🔒': '[cors]', '⚠️': '[warn]', '✅': '[ok]',
+            '❌': '[fail]', '🚀': '[start]', '🔌': '[transport]', '📝': '[log]',
+            '🔍': '[find]', '💾': '[save]'
+        };
+        const replaceEmojis = (args: unknown[]): unknown[] => args.map((arg) =>
+            typeof arg === 'string' ? arg.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, (emoji) => EMOJI_TO_ASCII[emoji] ?? '?') : arg
+        );
+        for (const method of ['log', 'warn', 'error', 'info', 'debug'] as const) {
+            const original = console[method].bind(console);
+            (console as unknown as Record<string, (...args: unknown[]) => void>)[method] = (...args: unknown[]) => original(...replaceEmojis(args));
+        }
+    }
+}

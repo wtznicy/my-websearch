@@ -18,6 +18,9 @@ export interface AppConfig {
     // 如 chrome131 / chrome124 / chrome116）。Chrome 指纹保鲜期以年计，
     // 被反爬标记时才需要切到更新的目标。
     bingImpersonateTarget: string;
+    // startpage 的 Playwright 兜底开关（hidden-headed 预热 Anubis 挑战）。
+    // false 时不启动浏览器，HTTP 被反爬直接报错（可配合 minResults 级联换引擎）。
+    startpagePlaywrightFallback: boolean;
     // Proxy configuration
     proxyUrl?: string;
     useProxy: boolean;
@@ -57,6 +60,7 @@ export const config: AppConfig = {
     searchMode: (process.env.SEARCH_MODE as AppConfig['searchMode']) || 'auto',
     bingPlaywrightFallback: process.env.BING_PLAYWRIGHT_FALLBACK !== 'false',
     bingImpersonateTarget: readOptionalEnv('BING_IMPERSONATE_TARGET') || 'chrome131',
+    startpagePlaywrightFallback: process.env.STARTPAGE_PLAYWRIGHT_FALLBACK !== 'false',
     // Proxy configuration
     proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:7890',
     useProxy: process.env.USE_PROXY === 'true',

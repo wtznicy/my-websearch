@@ -84,7 +84,8 @@ export async function assertOverseasEngineUsable(engine: 'duckduckgo' | 'brave' 
         const error = new Error(
             `${engine} is unreachable from your current network without a proxy. ` +
             'Enable USE_PROXY=true + PROXY_URL (and include this engine in PROXY_ENGINES if that whitelist is set), ' +
-            'or use domestic engines (bing/baidu/csdn/juejin/sogou) or exa (requires EXA_API_KEY).'
+            'or use domestic engines (bing/baidu/csdn/juejin/sogou) or exa (requires EXA_API_KEY). ' +
+            'Already running a proxy client? This server ignores system proxy env vars by design — check that USE_PROXY/PROXY_URL are set in your MCP client config, then restart the MCP server.'
         );
         (error as any).retryable = false;
         throw error;
