@@ -160,31 +160,6 @@ export function hintProxyConnectionError(error: unknown): Error {
     return error instanceof Error ? error : new Error(message);
 }
 
-/**
- * 国内站点判断：.cn 域名后缀或已知国内站点名单命中 → 直连（不走代理）。
- * 供 fetchWebContent/fetchCsdnArticle 等通用抓取分流：国内直连、海外按全局代理配置。
- */
-const DOMESTIC_HOST_SUFFIXES = [
-    'baidu.com', 'csdn.net', 'juejin.cn', 'zhihu.com', 'gitee.com', 'bigmodel.cn',
-    'sogou.com', 'weibo.com', 'qq.com', '163.com', 'aliyun.com', 'bilibili.com',
-    'douyin.com', 'bytedance.com', 'xiaohongshu.com', 'meituan.com', 'taobao.com',
-    'jd.com', '163yun.com', 'huawei.com', 'tencent.com', 'zhipuai.cn', 'deepseek.com',
-    'qianwen.com', 'volces.com', 'baidubce.com', 'aliyuncs.com', 'sina.com.cn'
-];
-
-export function isDomesticTargetUrl(url: string): boolean {
-    let host: string;
-    try {
-        host = new URL(url).hostname.toLowerCase();
-    } catch {
-        return false;
-    }
-    if (host.endsWith('.cn')) {
-        return true;
-    }
-    return DOMESTIC_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
-}
-
 export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {}): AxiosRequestConfig {
     const {
         allowInsecureTls = false,
@@ -304,6 +279,45 @@ let axiosRequestImpl: AxiosRequestFn = (config) => axios.request(config);
 
 export function __setAxiosRequestForTests(impl?: AxiosRequestFn): void {
     axiosRequestImpl = impl ?? ((config) => axios.request(config));
+}
+
+/** 网络层错误判定（超时/连接拒绝/重置/不可达/DNS 失败等）；HTTP 状态类错误不算 */
+export function isNetworkLayerError(message: string): boolean {
+    return /ECONNREFUSED|ECONNRESET|ETIMEDOUT|ESOCKETTIMEDOUT|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ENOTFOUND|socket hang up|network timeout|network error|fetch failed|ERR_NETWORK|timeout of \d+ms/i.test(message);
+}
+
+/**
+ * 直连优先、代理兜底的请求（供 fetchWebContent / fetchCsdnArticle / fetchJuejinArticle 等通用抓取）：
+ * 1. 先无代理直连（快、国内站点最优，不依赖代理可用性）；
+ * 2. 网络层失败（超时/连接错误，非 HTTP 状态错误）时：
+ *    - 已配置代理（USE_PROXY=true + PROXY_URL）→ 走代理重试一次；代理也失败 → 附加"代理不可达"提示；
+ *    - 未配置代理 → 错误附加"开启代理"提示（目标站点可能无法从当前网络直连）。
+ * buildOptions 接收 forceDirect 决定请求是否挂代理，调用方用它构造 AxiosRequestConfig。
+ */
+export async function requestDirectFirst(
+    method: 'GET' | 'HEAD',
+    url: string,
+    buildOptions: (forceDirect: boolean) => AxiosRequestConfig,
+    urlLabel: string = 'Request URL'
+): Promise<AxiosResponse> {
+    try {
+        return await requestWithSafeRedirects(method, url, buildOptions(true), urlLabel);
+    } catch (directError) {
+        const message = directError instanceof Error ? directError.message : String(directError);
+        if (!isNetworkLayerError(message)) {
+            throw directError;
+        }
+        if (config.useProxy && config.proxyUrl) {
+            try {
+                return await requestWithSafeRedirects(method, url, buildOptions(false), urlLabel);
+            } catch (proxyError) {
+                throw hintProxyConnectionError(proxyError);
+            }
+        }
+        throw new Error(
+            `${message} | Hint: 直连失败——目标站点可能无法从当前网络直接访问；可开启代理（USE_PROXY=true + PROXY_URL，如 http://127.0.0.1:7890）后重试`
+        );
+    }
 }
 
 // Manually chase redirects so we can async-DNS-resolve each hop. follow-redirects'

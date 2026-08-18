@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { fetchPageHtmlWithBrowser, getBrowserCookieHeader, looksLikeBotChallengePage } from '../../utils/browserCookies.js';
-import { buildAxiosRequestOptions, hintProxyConnectionError, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { buildAxiosRequestOptions, hintProxyConnectionError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 
 function normalizeExtractedText(text: string): string {
     return text
@@ -35,7 +35,7 @@ function stripPromotionSections(text: string): string {
     return kept.join('\n\n').trim();
 }
 
-function buildRequestOptions(cookieHeader?: string): any {
+function buildRequestOptions(cookieHeader?: string, forceDirect = false): any {
     const headers: Record<string, string> = {
         'Accept': '*/*',
         'Host': 'blog.csdn.net',
@@ -43,7 +43,7 @@ function buildRequestOptions(cookieHeader?: string): any {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
     };
     // CSDN 是国内站点，强制直连：不因全局 USE_PROXY 走代理（代理挂掉时 CSDN 抓取不受影响）
-    const requestOptions = buildAxiosRequestOptions({ headers, forceDirect: true });
+    const requestOptions = buildAxiosRequestOptions({ headers, forceDirect });
 
     if (cookieHeader) {
         headers.Cookie = cookieHeader;
@@ -69,7 +69,8 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
     let content = '';
 
     try {
-        response = await requestWithSafeRedirects('GET', url, buildRequestOptions());
+        // 直连优先、代理兜底：CSDN 国内直连最快，网络失败且配置了代理时自动切换
+        response = await requestDirectFirst('GET', url, (forceDirect) => buildRequestOptions(undefined, forceDirect));
         html = String(response.data || '');
         content = extractArticleContent(html);
     } catch (error: any) {

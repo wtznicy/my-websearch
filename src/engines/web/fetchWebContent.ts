@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { config } from '../../config.js';
-import { buildAxiosRequestOptions, hintProxyConnectionError, isDomesticTargetUrl, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { buildAxiosRequestOptions, hintProxyConnectionError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/urlSafety.js';
 import {
     fetchPageHtmlWithBrowser,
@@ -256,7 +256,7 @@ async function extractReadableLinks(html: string, finalUrl: string): Promise<Ext
     return links;
 }
 
-function buildRequestOptions(cookieHeader?: string, targetUrl?: string): any {
+function buildRequestOptions(cookieHeader?: string, forceDirect = false): any {
     const headers: Record<string, string> = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
         'Accept': 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -267,7 +267,7 @@ function buildRequestOptions(cookieHeader?: string, targetUrl?: string): any {
         allowInsecureTls: config.fetchWebAllowInsecureTls,
         decompress: true,
         headers,
-        forceDirect: isDomesticTargetUrl(targetUrl ?? ''),
+        forceDirect,
         maxBodyLength: MAX_DOWNLOAD_BYTES,
         maxContentLength: MAX_DOWNLOAD_BYTES,
         maxRedirects: 5,
@@ -397,7 +397,7 @@ async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: a
 
     try {
         return {
-            response: await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader, url), 'Request URL'),
+            response: await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader, false), 'Request URL'),
             usedBrowserCookies: true
         };
     } catch {
@@ -419,7 +419,7 @@ export async function fetchWebContent(
     const startIndex = Math.max(0, Math.floor(options.startIndex ?? 0));
     const targetMaxChars = clampMaxChars(maxChars);
 
-    const requestOptions = buildRequestOptions(undefined, parsedUrl.toString());
+    const requestOptions = buildRequestOptions(undefined, true);
 
     // Pre-flight check to avoid downloading oversized payloads when Content-Length is present.
     // 明显的小文件（.md/.txt/.json 等）跳过 HEAD 预检：HEAD 一次延迟翻倍，
@@ -458,7 +458,8 @@ export async function fetchWebContent(
     let httpErrorStatus: number | undefined;
 
     try {
-        response = await requestWithSafeRedirects('GET', parsedUrl.toString(), requestOptions, 'Request URL');
+        // 直连优先、代理兜底：先无代理（国内站点最优），网络失败且配置了代理时自动切换
+        response = await requestDirectFirst('GET', parsedUrl.toString(), (forceDirect) => buildRequestOptions(undefined, forceDirect), 'Request URL');
     } catch (error: any) {
         const status = error?.response?.status;
         if (![401, 403, 429].includes(status)) {

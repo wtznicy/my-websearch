@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { buildAxiosRequestOptions, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 
 function shouldDebug(): boolean {
     return process.env.OPEN_WEBSEARCH_DEBUG === '1';
@@ -9,8 +9,8 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
     try {
         console.error(`🔍 Fetching Juejin article: ${url}`);
 
-        // 走统一的安全重定向链路（每跳 DNS 校验），与 fetchCsdnArticle / fetchWebContent 保持一致
-        const response = await requestWithSafeRedirects('GET', url, buildAxiosRequestOptions({
+        // 直连优先、代理兜底：先无代理，网络失败且配置了代理时自动切换
+        const response = await requestDirectFirst('GET', url, (forceDirect) => buildAxiosRequestOptions({
             headers: {
                 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
                 'Connection': 'keep-alive',
@@ -27,7 +27,8 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
                 'priority': 'u=0, i'
             },
             timeout: 30000,
-            decompress: true
+            decompress: true,
+            forceDirect
         }), 'Juejin article URL');
 
         const $ = cheerio.load(response.data);
