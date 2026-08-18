@@ -47,6 +47,34 @@ type DnsLookupFn = (
     callback: (err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void
 ) => void;
 
+/** 真实解析实现（测试可通过 __setDnsLookupForTests 替换） */
+let lookupImpl: DnsLookupFn = (hostname, options, callback) => {
+    dns.lookup(hostname, options, (err, address, family) => {
+        callback(err, address, family);
+    });
+};
+
+export function __setDnsLookupForTests(impl?: DnsLookupFn): void {
+    lookupImpl = impl ?? ((hostname, options, callback) => {
+        dns.lookup(hostname, options, (err, address, family) => {
+            callback(err, address, family);
+        });
+    });
+}
+
+/**
+ * 同步读取某 hostname 的缓存解析结果（无缓存返回 undefined）。
+ * 供同步安全钩子（如 axios beforeRedirect）在不发起新 DNS 查询的前提下
+ * 检查重定向目标是否解析到私网地址。
+ */
+export function peekCachedLookup(hostname: string): string[] | undefined {
+    const entry = cache.get(hostname.toLowerCase());
+    if (entry && Date.now() < entry.expiresAt) {
+        return entry.addresses;
+    }
+    return undefined;
+}
+
 export const cachedDnsLookup: DnsLookupFn = (hostname, options, callback) => {
     const now = Date.now();
     const cached = cache.get(hostname);
@@ -59,7 +87,7 @@ export const cachedDnsLookup: DnsLookupFn = (hostname, options, callback) => {
         return;
     }
 
-    dns.lookup(hostname, options, (err, ...rest) => {
+    lookupImpl(hostname, options, (err, ...rest) => {
         if (!err) {
             const addresses = options.all
                 ? (rest[0] as dns.LookupAddress[])

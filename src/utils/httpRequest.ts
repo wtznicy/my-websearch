@@ -8,7 +8,7 @@ import {
 } from 'request-filtering-agent';
 import { config, getProxyUrl, engineShouldUseProxy } from '../config.js';
 import { assertPublicHttpUrlResolved, isPrivateOrLocalHostname } from './urlSafety.js';
-import { cachedDnsLookup } from './dnsCache.js';
+import { cachedDnsLookup, peekCachedLookup } from './dnsCache.js';
 import { metrics } from '../core/metrics.js';
 
 // 默认请求超时：调用方未显式传 timeout 时使用，避免引擎请求永不超时拖垮整个搜索。
@@ -198,6 +198,14 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         const target = (opts.hostname ?? opts.host) as string | undefined;
         if (target && isPrivateOrLocalHostname(target)) {
             throw new Error('Redirect target points to a private or local network address');
+        }
+        // 若该 hostname 的解析结果已在 DNS 缓存中且解析到私网地址，同步拦截
+        // （覆盖"重定向到域名、而该域名此前已解析到私网 IP"的场景，不发起新 DNS 查询）
+        if (target) {
+            const cachedAddresses = peekCachedLookup(target);
+            if (cachedAddresses && cachedAddresses.some((address) => isPrivateOrLocalHostname(address))) {
+                throw new Error(`Redirect target "${target}" resolves to a private or local network address (cached DNS)`);
+            }
         }
     };
 
