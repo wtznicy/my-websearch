@@ -26,7 +26,8 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
                 'accept-language': 'zh-CN,zh;q=0.9',
                 'priority': 'u=0, i'
             },
-            timeout: 30000,
+            // 直连+代理兜底最坏 2×10s，保持在 MCP 客户端 30s 超时预算内（掘金正常响应远快于 10s）
+            timeout: 10000,
             decompress: true,
             forceDirect
         }), 'Juejin article URL');
