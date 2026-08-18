@@ -1,5 +1,6 @@
-import { __buildBingBrowserLaunchArgsForTests, hasSiteOperator, shouldSuggestRemovingSiteOperator } from '../engines/bing/bing.js';
+import { __analyzeBlockedPageForTests, __buildBingBrowserLaunchArgsForTests, hasSiteOperator, shouldSuggestRemovingSiteOperator } from '../engines/bing/bing.js';
 import { parseBingSearchResults } from '../engines/bing/parser.js';
+import * as cheerio from 'cheerio';
 
 function assert(condition: unknown, message: string): void {
     if (!condition) {
@@ -130,5 +131,54 @@ const relativeCkRedirectHtml = `
 </ol>`;
 const relativeCkResults = parseBingSearchResults(relativeCkRedirectHtml, 5);
 assert(relativeCkResults.length === 0, 'relative /ck/a redirect should be discarded as an internal Bing jump link');
+
+// ---------------------------------------------------------------------------
+// analyzeBlockedPage 轻量级选择器检查测试
+// ---------------------------------------------------------------------------
+
+function testAnalyzeBlockedPage(): void {
+    // 正常结果页：有结构化结果 → not blocked
+    const normalHtml = `<html><head><title>Bing</title></head><body>
+        <ol id="b_results">
+            <li class="b_algo"><h2><a href="https://example.com">Result</a></h2></li>
+        </ol>
+    </body></html>`;
+    const $normal = cheerio.load(normalHtml);
+    const normalState = __analyzeBlockedPageForTests($normal, normalHtml);
+    assert(normalState.hasResults === true, 'normal page with .b_algo should detect results');
+    assert(normalState.blocked === false, 'normal page should not be blocked');
+
+    // 无结构化结果但有回退链接 → hasResults = true, not blocked
+    const fallbackHtml = `<html><head><title>Bing</title></head><body>
+        <div id="b_results">
+            <a href="https://fallback.example.com">Fallback Link</a>
+        </div>
+    </body></html>`;
+    const $fallback = cheerio.load(fallbackHtml);
+    const fallbackState = __analyzeBlockedPageForTests($fallback, fallbackHtml);
+    assert(fallbackState.hasResults === true, 'page with fallback links should detect results');
+    assert(fallbackState.blocked === false, 'page with fallback links should not be blocked');
+
+    // 验证码页面：有 captcha 关键词 + 无结果 → blocked
+    const captchaHtml = `<html><head><title>Please verify you are human</title></head><body>
+        <div id="b_captcha">CAPTCHA</div>
+    </body></html>`;
+    const $captcha = cheerio.load(captchaHtml);
+    const captchaState = __analyzeBlockedPageForTests($captcha, captchaHtml);
+    assert(captchaState.hasResults === false, 'captcha page should have no results');
+    assert(captchaState.blocked === true, 'captcha page should be blocked');
+    assert(captchaState.title.includes('verify you are human'), 'should detect captcha title');
+
+    // 空页面：无结果无 captcha → not blocked（可能是正常空结果）
+    const emptyHtml = `<html><head><title>Bing</title></head><body></body></html>`;
+    const $empty = cheerio.load(emptyHtml);
+    const emptyState = __analyzeBlockedPageForTests($empty, emptyHtml);
+    assert(emptyState.hasResults === false, 'empty page should have no results');
+    assert(emptyState.blocked === false, 'empty page without captcha signals should not be blocked');
+
+    console.log('✅ analyzeBlockedPage lightweight selector check');
+}
+
+testAnalyzeBlockedPage();
 
 console.log('Bing parser tests passed.');

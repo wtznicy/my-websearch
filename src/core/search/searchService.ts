@@ -147,6 +147,8 @@ function normalizeLimitBucket(limit: number): number {
 type CacheEntry = {
     value: SearchExecutionResult;
     expiresAt: number;
+    /** 写入缓存时的请求 limit，用于判断"缓存是否足以满足当前请求" */
+    requestedLimit: number;
 };
 
 /**
@@ -186,7 +188,13 @@ export class SearchTtlCache {
             this.cache.delete(key);
             return undefined;
         }
-        // limit 归一化后缓存可能比请求多（如 limit=5 命中 limit=10 的档位）：按请求 limit 截断，保持语义
+        // 写入时的请求 limit 不足以覆盖当前请求 limit → miss。
+        // 用 requestedLimit 而非 results.length 判断：冷门查询引擎只返回 3 条但 requestedLimit=5，
+        // 说明 3 条就是该查询的完整结果，后续 limit=5 应命中；只有 limit>5 才 miss。
+        if (entry.requestedLimit < input.limit) {
+            return undefined;
+        }
+        // 缓存比请求多时按请求 limit 截断，保持语义
         if (entry.value.results.length > input.limit) {
             return {
                 ...entry.value,
@@ -213,7 +221,7 @@ export class SearchTtlCache {
             }
             this.cache.delete(oldestKey);
         }
-        this.cache.set(this.buildKey(input), { value, expiresAt: now + this.ttlMs });
+        this.cache.set(this.buildKey(input), { value, expiresAt: now + this.ttlMs, requestedLimit: input.limit });
     }
 
     clear(): void {
@@ -271,6 +279,9 @@ function buildHintedMessage(engine: string, message: string): string {
 // 搜索级总时间预算：超过后未完成的引擎按超时处理，避免单个慢引擎（含重试）拖垮整次搜索
 export const SEARCH_DEADLINE_MS = 30000;
 
+// 查询长度上限：防止超长查询导致搜索引擎请求超时或被封禁
+export const MAX_QUERY_LENGTH = 500;
+
 export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: SearchTtlCache) {
     const ttlCache = cache ?? new SearchTtlCache();
 
@@ -279,6 +290,9 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             const cleanQuery = query.trim();
             if (!cleanQuery) {
                 throw new Error('Query string cannot be empty');
+            }
+            if (cleanQuery.length > MAX_QUERY_LENGTH) {
+                throw new Error(`Query string too long (${cleanQuery.length} characters, max ${MAX_QUERY_LENGTH})`);
             }
 
             // 缓存命中直接返回

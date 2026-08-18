@@ -234,14 +234,97 @@ async function testSearchTtlCache(): Promise<void> {
     await failingService.execute(failingInput);
     assertEqual(failCount, 6, 'failed search results are not cached (retried on next identical query)');
 
-    // 直接验证缓存类
+    // 直接验证缓存类（缓存结果数 >= limit 才命中）
     const cache = new SearchTtlCache(100);
-    cache.set(input, { query: 'x', engines: ['bing'], totalResults: 0, results: [], partialFailures: [] });
-    assert(cache.get(input) !== undefined, 'cache returns fresh entry');
+    const cachedResults = Array.from({ length: 2 }, (_, i) => createResult('bing', i + 1));
+    cache.set(input, { query: 'x', engines: ['bing'], totalResults: 2, results: cachedResults, partialFailures: [] });
+    assert(cache.get(input) !== undefined, 'cache returns fresh entry when results >= limit');
     await new Promise((resolve) => setTimeout(resolve, 150));
     assert(cache.get(input) === undefined, 'cache expires entry after TTL');
 
     console.log('✅ SearchTtlCache deduplicates requests and expires');
+}
+
+async function testSearchTtlCacheInsufficientResultsMiss(): Promise<void> {
+    // 场景 1：requestedLimit 不足时应 miss。
+    // normalizeLimitBucket: limit=7 和 limit=10 都归一化为 10（同一档位）。
+    // limit=7 写入 → limit=8 miss（requestedLimit=7 < 8）
+    let callCount = 0;
+    const service = createSearchService({
+        bing: async (query, limit) => {
+            callCount += 1;
+            const count = callCount === 1 ? 7 : 10;
+            return Array.from({ length: count }, (_, index) => createResult('bing', index + 1));
+        }
+    });
+
+    const r1 = await service.execute({ query: 'insufficient', engines: ['bing'], limit: 7 });
+    assertEqual(r1.totalResults, 7, 'first call returns 7 results from engine');
+    assertEqual(callCount, 1, 'first call invokes engine');
+
+    const r2 = await service.execute({ query: 'insufficient', engines: ['bing'], limit: 6 });
+    assertEqual(r2.totalResults, 6, 'limit=6 truncates from cached 7 results');
+    assertEqual(callCount, 1, 'limit=6 still hits cache (requestedLimit=7 >= 6)');
+
+    const r3 = await service.execute({ query: 'insufficient', engines: ['bing'], limit: 8 });
+    assertEqual(callCount, 2, 'limit=8 misses cache (requestedLimit=7 < 8)');
+    assertEqual(r3.totalResults, 8, 'limit=8 gets fresh results after cache miss');
+
+    console.log('✅ SearchTtlCache misses when requestedLimit < input.limit');
+}
+
+async function testSearchTtlCacheColdQueryHitsCache(): Promise<void> {
+    // 场景 2：冷门查询（真实结果 < limit）不应导致缓存失效。
+    // 引擎恒返 3 条，limit=5 → requestedLimit=5 存入缓存。
+    // 后续 limit=5 应命中（3 条就是该查询的完整结果），只有 limit=8 才 miss。
+    let callCount = 0;
+    const service = createSearchService({
+        bing: async (query, limit) => {
+            callCount += 1;
+            return Array.from({ length: 3 }, (_, index) => createResult('bing', index + 1));
+        }
+    });
+
+    // 第一次 limit=5，引擎返回 3 条 → 缓存（requestedLimit=5）
+    const r1 = await service.execute({ query: 'cold query', engines: ['bing'], limit: 5 });
+    assertEqual(r1.totalResults, 3, 'cold query returns 3 results from engine');
+    assertEqual(callCount, 1, 'first call invokes engine');
+
+    // 第二次 limit=5，命中缓存（requestedLimit=5 >= 5）
+    const r2 = await service.execute({ query: 'cold query', engines: ['bing'], limit: 5 });
+    assertEqual(r2.totalResults, 3, 'same limit=5 hits cache with 3 results');
+    assertEqual(callCount, 1, 'same limit does not re-invoke engine');
+
+    // limit=4 也命中（requestedLimit=5 >= 4）
+    const r3 = await service.execute({ query: 'cold query', engines: ['bing'], limit: 4 });
+    assertEqual(r3.totalResults, 3, 'limit=4 hits cache (requestedLimit=5 >= 4, 3 results returned as-is)');
+    assertEqual(callCount, 1, 'limit=4 does not re-invoke engine');
+
+    // limit=8 miss（requestedLimit=5 < 8）
+    const r4 = await service.execute({ query: 'cold query', engines: ['bing'], limit: 8 });
+    assertEqual(callCount, 2, 'limit=8 misses cache (requestedLimit=5 < 8)');
+
+    console.log('✅ SearchTtlCache cold query does not thrash cache');
+}
+
+async function testSearchQueryTooLong(): Promise<void> {
+    const service = createSearchService({
+        bing: async (query, limit) => Array.from({ length: limit }, (_, i) => createResult('bing', i + 1))
+    });
+
+    let threw = false;
+    try {
+        await service.execute({ query: 'x'.repeat(501), engines: ['bing'], limit: 1 });
+    } catch (error) {
+        threw = error instanceof Error && error.message.includes('Query string too long');
+    }
+    assert(threw, 'query over 500 characters should be rejected');
+
+    // 500 字符刚好通过
+    const result = await service.execute({ query: 'x'.repeat(500), engines: ['bing'], limit: 1 });
+    assertEqual(result.totalResults, 1, '500-character query is accepted');
+
+    console.log('✅ search service rejects queries over 500 characters');
 }
 
 async function testSearchZeroQuotaEngines(): Promise<void> {
@@ -360,6 +443,9 @@ async function main(): Promise<void> {
     testNormalizeResultUrl();
     testMergeSearchResultsDedupAndRank();
     await testSearchTtlCache();
+    await testSearchTtlCacheInsufficientResultsMiss();
+    await testSearchTtlCacheColdQueryHitsCache();
+    await testSearchQueryTooLong();
     await testSearchZeroQuotaEngines();
     await testSearchServiceMinResultsCascade();
     await testSearchServiceClearCache();

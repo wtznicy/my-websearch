@@ -291,6 +291,9 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
     if (!query) {
         throw new Error('Search query is required');
     }
+    if (query.length > 500) {
+        throw new Error(`Search query too long (${query.length} characters, max 500)`);
+    }
     if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
         throw new Error('Limit must be an integer between 1 and 50');
     }

@@ -142,10 +142,10 @@ function analyzeBlockedPage($: any, html: string): { blocked: boolean; hasResult
     const normalized = html.toLowerCase();
     const title = $('title').first().text().trim().toLowerCase();
     const detectedKeywords = BOT_DETECTION_KEYWORDS.filter((keyword) => normalized.includes(keyword));
+    // 轻量级选择器检查：覆盖结构化结果和回退链接两种提取路径，避免调用完整的 parseBingSearchResults（每页只需检查一次是否有结果）
     const resultSelector = '#b_results .b_algo, #b_results li.b_algo, .b_algo, .b_ans';
-    const hasStructuredResults = $(resultSelector).length > 0;
-    const hasParsedResults = hasStructuredResults || parseBingSearchResults(html, 1, $).length > 0;
-    const hasResults = hasStructuredResults || hasParsedResults;
+    const fallbackLinkSelector = '#b_results a[href], #b_topw a[href], .b_algo a[href], .b_ans a[href]';
+    const hasResults = $(resultSelector).length > 0 || $(fallbackLinkSelector).length > 0;
     const hasCaptchaUi = $([
         'iframe[src*="captcha"]',
         '[id*="captcha"]',
@@ -260,6 +260,9 @@ export function __buildBingBrowserLaunchArgsForTests(hideWindow: boolean, platfo
     return buildBrowserLaunchArgs(hideWindow, platform);
 }
 
+export function __analyzeBlockedPageForTests($: any, html: string): { blocked: boolean; hasResults: boolean; detectedKeywords: string[]; title: string } {
+    return analyzeBlockedPage($, html);
+}
 
 function getBingUiTimeoutMs(): number {
     return Math.min(config.playwrightNavigationTimeoutMs, 15000);

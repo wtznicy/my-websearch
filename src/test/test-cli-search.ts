@@ -140,6 +140,24 @@ function testParseSearchArgs(): void {
     console.log('✅ CLI parseSearchArgs');
 }
 
+function testParseSearchArgsQueryTooLong(): void {
+    const runtime = createStubRuntime();
+
+    let threw = false;
+    try {
+        parseSearchArgs(['x'.repeat(501)], runtime);
+    } catch (error) {
+        threw = error instanceof Error && error.message.includes('Search query too long');
+    }
+    assert(threw, 'query over 500 characters should throw');
+
+    // 500 字符刚好通过
+    const parsed = parseSearchArgs(['x'.repeat(500)], runtime);
+    assertEqual(parsed.query.length, 500, '500-character query should be accepted');
+
+    console.log('✅ CLI parseSearchArgs rejects queries over 500 characters');
+}
+
 function testParseFetchArgs(): void {
     const parsedWeb = parseFetchWebArgs([
         'https://example.com',
@@ -943,6 +961,7 @@ async function testRunCliSearchMinResults(): Promise<void> {
 
 async function main(): Promise<void> {
     testParseSearchArgs();
+    testParseSearchArgsQueryTooLong();
     testParseFetchArgs();
     await withEnv('OPEN_WEBSEARCH_DAEMON_PORT', '65530', async () => {
         await withEnv('OPEN_WEBSEARCH_DAEMON_URL', undefined, async () => {

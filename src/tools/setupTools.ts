@@ -184,7 +184,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
         searchToolName,
         getSearchDescription(),
         {
-            query: z.string().min(1, "Search query must not be empty"),
+            query: z.string().min(1, "Search query must not be empty").max(500, "Search query too long (max 500 characters)"),
             limit: z.number().min(1).max(50).default(10),
             searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
             minResults: z.number().int().min(0).optional()
