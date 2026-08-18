@@ -1,6 +1,7 @@
 import { SearchResult } from '../../types.js';
 import { AppConfig } from '../../config.js';
 import { distributeLimit, SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
+import { quoteModelLikeTerms } from '../../utils/queryPreprocess.js';
 import { sleep } from '../../utils/timing.js';
 
 // ---------------------------------------------------------------------------
@@ -334,8 +335,12 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 throw new Error(`Query string too long (${cleanQuery.length} characters, max ${MAX_QUERY_LENGTH})`);
             }
 
+            // 型号/版本类查询（如 GLM-4.6V-Flash）自动加引号做精确匹配，降低拆词导致的泛化结果；
+            // 缓存键与引擎调用用处理后的查询，返回给调用方的 query 保持原始输入。
+            const searchQuery = quoteModelLikeTerms(cleanQuery);
+
             // 缓存命中直接返回
-            const cached = ttlCache.get({ query: cleanQuery, engines, limit, searchMode, minResults });
+            const cached = ttlCache.get({ query: searchQuery, engines, limit, searchMode, minResults });
             if (cached) {
                 return cached;
             }
@@ -382,7 +387,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 let lastError: unknown;
                 for (let attempt = 0; attempt < 3; attempt += 1) {
                     try {
-                        const results = await executor(cleanQuery, engineLimit, { searchMode: effectiveSearchMode });
+                        const results = await executor(searchQuery, engineLimit, { searchMode: effectiveSearchMode });
                         if (attempt > 0) {
                             console.error(`✅ Engine ${engine} recovered after ${attempt} retries`);
                         }
@@ -491,7 +496,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                         }, remaining);
 
                         (async () => {
-                            const results = await engineMap[candidate]!(cleanQuery, gap, { searchMode: effectiveSearchMode });
+                            const results = await engineMap[candidate]!(searchQuery, gap, { searchMode: effectiveSearchMode });
                             if (!done) {
                                 done = true;
                                 clearTimeout(timer);
@@ -557,7 +562,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // 失败/降级结果不缓存：有 partialFailures 或零结果时，下次相同查询应重试，
             // 避免引擎临时故障被钉死在 TTL 内。
             if (partialFailures.length === 0 && merged.length > 0) {
-                ttlCache.set({ query: cleanQuery, engines, limit, searchMode, minResults }, result);
+                ttlCache.set({ query: searchQuery, engines, limit, searchMode, minResults }, result);
             }
 
             return result;

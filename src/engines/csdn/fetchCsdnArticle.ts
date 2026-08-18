@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { fetchPageHtmlWithBrowser, getBrowserCookieHeader, looksLikeBotChallengePage } from '../../utils/browserCookies.js';
-import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { buildAxiosRequestOptions, hintProxyConnectionError, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 
 function normalizeExtractedText(text: string): string {
     return text
@@ -74,7 +74,7 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
     } catch (error: any) {
         const status = error?.response?.status;
         if (![401, 403, 429].includes(status)) {
-            throw error;
+            throw hintProxyConnectionError(error);
         }
 
         const cookieHeader = await getBrowserCookieHeader(url);

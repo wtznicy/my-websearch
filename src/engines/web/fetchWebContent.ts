@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { config } from '../../config.js';
-import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { buildAxiosRequestOptions, hintProxyConnectionError, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/urlSafety.js';
 import {
     fetchPageHtmlWithBrowser,
@@ -460,7 +460,7 @@ export async function fetchWebContent(
     } catch (error: any) {
         const status = error?.response?.status;
         if (![401, 403, 429].includes(status)) {
-            throw error;
+            throw hintProxyConnectionError(error);
         }
 
         const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());

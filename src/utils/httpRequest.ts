@@ -142,6 +142,21 @@ function getInsecureTrustedStaticHttpsAgent(): https.Agent {
     return insecureTrustedStaticHttpsAgent;
 }
 
+/**
+ * 代理连接错误提示：USE_PROXY=true 且请求失败于连接类错误（ECONNREFUSED 等）时，
+ * 附加明确提示（最常见原因：代理软件没启动或 PROXY_URL 端口不对），
+ * 让调用方/LLM 一眼知道是代理配置问题而不是目标站点问题。
+ */
+export function hintProxyConnectionError(error: unknown): Error {
+    const message = error instanceof Error ? error.message : String(error);
+    if (config.useProxy && /ECONNREFUSED|ECONNRESET|socket hang up|ENETUNREACH/i.test(message)) {
+        return new Error(
+            `${message} | Hint: 请求经代理 ${config.proxyUrl} 失败——请确认代理软件已启动、PROXY_URL 端口正确，或临时关闭 USE_PROXY（国内站点可直连）`
+        );
+    }
+    return error instanceof Error ? error : new Error(message);
+}
+
 export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {}): AxiosRequestConfig {
     const {
         allowInsecureTls = false,
