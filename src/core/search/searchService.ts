@@ -3,6 +3,45 @@ import { AppConfig } from '../../config.js';
 import { distributeLimit, SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
 import { sleep } from '../../utils/timing.js';
 
+// ---------------------------------------------------------------------------
+// 简单信号量：限制并发搜索数
+// ---------------------------------------------------------------------------
+
+class Semaphore {
+    private permits: number;
+    private waitQueue: Array<() => void> = [];
+
+    constructor(permits: number) {
+        this.permits = permits;
+    }
+
+    async acquire(): Promise<void> {
+        if (this.permits > 0) {
+            this.permits -= 1;
+            return;
+        }
+        return new Promise<void>((resolve) => {
+            this.waitQueue.push(resolve);
+        });
+    }
+
+    release(): void {
+        const next = this.waitQueue.shift();
+        if (next) {
+            next();
+        } else {
+            this.permits += 1;
+        }
+    }
+}
+
+// 全局并发限制（0 = 不限制）
+let globalSemaphore: Semaphore | null = null;
+
+export function configureGlobalConcurrencyLimit(maxConcurrent: number): void {
+    globalSemaphore = maxConcurrent > 0 ? new Semaphore(maxConcurrent) : null;
+}
+
 export type SearchExecutionContext = {
     searchMode?: AppConfig['searchMode'];
 };
@@ -301,6 +340,12 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 return cached;
             }
 
+            // 全局并发限制：等待信号量
+            if (globalSemaphore) {
+                await globalSemaphore.acquire();
+            }
+
+            try {
             const limits = distributeLimit(limit, engines.length);
             const partialFailures: SearchExecutionFailure[] = [];
             const effectiveSearchMode = resolveSearchModeOverride(searchMode);
@@ -327,9 +372,10 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                     return [];
                 }
 
-                // 引擎请求错峰：按索引交错启动，避免多引擎同时突发请求触发限流
+                // 引擎请求错峰：按索引交错启动，避免多引擎同时突发请求触发限流。
+                // 使用 50ms 基础间隔 + 小量随机 jitter，比 150ms 线性延迟更紧凑但仍有效避峰。
                 if (index > 0) {
-                    await sleep(index * 150);
+                    await sleep(index * 50 + Math.random() * 30);
                 }
 
                 // 失败指数退避：最多重试 2 次（4xx 除 429 外不重试）
@@ -515,6 +561,12 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             }
 
             return result;
+            } finally {
+                // 释放全局并发信号量
+                if (globalSemaphore) {
+                    globalSemaphore.release();
+                }
+            }
         },
 
         /** 清空搜索 TTL 缓存（引擎刚恢复/反爬页面过期时手动强制重查） */

@@ -179,7 +179,10 @@ npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true my-websearch
 | `MCP_TOOL_FETCH_JUEJIN_NAME` | `fetchJuejinArticle` | Valid MCP tool name | Custom name for the Juejin article fetch tool |
 | `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | Valid MCP tool name | Custom name for generic web/Markdown fetch tool |
 | `EXA_API_KEY` | empty | Any valid Exa API key | **可选**（仅 exa 引擎需要）。exa 的免 key 网页端点已失效，想用 exa 引擎时在 [https://dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) 免费申请并配置到 MCP 客户端 env；不配置只影响 exa 一个引擎，其余引擎不受影响 |
-| `LOG_LEVEL` | `normal` | `normal`, `quiet` | `quiet` 抑制启动配置日志（MCP stdio 裸启动默认已静默；诊断时可用 `LOG_LEVEL=normal` 恢复） |
+| `MAX_CONCURRENT_SEARCHES` | `0` | Non-negative integer | 全局并发搜索限制（daemon 模式下多客户端生效）。`0` = 不限制，CLI 一次性调用不受影响 |
+| `METRICS_ENABLED` | `false` | `true`, `false` | 启用引擎指标收集（成功率、缓存命中率、平均响应时间） |
+| `SECURITY_AUDIT` | `false` | `true`, `false` | 启用安全审计日志（SSRF 拦截、TLS 白名单触发等事件） |
+| `LOG_LEVEL` | `info` | `quiet`, `debug`, `info`, `warn`, `error` | 日志级别。`quiet` 完全静默，`debug` 最详细 |
 | `OPEN_WEBSEARCH_QUIET_STARTUP` | `false` | `true`, `false` | 抑制启动配置日志（兼容开关，`LOG_LEVEL=quiet` 与之等价） |
 
 **Optional: configure EXA_API_KEY (only needed if you want to use the exa engine)**

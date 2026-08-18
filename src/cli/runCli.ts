@@ -9,6 +9,7 @@ import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { AppConfig } from '../config.js';
+import { ErrorCode } from '../core/errors.js';
 
 export type CliIo = {
     stdout: (text: string) => void;
@@ -748,18 +749,18 @@ function getUnknownCommandMessage(command: string): string {
 
 function getDaemonCliErrorCode(error: unknown): string {
     if (error instanceof DaemonUnavailableError) {
-        return 'daemon_unavailable';
+        return ErrorCode.DAEMON_UNAVAILABLE;
     }
 
     if (error instanceof DaemonRequestTimeoutError) {
-        return 'daemon_timeout';
+        return ErrorCode.DAEMON_TIMEOUT;
     }
 
     if (error instanceof DaemonRequestFailedError) {
-        return 'daemon_request_failed';
+        return ErrorCode.DAEMON_REQUEST_FAILED;
     }
 
-    return 'engine_error';
+    return ErrorCode.ENGINE_ERROR;
 }
 
 function getDaemonCliErrorHint(error: unknown): string {
@@ -893,7 +894,7 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (rest.includes('--json')) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    'invalid_arguments',
+                    ErrorCode.INVALID_ARGUMENTS,
                     message,
                     { hint: 'Use `my-websearch search <query> [--limit N] [--engine NAME] [--search-mode MODE] [--json]`.' }
                 ), null, 2));
@@ -969,7 +970,7 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    'invalid_arguments',
+                    ErrorCode.INVALID_ARGUMENTS,
                     message,
                     { hint: 'Use `my-websearch cache-clear [--daemon-url URL] [--spawn] [--json]`.' }
                 ), null, 2));
@@ -1036,7 +1037,7 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (rest.includes('--json')) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    'invalid_arguments',
+                    ErrorCode.INVALID_ARGUMENTS,
                     message,
                     { hint: 'Use `my-websearch fetch-web <url> [--max-chars N] [--json]`.' }
                 ), null, 2));
@@ -1094,7 +1095,7 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : 'validation_failed',
+                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : ErrorCode.INVALID_ARGUMENTS,
                     message,
                     { hint: isDaemonRequestError(error)
                         ? getDaemonCliErrorHint(error)
@@ -1117,7 +1118,7 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (rest.includes('--json')) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    'invalid_arguments',
+                    ErrorCode.INVALID_ARGUMENTS,
                     message,
                     { hint: 'Use `my-websearch fetch-github-readme <repository-url> [--json]`.' }
                 ), null, 2));
@@ -1153,7 +1154,7 @@ export async function runCli(
             if (!result) {
                 if (parsed.json) {
                     io.stdout(JSON.stringify(createErrorEnvelope(
-                        'not_found',
+                        ErrorCode.NOT_FOUND,
                         'README not found or repository does not exist',
                         { hint: 'Verify the repository URL and default branch contents.' }
                     ), null, 2));
@@ -1176,7 +1177,7 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : 'validation_failed',
+                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : ErrorCode.INVALID_ARGUMENTS,
                     message,
                     { hint: isDaemonRequestError(error)
                         ? getDaemonCliErrorHint(error)
@@ -1199,7 +1200,7 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (rest.includes('--json')) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    'invalid_arguments',
+                    ErrorCode.INVALID_ARGUMENTS,
                     message,
                     { hint: 'Use `my-websearch fetch-csdn <article-url> [--json]`.' }
                 ), null, 2));
@@ -1245,7 +1246,7 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : 'validation_failed',
+                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : ErrorCode.INVALID_ARGUMENTS,
                     message,
                     { hint: isDaemonRequestError(error)
                         ? getDaemonCliErrorHint(error)
@@ -1268,7 +1269,7 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (rest.includes('--json')) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    'invalid_arguments',
+                    ErrorCode.INVALID_ARGUMENTS,
                     message,
                     { hint: 'Use `my-websearch fetch-juejin <article-url> [--json]`.' }
                 ), null, 2));
@@ -1314,7 +1315,7 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : 'validation_failed',
+                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : ErrorCode.INVALID_ARGUMENTS,
                     message,
                     { hint: isDaemonRequestError(error)
                         ? getDaemonCliErrorHint(error)
@@ -1335,7 +1336,7 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (rest.includes('--json')) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    'invalid_arguments',
+                    ErrorCode.INVALID_ARGUMENTS,
                     message,
                     { hint: 'Use `my-websearch status [--base-url URL] [--json]`.' }
                 ), null, 2));
@@ -1397,7 +1398,7 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (rest.includes('--json')) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    'invalid_arguments',
+                    ErrorCode.INVALID_ARGUMENTS,
                     message,
                     { hint: 'Usage: my-websearch serve [--host HOST] [--port PORT] [--json]' }
                 ), null, 2));
@@ -1460,7 +1461,7 @@ export async function runCli(
 
     if (rest.includes('--json')) {
         io.stdout(JSON.stringify(createErrorEnvelope(
-            'invalid_arguments',
+            ErrorCode.INVALID_ARGUMENTS,
             unknownCommandMessage,
             {
                 hint: unknownCommandHint

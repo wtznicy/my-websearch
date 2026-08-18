@@ -5,6 +5,7 @@ import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
+import { ErrorCode } from '../../core/errors.js';
 
 export type LocalDaemonOptions = {
     host?: string;
@@ -183,32 +184,32 @@ function classifyFetchError(error: unknown): FetchErrorClassification {
     // SSRF 防护拒绝（私网/本地地址/非法协议）→ 400 客户端错误，不可重试
     if (message === 'Invalid public HTTP(S) URL'
         || (/private|local network|localhost|127\.0\.0\.1|blackhole|DNS blocking/i.test(message) && /reject|block|not allowed|points to|only public/i.test(message))) {
-        return { statusCode: 400, code: 'validation_failed', message, retryable: false };
+        return { statusCode: 400, code: ErrorCode.INVALID_ARGUMENTS, message, retryable: false };
     }
 
     // 明确的参数/越界错误 → 400，不可重试
     if (code === 'ERR_START_INDEX_OUT_OF_RANGE') {
-        return { statusCode: 400, code: 'validation_failed', message, retryable: false };
+        return { statusCode: 400, code: ErrorCode.INVALID_ARGUMENTS, message, retryable: false };
     }
     if (code === 'ERR_RESPONSE_TOO_LARGE' || /too large/i.test(message)) {
-        return { statusCode: 413, code: 'payload_too_large', message, retryable: false };
+        return { statusCode: 413, code: ErrorCode.PAYLOAD_TOO_LARGE, message, retryable: false };
     }
 
     // HTTP 状态错误：429 限流与 5xx 可重试；4xx 客户端错误不可重试
     if (status !== undefined) {
         if (status === 429 || status >= 500) {
-            return { statusCode: 502, code: 'upstream_error', message, retryable: true };
+            return { statusCode: 502, code: ErrorCode.UPSTREAM_ERROR, message, retryable: true };
         }
-        return { statusCode: 400, code: 'http_error', message, retryable: false };
+        return { statusCode: 400, code: ErrorCode.HTTP_ERROR, message, retryable: false };
     }
 
     // 超时 / 网络错误（ECONN*/ETIMEDOUT/ENOTFOUND/Socket hang up 等）→ 可重试
     if (/timeout|timed out|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network|ENETUNREACH/i.test(message)) {
-        return { statusCode: 504, code: 'network_error', message, retryable: true };
+        return { statusCode: 504, code: ErrorCode.NETWORK_ERROR, message, retryable: true };
     }
 
     // 其他（如 "No readable content"）→ 客户端不可重试，但归类为提取失败而非校验失败
-    return { statusCode: 422, code: 'extraction_failed', message, retryable: false };
+    return { statusCode: 422, code: ErrorCode.EXTRACTION_FAILED, message, retryable: false };
 }
 
 export async function startLocalDaemon(

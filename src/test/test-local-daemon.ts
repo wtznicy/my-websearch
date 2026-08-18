@@ -22,6 +22,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         defaultSearchEngine: 'bing',
         allowedSearchEngines: [],
         searchMode: 'request',
+        maxConcurrentSearches: 0,
         bingPlaywrightFallback: true,
         bingImpersonateTarget: 'chrome131',
         startpagePlaywrightFallback: true,
@@ -231,7 +232,7 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
         });
         assertEqual(invalidFetchWebResult.response.status, 400, 'daemon /fetch-web invalid http status');
         assertEqual(invalidFetchWebResult.payload.status, 'error', 'daemon /fetch-web invalid payload status');
-        assertEqual(invalidFetchWebResult.payload.error.code, 'validation_failed', 'daemon /fetch-web invalid error code');
+        assertEqual(invalidFetchWebResult.payload.error.code, 'invalid_arguments', 'daemon /fetch-web invalid error code');
         assert(invalidFetchWebResult.payload.hint.includes('public HTTP(S) URL'), 'daemon /fetch-web invalid hint');
 
         const invalidSearchResult = await postJson<{

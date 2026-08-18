@@ -9,6 +9,7 @@ import {
 import { config, getProxyUrl, engineShouldUseProxy } from '../config.js';
 import { assertPublicHttpUrlResolved, isPrivateOrLocalHostname } from './urlSafety.js';
 import { cachedDnsLookup } from './dnsCache.js';
+import { metrics } from '../core/metrics.js';
 
 // 默认请求超时：调用方未显式传 timeout 时使用，避免引擎请求永不超时拖垮整个搜索。
 export const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
@@ -226,6 +227,13 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
             if (!TRUSTED_INSECURE_HOSTS.has(host)) {
                 throw new Error(`allowInsecureTls + trustedStaticHost is not allowed for host "${host}". Allowed hosts: ${[...TRUSTED_INSECURE_HOSTS].join(', ')}`);
             }
+            // 审计日志：TLS 白名单实际触发时记录，便于安全审计
+            metrics.recordSecurityEvent({
+                type: 'tls_failed',
+                targetUrl: options.requestUrl,
+                reason: `TLS certificate verification bypassed for trusted host "${host}"`,
+                details: { host, engine }
+            });
             requestOptions.httpsAgent = getInsecureTrustedStaticHttpsAgent();
         }
     } else {

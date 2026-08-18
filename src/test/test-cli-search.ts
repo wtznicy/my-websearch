@@ -26,6 +26,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         defaultSearchEngine: 'bing',
         allowedSearchEngines: [],
         searchMode: 'request',
+        maxConcurrentSearches: 0,
         bingPlaywrightFallback: true,
         bingImpersonateTarget: 'chrome131',
         startpagePlaywrightFallback: true,
@@ -498,7 +499,7 @@ async function testRunCliFetchWebValidationFailure(): Promise<void> {
         error: { code: string; message: string };
     };
     assertEqual(payload.status, 'error', 'CLI fetch-web validation status');
-    assertEqual(payload.error.code, 'validation_failed', 'CLI fetch-web validation code');
+    assertEqual(payload.error.code, 'invalid_arguments', 'CLI fetch-web validation code');
     assert(payload.error.message.includes('Invalid public HTTP(S) URL'), 'CLI fetch-web validation message');
 
     console.log('✅ CLI runCli fetch-web validation failure');
@@ -576,7 +577,7 @@ async function testRunCliFetchCsdnValidationFailure(): Promise<void> {
         error: { code: string; message: string };
     };
     assertEqual(payload.status, 'error', 'CLI fetch-csdn validation status');
-    assertEqual(payload.error.code, 'validation_failed', 'CLI fetch-csdn validation code');
+    assertEqual(payload.error.code, 'invalid_arguments', 'CLI fetch-csdn validation code');
     assert(payload.error.message.includes('Invalid csdn article URL'), 'CLI fetch-csdn validation message');
 
     console.log('✅ CLI runCli fetch-csdn validation failure');

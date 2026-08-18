@@ -9,6 +9,9 @@ export interface AppConfig {
     // Search mode: request only, auto request then fallback, or force Playwright
     // Currently only affects Bing.
     searchMode: 'request' | 'auto' | 'playwright';
+    // 全局并发搜索限制：同时进行的搜索请求数上限（0 = 不限制）。
+    // CLI 一次性调用不受此限制，仅 daemon 模式下多客户端并发时生效。
+    maxConcurrentSearches: number;
     // When searchMode=auto and Bing's request mode hits an anti-bot page, should we
     // fall back to launching a Playwright browser (slow, ~400MB, hidden window)?
     // Set BING_PLAYWRIGHT_FALLBACK=false to instead surface the error so the search
@@ -58,6 +61,7 @@ export const config: AppConfig = {
         process.env.ALLOWED_SEARCH_ENGINES.split(',').map(e => e.trim()) :
         [],
     searchMode: (process.env.SEARCH_MODE as AppConfig['searchMode']) || 'auto',
+    maxConcurrentSearches: Number(process.env.MAX_CONCURRENT_SEARCHES || '0'),
     bingPlaywrightFallback: process.env.BING_PLAYWRIGHT_FALLBACK !== 'false',
     bingImpersonateTarget: readOptionalEnv('BING_IMPERSONATE_TARGET') || 'chrome131',
     startpagePlaywrightFallback: process.env.STARTPAGE_PLAYWRIGHT_FALLBACK !== 'false',

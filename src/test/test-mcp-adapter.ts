@@ -53,6 +53,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         defaultSearchEngine: 'bing',
         allowedSearchEngines: [],
         searchMode: 'request',
+        maxConcurrentSearches: 0,
         bingPlaywrightFallback: true,
         bingImpersonateTarget: 'chrome131',
         startpagePlaywrightFallback: true,

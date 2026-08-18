@@ -13,7 +13,7 @@ import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
 import { fetchGithubReadme } from '../engines/github/index.js';
 import { fetchWebContent } from '../engines/web/index.js';
 import { createContext7Services } from '../core/context7/context7Service.js';
-import { createSearchService, SearchEngineExecutorMap } from '../core/search/searchService.js';import {
+import { createSearchService, configureGlobalConcurrencyLimit, SearchEngineExecutorMap } from '../core/search/searchService.js';import {
     createArticleFetchService,
     createGithubReadmeService,
     createWebFetchService,
@@ -56,6 +56,9 @@ export function createMyWebSearchRuntime(options: CreateMyWebSearchRuntimeOption
     const searchExecutors = dependencies.searchExecutors ?? createDefaultSearchExecutors();
     // 只实例化一次 context7 服务，libraries/docs 共享同一份缓存
     const context7 = createContext7Services();
+
+    // 初始化全局并发限制
+    configureGlobalConcurrencyLimit(runtimeConfig.maxConcurrentSearches);
 
     return {
         config: runtimeConfig,

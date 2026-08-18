@@ -199,7 +199,7 @@ function extractMainTextFromHtml(html: string): HtmlExtractionResult {
 
     if (!selectedText) {
         const body = $('body');
-        selectedText = normalizeText((body.length > 0 ? body : $.root()).text());
+        selectedText = normalizeText((body.length > 0 ? body : $.root() as any).text());
         if (selectedText) {
             mode = 'body';
         }

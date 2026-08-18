@@ -101,6 +101,7 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
 
     // 代理模式下 DNS 交由代理在远端解析，本地只做字面量/私网检查，
     // 避免本机 DNS 被污染（如 raw.githubusercontent.com → 0.0.0.0）时误拦截。
+    // 注意：上方 assertPublicHttpUrl 已对字面量 IP 做了私网/黑洞检查，此处无需重复。
     if (config.useProxy) {
         return;
     }
