@@ -41,6 +41,9 @@ type BuildAxiosRequestOptions = {
     // 目标请求 URL。allowInsecureTls + trustedStaticHost 组合时必填，
     // 用于白名单校验（见 TRUSTED_INSECURE_HOSTS）。
     requestUrl?: string;
+    // 强制直连（不走代理）：用于国内站点网页抓取——全局 USE_PROXY 会拖累 .cn 等
+    // 国内目标（代理一挂国内抓取全挂），国内站点直连、海外才走代理。
+    forceDirect?: boolean;
 };
 
 /**
@@ -157,6 +160,31 @@ export function hintProxyConnectionError(error: unknown): Error {
     return error instanceof Error ? error : new Error(message);
 }
 
+/**
+ * 国内站点判断：.cn 域名后缀或已知国内站点名单命中 → 直连（不走代理）。
+ * 供 fetchWebContent/fetchCsdnArticle 等通用抓取分流：国内直连、海外按全局代理配置。
+ */
+const DOMESTIC_HOST_SUFFIXES = [
+    'baidu.com', 'csdn.net', 'juejin.cn', 'zhihu.com', 'gitee.com', 'bigmodel.cn',
+    'sogou.com', 'weibo.com', 'qq.com', '163.com', 'aliyun.com', 'bilibili.com',
+    'douyin.com', 'bytedance.com', 'xiaohongshu.com', 'meituan.com', 'taobao.com',
+    'jd.com', '163yun.com', 'huawei.com', 'tencent.com', 'zhipuai.cn', 'deepseek.com',
+    'qianwen.com', 'volces.com', 'baidubce.com', 'aliyuncs.com', 'sina.com.cn'
+];
+
+export function isDomesticTargetUrl(url: string): boolean {
+    let host: string;
+    try {
+        host = new URL(url).hostname.toLowerCase();
+    } catch {
+        return false;
+    }
+    if (host.endsWith('.cn')) {
+        return true;
+    }
+    return DOMESTIC_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+}
+
 export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {}): AxiosRequestConfig {
     const {
         allowInsecureTls = false,
@@ -170,7 +198,8 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         responseType,
         timeout = DEFAULT_REQUEST_TIMEOUT_MS,
         trustedStaticHost = false,
-        validateStatus
+        validateStatus,
+        forceDirect = false
     } = options;
 
     const requestOptions: AxiosRequestConfig = {
@@ -224,9 +253,11 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         }
     };
 
-    const effectiveProxyUrl = engine !== undefined
-        ? (engineShouldUseProxy(engine) ? getProxyUrl() : undefined)
-        : getProxyUrl();
+    const effectiveProxyUrl = forceDirect
+        ? undefined
+        : (engine !== undefined
+            ? (engineShouldUseProxy(engine) ? getProxyUrl() : undefined)
+            : getProxyUrl());
     if (effectiveProxyUrl) {
         const proxyAgent = getProxyAgent(effectiveProxyUrl, allowInsecureTls);
         requestOptions.httpAgent = proxyAgent;

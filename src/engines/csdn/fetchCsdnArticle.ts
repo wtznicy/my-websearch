@@ -42,7 +42,8 @@ function buildRequestOptions(cookieHeader?: string): any {
         'Connection': 'keep-alive',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
     };
-    const requestOptions = buildAxiosRequestOptions({ headers });
+    // CSDN 是国内站点，强制直连：不因全局 USE_PROXY 走代理（代理挂掉时 CSDN 抓取不受影响）
+    const requestOptions = buildAxiosRequestOptions({ headers, forceDirect: true });
 
     if (cookieHeader) {
         headers.Cookie = cookieHeader;

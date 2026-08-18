@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { config } from '../../config.js';
-import { buildAxiosRequestOptions, hintProxyConnectionError, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { buildAxiosRequestOptions, hintProxyConnectionError, isDomesticTargetUrl, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/urlSafety.js';
 import {
     fetchPageHtmlWithBrowser,
@@ -256,16 +256,18 @@ async function extractReadableLinks(html: string, finalUrl: string): Promise<Ext
     return links;
 }
 
-function buildRequestOptions(cookieHeader?: string): any {
+function buildRequestOptions(cookieHeader?: string, targetUrl?: string): any {
     const headers: Record<string, string> = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
         'Accept': 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
     };
+    // 国内站点（.cn/已知国内域名）直连，不因全局 USE_PROXY 走代理——代理挂掉时国内抓取不受影响
     const requestOptions = buildAxiosRequestOptions({
         allowInsecureTls: config.fetchWebAllowInsecureTls,
         decompress: true,
         headers,
+        forceDirect: isDomesticTargetUrl(targetUrl ?? ''),
         maxBodyLength: MAX_DOWNLOAD_BYTES,
         maxContentLength: MAX_DOWNLOAD_BYTES,
         maxRedirects: 5,
@@ -395,7 +397,7 @@ async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: a
 
     try {
         return {
-            response: await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader), 'Request URL'),
+            response: await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader, url), 'Request URL'),
             usedBrowserCookies: true
         };
     } catch {
@@ -417,7 +419,7 @@ export async function fetchWebContent(
     const startIndex = Math.max(0, Math.floor(options.startIndex ?? 0));
     const targetMaxChars = clampMaxChars(maxChars);
 
-    const requestOptions = buildRequestOptions();
+    const requestOptions = buildRequestOptions(undefined, parsedUrl.toString());
 
     // Pre-flight check to avoid downloading oversized payloads when Content-Length is present.
     // 明显的小文件（.md/.txt/.json 等）跳过 HEAD 预检：HEAD 一次延迟翻倍，
