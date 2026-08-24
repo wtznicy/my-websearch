@@ -8,6 +8,7 @@
 ![npm downloads](https://img.shields.io/npm/dm/my-websearch)
 ![license](https://img.shields.io/npm/l/my-websearch)
 ![GitHub stars](https://img.shields.io/github/stars/wtznicy/my-websearch)
+[![M8ven Live Monitored](https://m8ven.ai/badge/mcp/wtznicy-my-websearch-1nmaw4)](https://m8ven.ai/mcp/wtznicy-my-websearch-1nmaw4)
 
 </div>
 
