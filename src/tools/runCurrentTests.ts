@@ -61,6 +61,8 @@ if (process.argv.includes('--list')) {
 const networkFailurePatterns = [
     /\b(EAI_AGAIN|ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ESOCKETTIMEDOUT|ENETUNREACH|EHOSTUNREACH|ECONNABORTED)\b/i,
     /\b(socket hang up|network timeout|network error|fetch failed|ERR_NETWORK)\b/i,
+    // axios 超时格式（"timeout of 30000ms exceeded"）——并行全量测试下偶发
+    /timeout of \d+ms exceeded/i,
     // 海外引擎直连探测失败（无代理不可达）：确定性网络环境错误，与错误码模式等效
     /is unreachable from your current network without a proxy/i,
     // 只匹配明确的证书/握手错误特征；裸单词 "TLS"/"SSL"/"certificate" 会误伤——
