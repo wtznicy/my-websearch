@@ -65,9 +65,9 @@
     "test:article-fetch:live": "tsc && node build/test/test-article-fetch-live.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.11.2",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",
-    "axios": "^1.7.9",
+    "axios": "^1.19.0",
     "cheerio": "^1.0.0",
     "cors": "^2.8.5",
     "express": "^4.22.1",

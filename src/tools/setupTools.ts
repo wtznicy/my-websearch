@@ -196,6 +196,13 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                     runtime.config.defaultSearchEngine
                 ) as [SupportedSearchEngine, ...SupportedSearchEngine[]])
         },
+        {
+            // 全部工具均为只读、幂等、开放世界操作（搜索/抓取不修改任何持久状态）
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true
+        },
         async ({query, limit = 10, searchMode, engines, minResults}) => {
             try {
                 // 正常走 MCP 时 engines 已由 schema transform 解析；直接调用 handler 的场景
@@ -253,6 +260,13 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                 "URL must be from blog.csdn.net contains /article/details/ path"
             )
         },
+        {
+            // 全部工具均为只读、幂等、开放世界操作（搜索/抓取不修改任何持久状态）
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true
+        },
         async ({url}) => {
             try {
                 logTool(`Fetching CSDN article: ${url}`);
@@ -289,6 +303,13 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                 (url) => validateGithubRepositoryUrl(url),
                 "URL must be a valid GitHub repository URL (supports HTTPS, SSH formats)"
             )
+        },
+        {
+            // 全部工具均为只读、幂等、开放世界操作（搜索/抓取不修改任何持久状态）
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true
         },
         async ({url}) => {
             try {
@@ -342,6 +363,13 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
             raw: z.boolean().optional().describe("Return the raw response body (HTML/plain text) without extraction"),
             startIndex: z.number().int().min(0).optional().describe("Character offset to start reading from (for paging through long content)"),
         },
+        {
+            // 全部工具均为只读、幂等、开放世界操作（搜索/抓取不修改任何持久状态）
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true
+        },
         async ({url, maxChars = 30000, readability, includeLinks, raw, startIndex}) => {
             try {
                 logTool(`Fetching web content: ${url}`);
@@ -379,6 +407,13 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                 "URL must be from juejin.cn and contain /post/ path"
             )
         },
+        {
+            // 全部工具均为只读、幂等、开放世界操作（搜索/抓取不修改任何持久状态）
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true
+        },
         async ({url}) => {
             try {
                 logTool(`Fetching Juejin article: ${url}`);
@@ -414,6 +449,13 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
             libraryName: z.string().min(1).describe("The library or package name to search for (e.g. 'Next.js', 'express', 'prisma')"),
             query: z.string().min(1).optional().describe("The user's question or task, used to rank results by relevance (optional; defaults to the library name when omitted, e.g. 'how to implement authentication')"),
             limit: z.number().int().min(1).max(10).optional().describe("Maximum number of library matches to return (default 5)")
+        },
+        {
+            // 全部工具均为只读、幂等、开放世界操作（搜索/抓取不修改任何持久状态）
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true
         },
         async ({libraryName, query, limit}) => {
             try {
@@ -453,6 +495,13 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
             ).describe("Exact Context7-compatible library ID (e.g. /vercel/next.js, /packages/express; optional version like /vercel/next.js@v15.1.8)"),
             query: z.string().min(1).optional().describe("The question or task to get relevant documentation for (optional; defaults to an overview when omitted, e.g. 'how to set up middleware with auth')"),
             limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets to return (default 5)")
+        },
+        {
+            // 全部工具均为只读、幂等、开放世界操作（搜索/抓取不修改任何持久状态）
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true
         },
         async ({libraryId, query, limit}) => {
             try {
