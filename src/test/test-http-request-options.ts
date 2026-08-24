@@ -39,7 +39,7 @@ function main(): void {
         assert(trustedStaticHostWithRedirects.maxRedirects === 0, 'trusted static host requests should force redirects off even when maxRedirects is provided');
         console.log('✅ trusted static host request options force redirects off');
 
-        const insecureTrustedStaticHostOptions = buildAxiosRequestOptions({ trustedStaticHost: true, allowInsecureTls: true });
+        const insecureTrustedStaticHostOptions = buildAxiosRequestOptions({ trustedStaticHost: true, allowInsecureTls: true, requestUrl: 'https://cn.bing.com/search' });
         assert(!insecureTrustedStaticHostOptions.httpAgent, 'trusted static host insecure requests should not use the filtering http agent');
         assert(insecureTrustedStaticHostOptions.httpsAgent instanceof https.Agent, 'trusted static host insecure requests should use a direct https agent');
         assert((insecureTrustedStaticHostOptions.httpsAgent as any).options.rejectUnauthorized === false, 'trusted static host insecure requests should disable TLS verification when requested');

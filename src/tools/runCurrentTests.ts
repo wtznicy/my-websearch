@@ -61,7 +61,12 @@ if (process.argv.includes('--list')) {
 const networkFailurePatterns = [
     /\b(EAI_AGAIN|ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ESOCKETTIMEDOUT|ENETUNREACH|EHOSTUNREACH|ECONNABORTED)\b/i,
     /\b(socket hang up|network timeout|network error|fetch failed|ERR_NETWORK)\b/i,
-    /\b(TLS|SSL|certificate|CERT_[A-Z_]+)\b/i,
+    // 海外引擎直连探测失败（无代理不可达）：确定性网络环境错误，与错误码模式等效
+    /is unreachable from your current network without a proxy/i,
+    // 只匹配明确的证书/握手错误特征；裸单词 "TLS"/"SSL"/"certificate" 会误伤——
+    // config 启动日志固定含 "TLS verification is enabled"，任何 import config 后失败的
+    // 测试都会因此被误赦免（单元测试断言失败被静默放过的盲区）
+    /\b(certificate verify failed|SSL peer certificate|TLS handshake|CERT_[A-Z_]+|CERTIFICATE_VERIFY_FAILED|UNABLE_TO_VERIFY_LEAF_SIGNATURE)\b/i,
     /net::ERR_[A-Z_]+/i,
     /Request failed with status code (429|5\d\d)\b/i,
     /page\.goto: Timeout \d+ms exceeded[\s\S]*navigating to/i,

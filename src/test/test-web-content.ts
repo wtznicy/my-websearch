@@ -319,12 +319,15 @@ async function main(): Promise<void> {
 
                 const result = await fetchWebContent('https://example.com/page', 5000, {
                     readability: true,
-                    includeLinks: true
+                    includeLinks: true,
+                    includeReadableHtml: true
                 });
                 assert(result.readabilityApplied === true, 'readability flag should be true');
                 assert(result.title === 'Readable Skill Page', 'readability title should override page title');
                 assert(result.content.includes('Readability content with a Guide.'), 'readability text should be used');
-                assert(result.readableHtml?.includes('<article>'), 'readable html should be returned');
+                assert(result.readableHtml?.includes('<article>'), 'readable html should be returned when includeReadableHtml is set');
+                const resultWithoutHtml = await fetchWebContent('https://example.com/page', 5000, { readability: true });
+                assert(resultWithoutHtml.readableHtml === undefined, 'readableHtml should be omitted by default');
                 assert(result.links?.[0]?.href === 'https://example.com/guide', 'relative links should be resolved');
                 assert(result.byline === 'Aasee', 'byline should be returned');
                 assert(result.excerpt === 'Readable excerpt', 'excerpt should be returned');
@@ -338,7 +341,8 @@ async function main(): Promise<void> {
 
                 const result = await fetchWebContent('https://example.com/page', 5000, {
                     readability: true,
-                    includeLinks: true
+                    includeLinks: true,
+                    includeReadableHtml: true
                 });
                 assert(result.readabilityApplied === false, 'readability should fall back when parser returns null');
                 assert(result.title === 'Skill Page', 'fallback title should use existing extractor');

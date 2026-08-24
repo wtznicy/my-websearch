@@ -27,6 +27,12 @@ async function testExaSearch() {
 
     return results;
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // 未配置 EXA_API_KEY 属于环境配置缺失（确定性错误），显式跳过而非失败
+    if (message.includes('EXA_API_KEY')) {
+      console.log(`⏭️ SKIPPED: ${message}`);
+      process.exit(0);
+    }
     console.error('❌ Test failed:', error);
     process.exit(1);
     return [];
