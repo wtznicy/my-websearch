@@ -114,7 +114,9 @@ async function main() {
         console.warn('CORS is enabled with default origin "*" — any website can call this local MCP server from the browser. Consider setting CORS_ORIGIN to a specific origin.');
       }
       app.use(cors(mcpCorsOptions));
-      app.options('*', cors(mcpCorsOptions));
+      // express 5 中裸 * 不再是通配符（path-to-regexp v8 要求命名通配符），
+      // CORS preflight 需用 /*splat 匹配所有路径的 OPTIONS 请求
+      app.options('/*splat', cors(mcpCorsOptions));
     }
 
     // Store transports for each session type

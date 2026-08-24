@@ -147,7 +147,7 @@ async function getScCode(): Promise<string> {
     return cachedScCode;
 }
 
-function extractResultsFromHtml(html: string): SearchResult[] {
+export function extractResultsFromHtml(html: string): SearchResult[] {
     if (isCaptchaPage(html)) {
         throw new Error('Startpage returned a verification or anti-bot page');
     }

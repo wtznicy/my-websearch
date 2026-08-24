@@ -31,6 +31,84 @@ function cleanHighlightedText(html: string): string {
   return cheerio.load(html).root().text().trim();
 }
 
+/**
+ * 解析 DuckDuckGo preload 路径（links.duckduckgo.com/d.js）返回的 JSONP 文本。
+ * 提取并映射为 SearchResult；导航项（item.n）跳过。文本不可解析时返回空数组
+ * （由调用方决定终止分页）。
+ */
+export function parseDuckDuckGoJsonpPayload(jsonpText: string): SearchResult[] {
+  const jsonpMatch = jsonpText.match(/DDG\.pageLayout\.load\('d',\s*(\[.*?\])\s*\);/s);
+  if (!jsonpMatch || !jsonpMatch[1]) {
+    return [];
+  }
+
+  try {
+    const jsonData = JSON.parse(jsonpMatch[1]);
+    const results: SearchResult[] = [];
+    jsonData.forEach((item: any) => {
+      // Exclude navigation items
+      if (item.n) {
+        return;
+      }
+      results.push({
+        title: cleanHighlightedText(item.t || ''),
+        url: item.u || '',
+        description: cleanHighlightedText(item.a || ''),
+        source: cleanHighlightedText(item.i || item.sn || ''),
+        engine: 'duckduckgo'
+      });
+    });
+    return results;
+  } catch (error) {
+    console.warn('解析JSONP数据失败:', error);
+    return [];
+  }
+}
+
+export type DuckDuckGoHtmlParseResult = {
+  results: SearchResult[];
+  /** 本页原始结果卡数量（含广告/被过滤项），用于分页 offset 计算 */
+  rawCount: number;
+};
+
+/**
+ * 解析 DuckDuckGo HTML 路径（html.duckduckgo.com/html/）的结果页。
+ * 广告卡（.result--ad）与已见 URL 会被过滤；rawCount 供调用方计算下一页 offset。
+ */
+export function parseDuckDuckGoHtmlResults(html: string, maxResults: number, seenUrls: Set<string>): DuckDuckGoHtmlParseResult {
+  const $ = cheerio.load(html);
+  const results: SearchResult[] = [];
+  let rawCount = 0;
+
+  $('div.result').each((_, el) => {
+    rawCount += 1;
+    if (results.length >= maxResults) {
+      return false;
+    }
+
+    const titleEl = $(el).find('a.result__a');
+    const snippetEl = $(el).find('.result__snippet');
+    const title = titleEl.text().trim();
+    const url = titleEl.attr('href') || '';
+    const description = snippetEl.text().trim();
+    const sourceEl = $(el).find('.result__url');
+    const source = sourceEl.text().trim();
+
+    if (title && url && !$(el).hasClass('result--ad') && !seenUrls.has(url)) {
+      seenUrls.add(url);
+      results.push({
+        title,
+        url,
+        description,
+        source,
+        engine: 'duckduckgo'
+      });
+    }
+  });
+
+  return { results, rawCount };
+}
+
 
 /**
  * Search DuckDuckGo and return results
@@ -155,57 +233,29 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
         });
 
         // Extract JSON data from JSONP response
-        const jsonpMatch = dataResponse.data.match(/DDG\.pageLayout\.load\('d',\s*(\[.*?\])\s*\);/s);
+        const pageResults = parseDuckDuckGoJsonpPayload(String(dataResponse.data || ''));
 
-        if (jsonpMatch && jsonpMatch[1]) {
-          try {
-            const jsonData = JSON.parse(jsonpMatch[1]);
-
-            // If no results, means no more data
-            if (jsonData.length === 0) {
-              hasMoreResults = false;
-              break;
-            }
-
-            // Calculate next page offset (current offset + current page results)
-            let validResultsInCurrentPage = 0;
-
-            // Process search results
-            jsonData.forEach((item: any) => {
-              // Exclude navigation items
-              if (item.n) return;
-
-              validResultsInCurrentPage++;
-
-              // If results already meet requirements, don't add more
-              if (results.length >= maxResults) return;
-
-              results.push({
-                title: cleanHighlightedText(item.t || ''),
-                url: item.u || '',
-                description: cleanHighlightedText(item.a || ''),
-                source: cleanHighlightedText(item.i || item.sn || ''),
-                engine: 'duckduckgo'
-              });
-            });
-
-            // If current page has no valid results, assume there are no more results
-            if (validResultsInCurrentPage === 0) {
-              hasMoreResults = false;
-              break;
-            }
-
-            // Update offset, prepare to request next page
-            offset += validResultsInCurrentPage;
-
-          } catch (error) {
-            console.warn('解析JSONP数据失败:', error);
-            hasMoreResults = false;
-          }
-        } else {
-          // If unable to extract data from response, assume no more results
+        // If no results, means no more data
+        if (pageResults.length === 0) {
           hasMoreResults = false;
+          break;
         }
+
+        // Calculate next page offset (current offset + current page results)
+        let validResultsInCurrentPage = 0;
+
+        // Process search results
+        for (const result of pageResults) {
+          validResultsInCurrentPage++;
+          // If results already meet requirements, don't add more
+          if (results.length >= maxResults) {
+            break;
+          }
+          results.push(result);
+        }
+
+        // Update offset, prepare to request next page
+        offset += validResultsInCurrentPage;
       }
 
       return results.slice(0, maxResults);
@@ -219,9 +269,6 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
 
   async function searchDuckDuckGoHtml(query: string, maxResults = 10): Promise<SearchResult[]> {
   const requestUrl = 'https://html.duckduckgo.com/html/';
-  const results: SearchResult[] = [];
-  let offset = 0;
-  let pageCount = 0;
 
     // Configure request options
     const requestOptions = buildAxiosRequestOptions({ engine: 'duckduckgo',
@@ -235,48 +282,26 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
   });
 
   try {
+    const seenUrls = new Set<string>();
+    const results: SearchResult[] = [];
+    let offset = 0;
+    let pageCount = 0;
+
     let response = await axios.post(
       requestUrl,
       new URLSearchParams({ q: query }).toString(),
       requestOptions
     );
 
-    let $ = cheerio.load(response.data);
-    let items = $('div.result');
+    let parsedPage = parseDuckDuckGoHtmlResults(String(response.data || ''), maxResults, seenUrls);
+    results.push(...parsedPage.results);
 
-    if (items.length === 0) {
-      return results;
-    }
-
-    items.each((_, el) => {
-      if (results.length >= maxResults) return false;
-
-      const titleEl = $(el).find('a.result__a');
-      const snippetEl = $(el).find('.result__snippet');
-      const title = titleEl.text().trim();
-      const url = titleEl.attr('href') || '';
-      const description = snippetEl.text().trim();
-      const sourceEl = $(el).find('.result__url');
-      const source = sourceEl.text().trim();
-
-      if (title && url && !$(el).hasClass('result--ad')) {
-        results.push({
-          title,
-          url,
-          description,
-          source,
-          engine: 'duckduckgo'
-        });
-      }
-    });
-
-    while (results.length < maxResults && items.length > 0 && pageCount < 10) {
-      offset += items.length;
+    while (results.length < maxResults && parsedPage.rawCount > 0 && pageCount < 10) {
+      offset += parsedPage.rawCount;
       pageCount += 1;
 
       // 记录本页 URL 集合，用于检测服务端重复返回导致的无进展死循环
       const beforeDedup = results.length;
-      const seenUrls = new Set(results.map((r) => r.url));
 
       response = await axios.post(
         requestUrl,
@@ -291,30 +316,8 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
         requestOptions
       );
 
-      $ = cheerio.load(response.data);
-      items = $('div.result');
-
-      items.each((_, el) => {
-        if (results.length >= maxResults) return false;
-
-        const titleEl = $(el).find('a.result__a');
-        const snippetEl = $(el).find('.result__snippet');
-        const title = titleEl.text().trim();
-        const url = titleEl.attr('href') || '';
-        const description = snippetEl.text().trim();
-        const sourceEl = $(el).find('.result__url');
-        const source = sourceEl.text().trim();
-
-        if (title && url && !$(el).hasClass('result--ad') && !seenUrls.has(url)) {
-          results.push({
-            title,
-            url,
-            description,
-            source,
-            engine: 'duckduckgo'
-          });
-        }
-      });
+      parsedPage = parseDuckDuckGoHtmlResults(String(response.data || ''), maxResults, seenUrls);
+      results.push(...parsedPage.results);
 
       // 安全阀：本页没有新增任何去重后的结果，说明分页无进展，终止循环避免死循环
       if (results.length === beforeDedup) {

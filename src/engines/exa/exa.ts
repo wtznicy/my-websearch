@@ -39,7 +39,24 @@ async function searchExaOfficial(query: string, limit: number, apiKey: string): 
         requestOptions
     );
 
-    const apiResults = response.data.results;
+    return parseExaResults(response.data.results, limit);
+}
+
+/** 清洗 Exa 正文摘要：剥 HTML 标签、解码实体、压缩空白、限长 */
+export function cleanExaDescription(text: string): string {
+    const stripped = text
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&[a-zA-Z#0-9]+;/g, (entity) => {
+            const named: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' };
+            return named[entity] ?? ' ';
+        })
+        .replace(/\s+/g, ' ')
+        .trim();
+    return stripped.substring(0, 500);
+}
+
+/** 把 Exa API 结果映射为 SearchResult（标题/正文/来源处理），供请求路径复用 */
+export function parseExaResults(apiResults: ExaResult[], limit: number): SearchResult[] {
     if (!apiResults || apiResults.length === 0) {
         console.error('⚠️ No results returned from Exa.ai official API.');
         return [];
@@ -56,19 +73,6 @@ async function searchExaOfficial(query: string, limit: number, apiKey: string): 
         source: new URL(item.url).hostname,
         engine: 'exa'
     }));
-}
-
-/** 清洗 Exa 正文摘要：剥 HTML 标签、解码实体、压缩空白、限长 */
-function cleanExaDescription(text: string): string {
-    const stripped = text
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/&[a-zA-Z#0-9]+;/g, (entity) => {
-            const named: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' };
-            return named[entity] ?? ' ';
-        })
-        .replace(/\s+/g, ' ')
-        .trim();
-    return stripped.substring(0, 500);
 }
 
 export async function searchExa(query: string, limit: number): Promise<SearchResult[]> {

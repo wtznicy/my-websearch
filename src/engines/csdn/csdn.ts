@@ -5,11 +5,35 @@ import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { paginateSearch } from '../../utils/pagination.js';
 
 /** CSDN 搜索结果里的 <em> 高亮标签，剥离后返回纯文本 */
-function stripHighlightTags(value: string): string {
+export function stripHighlightTags(value: string): string {
     if (!value) {
         return '';
     }
     return String(value).replace(/<\/?em>/g, '').trim();
+}
+
+/** 把 CSDN 搜索 API 的一页 result_vos 映射为 SearchResult（页内按 URL 去重），供请求路径复用 */
+export function parseCsdnResults(
+    resultVos: Array<{ digest: string; title: string; url_location: string; nickname: string }>,
+    seenUrls: Set<string>
+): SearchResult[] {
+    const results: SearchResult[] = [];
+    for (const re of resultVos) {
+        const { digest, title, url_location, nickname } = re;
+        const url = url_location || '';
+        if (!url || seenUrls.has(url)) {
+            continue;
+        }
+        seenUrls.add(url);
+        results.push({
+            title: stripHighlightTags(title),
+            url,
+            description: stripHighlightTags(digest),
+            source: nickname || '',
+            engine: 'csdn'
+        });
+    }
+    return results;
 }
 
 export async function searchCsdn(query: string, limit: number): Promise<SearchResult[]> {
@@ -52,22 +76,7 @@ export async function searchCsdn(query: string, limit: number): Promise<SearchRe
                 return [];
             }
 
-            const results: SearchResult[] = [];
-            for (const re of result_vos) {
-                const { digest, title, url_location, nickname } = re;
-                const url = url_location || '';
-                if (!url || seenUrls.has(url)) {
-                    continue;
-                }
-                seenUrls.add(url);
-                results.push({
-                    title: stripHighlightTags(title),
-                    url,
-                    description: stripHighlightTags(digest),
-                    source: nickname || '',
-                    engine: 'csdn'
-                });
-            }
+            const results = parseCsdnResults(payload.result_vos, seenUrls);
 
             return results;
         }

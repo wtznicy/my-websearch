@@ -39,11 +39,35 @@ interface JuejinSearchResponse {
 }
 
 /** 把 highlight HTML 转成纯文本：剥掉 <em> 高亮标签并解码 HTML 实体（&#34; → " 等） */
-function highlightToText(html: string): string {
+export function highlightToText(html: string): string {
     if (!html) {
         return '';
     }
     return cheerio.load(html).root().text().trim();
+}
+
+/** 把掘金搜索 API 的一页 data 映射为 SearchResult（高亮转纯文本 + 描述拼装），供请求路径复用 */
+export function parseJuejinResults(data: JuejinSearchResponse['data']): SearchResult[] {
+    return data.map((item) => {
+        const { result_model, title_highlight, content_highlight } = item;
+        const { article_info, author_user_info, category, tags } = result_model;
+
+        // 高亮片段转纯文本：去 <em> 标签并解码 HTML 实体
+        const cleanTitle = highlightToText(title_highlight);
+        const cleanContent = highlightToText(content_highlight);
+
+        // 构建描述信息
+        const tagNames = tags.map(tag => tag.tag_name).join(', ');
+        const description = `${cleanContent} | 分类: ${category.category_name} | 标签: ${tagNames} | 👍 ${article_info.digg_count} | 👀 ${article_info.view_count}`;
+
+        return {
+            title: cleanTitle,
+            url: `https://juejin.cn/post/${result_model.article_id}`,
+            description: description,
+            source: author_user_info.user_name,
+            engine: 'juejin'
+        };
+    });
 }
 
 export async function searchJuejin(query: string, limit: number): Promise<SearchResult[]> {
@@ -90,26 +114,7 @@ export async function searchJuejin(query: string, limit: number): Promise<Search
                 break;
             }
 
-            const results: SearchResult[] = responseData.data.map((item) => {
-                const { result_model, title_highlight, content_highlight } = item;
-                const { article_info, author_user_info, category, tags } = result_model;
-
-                // 高亮片段转纯文本：去 <em> 标签并解码 HTML 实体
-                const cleanTitle = highlightToText(title_highlight);
-                const cleanContent = highlightToText(content_highlight);
-
-                // 构建描述信息
-                const tagNames = tags.map(tag => tag.tag_name).join(', ');
-                const description = `${cleanContent} | 分类: ${category.category_name} | 标签: ${tagNames} | 👍 ${article_info.digg_count} | 👀 ${article_info.view_count}`;
-
-                return {
-                    title: cleanTitle,
-                    url: `https://juejin.cn/post/${result_model.article_id}`,
-                    description: description,
-                    source: author_user_info.user_name,
-                    engine: 'juejin'
-                };
-            });
+            const results: SearchResult[] = parseJuejinResults(responseData.data);
 
             allResults = allResults.concat(results);
 

@@ -35,6 +35,54 @@ function buildBraveErrorMessage(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
 }
 
+/**
+ * 解析 Brave 结果页（SvelteKit SSR）。
+ * 结果卡结构：
+ * .snippet[.svelte-*]（新版外层容器已不带 #results 锚点，选择器必须兼容两种结构）
+ *   └── .result-content
+ *        ├── > a (main link with href)
+ *        │   ├── .site-name-wrapper (source)
+ *        │   └── .search-snippet-title (title)
+ *        └── .generic-snippet (description)
+ */
+export function parseBraveResults(html: string, seenUrls: Set<string>): SearchResult[] {
+    const $ = cheerio.load(html);
+    const results: SearchResult[] = [];
+
+    $('#results .snippet, .snippet').each((_, element) => {
+        const resultElement = $(element);
+        const content = resultElement.find('.result-content').first();
+        if (content.length === 0) return;
+
+        // The first <a> inside .result-content is the main link
+        const mainLink = content.find('> a').first();
+        const url = mainLink.attr('href');
+
+        // Title is inside .search-snippet-title
+        const title = mainLink.find('.search-snippet-title').text().trim();
+
+        // Description is in .generic-snippet
+        const description = content.find('.generic-snippet').text().trim() || '';
+
+        // Source/site name is in .site-name-wrapper
+        const source = mainLink.find('.site-name-wrapper').first().text().trim() || '';
+
+        // Ensure that we have a valid title and URL before adding
+        if (title && url && !seenUrls.has(url)) {
+            seenUrls.add(url);
+            results.push({
+                title: title,
+                url: url,
+                description: description,
+                source: source,
+                engine: 'brave'
+            });
+        }
+    });
+
+    return results;
+}
+
 export async function searchBrave(query: string, limit: number): Promise<SearchResult[]> {
   // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂超时拖累整次搜索
   await assertOverseasEngineUsable('brave');
@@ -75,48 +123,7 @@ export async function searchBrave(query: string, limit: number): Promise<SearchR
                 throw new Error('Brave returned a verification or anti-bot page (access denied / captcha)');
             }
 
-            const $ = cheerio.load(response.data);
-            const results: SearchResult[] = [];
-
-            // Brave 用 SvelteKit SSR。结果卡结构：
-            // .snippet[.svelte-*]（新版外层容器已不带 #results 锚点，选择器必须兼容两种结构）
-            //   └── .result-content
-            //        ├── > a (main link with href)
-            //        │   ├── .site-name-wrapper (source)
-            //        │   └── .search-snippet-title (title)
-            //        └── .generic-snippet (description)
-            $('#results .snippet, .snippet').each((index, element) => {
-                const resultElement = $(element);
-                const content = resultElement.find('.result-content').first();
-                if (content.length === 0) return;
-
-                // The first <a> inside .result-content is the main link
-                const mainLink = content.find('> a').first();
-                const url = mainLink.attr('href');
-
-                // Title is inside .search-snippet-title
-                const title = mainLink.find('.search-snippet-title').text().trim();
-
-                // Description is in .generic-snippet
-                const description = content.find('.generic-snippet').text().trim() || '';
-
-                // Source/site name is in .site-name-wrapper
-                const source = mainLink.find('.site-name-wrapper').first().text().trim() || '';
-
-                // Ensure that we have a valid title and URL before adding
-                if (title && url && !seenUrls.has(url)) {
-                    seenUrls.add(url);
-                    results.push({
-                        title: title,
-                        url: url,
-                        description: description,
-                        source: source,
-                        engine: 'brave'
-                    });
-                }
-            });
-
-            return results;
+            return parseBraveResults(String(response.data || ''), seenUrls);
         }
     });
 }
