@@ -1,5 +1,8 @@
+import axios from 'axios';
+import type { AxiosResponse } from 'axios';
 import { Buffer } from 'node:buffer';
-import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { config } from '../../config.js';
+import { buildAxiosRequestOptions, isNetworkLayerError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 
 // Avoid the GitHub README API here because anonymous API requests in this
 // environment hit rate limits quickly; raw URLs are more stable for this tool.
@@ -28,10 +31,98 @@ const JSDELIVR_REF_CANDIDATES = ['', '@main', '@master'];
 // straight to the jsDelivr CDN (useful when GitHub is unreachable).
 const cdnFirst = process.env.GITHUB_README_CDN_FIRST === 'true';
 
+// raw.githubusercontent.com 直连可达性探测：3s 超时、失败重试 1 次、结果缓存 5 分钟。
+// 探测结果决定 raw 路径走直连还是走代理/jsDelivr（避免国内无代理环境每次抓取都挂满超时）。
+const RAW_PROBE_TIMEOUT_MS = 3000;
+const RAW_PROBE_MAX_RETRIES = 1;
+const RAW_PROBE_CACHE_TTL_MS = 5 * 60 * 1000;
+const RAW_PROBE_TARGET = `${RAW_GITHUB_BASE}/`;
+
+let rawProbeCache: { reachable: boolean; checkedAt: number } | null = null;
+let rawProbePromise: Promise<boolean> | null = null;
+
+/**
+ * 探测 raw.githubusercontent.com 直连是否可达。
+ * 裸 axios 请求固定 URL：不经过 buildAxiosRequestOptions（其代理路由会干扰"直连探测"语义）；
+ * 任何 HTTP 响应（含 404/403/429）都说明链路可达，只有网络层失败（超时/连接拒绝/DNS）才算不可达。
+ * 结果（含不可达）缓存 5 分钟，避免同一会话内多次抓取 README 反复探测；
+ * 并发请求共享同一个 in-flight 探测（不重复探测）。
+ */
+async function isRawDirectlyReachable(): Promise<boolean> {
+    const now = Date.now();
+    if (rawProbeCache && now - rawProbeCache.checkedAt < RAW_PROBE_CACHE_TTL_MS) {
+        return rawProbeCache.reachable;
+    }
+    if (rawProbePromise) {
+        return rawProbePromise;
+    }
+
+    rawProbePromise = (async () => {
+        let reachable = false;
+        for (let attempt = 0; attempt <= RAW_PROBE_MAX_RETRIES && !reachable; attempt += 1) {
+            try {
+                await axios.get(RAW_PROBE_TARGET, {
+                    headers: { 'User-Agent': 'GitHub-README-Fetcher/1.0' },
+                    timeout: RAW_PROBE_TIMEOUT_MS,
+                    validateStatus: () => true
+                });
+                reachable = true;
+            } catch {
+                // 网络层失败：重试或判定不可达
+            }
+        }
+
+        rawProbeCache = { reachable, checkedAt: Date.now() };
+        return reachable;
+    })().finally(() => {
+        rawProbePromise = null;
+    });
+
+    return rawProbePromise;
+}
+
 type ReadmeFetchOutcome =
     | { status: 'ok'; content: string }
     | { status: 'notfound' }
     | { status: 'error'; message: string };
+
+/** 构造 README 抓取请求选项；forceDirect=true 时直连（raw 直连额外用可信 host 语义） */
+function buildReadmeOptions(label: string, forceDirect: boolean, timeout: number) {
+    return {
+        ...buildAxiosRequestOptions({
+            headers: {
+                'User-Agent': 'GitHub-README-Fetcher/1.0'
+            },
+            trustedStaticHost: label === 'raw' && forceDirect,
+            forceDirect,
+            timeout,
+            responseType: 'text',
+            validateStatus: (status) => status === 200 || status === 404
+        })
+    };
+}
+
+/**
+ * jsDelivr CDN 抓取：直连优先、代理兜底（requestDirectFirst）。
+ * jsDelivr 是 raw 失败后的最后兜底，冷启动/并发时偶发超时（ECONNABORTED 实测），
+ * 网络层错误重试 1 次；HTTP 状态错误（404/5xx）不重试。
+ */
+async function fetchJsDelivr(url: string, timeout: number): Promise<AxiosResponse> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+            return await requestDirectFirst('GET', url, (forceDirect) => buildReadmeOptions('jsDelivr', forceDirect, timeout), 'jsDelivr CDN');
+        } catch (error) {
+            lastError = error;
+            const message = error instanceof Error ? error.message : String(error);
+            if (!isNetworkLayerError(message)) {
+                throw error;
+            }
+            console.warn(`jsDelivr network-layer failure (attempt ${attempt + 1}/2), retrying: ${message}`);
+        }
+    }
+    throw lastError;
+}
 
 /**
  * Fetch one README candidate URL and classify the outcome.
@@ -43,20 +134,23 @@ async function fetchReadmeSource(url: string, label: string, timeout: number): P
     try {
         console.error(`Fetching README from ${label}: ${url}`);
 
-        // 走统一的安全重定向链路：raw 是代码固定生成的可信 host（禁用重定向、绕过通用 DNS 私网过滤，
-        // 避免部分网络把 GitHub raw 域名解析到 100.64.0.0/10 代理地址时误判为 SSRF）；
-        // jsDelivr CDN 走标准过滤 agent + 每跳 DNS 校验（保持 SSRF 防护）。
-        const response = await requestWithSafeRedirects('GET', url, {
-            ...buildAxiosRequestOptions({
-                headers: {
-                    'User-Agent': 'GitHub-README-Fetcher/1.0'
-                },
-                trustedStaticHost: label === 'raw',
-                timeout,
-                responseType: 'text',
-                validateStatus: (status) => status === 200 || status === 404
-            })
-        }, label === 'raw' ? 'raw.githubusercontent.com' : 'jsDelivr CDN');
+        // raw：先探测直连可达性——
+        // 直连可达 → 直连（可信 host，绕过 DNS 私网过滤，避免 100.64.0.0/10 误判为 SSRF）；
+        // 直连不可达但配置了代理 → raw 走代理（代理通常可通 GitHub）；
+        // 直连不可达且无代理 → 返回错误，由主循环转 jsDelivr CDN 兜底。
+        // jsDelivr CDN：直连优先、代理兜底（CDN 国内直连可达，代理不可达时不卡死），SSRF 防护保留。
+        let response: AxiosResponse;
+        if (label === 'raw') {
+            if (await isRawDirectlyReachable()) {
+                response = await requestWithSafeRedirects('GET', url, buildReadmeOptions('raw', true, timeout), 'raw.githubusercontent.com');
+            } else if (config.useProxy && config.proxyUrl) {
+                response = await requestWithSafeRedirects('GET', url, buildReadmeOptions('raw', false, timeout), 'raw.githubusercontent.com (proxy)');
+            } else {
+                return { status: 'error', message: 'raw.githubusercontent.com is unreachable from the current network without a proxy' };
+            }
+        } else {
+            response = await fetchJsDelivr(url, timeout);
+        }
 
         if (response.status === 404) {
             return { status: 'notfound' };
@@ -231,10 +325,13 @@ async function fetchReadme(owner: string, repo: string, host: RepoHost): Promise
     }
 
     if (sawFetchFailure) {
-        console.warn(`Failed to fetch README for ${owner}/${repo}`);
-    } else {
-        console.warn(`README not found for ${owner}/${repo}`);
+        // 所有候选源都出现非 404 错误（网络不可达/上游错误）：抛明确错误，
+        // 避免调用方把"网络不通"误报为"README not found"
+        throw new Error(
+            `Failed to fetch README for ${owner}/${repo}: all sources (raw.githubusercontent.com, proxy, jsDelivr CDN) failed — network unreachable or upstream error. Check network/proxy configuration.`
+        );
     }
+    console.warn(`README not found for ${owner}/${repo}`);
 
     return null;
 }
