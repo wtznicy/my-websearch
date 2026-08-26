@@ -25,8 +25,16 @@ function testValidateArticleUrl(): void {
         'juejin post url should be valid'
     );
     assert(
+        validateArticleUrl('https://article.juejin.cn/post/1234567890', 'juejin'),
+        'juejin subdomain (article.juejin.cn) post url should be valid'
+    );
+    assert(
         !validateArticleUrl('https://juejin.cn/pin/1234567890', 'juejin'),
         'juejin non-post url should be invalid'
+    );
+    assert(
+        !validateArticleUrl('https://eviljuejin.cn/post/1234567890', 'juejin'),
+        'juejin lookalike host should be invalid'
     );
 
     console.log('✅ validateArticleUrl');

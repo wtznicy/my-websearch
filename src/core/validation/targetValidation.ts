@@ -9,7 +9,10 @@ export function validateArticleUrl(url: string, type: 'csdn' | 'juejin'): boolea
                 // 用 pathname 而非完整 url 判断，避免 query 参数伪造路径（如 /article/details/ 出现在 ?next= 中）
                 return urlObj.hostname === 'blog.csdn.net' && urlObj.pathname.includes('/article/details/');
             case 'juejin':
-                return urlObj.hostname === 'juejin.cn' && urlObj.pathname.includes('/post/');
+                // 兼容 juejin.cn 主域名与子域名（article.juejin.cn 是掘金内容分发域名，
+                // 搜索引擎返回的链接常为此格式）；必须含 /post/ 路径
+                return (urlObj.hostname === 'juejin.cn' || urlObj.hostname.endsWith('.juejin.cn'))
+                    && urlObj.pathname.includes('/post/');
             default:
                 return false;
         }
