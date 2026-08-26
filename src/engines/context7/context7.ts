@@ -14,7 +14,7 @@
  */
 
 import axios from 'axios';
-import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
+import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 
 export const CONTEXT7_BASE_URL = 'https://context7.com';
 export const CONTEXT7_API_VERSION = 'v2';
@@ -116,12 +116,13 @@ function buildHeaders(): Record<string, string> {
     return headers;
 }
 
-function context7RequestOptions(): any {
+function context7RequestOptions(forceDirect: boolean): any {
     return buildAxiosRequestOptions({
         headers: buildHeaders(),
         timeout: 20000,
         responseType: 'json',
-        validateStatus: (status) => status >= 200 && status < 300
+        validateStatus: (status) => status >= 200 && status < 300,
+        forceDirect
     });
 }
 
@@ -133,12 +134,23 @@ function sleep(ms: number): Promise<void> {
  * 带退避重试的 context7 GET：429（限流）与 5xx（上游故障）最多重试 2 次并尊重 Retry-After。
  * 无 API key 时低速率限流（429）是预期失败模式，重试耗尽后转成带明确提示的错误，
  * 而不是和 5xx 一样笼统报"Failed to fetch docs"。
+ *
+ * 请求走"直连优先、代理兜底"（requestDirectFirst）：context7 API 国内直连可达
+ * （无需代理），配置了代理但代理不可达时不会被卡死——先直连成功即返回。
  */
 async function context7GetWithRetry(url: string, options: any, retries = 3): Promise<any> {
     let lastError: any;
     for (let attempt = 0; attempt < retries; attempt += 1) {
         try {
-            return await axios.get(url, options);
+            return await requestDirectFirst(
+                'GET',
+                url,
+                (forceDirect) => ({
+                    ...context7RequestOptions(forceDirect),
+                    params: options.params
+                }),
+                'context7 API'
+            );
         } catch (error: any) {
             lastError = error;
             const status = error?.response?.status;
@@ -178,7 +190,6 @@ export async function searchContext7Libraries(
 
     const url = `${CONTEXT7_BASE_URL}/api/${CONTEXT7_API_VERSION}/libs/search`;
     const response = await context7GetWithRetry(url, {
-        ...context7RequestOptions(),
         params: {
             libraryName: cleanLibraryName,
             query: cleanQuery || cleanLibraryName
@@ -213,7 +224,6 @@ export async function fetchContext7Docs(
 
     const url = `${CONTEXT7_BASE_URL}/api/${CONTEXT7_API_VERSION}/context`;
     const response = await context7GetWithRetry(url, {
-        ...context7RequestOptions(),
         params: {
             libraryId: cleanLibraryId,
             query: cleanQuery || 'overview',
