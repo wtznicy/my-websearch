@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { buildAxiosRequestOptions, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 
 // Avoid the GitHub README API here because anonymous API requests in this
 // environment hit rate limits quickly; raw URLs are more stable for this tool.
@@ -45,18 +45,20 @@ async function fetchReadmeSource(url: string, label: string, timeout: number): P
 
         // 走统一的安全重定向链路：raw 是代码固定生成的可信 host（禁用重定向、绕过通用 DNS 私网过滤，
         // 避免部分网络把 GitHub raw 域名解析到 100.64.0.0/10 代理地址时误判为 SSRF）；
-        // jsDelivr CDN 走标准过滤 agent + 每跳 DNS 校验（保持 SSRF 防护）。
-        const response = await requestWithSafeRedirects('GET', url, {
+        // jsDelivr CDN 走"直连优先、代理兜底"（requestDirectFirst）：CDN 国内直连可达，
+        // 配置了代理但代理不可达时不会被卡死（先直连成功即返回），SSRF 防护保留（标准过滤 agent + 每跳 DNS 校验）。
+        const response = await requestDirectFirst('GET', url, (forceDirect) => ({
             ...buildAxiosRequestOptions({
                 headers: {
                     'User-Agent': 'GitHub-README-Fetcher/1.0'
                 },
                 trustedStaticHost: label === 'raw',
+                forceDirect: label === 'raw' || forceDirect,
                 timeout,
                 responseType: 'text',
                 validateStatus: (status) => status === 200 || status === 404
             })
-        }, label === 'raw' ? 'raw.githubusercontent.com' : 'jsDelivr CDN');
+        }), label === 'raw' ? 'raw.githubusercontent.com' : 'jsDelivr CDN');
 
         if (response.status === 404) {
             return { status: 'notfound' };
