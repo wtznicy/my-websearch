@@ -260,7 +260,9 @@ USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brav
 
 If a search includes overseas engines but the proxy is off, those engines will fail fast instead of hanging until timeout: my-websearch probes direct connectivity to `duckduckgo`/`brave`/`startpage` (3s timeout, one retry, result cached for 5 minutes) — unreachable engines immediately return a "proxy required, or use domestic engines" error, while reachable engines (e.g. overseas users) work normally. `exa` is excluded from probing because `api.exa.ai` is directly reachable from mainland China. When the proxy is on, engines in `PROXY_ENGINES` are never probed — they go straight through the proxy.
 
-Browser-enhanced Bing fallback is opt-in. The published package does not bundle Playwright anymore. Enable it manually with one of these setups:
+Browser-enhanced Bing fallback and the `startpage` engine work out of the box: `playwright-core` is bundled as an optional dependency (auto-installed with the package, no browser download — system browsers are auto-discovered, e.g. Edge on Windows). If that install fails (network/platform), browser-based features degrade gracefully and all other engines stay unaffected.
+
+Optional advanced setups (full Playwright with its own browser, custom module paths, remote/CDP browsers):
 
 1. Full local Playwright install:
 ```bash
