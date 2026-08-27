@@ -87,6 +87,7 @@
   "optionalDependencies": {
     "curl-cffi-node": "^0.1.8",
     "jsdom": "^26.1.0",
-    "koffi": "^2.16.0"
+    "koffi": "^2.16.0",
+    "playwright-core": "^1.62.1"
   }
 }
