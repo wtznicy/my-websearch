@@ -56,6 +56,20 @@ describe('parseBraveResults', () => {
         expect(parseBraveResults(html, new Set<string>())).toEqual([]);
     });
 
+    it('should normalize breadcrumb source text to the URL hostname', () => {
+        const html = `<div class="snippet">
+            <div class="result-content">
+                <a href="https://cloud.google.com/discover/ai">
+                    <span class="site-name-wrapper">cloud.google.com › discover › ai-guides</span>
+                    <span class="search-snippet-title">Google Cloud AI</span>
+                </a>
+                <div class="generic-snippet">描述</div>
+            </div>
+        </div>`;
+        const results = parseBraveResults(html, new Set<string>());
+        expect(results[0].source).toBe('cloud.google.com');
+    });
+
     it('should return empty array for page without results', () => {
         expect(parseBraveResults('<html><body>no results</body></html>', new Set<string>())).toEqual([]);
     });

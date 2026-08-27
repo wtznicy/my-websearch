@@ -29,6 +29,39 @@ function withErrorHint(message: string, hint: string): string {
 }
 
 /**
+ * fetchWebContent 错误提示按错误类型区分，避免把"页面不存在（404）"也提示成
+ * "降低 maxChars 继续分页读取"这类无关建议。依据错误消息/状态码归类：
+ * 404 → URL 问题；4xx → 被拒/反爬；5xx → 上游故障；网络类 → 网络/代理；提取失败 → raw/maxChars。
+ */
+function buildFetchWebErrorHint(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    const statusMatch = message.match(/status code (\d{3})/i);
+    const status = statusMatch ? Number(statusMatch[1]) : (error as any)?.response?.status;
+
+    if (typeof status === 'number') {
+        if (status === 404) {
+            return '目标页面不存在（404）——检查 URL 是否正确、页面是否已删除、或站点需要登录后才能访问。';
+        }
+        if (status >= 500) {
+            return `目标站点返回服务器错误（HTTP ${status}）——上游问题，可稍后重试或换一个来源页面。`;
+        }
+        if (status >= 400) {
+            return `目标站点拒绝了请求（HTTP ${status}）——页面可能要求登录/验证，或站点对自动化抓取有反爬限制。`;
+        }
+    }
+
+    if (/timeout|timed out|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network|ENETUNREACH/i.test(message)) {
+        return '网络错误——可稍后重试；若目标站点需代理访问，开启 USE_PROXY=true + PROXY_URL 后重试。';
+    }
+
+    if (/no readable content|extract/i.test(message)) {
+        return '页面正文提取失败——可尝试 raw=true 获取原始内容，或降低 maxChars。';
+    }
+
+    return '可降低 maxChars，或用 startIndex 分页继续读取长文档。';
+}
+
+/**
  * 工具级日志门控：LOG_LEVEL=quiet（或 OPEN_WEBSEARCH_QUIET_STARTUP=true）时
  * 静默所有工具执行日志（搜索词、URL、库名等），避免噪音与隐私信息写入宿主日志。
  * 现有 LOG_LEVEL 只控制启动日志，这里扩展为全局级别。
@@ -388,7 +421,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                         type: 'text',
                         text: withErrorHint(
                             `Failed to fetch web content: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                            '可降低 maxChars，或用 startIndex 分页继续读取长文档。'
+                            buildFetchWebErrorHint(error)
                         )
                     }],
                     isError: true

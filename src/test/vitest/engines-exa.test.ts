@@ -61,8 +61,8 @@ describe('cleanExaDescription', () => {
         expect(cleanExaDescription('a\n\n  b\t c')).toBe('a b c');
     });
 
-    it('should cap at 500 characters', () => {
+    it('should cap at 300 characters', () => {
         const long = 'x'.repeat(600);
-        expect(cleanExaDescription(long)).toHaveLength(500);
+        expect(cleanExaDescription(long)).toHaveLength(300);
     });
 });

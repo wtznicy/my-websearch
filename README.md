@@ -82,6 +82,8 @@ If the agent can only get through the package-install step with npm proxy settin
 
 CLI is for one-shot execution. The local daemon is a long-lived local HTTP service for repeated calls with lower startup friction. Use `my-websearch serve` as the explicit daemon start command and `my-websearch status` as the explicit daemon status command.
 
+> **Windows console note**: CLI JSON output is UTF-8. On the legacy Windows console (GBK code page 936) Chinese characters may render as mojibake in cmd/other terminals (redirecting to a file is fine). Run `chcp 65001` first, or use Windows Terminal.
+
 Action commands such as `search` and `fetch-web` try the default local daemon first when it is available. If you pass `--daemon-url`, that daemon path becomes explicit and silent fallback to direct execution is disabled.
 
 Build first:

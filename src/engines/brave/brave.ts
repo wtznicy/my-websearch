@@ -65,7 +65,18 @@ export function parseBraveResults(html: string, seenUrls: Set<string>): SearchRe
         const description = content.find('.generic-snippet').text().trim() || '';
 
         // Source/site name is in .site-name-wrapper
-        const source = mainLink.find('.site-name-wrapper').first().text().trim() || '';
+        const rawSource = mainLink.find('.site-name-wrapper').first().text().trim() || '';
+
+        // 统一 source 为纯域名（面包屑文本如 "cloud.google.com › discover › ..." 跨引擎格式不一致）；
+        // URL 解析失败时回退原始面包屑文本
+        let source = rawSource;
+        if (url) {
+            try {
+                source = new URL(url).hostname;
+            } catch {
+                // 保留 rawSource
+            }
+        }
 
         // Ensure that we have a valid title and URL before adding
         if (title && url && !seenUrls.has(url)) {

@@ -12,7 +12,10 @@ export function stripHighlightTags(value: string): string {
     return String(value).replace(/<\/?em>/g, '').trim();
 }
 
-/** 把 CSDN 搜索 API 的一页 result_vos 映射为 SearchResult（页内按 URL 去重），供请求路径复用 */
+/**
+ * 把 CSDN 搜索 API 的一页 result_vos 映射为 SearchResult（页内按 URL 去重）。
+ * 过滤低价值下载资源页（download.csdn.net，正文价值低）与无信息量条目（无标题或无摘要）。
+ */
 export function parseCsdnResults(
     resultVos: Array<{ digest: string; title: string; url_location: string; nickname: string }>,
     seenUrls: Set<string>
@@ -21,14 +24,20 @@ export function parseCsdnResults(
     for (const re of resultVos) {
         const { digest, title, url_location, nickname } = re;
         const url = url_location || '';
-        if (!url || seenUrls.has(url)) {
+        if (!url || seenUrls.has(url) || /^https?:\/\/download\.csdn\.net\//i.test(url)) {
+            continue;
+        }
+        const cleanTitle = stripHighlightTags(title);
+        const cleanDigest = stripHighlightTags(digest);
+        // 无标题或无摘要的条目对 LLM 无信息量（常见于广告/空壳页），剔除
+        if (!cleanTitle || !cleanDigest) {
             continue;
         }
         seenUrls.add(url);
         results.push({
-            title: stripHighlightTags(title),
+            title: cleanTitle,
             url,
-            description: stripHighlightTags(digest),
+            description: cleanDigest,
             source: nickname || '',
             engine: 'csdn'
         });

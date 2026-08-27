@@ -43,6 +43,28 @@ describe('parseCsdnResults', () => {
         expect(results.some((r) => r.url === '')).toBe(false);
     });
 
+    it('should filter download.csdn.net resource pages and entries without digest', () => {
+        const vos = [
+            ...RESULT_VOS,
+            {
+                digest: '下载页摘要',
+                title: '下载资源',
+                url_location: 'https://download.csdn.net/download/user/123',
+                nickname: '作者'
+            },
+            {
+                digest: '',
+                title: '无摘要条目',
+                url_location: 'https://blog.csdn.net/user3/article/details/333',
+                nickname: '作者丙'
+            }
+        ];
+        const results = parseCsdnResults(vos as never, new Set<string>());
+        expect(results.some((r) => r.url.includes('download.csdn.net'))).toBe(false);
+        expect(results.some((r) => r.title === '无摘要条目')).toBe(false);
+        expect(results).toHaveLength(2); // 原 fixture 2 条有效 + 2 条被过滤
+    });
+
     it('should dedupe urls via the provided seenUrls set', () => {
         const seenUrls = new Set<string>(['https://blog.csdn.net/user1/article/details/111']);
         const results = parseCsdnResults(RESULT_VOS as never, seenUrls);

@@ -250,6 +250,8 @@ PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium 
 
 ## CLI 与本地 daemon
 
+> **Windows 控制台说明**：CLI 的 JSON 输出为 UTF-8。在旧版 Windows 控制台（GBK 代码页 936）的 cmd/部分终端中，中文会显示乱码（重定向到文件正常）。可先执行 `chcp 65001`，或使用 Windows Terminal。
+
 CLI 适合一次性执行；本地 daemon 是常驻 HTTP 服务，适合反复调用。
 
 ```bash

@@ -42,7 +42,7 @@ async function searchExaOfficial(query: string, limit: number, apiKey: string): 
     return parseExaResults(response.data.results, limit);
 }
 
-/** 清洗 Exa 正文摘要：剥 HTML 标签、解码实体、压缩空白、限长 */
+/** 清洗 Exa 正文摘要：剥 HTML 标签、解码实体、压缩空白、限长（正文常为整段数百字，截断到 ~300 字控制 token 成本） */
 export function cleanExaDescription(text: string): string {
     const stripped = text
         .replace(/<[^>]*>/g, ' ')
@@ -52,7 +52,7 @@ export function cleanExaDescription(text: string): string {
         })
         .replace(/\s+/g, ' ')
         .trim();
-    return stripped.substring(0, 500);
+    return stripped.substring(0, 300);
 }
 
 /** 把 Exa API 结果映射为 SearchResult（标题/正文/来源处理），供请求路径复用 */
