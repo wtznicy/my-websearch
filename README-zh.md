@@ -227,7 +227,11 @@ BING_PLAYWRIGHT_FALLBACK=false npx my-websearch@latest
 
 ## 可选：Playwright 浏览器增强
 
-Bing 的 `playwright` 模式（以及部分网站的 cookie/渲染兜底）需要手动安装：
+Bing 的 Playwright 兜底与 `startpage` 引擎**开箱即用**：`playwright-core` 已作为可选依赖随包自动安装（约 8MB，不下载浏览器；系统浏览器自动发现，如 Windows 的 Edge）。若安装失败（网络/平台问题），浏览器相关功能优雅降级，其他引擎不受影响。
+
+可选的高级配置（完整 Playwright 自带浏览器、自定义模块路径、远程/CDP 浏览器）：
+
+1. 完整本地 Playwright 安装（自带浏览器）：
 
 ```bash
 npm install playwright
@@ -235,7 +239,7 @@ npx playwright install chromium
 SEARCH_MODE=auto npx my-websearch@latest
 ```
 
-或者只装精简客户端、复用现有浏览器：
+2. 只装精简客户端、复用现有浏览器二进制：
 
 ```bash
 npm install playwright-core
