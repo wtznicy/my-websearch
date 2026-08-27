@@ -1,6 +1,6 @@
 {
   "name": "my-websearch",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "mcpName": "io.github.wtznicy/my-websearch",
   "description": "MyWebSearch - multi-engine web search MCP server, CLI and local daemon. No API keys required.",
   "license": "Apache-2.0",
