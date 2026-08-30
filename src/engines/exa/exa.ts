@@ -52,7 +52,8 @@ export function cleanExaDescription(text: string): string {
         })
         .replace(/\s+/g, ' ')
         .trim();
-    return stripped.substring(0, 300);
+    // 按 Unicode 码点截断（Array.from 不会劈开 emoji 等代理对，substring 会产出乱码字符）
+    return Array.from(stripped).slice(0, 300).join('');
 }
 
 /** 把 Exa API 结果映射为 SearchResult（标题/正文/来源处理），供请求路径复用 */

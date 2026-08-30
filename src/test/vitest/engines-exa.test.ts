@@ -65,4 +65,15 @@ describe('cleanExaDescription', () => {
         const long = 'x'.repeat(600);
         expect(cleanExaDescription(long)).toHaveLength(300);
     });
+
+    it('should not split emoji surrogate pairs when truncating', () => {
+        // 🚀 是代理对（2 个 UTF-16 码元）；298 个 x + 🚀 正好卡在截断边界
+        const input = 'x'.repeat(298) + '🚀' + 'y'.repeat(50);
+        const result = cleanExaDescription(input);
+        expect(Array.from(result)).toHaveLength(300); // 300 个码点（🚀 占 1 个码点、2 个码元）
+        expect(result.includes('🚀')).toBe(true); // 代理对完整保留（未被劈开）
+        // 无孤立代理对：完整代理对在 Array.from 中是长度 2 的码元；孤立代理码元是长度 1 的代理区码元
+        const hasLoneSurrogate = Array.from(result).some((ch) => ch.length === 1 && /[\uD800-\uDFFF]/.test(ch));
+        expect(hasLoneSurrogate).toBe(false);
+    });
 });
