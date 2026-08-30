@@ -29,14 +29,34 @@ function withErrorHint(message: string, hint: string): string {
 }
 
 /**
+ * 从错误中提取 HTTP 状态码：优先结构化字段（AxiosError.response.status），
+ * 正则（axios 的 "Request failed with status code 404" 措辞）仅做兜底——
+ * 不依赖 axios 错误文案，避免其大版本改措辞后静默落入兜底分支。
+ */
+function extractErrorStatus(error: unknown): number | undefined {
+    const structured = (error as any)?.response?.status;
+    if (typeof structured === 'number') {
+        return structured;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    const match = message.match(/status code (\d{3})/i);
+    if (match) {
+        const parsed = Number(match[1]);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    return undefined;
+}
+
+/**
  * fetchWebContent 错误提示按错误类型区分，避免把"页面不存在（404）"也提示成
  * "降低 maxChars 继续分页读取"这类无关建议。依据错误消息/状态码归类：
  * 404 → URL 问题；4xx → 被拒/反爬；5xx → 上游故障；网络类 → 网络/代理；提取失败 → raw/maxChars。
  */
 function buildFetchWebErrorHint(error: unknown): string {
     const message = error instanceof Error ? error.message : String(error);
-    const statusMatch = message.match(/status code (\d{3})/i);
-    const status = statusMatch ? Number(statusMatch[1]) : (error as any)?.response?.status;
+    const status = extractErrorStatus(error);
 
     if (typeof status === 'number') {
         if (status === 404) {
@@ -54,7 +74,7 @@ function buildFetchWebErrorHint(error: unknown): string {
         return '网络错误——可稍后重试；若目标站点需代理访问，开启 USE_PROXY=true + PROXY_URL 后重试。';
     }
 
-    if (/no readable content|extract/i.test(message)) {
+    if (/no readable content|extraction failed/i.test(message)) {
         return '页面正文提取失败——可尝试 raw=true 获取原始内容，或降低 maxChars。';
     }
 
