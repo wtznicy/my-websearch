@@ -9,6 +9,7 @@ import {
 import { config, getProxyUrl, engineShouldUseProxy } from '../config.js';
 import { assertPublicHttpUrlResolved, isPrivateOrLocalHostname } from './urlSafety.js';
 import { cachedDnsLookup, peekCachedLookup } from './dnsCache.js';
+import { getSystemProxyFallbackUrl } from './systemProxy.js';
 import { metrics } from '../core/metrics.js';
 
 // 默认请求超时：调用方未显式传 timeout 时使用，避免引擎请求永不超时拖垮整个搜索。
@@ -231,8 +232,8 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
     const effectiveProxyUrl = forceDirect
         ? undefined
         : (engine !== undefined
-            ? (engineShouldUseProxy(engine) ? getProxyUrl() : undefined)
-            : getProxyUrl());
+            ? (engineShouldUseProxy(engine) ? getProxyUrl() : getSystemProxyFallbackUrl(engine))
+            : (getProxyUrl() ?? getSystemProxyFallbackUrl(undefined)));
     if (effectiveProxyUrl) {
         const proxyAgent = getProxyAgent(effectiveProxyUrl, allowInsecureTls);
         requestOptions.httpAgent = proxyAgent;

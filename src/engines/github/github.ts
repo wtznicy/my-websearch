@@ -3,6 +3,7 @@ import type { AxiosResponse } from 'axios';
 import { Buffer } from 'node:buffer';
 import { config } from '../../config.js';
 import { buildAxiosRequestOptions, isNetworkLayerError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { detectSystemProxy } from '../../utils/systemProxy.js';
 
 // Avoid the GitHub README API here because anonymous API requests in this
 // environment hit rate limits quickly; raw URLs are more stable for this tool.
@@ -143,7 +144,7 @@ async function fetchReadmeSource(url: string, label: string, timeout: number): P
         if (label === 'raw') {
             if (await isRawDirectlyReachable()) {
                 response = await requestWithSafeRedirects('GET', url, buildReadmeOptions('raw', true, timeout), 'raw.githubusercontent.com');
-            } else if (config.useProxy && config.proxyUrl) {
+            } else if ((config.useProxy && config.proxyUrl) || (await detectSystemProxy())) {
                 response = await requestWithSafeRedirects('GET', url, buildReadmeOptions('raw', false, timeout), 'raw.githubusercontent.com (proxy)');
             } else {
                 return { status: 'error', message: 'raw.githubusercontent.com is unreachable from the current network without a proxy' };

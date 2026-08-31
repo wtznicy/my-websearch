@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { engineShouldUseProxy } from '../config.js';
 import { BROWSER_USER_AGENT } from './constants.js';
+import { detectSystemProxy, parseProxyUrl } from './systemProxy.js';
 
 /**
  * 境外引擎可达性探测（方案二）：
@@ -32,14 +33,19 @@ const PROBE_TARGETS: Record<'duckduckgo' | 'brave' | 'startpage', string> = {
 type ProbeState = { reachable: boolean; checkedAt: number };
 const probeCache = new Map<string, ProbeState>();
 
-/** 单次探测：任何 HTTP 响应（含 403/429）都说明链路可达，只有网络层失败才算不可达 */
-async function probeOnce(url: string): Promise<boolean> {
+/**
+ * 单次探测：任何 HTTP 响应（含 403/429）都说明链路可达，只有网络层失败才算不可达。
+ * proxyUrl 提供时经该代理探测（用于系统代理兜底：用户开了 Clash 但未配 USE_PROXY 的场景）。
+ */
+async function probeOnce(url: string, proxyUrl?: string): Promise<boolean> {
     try {
+        const proxy = proxyUrl ? parseProxyUrl(proxyUrl) : undefined;
         await axios.get(url, {
             headers: { 'User-Agent': BROWSER_USER_AGENT },
             timeout: PROBE_TIMEOUT_MS,
             // 裸请求固定 URL：不依赖 buildAxiosRequestOptions（其代理路由会干扰"直连探测"语义）
-            validateStatus: () => true
+            validateStatus: () => true,
+            ...(proxy ? { proxy } : {})
         });
         return true;
     } catch {
@@ -57,6 +63,16 @@ async function isDirectlyReachable(engine: 'duckduckgo' | 'brave' | 'startpage')
     let reachable = false;
     for (let attempt = 0; attempt <= PROBE_MAX_RETRIES && !reachable; attempt += 1) {
         reachable = await probeOnce(PROBE_TARGETS[engine]);
+    }
+
+    // 直连不可达但检测到系统代理（Clash 等已开启、未显式配置 USE_PROXY）：经系统代理再探测一次
+    if (!reachable) {
+        const systemProxy = await detectSystemProxy();
+        if (systemProxy) {
+            for (let attempt = 0; attempt <= PROBE_MAX_RETRIES && !reachable; attempt += 1) {
+                reachable = await probeOnce(PROBE_TARGETS[engine], systemProxy);
+            }
+        }
     }
 
     if (probeCache.size >= PROBE_MAX_ENTRIES) {
