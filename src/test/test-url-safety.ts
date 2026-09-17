@@ -1,4 +1,5 @@
 import { __setDnsLookupForTests, assertPublicHttpUrlResolved, isPublicHttpUrl, isPrivateOrLocalHostname } from '../utils/urlSafety.js';
+import { isFakeIpDnsEnvironment } from './support/fakeIp.js';
 
 type Case = {
     value: string;
@@ -87,6 +88,11 @@ function runAdvisoryBypassCases(): void {
 // nip.io resolves *.nip.io to the embedded IP — exercises the real DNS path.
 // May fail when the system DNS is behind a proxy like Clash fake IP mode.
 async function runDnsResolvedCases(): Promise<void> {
+    if (await isFakeIpDnsEnvironment()) {
+        console.log('⏭️  Skipped DNS-resolved cases: system DNS is behind a TUN/fake-ip proxy (198.18.0.0/15)');
+        return;
+    }
+
     let rejected = false;
     try {
         await assertPublicHttpUrlResolved('https://127.0.0.1.nip.io/');

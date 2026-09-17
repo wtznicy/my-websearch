@@ -71,6 +71,9 @@ const networkFailurePatterns = [
     /\b(certificate verify failed|SSL peer certificate|TLS handshake|CERT_[A-Z_]+|CERTIFICATE_VERIFY_FAILED|UNABLE_TO_VERIFY_LEAF_SIGNATURE)\b/i,
     /net::ERR_[A-Z_]+/i,
     /Request failed with status code (429|5\d\d)\b/i,
+    // Brave 的 429 被 buildBraveErrorMessage 包装为 "Brave rate limited (HTTP 429): ..."，
+    // 不再含 axios 原始文案——代理/机房 IP 被上游节流属环境问题
+    /Brave rate limited \(HTTP 429\)/i,
     /page\.goto: Timeout \d+ms exceeded[\s\S]*navigating to/i,
     /Timeout \d+ms exceeded[\s\S]*(https?:\/\/|navigating to)/i
 ];

@@ -5,6 +5,7 @@ import {
     fetchPageHtmlWithBrowser,
     getBrowserCookieHeader
 } from '../utils/browserCookies.js';
+import { isFakeIpDnsEnvironment } from './support/fakeIp.js';
 
 async function assertRejects(
     fn: () => Promise<unknown>,
@@ -24,6 +25,13 @@ async function assertRejects(
 }
 
 async function run(): Promise<void> {
+    // TUN/fake-ip 环境（Clash TUN 等）下 DNS 解析路径失真（产品代码用 FAKE_IP_CIDRS 处理该环境）：
+    // 所有依赖"域名解析到私网"的用例统一跳过，避免误报失败。
+    const skipDnsCases = await isFakeIpDnsEnvironment();
+    if (skipDnsCases) {
+        console.log('⏭️  TUN/fake-ip DNS detected — DNS-resolved private cases will be skipped');
+    }
+
     // getBrowserCookieHeader must reject before loading Playwright.
     await assertRejects(
         () => getBrowserCookieHeader('http://127.0.0.1/admin'),
@@ -46,12 +54,14 @@ async function run(): Promise<void> {
     );
     console.log('✅ getBrowserCookieHeader rejects IMDS pre-navigation');
 
-    await assertRejects(
-        () => getBrowserCookieHeader('http://127.0.0.1.nip.io/admin'),
-        /private or local network/,
-        'getBrowserCookieHeader with DNS-resolved private'
-    );
-    console.log('✅ getBrowserCookieHeader rejects DNS-resolved private pre-navigation');
+    if (!skipDnsCases) {
+        await assertRejects(
+            () => getBrowserCookieHeader('http://127.0.0.1.nip.io/admin'),
+            /private or local network/,
+            'getBrowserCookieHeader with DNS-resolved private'
+        );
+        console.log('✅ getBrowserCookieHeader rejects DNS-resolved private pre-navigation');
+    }
 
     // fetchPageHtmlWithBrowser: same coverage.
     await assertRejects(
@@ -68,12 +78,14 @@ async function run(): Promise<void> {
     );
     console.log('✅ fetchPageHtmlWithBrowser rejects [::ffff:7f00:1] pre-navigation');
 
-    await assertRejects(
-        () => fetchPageHtmlWithBrowser('http://127.0.0.1.nip.io/admin'),
-        /private or local network/,
-        'fetchPageHtmlWithBrowser with DNS-resolved private'
-    );
-    console.log('✅ fetchPageHtmlWithBrowser rejects DNS-resolved private pre-navigation');
+    if (!skipDnsCases) {
+        await assertRejects(
+            () => fetchPageHtmlWithBrowser('http://127.0.0.1.nip.io/admin'),
+            /private or local network/,
+            'fetchPageHtmlWithBrowser with DNS-resolved private'
+        );
+        console.log('✅ fetchPageHtmlWithBrowser rejects DNS-resolved private pre-navigation');
+    }
 
     // Subresource guard: literal-private blocked sync, DNS-private blocked via
     // classifyBrowserSubresourceUrl, repeat calls served from the TTL cache.
@@ -100,24 +112,26 @@ async function run(): Promise<void> {
     );
     console.log('✅ subresource guard rejects IMDS');
 
-    await assertRejects(
-        () => classifyBrowserSubresourceUrl('http://127.0.0.1.nip.io/img.png'),
-        /private or local network/,
-        'subresource DNS-resolved private'
-    );
-    console.log('✅ subresource guard rejects DNS-resolved private (first call)');
+    if (!skipDnsCases) {
+        await assertRejects(
+            () => classifyBrowserSubresourceUrl('http://127.0.0.1.nip.io/img.png'),
+            /private or local network/,
+            'subresource DNS-resolved private'
+        );
+        console.log('✅ subresource guard rejects DNS-resolved private (first call)');
 
-    if (__getBrowserSubresourceClassificationForTests('127.0.0.1.nip.io') !== false) {
-        throw new Error('expected cached negative classification for 127.0.0.1.nip.io');
+        if (__getBrowserSubresourceClassificationForTests('127.0.0.1.nip.io') !== false) {
+            throw new Error('expected cached negative classification for 127.0.0.1.nip.io');
+        }
+        console.log('✅ subresource cache stores negative classification');
+
+        await assertRejects(
+            () => classifyBrowserSubresourceUrl('http://127.0.0.1.nip.io/img2.png'),
+            /private or local network/,
+            'subresource DNS-resolved private (second call, cached)'
+        );
+        console.log('✅ subresource guard rejects repeated DNS-resolved private (cache hit)');
     }
-    console.log('✅ subresource cache stores negative classification');
-
-    await assertRejects(
-        () => classifyBrowserSubresourceUrl('http://127.0.0.1.nip.io/img2.png'),
-        /private or local network/,
-        'subresource DNS-resolved private (second call, cached)'
-    );
-    console.log('✅ subresource guard rejects repeated DNS-resolved private (cache hit)');
 
     try {
         await classifyBrowserSubresourceUrl('http://8.8.8.8.nip.io/cdn/asset.css');
