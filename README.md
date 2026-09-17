@@ -156,7 +156,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true my-websearch
 |----------|-------------------------|---------|-------------|
 | `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
 | `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `auto`, `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine. `auto` routes by query: Chinese natural-language queries go to baidu, English/technical queries to bing |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
 | `PROXY_ENGINES` | empty (all engines) | Comma-separated engine names | With `USE_PROXY=true`, **only** the engines in this whitelist route through the proxy; others stay direct. Empty = all engines proxied (legacy global behavior). Recommended for mainland China: `PROXY_ENGINES=duckduckgo,exa,brave,startpage` (overseas engines via proxy, domestic engines direct) |

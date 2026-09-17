@@ -4,6 +4,7 @@ import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { normalizeText } from '../../utils/text.js';
+import { sleep } from '../../utils/timing.js';
 
 const SOGOU_SEARCH_URL = 'https://www.sogou.com/web';
 const SOGOU_PAGE_SIZE = 10;
@@ -256,7 +257,21 @@ async function searchSogouPage(query: string, page: number): Promise<SearchResul
     url.searchParams.set('page', String(page));
     url.searchParams.set('ie', 'utf8');
 
-    const parsed = parseSogouSearchResults(await fetchSogouHtml(url.toString()));
+    let parsed: SearchResult[];
+    try {
+        parsed = parseSogouSearchResults(await fetchSogouHtml(url.toString()));
+    } catch (error) {
+        // 反爬降级：命中验证页时等待 1-2 秒重试一次（给服务端一次冷却机会），
+        // 仍失败才向上抛（由 searchService 的 partialFailures/级联换引擎接管）
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/anti-bot|verification/i.test(message)) {
+            throw error;
+        }
+        console.warn('Sogou returned an anti-bot page, retrying once after a short delay');
+        await sleep(1000 + Math.random() * 1000);
+        parsed = parseSogouSearchResults(await fetchSogouHtml(url.toString()));
+    }
+
     // 跳转链并发解析成真实 URL；source 跟随真实 URL 重新提取（跳转链时只会是 www.sogou.com）
     return mapWithConcurrency(parsed, 4, async (result) => {
         const resolvedUrl = await resolveSogouLinkUrl(result.url);

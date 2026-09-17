@@ -4,6 +4,7 @@ import { AppConfig } from '../../config.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
+import { pickDefaultEngineForQuery } from '../../core/search/queryEngineRouting.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
 import { ErrorCode } from '../../core/errors.js';
 
@@ -67,9 +68,12 @@ function sendError(
     res.status(statusCode).json(createErrorEnvelope(code, message, options));
 }
 
-function parseRequestedEngines(runtime: MyWebSearchRuntime, engines: unknown): SupportedSearchEngine[] {
+function parseRequestedEngines(runtime: MyWebSearchRuntime, engines: unknown, query: string): SupportedSearchEngine[] {
+    // DEFAULT_SEARCH_ENGINE=auto 时按查询特征自动路由（中文 → baidu，英文/技术 → bing）
+    const fallbackEngine = pickDefaultEngineForQuery(query, runtime.config.defaultSearchEngine);
+
     if (engines === undefined) {
-        return [runtime.config.defaultSearchEngine as SupportedSearchEngine];
+        return [fallbackEngine as SupportedSearchEngine];
     }
 
     if (!Array.isArray(engines) || engines.some((engine) => typeof engine !== 'string')) {
@@ -87,7 +91,7 @@ function parseRequestedEngines(runtime: MyWebSearchRuntime, engines: unknown): S
     return resolveRequestedEngines(
         normalized,
         runtime.config.allowedSearchEngines,
-        runtime.config.defaultSearchEngine
+        fallbackEngine
     ) as SupportedSearchEngine[];
 }
 
@@ -281,7 +285,7 @@ export async function startLocalDaemon(
             }
 
             const limit = parseLimit(req.body?.limit);
-            const engines = parseRequestedEngines(runtime, req.body?.engines);
+            const engines = parseRequestedEngines(runtime, req.body?.engines, query);
             const searchMode = parseSearchMode(req.body?.searchMode);
             const minResults = parseMinResults(req.body?.minResults);
             const result = await runtime.services.search.execute({

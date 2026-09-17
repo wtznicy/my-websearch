@@ -132,7 +132,7 @@ my-websearch
 
 | 变量名 | 默认值 | 可选值 | 说明 |
 |--------|--------|--------|------|
-| `DEFAULT_SEARCH_ENGINE` | `bing` | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | 默认搜索引擎 |
+| `DEFAULT_SEARCH_ENGINE` | `bing` | `auto`, `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | 默认搜索引擎。`auto` 按查询特征路由：中文自然语言查询用 baidu，英文/技术查询用 bing |
 | `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名 | 限制可用的搜索引擎；默认引擎不在列表时取第一个 |
 | `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | 仅对 Bing 生效：仅请求 / 请求失败回退 Playwright / 强制 Playwright |
 | `BING_IMPERSONATE_TARGET` | `chrome131` | curl-cffi-node 支持的目标（如 `chrome131`、`chrome124`、`chrome116`） | Bing HTTP 模式的浏览器指纹目标。Bing 会按 TLS/HTTP2 指纹对纯 HTTP 请求软降级（返回无关结果）；此选项启用 Chrome 指纹模拟（实测约 2/3 请求拿到完整结果，默认客户端则稳定降级）。原生模块不可用时自动回退默认 HTTP 客户端 |

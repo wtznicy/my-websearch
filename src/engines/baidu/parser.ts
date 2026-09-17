@@ -97,6 +97,23 @@ async function resolveBaiduRedirectUrls(hrefs: string[]): Promise<string[]> {
     return resolved;
 }
 
+/** 百度推广容器/链接特征：推广走加密跳转（baidu.php?url=）且常无描述，需在解析层剔除 */
+function isBaiduAdContainer(element: any, $: any): boolean {
+    const container = $(element);
+    const className = String(container.attr('class') || '');
+    // 经典广告标记：b_ad 容器、ec_ 前缀推广位 class、data-tuiguang 属性
+    return container.hasClass('b_ad')
+        || container.find('.b_ad').length > 0
+        || /(^|\s)ec_\w*/.test(className)
+        || container.attr('data-tuiguang') !== undefined;
+}
+
+function isBaiduAdLink(href: string): boolean {
+    // 推广加密跳转（区别于自然结果的 www.baidu.com/link?url= 中转）：
+    // baidu.php 推广链通常出现在广告位，直接剔除
+    return /\/baidu\.php\?url=/i.test(href);
+}
+
 /**
  * 解析一页百度结果（提取 + 中转链接解析 + 页内去重）。
  * HTTP/impersonate 两条请求路径共用，保证两边的结果结构一致。
@@ -108,11 +125,16 @@ export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>)
     // 第一遍：只收集原始数据，避免在循环里串行 await 解析跳转链
     const collected: Array<{ title: string; href: string; description: string; source: string }> = [];
     for (const element of elements) {
+        // 跳过推广容器（广告伪装成自然结果混入，不在 .b_ad 里的推广位同样要拦）
+        if (isBaiduAdContainer(element, $)) {
+            continue;
+        }
+
         // 标题只取当前结果容器内的第一个 h3（旧选择器会误匹配容器内多个 h3，把多个标题拼成一个）
         const titleElement = $(element).find('h3').first();
         const linkElement = titleElement.find('a[href]').first();
         const href = linkElement.attr('href');
-        if (!href || !href.startsWith('http')) {
+        if (!href || !href.startsWith('http') || isBaiduAdLink(href)) {
             continue;
         }
 

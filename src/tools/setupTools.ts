@@ -7,6 +7,7 @@ import {
     SUPPORTED_SEARCH_ENGINES,
     SupportedSearchEngine
 } from '../core/search/searchEngines.js';
+import { pickDefaultEngineForQuery } from '../core/search/queryEngineRouting.js';
 import {
     validateArticleUrl,
     validateGithubRepositoryUrl,
@@ -242,12 +243,8 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
             searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
             minResults: z.number().int().min(0).optional()
                 .describe("Auto-run additional engines when fewer than this many results come back (default: disabled)"),
-            engines: z.array(getEngineInputSchema()).min(1).default([runtime.config.defaultSearchEngine])
-                .transform(requestedEngines => resolveRequestedEngines(
-                    requestedEngines,
-                    runtime.config.allowedSearchEngines,
-                    runtime.config.defaultSearchEngine
-                ) as [SupportedSearchEngine, ...SupportedSearchEngine[]])
+            engines: z.array(getEngineInputSchema()).min(1).optional()
+                .describe("Search engines to use (default: server default, which may auto-route by query language)")
         },
         {
             // 全部工具均为只读、幂等、开放世界操作（搜索/抓取不修改任何持久状态）
@@ -258,9 +255,12 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
         },
         async ({query, limit = 10, searchMode, engines, minResults}) => {
             try {
-                // 正常走 MCP 时 engines 已由 schema transform 解析；直接调用 handler 的场景
-                // （测试/程序化调用）engines 可能未定义，这里补一个兜底。
-                const resolvedEngines = (engines ?? [runtime.config.defaultSearchEngine]) as [SupportedSearchEngine, ...SupportedSearchEngine[]];
+                // engines 未指定时使用默认引擎；DEFAULT_SEARCH_ENGINE=auto 时按查询特征
+                // （中文自然语言 → baidu，英文/技术 → bing）自动路由，见 queryEngineRouting.ts
+                const fallbackEngine = pickDefaultEngineForQuery(query, runtime.config.defaultSearchEngine);
+                const resolvedEngines = (engines && engines.length > 0
+                    ? resolveRequestedEngines(engines, runtime.config.allowedSearchEngines, fallbackEngine)
+                    : [fallbackEngine]) as [SupportedSearchEngine, ...SupportedSearchEngine[]];
 
                 logTool(`Searching for "${query}" using engines: ${resolvedEngines.join(', ')}`);
 

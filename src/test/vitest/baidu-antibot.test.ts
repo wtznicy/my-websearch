@@ -82,4 +82,35 @@ describe('parseBaiduResultsPage', () => {
         const results = await parseBaiduResultsPage('<html><body>no results</body></html>', new Set<string>());
         expect(results).toEqual([]);
     });
+
+    it('should filter ad containers and baidu.php promoted links', async () => {
+        const pageWithAds = `<!DOCTYPE html>
+<html><body>
+<div id="content_left">
+  <div class="result c-container">
+    <h3 class="c-title"><a href="https://example.com/normal">正常结果</a></h3>
+    <div class="c-font-normal c-color-text">正常描述</div>
+  </div>
+  <div class="result c-container ec_result">
+    <h3 class="c-title"><a href="https://example.com/ad-in-ec">ec_ 推广容器</a></h3>
+    <div class="c-font-normal c-color-text">推广描述</div>
+  </div>
+  <div class="result c-container" data-tuiguang="1">
+    <h3 class="c-title"><a href="https://example.com/ad-tuiguang">data-tuiguang 推广</a></h3>
+  </div>
+  <div class="result c-container">
+    <h3 class="c-title"><a href="https://www.baidu.com/baidu.php?url=encrypted">加密跳转推广</a></h3>
+    <div class="c-font-normal c-color-text">推广描述</div>
+  </div>
+  <div class="result c-container b_ad">
+    <h3 class="c-title"><a href="https://example.com/b-ad">b_ad 容器</a></h3>
+  </div>
+</div>
+</body></html>`;
+
+        const results = await parseBaiduResultsPage(pageWithAds, new Set<string>());
+
+        expect(results).toHaveLength(1);
+        expect(results[0]).toMatchObject({ title: '正常结果', url: 'https://example.com/normal' });
+    });
 });

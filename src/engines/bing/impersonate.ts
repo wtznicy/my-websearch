@@ -2,6 +2,7 @@ import * as zlib from 'node:zlib';
 import { config } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
+import { ensureCurlCaBundle } from '../../utils/systemCa.js';
 
 /**
  * Bing HTTP 模式的浏览器指纹请求层（curl-cffi-node）。
@@ -42,6 +43,9 @@ export function isImpersonateAvailable(): Promise<boolean> {
     if (!availabilityPromise) {
         availabilityPromise = (async () => {
             try {
+                // Windows 下先导出系统根证书给 curl（CURL_CA_BUNDLE），避免首次请求
+                // 报 curl 60 后降级关闭 TLS 校验的一次往返；失败静默走既有降级路径
+                await ensureCurlCaBundle();
                 const mod = await import('curl-cffi-node');
                 // 构造一次 Session 确认原生绑定真实可用（部分平台 prebuild 缺失时会抛错）
                 new mod.Session({ impersonate: config.bingImpersonateTarget, verify: true });

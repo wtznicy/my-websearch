@@ -143,8 +143,15 @@ function isPlaceholderResult(result: SearchResult): boolean {
  * - 同分时保留先到的引擎结果（保持原始顺序稳定）
  * - 去重结果保留先到的引擎（source / engine 字段），不合并多引擎来源
  */
+/**
+ * 跨引擎融合：按规范化 URL 去重，并按"被多少个引擎命中"加权排序。
+ * - 命中引擎数越多，排名越靠前（多数引擎认为相关 => 更可信）
+ * - 同引擎内的重复 URL 只计一次引擎（engineHits 是跨引擎共识，不是出现次数）
+ * - 同分时保留先到的引擎结果（保持原始顺序稳定）
+ * - 去重结果保留先到的引擎（source / engine 字段），不合并多引擎来源
+ */
 export function mergeSearchResults(engineResults: SearchResult[][]): SearchResult[] {
-    const seen = new Map<string, { result: SearchResult; hits: number; order: number }>();
+    const seen = new Map<string, { result: SearchResult; engines: Set<string>; order: number }>();
     let order = 0;
 
     for (const results of engineResults) {
@@ -152,17 +159,17 @@ export function mergeSearchResults(engineResults: SearchResult[][]): SearchResul
             const key = normalizeResultUrl(result.url);
             const existing = seen.get(key);
             if (existing) {
-                existing.hits += 1;
+                existing.engines.add(result.engine);
             } else {
-                seen.set(key, { result, hits: 1, order });
+                seen.set(key, { result, engines: new Set([result.engine]), order });
                 order += 1;
             }
         }
     }
 
     return [...seen.values()]
-        .sort((a, b) => b.hits - a.hits || a.order - b.order)
-        .map(({ result, hits }) => (hits > 1 ? { ...result, engineHits: hits } : result));
+        .sort((a, b) => b.engines.size - a.engines.size || a.order - b.order)
+        .map(({ result, engines }) => (engines.size > 1 ? { ...result, engineHits: engines.size } : result));
 }
 
 // ---------------------------------------------------------------------------

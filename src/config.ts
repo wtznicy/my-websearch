@@ -3,7 +3,8 @@ import ipaddr from 'ipaddr.js';
 
 export interface AppConfig {
     // Search engine configuration
-    defaultSearchEngine: 'bing' | 'duckduckgo' | 'exa' | 'brave' | 'baidu' | 'csdn' | 'juejin' | 'startpage' | 'sogou';
+    // 'auto'：按查询特征（中英文/技术词）自动选择默认引擎，见 queryEngineRouting.ts
+    defaultSearchEngine: 'auto' | 'bing' | 'duckduckgo' | 'exa' | 'brave' | 'baidu' | 'csdn' | 'juejin' | 'startpage' | 'sogou';
     // List of allowed search engines (if empty, all engines are available)
     allowedSearchEngines: string[];
     // Search mode: request only, auto request then fallback, or force Playwright
@@ -90,8 +91,8 @@ export const config: AppConfig = {
     enableHttpServer: process.env.MODE ? ['both', 'http'].includes(process.env.MODE) : true
 };
 
-// Valid search engines list
-const validSearchEngines = ['bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'juejin', 'startpage', 'sogou'];
+// Valid search engines list（'auto' 为查询感知路由的默认引擎哨兵值，不是真实引擎）
+const validSearchEngines = ['auto', 'bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'juejin', 'startpage', 'sogou'];
 const validSearchModes = ['request', 'auto', 'playwright'];
 const validPlaywrightPackages = ['auto', 'playwright', 'playwright-core'];
 const quietStartupLogs = process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true'
