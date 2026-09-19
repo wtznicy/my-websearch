@@ -75,10 +75,10 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
         content = extractArticleContent(html);
     } catch (error: any) {
         const status = error?.response?.status;
-        // 浏览器 Cookie 兜底触发条件：认证/限流（401/403/429）与 Cloudflare WAF 的
-        // 常见拦截状态（503 服务不可用、521 Web Server Is Down）——这些状态下
-        // 换浏览器会话/带 Cookie 往往能拿到内容，直接抛错会浪费兜底路径
-        if (![401, 403, 429, 503, 521].includes(status)) {
+        // 浏览器 Cookie 兜底触发条件：认证/限流（401/403/429）与 5xx 服务端临时故障
+        // （500/502/503 及 Cloudflare WAF 的 521/522）——这些状态下换浏览器会话/带 Cookie
+        // 往往能拿到内容，直接抛错会浪费兜底路径
+        if (![401, 403, 429, 500, 502, 503, 521, 522].includes(status)) {
             throw hintProxyConnectionError(error);
         }
 
