@@ -149,6 +149,16 @@ function parseBooleanFlag(value: unknown, name: string): boolean | undefined {
     return value;
 }
 
+function parseFormat(value: unknown): 'text' | 'markdown' | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value !== 'text' && value !== 'markdown') {
+        throw new Error('format must be one of: text, markdown');
+    }
+    return value;
+}
+
 function parseStartIndex(value: unknown): number | undefined {
     if (value === undefined) {
         return undefined;
@@ -321,7 +331,8 @@ export async function startLocalDaemon(
             const includeLinks = parseBooleanFlag(req.body?.includeLinks, 'includeLinks');
             const raw = parseBooleanFlag(req.body?.raw, 'raw');
             const startIndex = parseStartIndex(req.body?.startIndex);
-            const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, raw, startIndex });
+            const format = parseFormat(req.body?.format);
+            const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, raw, startIndex, format });
             res.json(createSuccessEnvelope(result));
         } catch (error) {
             const classification = classifyFetchError(error);

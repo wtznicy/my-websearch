@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import { config } from '../../config.js';
 import { buildAxiosRequestOptions, hintProxyConnectionError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/urlSafety.js';
+import { htmlToMarkdown } from '../../utils/markdown.js';
 import {
     fetchPageHtmlWithBrowser,
     getBrowserCookieHeader,
@@ -63,6 +64,11 @@ export type FetchWebContentOptions = {
     startIndex?: number;
     /** Include the full Readability DOM HTML in the response (default off — it can be tens of KB of tokens). */
     includeReadableHtml?: boolean;
+    /**
+     * 正文输出格式（默认 text）。'markdown' 时用 turndown 把 Readability 抽取的 DOM
+     * 转为 Markdown——保留围栏代码块语言与 GFM 表格，更适合技术文档与 LLM。
+     */
+    format?: 'text' | 'markdown';
 };
 
 // 请求超时 10s：快速失败优先——慢页面（如部分海外站点直连）10s 内不响应就报错，
@@ -562,7 +568,19 @@ export async function fetchWebContent(
                         excerpt = article.excerpt?.trim() || undefined;
                         siteName = article.siteName?.trim() || undefined;
                         title = article.title?.trim() || title;
-                        extractedContent = readableText;
+                        // format=markdown：从 Readability DOM 转 Markdown（保留代码块语言/表格），
+                        // 转换失败时回退纯文本；默认 format 为 text，行为不变
+                        if (options.format === 'markdown') {
+                            try {
+                                const markdown = htmlToMarkdown(article.content);
+                                extractedContent = markdown || readableText;
+                            } catch (error) {
+                                console.warn('Markdown conversion failed, falling back to plain text:', error instanceof Error ? error.message : String(error));
+                                extractedContent = readableText;
+                            }
+                        } else {
+                            extractedContent = readableText;
+                        }
                     }
                 } else {
                     logReadabilityFallback('parser returned no article content');
@@ -618,6 +636,7 @@ export async function fetchWebContent(
         ...(truncated ? { hasMore: true, nextStartIndex: startIndex + pageContent.length } : {}),
         ...(options.readability ? { readabilityApplied } : {}),
         ...(options.includeReadableHtml && readableHtml ? { readableHtml } : {}),
+        ...(options.format === 'markdown' ? { format: 'markdown' as const } : {}),
         ...(links ? { links } : {}),
         ...(byline ? { byline } : {}),
         ...(excerpt ? { excerpt } : {}),

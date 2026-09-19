@@ -415,6 +415,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
             includeLinks: z.boolean().optional(),
             raw: z.boolean().optional().describe("Return the raw response body (HTML/plain text) without extraction"),
             startIndex: z.number().int().min(0).optional().describe("Character offset to start reading from (for paging through long content)"),
+            format: z.enum(['text', 'markdown']).optional().describe("Content format: 'markdown' preserves fenced code blocks (with language) and GFM tables — better for technical docs"),
         },
         {
             // 全部工具均为只读、幂等、开放世界操作（搜索/抓取不修改任何持久状态）
@@ -423,10 +424,10 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
             idempotentHint: true,
             openWorldHint: true
         },
-        async ({url, maxChars = 30000, readability, includeLinks, raw, startIndex}) => {
+        async ({url, maxChars = 30000, readability, includeLinks, raw, startIndex, format}) => {
             try {
                 logTool(`Fetching web content: ${url}`);
-                const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, raw, startIndex });
+                const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, raw, startIndex, format });
 
                 return {
                     content: [{

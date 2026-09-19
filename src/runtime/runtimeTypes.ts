@@ -27,6 +27,7 @@ export type FetchWebService = {
         includeLinks?: boolean;
         raw?: boolean;
         startIndex?: number;
+        format?: 'text' | 'markdown';
     }): Promise<FetchWebContentResult>;
 };
 
