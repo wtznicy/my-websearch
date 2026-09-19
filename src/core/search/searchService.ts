@@ -1,6 +1,7 @@
 import { SearchResult } from '../../types.js';
 import { AppConfig } from '../../config.js';
 import { distributeLimit, SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
+import { rankSearchResults } from './resultRanking.js';
 import { quoteModelLikeTerms } from '../../utils/queryPreprocess.js';
 import { sleep } from '../../utils/timing.js';
 
@@ -64,6 +65,8 @@ export type SearchExecutionResult = {
     partialFailures: SearchExecutionFailure[];
     /** 级联补位实际成功的引擎（仅当 minResults 触发时出现） */
     cascadedEngines?: string[];
+    /** SERP 首位的直接答案卡片文本（如百度汇率换算/百科摘要卡），LLM 可免抓详情页直接取事实 */
+    directAnswer?: string;
 };
 
 export type SearchExecutionInput = {
@@ -452,6 +455,19 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 .filter((result) => !isPlaceholderResult(result))
                 .slice(0, limit);
 
+            // 轻量重排：位置分 + BM25 相关性 + 域名权威度 + 跨引擎共识（见 resultRanking.ts）
+            merged = rankSearchResults(merged, cleanQuery);
+
+            // 聚合各引擎返回的直接答案卡片（数组属性，取首个非空）
+            let directAnswer: string | undefined;
+            for (const engineResult of engineResults) {
+                const candidate = (engineResult as { directAnswer?: unknown }).directAnswer;
+                if (typeof candidate === 'string' && candidate.length > 0) {
+                    directAnswer = candidate;
+                    break;
+                }
+            }
+
             // 配额 >0 但引擎返回 0 条时，记录为可见的部分失败，便于 agent 区分
             // "该引擎没结果"（no_results，属正常空结果）与 "该引擎没被调用"（配额 0 的情况）。
             // 注意：不能把正常空结果报成 engine_error——冷门查询所有引擎都 0 条时会刷一墙误导性"故障"。
@@ -563,7 +579,8 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 totalResults: merged.length,
                 results: merged,
                 partialFailures,
-                ...(cascadedEngines.length > 0 ? { cascadedEngines } : {})
+                ...(cascadedEngines.length > 0 ? { cascadedEngines } : {}),
+                ...(directAnswer ? { directAnswer } : {})
             };
 
             // 失败/降级结果不缓存：有 partialFailures 或零结果时，下次相同查询应重试，

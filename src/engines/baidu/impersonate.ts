@@ -4,6 +4,7 @@ import { SearchResult } from '../../types.js';
 import { isImpersonateAvailable } from '../bing/impersonate.js';
 export { isImpersonateAvailable } from '../bing/impersonate.js';
 import { isBaiduAntiBotPage, parseBaiduResultsPage } from './parser.js';
+import { loadPersistedBaiduCookies, savePersistedBaiduCookies } from '../../utils/cookieStore.js';
 
 /**
  * Baidu HTTP 模式的浏览器指纹请求层（curl-cffi-node）。
@@ -122,15 +123,23 @@ export async function searchBaiduWithImpersonate(query: string, limit: number): 
         }
     };
 
-    // 首访首页让服务端种下 BAIDUID/BIDUPSID 会话 cookie；失败不致命（部分网络下首页偶发拦截），继续搜索
-    try {
-        await performWithTlsFallback(() => session.get('https://www.baidu.com/', { timeout: 15 }));
-    } catch (error) {
-        console.warn('Baidu impersonate home page request failed, continuing with search:', error instanceof Error ? error.message : String(error));
+    // 会话 cookie：优先复用磁盘持久化的长期项（BAIDUID/BIDUPSID，省一次首页预热往返）；
+    // 无持久化/已过期时走首页预热，并把长期项回写磁盘供下次进程复用
+    const persistedCookies = await loadPersistedBaiduCookies();
+    if (persistedCookies && persistedCookies.length > 0) {
+        session.importCookies(persistedCookies);
+    } else {
+        try {
+            await performWithTlsFallback(() => session.get('https://www.baidu.com/', { timeout: 15 }));
+            await savePersistedBaiduCookies(session.cookies);
+        } catch (error) {
+            console.warn('Baidu impersonate home page request failed, continuing with search:', error instanceof Error ? error.message : String(error));
+        }
     }
 
     const allResults: SearchResult[] = [];
     const seenUrls = new Set<string>();
+    let directAnswer: string | undefined;
     let pageNumber = 0;
 
     while (allResults.length < limit) {
@@ -150,6 +159,9 @@ export async function searchBaiduWithImpersonate(query: string, limit: number): 
         }
 
         const results = await parseBaiduResultsPage(html, seenUrls);
+        if (!directAnswer && results.directAnswer) {
+            directAnswer = results.directAnswer;
+        }
         allResults.push(...results);
 
         if (results.length === 0) {
@@ -159,5 +171,9 @@ export async function searchBaiduWithImpersonate(query: string, limit: number): 
         pageNumber += 1;
     }
 
-    return allResults.slice(0, limit);
+    const finalResults = allResults.slice(0, limit);
+    if (directAnswer) {
+        (finalResults as { directAnswer?: string }).directAnswer = directAnswer;
+    }
+    return finalResults;
 }

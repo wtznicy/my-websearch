@@ -32,6 +32,8 @@ export interface AppConfig {
     // Empty list = all engines use proxy (legacy global-proxy behavior).
     proxyEngines: string[];
     fakeIpCidrs: string[];
+    /** 结果重排的额外权威域名（追加在内置白名单之后，逗号分隔） */
+    authorityDomains: string[];
     fetchWebAllowInsecureTls: boolean;
     // Playwright configuration
     playwrightPackage: 'auto' | 'playwright' | 'playwright-core';
@@ -74,6 +76,9 @@ export const config: AppConfig = {
         [],
     fakeIpCidrs: process.env.FAKE_IP_CIDRS ?
         process.env.FAKE_IP_CIDRS.split(',').map(cidr => cidr.trim()).filter(Boolean) :
+        [],
+    authorityDomains: process.env.SEARCH_AUTHORITY_DOMAINS ?
+        process.env.SEARCH_AUTHORITY_DOMAINS.split(',').map(domain => domain.trim().toLowerCase()).filter(Boolean) :
         [],
     fetchWebAllowInsecureTls: process.env.FETCH_WEB_INSECURE_TLS === 'true',
     playwrightPackage: (process.env.PLAYWRIGHT_PACKAGE as AppConfig['playwrightPackage']) || 'auto',

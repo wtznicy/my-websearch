@@ -34,6 +34,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         useProxy: false,
         proxyEngines: [],
         fakeIpCidrs: [],
+        authorityDomains: [],
         fetchWebAllowInsecureTls: false,
         playwrightPackage: 'auto',
         playwrightModulePath: undefined,

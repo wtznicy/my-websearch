@@ -83,8 +83,29 @@ describe('parseBaiduResultsPage', () => {
         expect(results).toEqual([]);
     });
 
-    it('should filter ad containers and baidu.php promoted links', async () => {
-        const pageWithAds = `<!DOCTYPE html>
+    it('should extract direct answer card and skip noise templates', async () => {
+        const pageWithCard = `<!DOCTYPE html>
+<html><body>
+<div id="content_left">
+  <div class="result-op c-container new-pmd" tpl="new_baikan_index">Python 3.12.0 正式版于 2023 年 10 月 2 日发布。这是该版本的最终稳定版日期。</div>
+  <div class="result c-container new-pmd" tpl="www_index">
+    <h3 class="c-title"><a href="https://example.com/normal">正常结果</a></h3>
+    <div class="c-font-normal c-color-text">正常描述</div>
+  </div>
+  <div class="result-op c-container new-pmd" tpl="recommend_list">大家还在搜 python3.10下载 python最新版本</div>
+</div>
+</body></html>`;
+
+        const results = await parseBaiduResultsPage(pageWithCard, new Set<string>());
+
+        // 卡片无 h3 链接 → 不进结果；噪声 tpl 被跳过；正常结果保留
+        expect(results).toHaveLength(1);
+        expect(results[0].title).toBe('正常结果');
+        // 直接答案卡片文本提取到数组属性
+        expect((results as { directAnswer?: string }).directAnswer).toContain('2023 年 10 月 2 日');
+    });
+
+    it('should filter ad containers and baidu.php promoted links', async () => {        const pageWithAds = `<!DOCTYPE html>
 <html><body>
 <div id="content_left">
   <div class="result c-container">

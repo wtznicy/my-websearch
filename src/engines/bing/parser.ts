@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import * as cheerio from 'cheerio';
-import { SearchResult } from '../../types.js';
+import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { normalizeText as normalizeWhitespace } from '../../utils/text.js';
 
 type LoadedDoc = ReturnType<typeof cheerio.load>;
@@ -186,7 +186,7 @@ function collectFallbackLinks($: any, limit: number, seenUrls: Set<string>, resu
  * @param loadedDoc 可选：调用方已 cheerio.load 好的文档实例，避免同一页被重复解析
  *                  （analyzeBlockedPage + 正式提取各 load 一次 = 每页 3 次 HTML 解析）
  */
-export function parseBingSearchResults(htmlContent: string, limit: number, loadedDoc?: LoadedDoc): SearchResult[] {
+export function parseBingSearchResults(htmlContent: string, limit: number, loadedDoc?: LoadedDoc): EngineSearchResponse {
     const $ = loadedDoc ?? cheerio.load(htmlContent);
     const results: SearchResult[] = [];
     const seenUrls = new Set<string>();
@@ -233,5 +233,12 @@ export function parseBingSearchResults(htmlContent: string, limit: number, loade
         collectFallbackLinks($, limit, seenUrls, results);
     }
 
-    return results.slice(0, limit);
+    const response = results.slice(0, limit) as EngineSearchResponse;
+    // 直接答案卡片（Bing 的 li.b_ans 答案块，如汇率/天气/计算/百科摘要）：
+    // 提取首位文本供 LLM 免抓详情页；长度阈值过滤空壳/碎片
+    const answerCard = $('#b_results > li.b_ans, #b_results > .b_ans').first().text().replace(/\s+/g, ' ').trim();
+    if (answerCard && answerCard.length >= 10) {
+        response.directAnswer = answerCard.slice(0, 300);
+    }
+    return response;
 }

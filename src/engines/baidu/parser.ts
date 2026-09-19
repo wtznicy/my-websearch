@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { SearchResult } from '../../types.js';
+import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { BROWSER_USER_AGENT as BAIDU_USER_AGENT } from '../../utils/constants.js';
 
@@ -115,16 +115,45 @@ function isBaiduAdLink(href: string): boolean {
 }
 
 /**
+ * 百度卡片/噪声的 tpl 标识（实测：卡片条目在 tpl 属性上区分，比 class 更稳定）。
+ * 卡片类（jr_ 金融卡、new_baikan 百科摘要卡等）的首位文本即直接答案；
+ * 噪声类（大家还在搜、反馈条）需在解析层剔除，不给 LLM 造成干扰。
+ */
+const BAIDU_DIRECT_ANSWER_TEMPLATES = /^(jr_|new_baikan|op_|bk_|weather|calc|time_)/;
+const BAIDU_NOISE_TEMPLATES = new Set(['recommend_list', 'uer_feedback', 'san_']);
+
+/** 直接答案卡片文本保留上限（防止把整卡 HTML 文本塞进响应） */
+const DIRECT_ANSWER_MAX_CHARS = 300;
+
+/**
  * 解析一页百度结果（提取 + 中转链接解析 + 页内去重）。
  * HTTP/impersonate 两条请求路径共用，保证两边的结果结构一致。
+ * 返回的数组带 `directAnswer` 属性（若首屏存在汇率/百科等直接答案卡片）。
  */
-export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>): Promise<SearchResult[]> {
+export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>): Promise<EngineSearchResponse> {
     const $ = cheerio.load(html);
     const elements = $('#content_left').children().toArray();
 
     // 第一遍：只收集原始数据，避免在循环里串行 await 解析跳转链
     const collected: Array<{ title: string; href: string; description: string; source: string }> = [];
+    let directAnswer: string | undefined;
     for (const element of elements) {
+        const template = String($(element).attr('tpl') || '');
+
+        // 噪声条目（大家还在搜/反馈条）直接跳过
+        if (BAIDU_NOISE_TEMPLATES.has(template)) {
+            continue;
+        }
+
+        // 直接答案卡片：提取首位文本作为 directAnswer（汇率换算、百科摘要等）
+        if (!directAnswer && BAIDU_DIRECT_ANSWER_TEMPLATES.test(template)) {
+            const cardText = normalizeWhitespace($(element).text());
+            if (cardText && cardText.length >= 10) {
+                directAnswer = cardText.slice(0, DIRECT_ANSWER_MAX_CHARS);
+            }
+            // 卡片通常没有可跳转的自然结果链接，继续走后续解析（若有 h3 链接则同时作为结果保留）
+        }
+
         // 跳过推广容器（广告伪装成自然结果混入，不在 .b_ad 里的推广位同样要拦）
         if (isBaiduAdContainer(element, $)) {
             continue;
@@ -172,5 +201,9 @@ export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>)
         });
     });
 
-    return results;
+    const response = results as EngineSearchResponse;
+    if (directAnswer) {
+        response.directAnswer = directAnswer;
+    }
+    return response;
 }

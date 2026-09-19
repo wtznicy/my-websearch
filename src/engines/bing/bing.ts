@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { AppConfig, config } from '../../config.js';
-import { SearchResult } from '../../types.js';
+import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { prepareStealthPage } from '../../utils/browserStealth.js';
 import { isImpersonateAvailable, searchBingWithImpersonate } from './impersonate.js';
@@ -567,6 +567,7 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
     }
 
     let allResults: SearchResult[] = [];
+    let directAnswer: string | undefined;
     let pageNumber = 0;
 
     while (allResults.length < limit) {
@@ -588,6 +589,9 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
         }
 
         const results = parseBingSearchResults(html, limit - allResults.length, $);
+        if (!directAnswer && results.directAnswer) {
+            directAnswer = results.directAnswer;
+        }
         allResults = allResults.concat(results);
 
         if (results.length === 0) {
@@ -598,7 +602,11 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
         pageNumber += 1;
     }
 
-    return allResults.slice(0, limit);
+    const httpResults = allResults.slice(0, limit) as EngineSearchResponse;
+    if (directAnswer) {
+        httpResults.directAnswer = directAnswer;
+    }
+    return httpResults;
 }
 
 async function searchBingWithPlaywright(query: string, limit: number): Promise<SearchResult[]> {
@@ -627,6 +635,7 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
         try {
             const allResults: SearchResult[] = [];
             const seenUrls = new Set<string>();
+            let directAnswer: string | undefined;
 
             for (let pageNumber = 0; allResults.length < limit; pageNumber += 1) {
                 if (pageNumber === 0) {
@@ -651,7 +660,11 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
                     console.warn(`Playwright Bing page contains suspicious keywords but also has results, skipping block detection: ${pageState.detectedKeywords.join(', ')}`);
                 }
 
-                const pageResults = parseBingSearchResults(html, limit - allResults.length, $)
+                const parsedPage = parseBingSearchResults(html, limit - allResults.length, $);
+                if (!directAnswer && parsedPage.directAnswer) {
+                    directAnswer = parsedPage.directAnswer;
+                }
+                const pageResults = parsedPage
                     .filter((result) => {
                         if (seenUrls.has(result.url)) {
                             return false;
@@ -668,7 +681,10 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
                 }
             }
 
-            const finalResults = allResults.slice(0, limit);
+            const finalResults = allResults.slice(0, limit) as EngineSearchResponse;
+            if (directAnswer) {
+                finalResults.directAnswer = directAnswer;
+            }
             if (finalResults.length === 0 && hasSiteOperator(query)) {
                 throw new Error('Bing Playwright mode returned no results for a site:-restricted query. Retry without the site: prefix.');
             }

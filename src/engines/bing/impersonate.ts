@@ -1,6 +1,6 @@
 import * as zlib from 'node:zlib';
 import { config } from '../../config.js';
-import { SearchResult } from '../../types.js';
+import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { ensureCurlCaBundle } from '../../utils/systemCa.js';
 
@@ -134,6 +134,7 @@ export async function searchBingWithImpersonate(query: string, limit: number): P
     const sessionFactory = (verify: boolean) => new cachedModule!.Session({ impersonate: config.bingImpersonateTarget, verify });
     // 同一会话内复用连接（更接近真实浏览器的连接池行为）
     let allResults: SearchResult[] = [];
+    let directAnswer: string | undefined;
     let pageNumber = 0;
 
     while (allResults.length < limit) {
@@ -146,6 +147,9 @@ export async function searchBingWithImpersonate(query: string, limit: number): P
         }
 
         const results = parseBingSearchResults(html, limit - allResults.length);
+        if (!directAnswer && results.directAnswer) {
+            directAnswer = results.directAnswer;
+        }
         allResults = allResults.concat(results);
 
         if (results.length === 0) {
@@ -155,5 +159,9 @@ export async function searchBingWithImpersonate(query: string, limit: number): P
         pageNumber += 1;
     }
 
-    return allResults.slice(0, limit);
+    const finalResults = allResults.slice(0, limit) as EngineSearchResponse;
+    if (directAnswer) {
+        finalResults.directAnswer = directAnswer;
+    }
+    return finalResults;
 }

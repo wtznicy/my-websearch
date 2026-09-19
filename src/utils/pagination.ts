@@ -27,6 +27,9 @@ export async function paginateSearch<T>(options: PaginateSearchOptions<T>): Prom
     } = options;
 
     const allResults: T[] = [];
+    // 直接答案卡片（百度汇率/百科卡等）：fetchPage 返回值上的数组属性，
+    // concat/slice 会丢失——在循环里捕获，最终挂回返回数组供上层聚合
+    let directAnswer: string | undefined;
     let page = initialPage;
 
     for (let pageIndex = 0; pageIndex < maxPages && allResults.length < limit; pageIndex += 1) {
@@ -36,6 +39,10 @@ export async function paginateSearch<T>(options: PaginateSearchOptions<T>): Prom
             await new Promise((resolve) => setTimeout(resolve, delay));
         }
         const results = await fetchPage(page);
+        const pageAnswer = (results as { directAnswer?: unknown })?.directAnswer;
+        if (!directAnswer && typeof pageAnswer === 'string' && pageAnswer) {
+            directAnswer = pageAnswer;
+        }
         allResults.push(...results);
         if (results.length === 0) {
             break;
@@ -43,5 +50,9 @@ export async function paginateSearch<T>(options: PaginateSearchOptions<T>): Prom
         page += pageStep;
     }
 
-    return allResults.slice(0, limit);
+    const finalResults = allResults.slice(0, limit);
+    if (directAnswer) {
+        (finalResults as { directAnswer?: string }).directAnswer = directAnswer;
+    }
+    return finalResults;
 }
