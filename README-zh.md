@@ -56,7 +56,7 @@ my-websearch
       "args": ["-y", "my-websearch@latest"],
       "env": {
         "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "bing"
+        "DEFAULT_SEARCH_ENGINE": "auto"
       }
     }
   }
@@ -73,7 +73,7 @@ my-websearch
       "args": ["C:/你的路径/my-websearch/build/index.js"],
       "env": {
         "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "bing"
+        "DEFAULT_SEARCH_ENGINE": "auto"
       }
     }
   }
@@ -132,7 +132,7 @@ my-websearch
 
 | 变量名 | 默认值 | 可选值 | 说明 |
 |--------|--------|--------|------|
-| `DEFAULT_SEARCH_ENGINE` | `bing` | `auto`, `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | 默认搜索引擎。`auto` 按查询特征路由：中文自然语言查询用 baidu，英文/技术查询用 bing |
+| `DEFAULT_SEARCH_ENGINE` | `auto` | `auto`, `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | 默认搜索引擎。`auto` 按查询特征路由：中文自然语言查询用 baidu，英文/技术查询用 bing |
 | `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名 | 限制可用的搜索引擎；默认引擎不在列表时取第一个 |
 | `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | 仅对 Bing 生效：仅请求 / 请求失败回退 Playwright / 强制 Playwright |
 | `BING_IMPERSONATE_TARGET` | `chrome131` | curl-cffi-node 支持的目标（如 `chrome131`、`chrome124`、`chrome116`） | Bing HTTP 模式的浏览器指纹目标。Bing 会按 TLS/HTTP2 指纹对纯 HTTP 请求软降级（返回无关结果）；此选项启用 Chrome 指纹模拟（实测约 2/3 请求拿到完整结果，默认客户端则稳定降级）。原生模块不可用时自动回退默认 HTTP 客户端 |
@@ -220,7 +220,7 @@ USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx my-websearch@latest
 USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brave,startpage npx my-websearch@latest
 
 # 默认引擎使用 bing
-DEFAULT_SEARCH_ENGINE=bing npx my-websearch@latest
+DEFAULT_SEARCH_ENGINE=auto npx my-websearch@latest
 
 # 关闭 Bing 的 Playwright 兜底，反爬时自动级联其他引擎
 BING_PLAYWRIGHT_FALLBACK=false npx my-websearch@latest
@@ -248,6 +248,25 @@ PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium 
 ```
 
 **建议**：个人日常使用若不想为 Bing 反爬启动重浏览器（3-8 秒冷启动、约 400MB 内存），设置 `BING_PLAYWRIGHT_FALLBACK=false`，并在搜索时让引擎分担压力：`engines: ["duckduckgo", "brave"]`。
+
+### 推荐/必配环境变量（部署策略已移到服务端，工具参数仅作覆盖）
+
+| 变量 | 推荐值 | 作用 |
+|---|---|---|
+| `DEFAULT_SEARCH_ENGINE` | `auto` | 按查询语言自动路由（中文 → baidu，英文 → bing）；已为默认值 |
+| `DEFAULT_MIN_RESULTS` | `5` | 结果不足时自动级联补跑其他引擎；已为默认值 |
+| `USE_PROXY` + `PROXY_URL` | `true` + `http://127.0.0.1:7897` | 海外引擎走代理（按你的代理端口）；不配则自动检测系统代理 |
+| `PROXY_ENGINES` | `duckduckgo,exa,brave,startpage` | 只让海外引擎走代理，国内引擎保持直连 |
+| `FAKE_IP_CIDRS` | `198.18.0.0/15` | Clash TUN/fake-ip 模式（已默认包含该网段，显式写便于审计）|
+
+**各客户端的 MCP 配置位置**（把上面的 env 填进对应文件的 `env` 字段）：
+
+| 客户端 | 配置文件 |
+|---|---|
+| DSH (DeepSeek Harness) | `cordis.patch.yml` → `mcp-mywebsearch.env` |
+| Gemini | `mcp_config.json` → `mcpServers.mywebsearch.env` |
+| ZCode / zcode | `~/.zcode/cli/config.json` → `mcp.servers.mywebsearch.env` |
+| Reasonix | `~/.reasonix/config.toml`（注意同时设 `PROXY_URL`，否则走代码默认 `7890`）|
 
 ## CLI 与本地 daemon
 

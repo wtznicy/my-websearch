@@ -16,6 +16,41 @@ let dnsLookupForSafety: DnsLookupFn = async (hostname) => {
     return dns.lookup(hostname, { all: true, verbatim: true });
 };
 
+/** 常见 fake-IP 网段（代理伪造）：命中但未被 fakeIpCidrs 覆盖时，错误信息里给出配置提示 */
+const COMMON_FAKE_IP_HINTS: Array<{ cidr: string; example: string }> = [
+    { cidr: '198.18.0.0/15', example: '198.18.0.0/15' },
+    { cidr: '198.19.0.0/16', example: '198.19.0.0/16' },
+    { cidr: '240.0.0.0/4', example: '240.0.0.0/4' }
+];
+
+/** 若被拦地址落在常见 fake-IP 段且不在配置中，附加可自愈的提示 */
+export function hintFakeIpBlockedAddress(address: string): string {
+    try {
+        if (isIP(address) === 0) {
+            return '';
+        }
+        const parsed = ipaddr.parse(address);
+        for (const { cidr, example } of COMMON_FAKE_IP_HINTS) {
+            if (parsed.match(ipaddr.parseCIDR(cidr))) {
+                const configured = config.fakeIpCidrs.some((entry) => {
+                    try {
+                        return parsed.match(ipaddr.parseCIDR(entry));
+                    } catch {
+                        return false;
+                    }
+                });
+                if (!configured) {
+                    return ` | Hint: 该地址属于常见 fake-IP 网段（代理伪造）。若使用 Clash TUN/fake-ip 模式，请设置 FAKE_IP_CIDRS=${example}，搜索与抓取即可恢复`;
+                }
+                return '';
+            }
+        }
+        return '';
+    } catch {
+        return '';
+    }
+}
+
 function isAllowedFakeIp(address: string): boolean {
     if (isIP(address) === 0 || config.fakeIpCidrs.length === 0) {
         return false;
@@ -116,7 +151,8 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
     if (blackholeHit) {
         throw new Error(`${label} resolves to ${blackholeHit.address} (0.0.0.0/8 blackhole) — likely local DNS blocking/pollution; check DNS or enable a proxy`);
     }
-    if (resolved.some((entry) => isPrivateOrLocalHostname(entry.address) && !isAllowedFakeIp(entry.address))) {
-        throw new Error(`${label} resolves to a private or local network target, which is not allowed`);
+    const blockedEntry = resolved.find((entry) => isPrivateOrLocalHostname(entry.address) && !isAllowedFakeIp(entry.address));
+    if (blockedEntry) {
+        throw new Error(`${label} resolves to a private or local network target, which is not allowed${hintFakeIpBlockedAddress(blockedEntry.address)}`);
     }
 }

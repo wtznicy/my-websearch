@@ -120,6 +120,11 @@ function authorityScore(url: string): number {
     if (getAuthorityDomains().some((domain) => host === domain || host.endsWith(`.${domain}`))) {
         return 1;
     }
+    // 官方文档域：docs.*、*.github.io（官方文档站）、developer.*、*.readthedocs.io
+    // ——实测英文查询失败模式多为"召回到无关仓库/镜像站"，官方文档域加权可压制
+    if (/^docs\./.test(host) || /\.github\.io$/.test(host) || /^developer\./.test(host) || /\.readthedocs\.io$/.test(host)) {
+        return 0.9;
+    }
     if (/\.(gov|gov\.cn|edu|edu\.cn|ac\.cn)$/.test(host)) {
         return 0.8;
     }

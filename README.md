@@ -137,17 +137,17 @@ The fastest way to get started:
 npx my-websearch@latest
 
 # With environment variables (Linux/macOS)
-DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true npx my-websearch@latest
+DEFAULT_SEARCH_ENGINE=auto ENABLE_CORS=true npx my-websearch@latest
 
 # Windows PowerShell
 $env:DEFAULT_SEARCH_ENGINE="bing"; $env:ENABLE_CORS="true"; npx my-websearch@latest
 
 # Windows CMD
-set MODE=stdio && set DEFAULT_SEARCH_ENGINE=bing && npx my-websearch@latest
+set MODE=stdio && set DEFAULT_SEARCH_ENGINE=auto && npx my-websearch@latest
 
 # Cross-platform (requires cross-env, Used for local development)
 npm install -g my-websearch
-npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true my-websearch
+npx cross-env DEFAULT_SEARCH_ENGINE=auto ENABLE_CORS=true my-websearch
 ```
 
 **Environment Variables:**
@@ -156,7 +156,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true my-websearch
 |----------|-------------------------|---------|-------------|
 | `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
 | `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `auto`, `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine. `auto` routes by query: Chinese natural-language queries go to baidu, English/technical queries to bing |
+| `DEFAULT_SEARCH_ENGINE` | `auto`                  | `auto`, `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine. `auto` routes by query: Chinese natural-language queries go to baidu, English/technical queries to bing |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
 | `PROXY_ENGINES` | empty (all engines) | Comma-separated engine names | With `USE_PROXY=true`, **only** the engines in this whitelist route through the proxy; others stay direct. Empty = all engines proxied (legacy global behavior). Recommended for mainland China: `PROXY_ENGINES=duckduckgo,exa,brave,startpage` (overseas engines via proxy, domestic engines direct) |
@@ -247,7 +247,7 @@ SEARCH_MODE=auto npx my-websearch@latest
 SEARCH_MODE=request npx my-websearch@latest
 
 # Full configuration
-DEFAULT_SEARCH_ENGINE=bing ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx my-websearch@latest
+DEFAULT_SEARCH_ENGINE=auto ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx my-websearch@latest
 ```
 
 **Proxy guidance for mainland China:**
@@ -404,7 +404,7 @@ npm run build
       "command": "npx",
       "env": {
         "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "bing",
+        "DEFAULT_SEARCH_ENGINE": "auto",
         "ALLOWED_SEARCH_ENGINES": "bing,duckduckgo,exa"
       }
     }
@@ -426,7 +426,7 @@ Windows NPX configuration:
       ],
       "env": {
         "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "bing",
+        "DEFAULT_SEARCH_ENGINE": "auto",
         "SYSTEMROOT": "C:/Windows"
       }
     }
@@ -452,7 +452,7 @@ Proxy and TLS notes:
       "args": ["C:/path/to/your/project/build/index.js"],
       "env": {
         "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "bing",
+        "DEFAULT_SEARCH_ENGINE": "auto",
         "ALLOWED_SEARCH_ENGINES": "bing,duckduckgo,exa"
       }
     }
@@ -675,6 +675,25 @@ Since this tool works by scraping multi-engine search results, please note the f
    - For Clash fake-ip / TUN setups, configure synthetic DNS ranges with `FAKE_IP_CIDRS` (for example `198.18.0.0/15`)
    - `FAKE_IP_CIDRS` is **required** for Clash TUN/fake-ip modes: DNS answers in that range (e.g. `198.18.x.x`) are otherwise blocked by the SSRF guard as private-network targets (`DNS lookup ... is private IP address`), which breaks search and fetch
    - Without `USE_PROXY`, the server auto-detects the OS-level proxy (1.0.11+): just run your proxy client and overseas engines work; with `USE_PROXY=true` configured but the proxy client down, overseas engines fail fast instead
+
+### Recommended environment (deployment policy lives server-side; tool args only override)
+
+| Variable | Value | Purpose |
+|---|---|---|
+| `DEFAULT_SEARCH_ENGINE` | `auto` | Route by query language (Chinese → baidu, English → bing); already the default |
+| `DEFAULT_MIN_RESULTS` | `5` | Cascade to other engines when results are insufficient; already the default |
+| `USE_PROXY` + `PROXY_URL` | `true` + `http://127.0.0.1:7897` | Overseas engines via proxy; without it, the OS proxy is auto-detected |
+| `PROXY_ENGINES` | `duckduckgo,exa,brave,startpage` | Proxy only overseas engines; domestic engines stay direct |
+| `FAKE_IP_CIDRS` | `198.18.0.0/15` | Clash TUN/fake-ip setups (the range is included by default; set it explicitly for auditability) |
+
+**Where each client's MCP config lives** (put the env vars into the corresponding `env` field):
+
+| Client | Config file |
+|---|---|
+| DSH (DeepSeek Harness) | `cordis.patch.yml` → `mcp-mywebsearch.env` |
+| Gemini | `mcp_config.json` → `mcpServers.mywebsearch.env` |
+| ZCode / zcode | `~/.zcode/cli/config.json` → `mcp.servers.mywebsearch.env` |
+| Reasonix | `~/.reasonix/config.toml` (also set `PROXY_URL`, otherwise the code default `7890` is used) |
 
 ## Contributing
 
