@@ -179,16 +179,16 @@ export function relevanceScores(results: SearchResult[], query: string): number[
 }
 
 /**
- * 统计"可用结果"数：必须是**命中查询稀有词**、且不是站点入口页（非导航查询下）的结果。
+ * 统计"可用结果"数：必须是**命中查询区分性词**、且不是站点入口页（非导航查询下）的结果。
  *
- * 为何不用简单的 BM25 > 0：通用词命中会放行词义漂移结果——实测
- * query "model context protocol specification" 在 bing 上返回
- * "Model（英语单词）_百度百科 / 特斯拉 Model Y"（只命中通用词 "model"，
- * 与区分性词 context/protocol/specification 零重叠）。这类噪声若计入"可用"，
- * 级联就不会补跑（结果条数够了），真实内容永远进不来。
+ * 区分性词判据（与池子大小无关，经典 IDF 口径）：
+ * - `df === N`（所有候选都含，如品牌查询里的品牌词 "model"）→ 无区分度，剔除；
+ * - `df === 0`（无人命中）→ 与本次结果无关，剔除；
+ * - 余下 `0 < df < N` 的词即区分性词，命中**任一**即视为与查询有实质关联。
  *
- * 稀有词定义：在本次结果集中 documentFrequency 低于一半结果数的查询词；
- * 若所有查询词都常见（无稀有词），退化为"命中任一查询词"。
+ * 早期版本用 `df < floor(N/2)` 界定稀有词，存在"池子刚好凑够 minResults 时判据失效"的
+ * 漏洞：N=5 时区分词 df=2 卡在边界外（2 < 2 不成立）→ 无稀有词 → 回退成"命中任一 token"
+ * → 只含通用词的噪声也算可用 → 级联不触发。现在回退分支要求**至少命中 2 个不同 token**。
  */
 export function countUsableResults(results: SearchResult[], query: string): number {
     const queryTokens = tokenizeForRanking(query || '');
@@ -197,6 +197,7 @@ export function countUsableResults(results: SearchResult[], query: string): numb
     }
 
     const docs = results.map((result) => tokenizeForRanking(`${result.title} ${result.description}`));
+    const total = results.length;
     const documentFrequency = new Map<string, number>();
     for (const doc of docs) {
         const unique = new Set(doc);
@@ -207,9 +208,20 @@ export function countUsableResults(results: SearchResult[], query: string): numb
         }
     }
 
-    const rarityBar = Math.max(1, Math.floor(results.length * 0.5));
-    const rareTerms = queryTokens.filter((token) => (documentFrequency.get(token) || 0) < rarityBar);
-    const requiredTerms = rareTerms.length > 0 ? rareTerms : queryTokens;
+    // 区分性词口径（与池子大小无关的经典 IDF 近似）：
+    // - df === 0：无人命中，与本批结果无关 → 剔除
+    // - df === total：全员命中（品牌查询里的品牌词）→ 无区分度 → 剔除
+    // - df > ceil(sqrt(total))：出现得太普遍（如 5 条里 4 条都含的通用词）→ 剔除
+    //   （仅靠 df < total 不够：实测 "model" 在 5 条里 df=4 仍会放行纯噪声结果）
+    const rarityCap = Math.ceil(Math.sqrt(total));
+    const discriminativeTerms = queryTokens.filter((token) => {
+        const df = documentFrequency.get(token) || 0;
+        return df > 0 && df < total && df <= rarityCap;
+    });
+
+    // 有区分性词：命中任一即算可用；否则（query 全是通用词）回退为"至少命中 2 个不同 token"
+    const requiredTerms = discriminativeTerms.length > 0 ? discriminativeTerms : queryTokens;
+    const minHits = discriminativeTerms.length > 0 ? 1 : Math.min(2, requiredTerms.length);
 
     const navigational = isNavigationalQuery(query);
     let usable = 0;
@@ -218,7 +230,8 @@ export function countUsableResults(results: SearchResult[], query: string): numb
             return;
         }
         const docTokens = new Set(docs[index]);
-        if (requiredTerms.some((token) => docTokens.has(token))) {
+        const hits = requiredTerms.filter((token) => docTokens.has(token)).length;
+        if (hits >= minHits) {
             usable += 1;
         }
     });
