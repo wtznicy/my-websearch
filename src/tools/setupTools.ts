@@ -8,7 +8,7 @@ import {
     SupportedSearchEngine
 } from '../core/search/searchEngines.js';
 import { pickDefaultEngineForQuery } from '../core/search/queryEngineRouting.js';
-import { mergeMultiQueryResults } from '../core/search/multiQuery.js';
+import { mergeMultiQueryResults, mergeEngineMetricsAcrossQueries } from '../core/search/multiQuery.js';
 import {
     validateArticleUrl,
     validateGithubRepositoryUrl,
@@ -326,19 +326,27 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
 
                 // text 保持 JSON（可被客户端 JSON.parse——紧凑格式省 token；模型友好的引用引导在工具描述里）
                 const failures = executed.flatMap((one) => one.partialFailures);
+                // 顶层 engines 用并集（扇出时各 query 可能路由到不同引擎，只报第一个会与结果不符）
+                const allEngines = [...new Set(executed.flatMap((one) => one.engines))];
+                const allMetrics = mergeEngineMetricsAcrossQueries(executed.map((one) => one.engineMetrics));
                 return {
                     content: [{
                         type: 'text',
                         text: JSON.stringify({
-                            ...(queryList.length > 1 ? { queries: queryList } : { query: queryList[0] }),
-                            engines: executed[0].engines,
+                            ...(queryList.length > 1
+                                ? {
+                                    queries: queryList,
+                                    queryEngines: queryList.map((q, index) => ({ query: q, engines: executed[index].engines }))
+                                }
+                                : { query: queryList[0] }),
+                            engines: allEngines,
                             totalResults: mergedResults.length,
                             results: mergedResults,
                             partialFailures: failures,
                             ...(executed.find((one) => one.directAnswer)?.directAnswer
                                 ? { directAnswer: executed.find((one) => one.directAnswer)!.directAnswer }
                                 : {}),
-                            ...(executed[0].engineMetrics ? { engineMetrics: executed[0].engineMetrics } : {})
+                            ...(allMetrics.length > 0 ? { engineMetrics: allMetrics } : {})
                         })
                     }]
                 };

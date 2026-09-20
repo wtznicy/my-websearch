@@ -1,15 +1,25 @@
 import { SearchResult } from '../../types.js';
 
 /**
- * 多查询扇出结果的合并：按规范化 URL 去重（保留首次出现），
- * 用于 search 工具一次接收 1-4 个 query（覆盖不同意图）时的结果融合。
+ * 多查询扇出结果的公平合并。
  *
- * 注意与 mergeSearchResults 的区别：后者处理"同一查询的多个引擎结果"并
- * 计算 engineHits（跨引擎共识）；这里是"多个不同查询各自已融合的结果"，
- * 不重算 engineHits（各条保留自身查询内的共识值）。
+ * 背景：此前的"顺序拼接 + 按 limit 截断"会让返回最多的 query（通常是首个）
+ * 赢者通吃——实测 2 query（英文+中文）时，bing 的两个英文 query 贡献整列、
+ * limit 6 里占 5 条，唯一有效的中文结果被挤到最后一位，limit 再小就直接消失。
+ *
+ * 策略（两轮）：
+ * 1. 每个 query 保底配额 perQueryQuota = max(2, ceil(limit / queryCount))，
+ *    按序取各自前 N 条（去重）；
+ * 2. 若保底轮未填满 limit，按 round-robin 从各 query 剩余结果里补足。
+ *
+ * URL 去重贯穿全程（保留首次出现）。各 query 内部结果已在 searchService 完成
+ * rerank，这里只保证"多意图"的配额公平，不再重排。
  */
 
-/** URL 归一化：去 hash、常见跟踪参数（与 searchService 的归一化保持一致的简化版） */
+/** 报告/统计用的聚合指标形状（与 SearchExecutionResult.engineMetrics 一致） */
+export type EngineMetric = { engine: string; ms: number; count: number; error?: string };
+
+/** URL 归一化：去 hash 与常见跟踪参数（与 searchService 的归一化保持一致的简化版） */
 function normalizeForDedupe(rawUrl: string): string {
     try {
         const url = new URL(rawUrl);
@@ -29,24 +39,89 @@ export function mergeMultiQueryResults(
     perQueryResults: SearchResult[][],
     limit: number
 ): { results: SearchResult[]; totalBeforeDedupe: number } {
-    const seen = new Set<string>();
-    const results: SearchResult[] = [];
-    let totalBeforeDedupe = 0;
+    const queryCount = perQueryResults.length;
+    const totalBeforeDedupe = perQueryResults.reduce((sum, list) => sum + list.length, 0);
 
-    for (const queryResults of perQueryResults) {
-        for (const result of queryResults) {
-            totalBeforeDedupe += 1;
-            const key = normalizeForDedupe(result.url);
-            if (seen.has(key)) {
-                continue;
+    if (queryCount === 0 || limit <= 0) {
+        return { results: [], totalBeforeDedupe };
+    }
+
+    const seen = new Set<string>();
+    const picked: SearchResult[] = [];
+
+    const tryTake = (result: SearchResult): boolean => {
+        const key = normalizeForDedupe(result.url);
+        if (seen.has(key)) {
+            return false;
+        }
+        seen.add(key);
+        picked.push(result);
+        return true;
+    };
+
+    // 单查询：退化为去重 + 截断
+    if (queryCount === 1) {
+        for (const result of perQueryResults[0]) {
+            if (picked.length >= limit) {
+                break;
             }
-            seen.add(key);
-            results.push(result);
-            if (results.length >= limit) {
-                return { results, totalBeforeDedupe };
+            tryTake(result);
+        }
+        return { results: picked, totalBeforeDedupe };
+    }
+
+    // 第一轮：每个 query 保底配额（保证多意图都有代表）
+    const perQueryQuota = Math.max(2, Math.ceil(limit / queryCount));
+    const cursors = perQueryResults.map((list) => {
+        let taken = 0;
+        let index = 0;
+        while (index < list.length && taken < perQueryQuota && picked.length < limit) {
+            if (tryTake(list[index])) {
+                taken += 1;
+            }
+            index += 1;
+        }
+        return index;
+    });
+
+    // 第二轮：round-robin 补足剩余名额（保底轮之后仍有空间时）
+    let progress = true;
+    while (picked.length < limit && progress) {
+        progress = false;
+        for (let i = 0; i < queryCount && picked.length < limit; i += 1) {
+            const list = perQueryResults[i];
+            while (cursors[i] < list.length) {
+                const result = list[cursors[i]];
+                cursors[i] += 1;
+                if (tryTake(result)) {
+                    progress = true;
+                    break;
+                }
             }
         }
     }
 
-    return { results, totalBeforeDedupe };
+    return { results: picked.slice(0, limit), totalBeforeDedupe };
+}
+
+/** 多查询的 engineMetrics 合并：按引擎聚合（ms/count 求和，error 取首个非空） */
+export function mergeEngineMetricsAcrossQueries(
+    metricLists: Array<EngineMetric[] | undefined>
+): EngineMetric[] {
+    const byEngine = new Map<string, EngineMetric>();
+    for (const list of metricLists) {
+        for (const metric of list ?? []) {
+            const existing = byEngine.get(metric.engine);
+            if (!existing) {
+                byEngine.set(metric.engine, { ...metric });
+                continue;
+            }
+            existing.ms += metric.ms;
+            existing.count += metric.count;
+            if (!existing.error && metric.error) {
+                existing.error = metric.error;
+            }
+        }
+    }
+    return [...byEngine.values()];
 }
