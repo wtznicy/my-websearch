@@ -138,6 +138,7 @@ my-websearch
 | `BING_IMPERSONATE_TARGET` | `chrome131` | curl-cffi-node 支持的目标（如 `chrome131`、`chrome124`、`chrome116`） | Bing HTTP 模式的浏览器指纹目标。Bing 会按 TLS/HTTP2 指纹对纯 HTTP 请求软降级（返回无关结果）；此选项启用 Chrome 指纹模拟（实测约 2/3 请求拿到完整结果，默认客户端则稳定降级）。原生模块不可用时自动回退默认 HTTP 客户端 |
 | `BING_PLAYWRIGHT_FALLBACK` | `true` | `true`, `false` | `false` 时 Bing 被反爬直接报错，交给 `minResults` 级联换轻量引擎，不启动 Playwright 浏览器 |
 | `STARTPAGE_PLAYWRIGHT_FALLBACK` | `true` | `true`, `false` | `false` 时 startpage 的 Anubis 反爬预热不启动 Playwright 浏览器（省 ~400MB 内存与秒级延迟），直接报错交给 `minResults` 级联换轻量引擎 |
+| `FAKE_IP_CIDRS` | 空 | 逗号分隔的 CIDR 列表 | 把这些网段的 DNS 解析结果视为 **fake-IP**（代理伪造）而不按私网拦截。**Clash TUN / fake-ip 模式用户必配**：`FAKE_IP_CIDRS=198.18.0.0/15`——否则域名被解析为 198.18.x.x 时，SSRF 防护会把正常抓取当作私网访问拦截（报 `DNS lookup ... is private IP address`）。字面私网地址与其他私网 DNS 解析仍会被拦截 |
 | `ENABLE_CORS` | `false` | `true`, `false` | 启用 CORS |
 | `CORS_ORIGIN` | `*` | 任意来源 | CORS 来源配置 |
 | `USE_PROXY` | `false` | `true`, `false` | 启用 HTTP 代理 |
@@ -315,6 +316,8 @@ MCP 共提供 7 个工具：
 ## 使用限制
 
 - **中国大陆网络**：`duckduckgo`、`exa`、`brave`、`startpage` 为境外引擎，**不开代理会直接超时/失败**；`bing`、`baidu`、`csdn`、`juejin`、`sogou` 可直连。建议配置 `USE_PROXY=true` + `PROXY_ENGINES=duckduckgo,exa,brave,startpage`，让境外引擎走代理、国内引擎保持直连。若搜索时未开代理而包含境外引擎，它们会以 `partialFailures` 形式报错，其余结果仍正常返回——属预期行为
+- **Clash TUN / fake-ip 模式**：这类模式下 DNS 会把公网域名解析成伪造网段（如 `198.18.x.x`），SSRF 防护会因此把正常抓取误判为私网访问（报 `DNS lookup ... is private IP address`）。**必须配置 `FAKE_IP_CIDRS=198.18.0.0/15`**（或你的代理使用的伪造网段），搜索与抓取才可用
+- **代理可达性**：`USE_PROXY=true` 时若代理软件未启动，境外引擎会快速失败（提示需要代理）；也可去掉 `USE_PROXY` 走系统代理自动检测（1.0.11+ 支持，开代理软件即可用）
 - 未开代理时境外引擎（`duckduckgo`/`brave`/`startpage`）会**快速失败**而不是挂满超时：程序会先探测直连可达性（3 秒超时、失败重试 1 次、结果缓存 5 分钟），不可达立即返回"需要代理，或改用国内引擎"；海外直连用户不受影响。`exa` 不参与探测——`api.exa.ai` 国内可直连（仅需 `EXA_API_KEY`）。已配置代理的引擎不探测，直接走代理
 - 搜索引擎为免费接口，可能遇到反爬/限流；Bing 最常见。应对：多引擎分担（`engines`）、`minResults` 级联、`BING_PLAYWRIGHT_FALLBACK=false`、或设置代理
 - `brave` 对连续自动化请求限流最严：突发搜索后会持续返回 429（恢复窗口分钟级，即使走住宅代理 IP 也一样）。建议低频使用，日常海外搜索以 `duckduckgo` / `startpage` 为主（稳定且质量相近）；brave 被限时快速失败，`minResults` 级联会自动换引擎补位

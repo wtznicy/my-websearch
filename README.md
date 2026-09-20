@@ -673,6 +673,8 @@ Since this tool works by scraping multi-engine search results, please note the f
    - Configure proxy server address with `PROXY_URL`
    - With `USE_PROXY=true`, `PROXY_ENGINES` (comma-separated whitelist) limits which engines route through the proxy; empty = all engines proxied. Overseas engines (`duckduckgo`, `exa`, `brave`, `startpage`) require a proxy from mainland China, while domestic engines stay direct — recommended: `PROXY_ENGINES=duckduckgo,exa,brave,startpage`
    - For Clash fake-ip / TUN setups, configure synthetic DNS ranges with `FAKE_IP_CIDRS` (for example `198.18.0.0/15`)
+   - `FAKE_IP_CIDRS` is **required** for Clash TUN/fake-ip modes: DNS answers in that range (e.g. `198.18.x.x`) are otherwise blocked by the SSRF guard as private-network targets (`DNS lookup ... is private IP address`), which breaks search and fetch
+   - Without `USE_PROXY`, the server auto-detects the OS-level proxy (1.0.11+): just run your proxy client and overseas engines work; with `USE_PROXY=true` configured but the proxy client down, overseas engines fail fast instead
 
 ## Contributing
 
