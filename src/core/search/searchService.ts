@@ -478,8 +478,8 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 .filter((result) => !isPlaceholderResult(result))
                 .slice(0, limit);
 
-            // 轻量重排：位置分 + BM25 相关性 + 域名权威度 + 跨引擎共识（见 resultRanking.ts）
-            merged = rankSearchResults(merged, cleanQuery);
+            // 注意：重排不在此处——级联补位尚未发生，提前重排会让级联来的好结果
+            // 排在入口页/垃圾结果之后（级联合并后不会再跑）。统一放到所有分支的最后一步。
 
             // 聚合各引擎返回的直接答案卡片（数组属性，取首个非空）
             let directAnswer: string | undefined;
@@ -600,6 +600,11 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                     }
                 }
             }
+
+            // 全局重排：所有分支（主阶段 + 级联补位）合并完之后统一执行一次——
+            // 位置分 + BM25 相关性 + 域名权威度 + 跨引擎共识 + 入口页降权（见 resultRanking.ts）。
+            // 无论级联是否触发，首页/登录页都会沉底、真实内容上浮。
+            merged = rankSearchResults(merged, cleanQuery);
 
             const result: SearchExecutionResult = {
                 query: cleanQuery,
