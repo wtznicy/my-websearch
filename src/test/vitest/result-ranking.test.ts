@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rankSearchResults, tokenizeForRanking } from '../../core/search/resultRanking.js';
+import { rankSearchResults, tokenizeForRanking, countUsableResults } from '../../core/search/resultRanking.js';
 import type { SearchResult } from '../../types.js';
 
 function makeResult(overrides: Partial<SearchResult>): SearchResult {
@@ -19,6 +19,37 @@ describe('tokenizeForRanking', () => {
         expect(tokens).toContain('react');
         expect(tokens).toContain('hooks');
         expect(tokens).toContain('教程');
+    });
+});
+
+describe('countUsableResults (rare-term coverage)', () => {
+    it('should exclude semantic-drift results that only hit common query words', () => {
+        // 复现：query 的稀有词是 context/protocol/specification，而噪声只命中通用词 model
+        const results = [
+            makeResult({ title: 'Model（英语单词）', url: 'https://baike.baidu.com/item/model', description: 'model 的翻译' }),
+            makeResult({ title: 'Model Y 特斯拉', url: 'https://tesla.cn/model-y', description: '电动 SUV' }),
+            makeResult({ title: 'Model 3', url: 'https://tesla.cn/model-3', description: '电动轿车' }),
+            makeResult({ title: 'Model Context Protocol', url: 'https://modelcontextprotocol.io/spec', description: 'protocol specification for context' })
+        ];
+        // 只有最后一条命中稀有词
+        expect(countUsableResults(results, 'model context protocol specification')).toBe(1);
+    });
+
+    it('should exclude site entry pages for non-navigational queries', () => {
+        const results = [
+            makeResult({ title: 'context protocol', url: 'https://example.com/', description: 'context protocol overview' }),
+            makeResult({ title: 'context protocol guide', url: 'https://example.com/guide', description: 'context protocol guide' })
+        ];
+        expect(countUsableResults(results, 'context protocol')).toBe(1);
+    });
+
+    it('should degrade to any-query-term match when no rare terms exist', () => {
+        const results = [
+            makeResult({ title: 'React docs', url: 'https://react.dev/learn', description: 'react hooks' }),
+            makeResult({ title: 'Vue docs', url: 'https://vuejs.org/guide', description: 'vue guide' })
+        ];
+        // query 只有 react：命中的计入，未命中的不计
+        expect(countUsableResults(results, 'react')).toBe(1);
     });
 });
 

@@ -36,6 +36,7 @@ export interface AppConfig {
     authorityDomains: string[];
     /** 工具未显式传 limit/minResults 时的服务端默认（把部署策略从工具参数移到 env） */
     defaultSearchLimit: number;
+    /** 级联补位阈值：按"可用结果"（相关、非入口页）计，噪声占位时仍会补跑其他引擎 */
     defaultMinResults: number;
     /** 搜索级总时间预算（ms）：到点后未完成的引擎按超时处理 */
     searchDeadlineMs: number;

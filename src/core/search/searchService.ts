@@ -1,7 +1,7 @@
 import { SearchResult } from '../../types.js';
 import { AppConfig, config } from '../../config.js';
 import { distributeLimit, SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
-import { rankSearchResults } from './resultRanking.js';
+import { rankSearchResults, countUsableResults } from './resultRanking.js';
 import { quoteModelLikeTerms } from '../../utils/queryPreprocess.js';
 import { sleep } from '../../utils/timing.js';
 
@@ -474,9 +474,10 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                     });
                 });
             }));
+            // 不提前 slice(0, limit)：提前截断会让"噪声占满前 N 位"时把后面的好结果
+            // （含级联补来的）永久丢掉；截断统一放在最终重排之后
             let merged = mergeSearchResults(engineResults)
-                .filter((result) => !isPlaceholderResult(result))
-                .slice(0, limit);
+                .filter((result) => !isPlaceholderResult(result));
 
             // 注意：重排不在此处——级联补位尚未发生，提前重排会让级联来的好结果
             // 排在入口页/垃圾结果之后（级联合并后不会再跑）。统一放到所有分支的最后一步。
@@ -516,18 +517,22 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             const cascadedEngines: string[] = [];
             const CASCADE_BATCH_SIZE = 2;
             const MIN_CASCADE_BATCH_BUDGET_MS = 3000;
-            if (minResults && minResults > merged.length) {
+            // 级联判据用"可用条数"而非原始条数：入口页噪声与零相关（词义漂移）结果
+            // 不应让级联误判为"结果已够"——噪声占位时仍需补跑其他引擎
+            const usableCount = countUsableResults(merged, cleanQuery);
+            if (minResults && minResults > usableCount) {
                 const usedEngines = new Set(engines);
                 const candidates = SUPPORTED_SEARCH_ENGINES.filter(
                     (engine) => !usedEngines.has(engine) && typeof engineMap[engine] === 'function'
                 );
-                for (let cursor = 0; cursor < candidates.length && merged.length < minResults; cursor += CASCADE_BATCH_SIZE) {
+                for (let cursor = 0; cursor < candidates.length
+                    && countUsableResults(merged, cleanQuery) < minResults; cursor += CASCADE_BATCH_SIZE) {
                     const remaining = deadlineAt - Date.now();
                     if (remaining < MIN_CASCADE_BATCH_BUDGET_MS) {
                         break;
                     }
                     const batch = candidates.slice(cursor, cursor + CASCADE_BATCH_SIZE);
-                    const gap = minResults - merged.length;
+                    const gap = minResults - countUsableResults(merged, cleanQuery);
                     // 与引擎 deadline 同理：候选提前完成时必须 clearTimeout，否则泄漏的 30s timer 延迟 Node 进程退出
                     const runCandidate = (candidate: string): Promise<SearchResult[]> => new Promise((resolve, reject) => {
                         let done = false;
@@ -574,8 +579,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                             cascadedEngines.push(candidate);
                             engineResults.push(outcome.value);
                             merged = mergeSearchResults(engineResults)
-                                .filter((result) => !isPlaceholderResult(result))
-                                .slice(0, limit);
+                                .filter((result) => !isPlaceholderResult(result));
                             batchNewResults += merged.length - before;
                         } else {
                             batchAllReturnedNonEmpty = false;
@@ -604,7 +608,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // 全局重排：所有分支（主阶段 + 级联补位）合并完之后统一执行一次——
             // 位置分 + BM25 相关性 + 域名权威度 + 跨引擎共识 + 入口页降权（见 resultRanking.ts）。
             // 无论级联是否触发，首页/登录页都会沉底、真实内容上浮。
-            merged = rankSearchResults(merged, cleanQuery);
+            merged = rankSearchResults(merged, cleanQuery).slice(0, limit);
 
             const result: SearchExecutionResult = {
                 query: cleanQuery,

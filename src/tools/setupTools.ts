@@ -251,7 +251,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                 .describe("Max results (default: server DEFAULT_SEARCH_LIMIT, usually 10)"),
             searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
             minResults: z.number().int().min(0).optional()
-                .describe("Auto-run additional engines when fewer than this many results come back (default: server DEFAULT_MIN_RESULTS, usually 5)"),
+                .describe("Auto-run additional engines when fewer than this many USABLE results (relevant, non-entry-page) come back (default: server DEFAULT_MIN_RESULTS, usually 5)"),
             engines: z.array(getEngineInputSchema()).min(1).optional()
                 .describe("Search engines to use (default: server default, which may auto-route by query language)")
         },

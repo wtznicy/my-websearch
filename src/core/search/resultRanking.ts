@@ -166,6 +166,66 @@ function isNavigationalQuery(query: string): boolean {
 }
 
 /**
+ * 每条结果的原始 BM25 相关性分（未归一化，0 = 与查询零词重叠）。
+ * 供搜索服务做"可用结果"统计（级联判据）：零重叠 = 词义漂移结果，不应计入。
+ */
+export function relevanceScores(results: SearchResult[], query: string): number[] {
+    const queryTokens = tokenizeForRanking(query || '');
+    if (queryTokens.length === 0) {
+        return results.map(() => 0);
+    }
+    const docs = results.map((result) => tokenizeForRanking(`${result.title} ${result.description}`));
+    return bm25Scores(queryTokens, docs);
+}
+
+/**
+ * 统计"可用结果"数：必须是**命中查询稀有词**、且不是站点入口页（非导航查询下）的结果。
+ *
+ * 为何不用简单的 BM25 > 0：通用词命中会放行词义漂移结果——实测
+ * query "model context protocol specification" 在 bing 上返回
+ * "Model（英语单词）_百度百科 / 特斯拉 Model Y"（只命中通用词 "model"，
+ * 与区分性词 context/protocol/specification 零重叠）。这类噪声若计入"可用"，
+ * 级联就不会补跑（结果条数够了），真实内容永远进不来。
+ *
+ * 稀有词定义：在本次结果集中 documentFrequency 低于一半结果数的查询词；
+ * 若所有查询词都常见（无稀有词），退化为"命中任一查询词"。
+ */
+export function countUsableResults(results: SearchResult[], query: string): number {
+    const queryTokens = tokenizeForRanking(query || '');
+    if (queryTokens.length === 0 || results.length === 0) {
+        return results.length;
+    }
+
+    const docs = results.map((result) => tokenizeForRanking(`${result.title} ${result.description}`));
+    const documentFrequency = new Map<string, number>();
+    for (const doc of docs) {
+        const unique = new Set(doc);
+        for (const token of queryTokens) {
+            if (unique.has(token)) {
+                documentFrequency.set(token, (documentFrequency.get(token) || 0) + 1);
+            }
+        }
+    }
+
+    const rarityBar = Math.max(1, Math.floor(results.length * 0.5));
+    const rareTerms = queryTokens.filter((token) => (documentFrequency.get(token) || 0) < rarityBar);
+    const requiredTerms = rareTerms.length > 0 ? rareTerms : queryTokens;
+
+    const navigational = isNavigationalQuery(query);
+    let usable = 0;
+    results.forEach((result, index) => {
+        if (!navigational && isLikelySiteEntryPage(result.url)) {
+            return;
+        }
+        const docTokens = new Set(docs[index]);
+        if (requiredTerms.some((token) => docTokens.has(token))) {
+            usable += 1;
+        }
+    });
+    return usable;
+}
+
+/**
  * 对融合后的结果做混合重排；查询为空或结果数 ≤1 时原样返回。
  * 只调整顺序，不增删结果、不修改字段。
  */

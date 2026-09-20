@@ -356,8 +356,9 @@ async function testSearchServiceMinResultsCascade(): Promise<void> {
     const engineMap: SearchEngineExecutorMap = {
         bing: async (query, limit) => {
             called.push(`bing:${limit}`);
-            // bing 只返回 1 条（配额 3 却只有 1 条），迫使 minResults 触发级联
-            return [createResult('bing', 1)];
+            // bing 只返回 1 条（配额 3 却只有 1 条），迫使 minResults 触发级联。
+            // 该条命中 query 词（计入"可用结果"——零相关结果的新语义下不计入）
+            return [{ ...createResult('bing', 1), title: 'cascade me result', description: 'cascade me guide' }];
         },
         startpage: async (query, limit) => {
             called.push(`startpage:${limit}`);
