@@ -38,6 +38,8 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         defaultSearchLimit: 10,
         defaultMinResults: 0,
         searchDeadlineMs: 30000,
+        autoRouteEnEngines: ['bing', 'duckduckgo'],
+        autoRouteZhEngines: ['baidu'],
         fetchWebAllowInsecureTls: false,
         playwrightPackage: 'auto',
         playwrightModulePath: undefined,

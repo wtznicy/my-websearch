@@ -55,6 +55,27 @@ describe('rankSearchResults', () => {
         expect(rankSearchResults(single, 'anything')).toBe(single);
     });
 
+    it('should demote site entry pages for non-navigational queries', () => {
+        const results = [
+            makeResult({ title: 'GitHub', url: 'https://github.com/', description: 'github' }),
+            makeResult({ title: 'Sign in', url: 'https://github.com/login', description: 'login' }),
+            makeResult({ title: 'Release v1.12.0', url: 'https://github.com/wtznicy/github-mcp-server/releases/tag/v1.12.0', description: 'release notes for v1.12.0' })
+        ];
+        const ranked = rankSearchResults(results, 'github-mcp-server v1.12 release notes');
+        // 真实 release 页应排到入口页之前
+        expect(ranked[0].url).toContain('/releases/tag/');
+    });
+
+    it('should NOT penalize entry pages for navigational queries', () => {
+        const results = [
+            makeResult({ title: 'GitHub', url: 'https://github.com/', description: 'github official' }),
+            makeResult({ title: 'some repo', url: 'https://github.com/wtznicy/my-websearch', description: 'repo page' })
+        ];
+        const ranked = rankSearchResults(results, 'github.com');
+        // 导航类查询（域名）下首页不被惩罚，保持原序
+        expect(ranked[0].url).toBe('https://github.com/');
+    });
+
     // 注：共识因子（engineHits，权重 0.1）按设计无法翻转位置分（权重 0.4）——
     // 共识排序由 mergeSearchResults 层保证（按不同引擎命中数主导排序），此处不重复断言。
 

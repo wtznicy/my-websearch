@@ -136,10 +136,44 @@ function authorityScore(url: string): number {
 }
 
 /**
+ * 疑似"站点入口页"（首页/登录/注册/索引）：对非导航类查询属低价值结果。
+ * 实测：bing 对含域名的长尾技术 query（如 "github-mcp-server v1.12 release notes"）
+ * 会退化成站点首页/登录页，而真正的 release 页反而排后。
+ */
+export function isLikelySiteEntryPage(rawUrl: string): boolean {
+    try {
+        const url = new URL(rawUrl);
+        const path = url.pathname;
+        if (path === '/' || path === '') {
+            return true;
+        }
+        return /^\/(login|signin|sign-in|register|signup|index|home|account)(\/|$)/i.test(path);
+    } catch {
+        return false;
+    }
+}
+
+/** 导航类查询（查询本身是域名或单一品牌词）：入口页可能就是期望答案，不做惩罚 */
+function isNavigationalQuery(query: string): boolean {
+    const trimmed = query.trim();
+    if (!trimmed) {
+        return false;
+    }
+    if (/^[\w-]+(\.[a-z]{2,}){1,2}(\/.*)?$/i.test(trimmed)) {
+        return true;
+    }
+    return /^[\w一-鿿-]{2,15}$/.test(trimmed);
+}
+
+/**
  * 对融合后的结果做混合重排；查询为空或结果数 ≤1 时原样返回。
  * 只调整顺序，不增删结果、不修改字段。
  */
-export function rankSearchResults(results: SearchResult[], query: string): SearchResult[] {
+export function rankSearchResults(
+    results: SearchResult[],
+    query: string,
+    options?: { positionWeight?: number }
+): SearchResult[] {
     if (results.length <= 1) {
         return results;
     }
@@ -153,12 +187,30 @@ export function rankSearchResults(results: SearchResult[], query: string): Searc
     const bm25 = bm25Scores(queryTokens, docs);
     const maxBm25 = Math.max(...bm25, 1e-6);
 
+    // 非导航类查询下对"站点入口页"降权：惩罚 + 取消权威加分
+    // （github.com/ 这类入口页此前因域在白名单里拿满权威分，仍能压过真实结果页）
+    const applyEntryPagePenalty = !isNavigationalQuery(query);
+
+    // 权重归一：positionWeight 默认 0.4（单查询内位置分有意义）；
+    // 多查询合并后重排传 0——配额顺序不代表排名，位置分应让位给内容信号
+    const positionWeight = options?.positionWeight ?? 0.4;
+    const restWeight = 1 - positionWeight;
+    const relevanceWeight = restWeight * 0.5;
+    const authorityWeight = restWeight * (1 / 3);
+    const consensusWeight = restWeight * (1 / 6);
+
     const scored = results.map((result, index) => {
         const positionScore = 1 / (1 + index * 0.35);
         const relevance = bm25[index] / maxBm25;
-        const authority = authorityScore(result.url);
+        const isEntryPage = applyEntryPagePenalty && isLikelySiteEntryPage(result.url);
+        const authority = isEntryPage ? 0 : authorityScore(result.url);
         const consensus = Math.min(result.engineHits ?? 1, 3) / 3;
-        const score = 0.4 * positionScore + 0.3 * relevance + 0.2 * authority + 0.1 * consensus;
+        const entryPagePenalty = isEntryPage ? 0.25 : 0;
+        const score = positionWeight * positionScore
+            + relevanceWeight * relevance
+            + authorityWeight * authority
+            + consensusWeight * consensus
+            - entryPagePenalty;
         return { result, score, index };
     });
 

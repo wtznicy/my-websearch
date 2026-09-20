@@ -39,6 +39,10 @@ export interface AppConfig {
     defaultMinResults: number;
     /** 搜索级总时间预算（ms）：到点后未完成的引擎按超时处理 */
     searchDeadlineMs: number;
+    /** DEFAULT_SEARCH_ENGINE=auto 时的路由引擎组：英文（默认 bing+duckduckgo 并列，避免押注单点） */
+    autoRouteEnEngines: string[];
+    /** DEFAULT_SEARCH_ENGINE=auto 时的路由引擎组：中文（默认 baidu） */
+    autoRouteZhEngines: string[];
     fetchWebAllowInsecureTls: boolean;
     // Playwright configuration
     playwrightPackage: 'auto' | 'playwright' | 'playwright-core';
@@ -91,6 +95,14 @@ export const config: AppConfig = {
         process.env.SEARCH_AUTHORITY_DOMAINS.split(',').map(domain => domain.trim().toLowerCase()).filter(Boolean) :
         [],
     defaultSearchLimit: Number(process.env.DEFAULT_SEARCH_LIMIT || '10'),
+    // 英文默认并列 bing + duckduckgo：实测 bing 对含域名的长尾技术 query 会退化成站点首页，
+    // 单引擎质量风险高；duckduckgo 轻量、无需 key，可交叉提升召回（无代理时快速失败不拖累）
+    autoRouteEnEngines: process.env.AUTO_ROUTE_EN_ENGINES ?
+        process.env.AUTO_ROUTE_EN_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
+        ['bing', 'duckduckgo'],
+    autoRouteZhEngines: process.env.AUTO_ROUTE_ZH_ENGINES ?
+        process.env.AUTO_ROUTE_ZH_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
+        ['baidu'],
     defaultMinResults: Number(process.env.DEFAULT_MIN_RESULTS || '5'),
     searchDeadlineMs: Number(process.env.SEARCH_DEADLINE_MS || '30000'),
     fetchWebAllowInsecureTls: process.env.FETCH_WEB_INSECURE_TLS === 'true',

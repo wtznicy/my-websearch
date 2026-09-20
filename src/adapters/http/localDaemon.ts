@@ -4,7 +4,7 @@ import { AppConfig } from '../../config.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
-import { pickDefaultEngineForQuery } from '../../core/search/queryEngineRouting.js';
+import { pickDefaultEnginesForQuery } from '../../core/search/queryEngineRouting.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
 import { ErrorCode } from '../../core/errors.js';
 
@@ -69,11 +69,20 @@ function sendError(
 }
 
 function parseRequestedEngines(runtime: MyWebSearchRuntime, engines: unknown, query: string): SupportedSearchEngine[] {
-    // DEFAULT_SEARCH_ENGINE=auto 时按查询特征自动路由（中文 → baidu，英文/技术 → bing）
-    const fallbackEngine = pickDefaultEngineForQuery(query, runtime.config.defaultSearchEngine);
+    // DEFAULT_SEARCH_ENGINE=auto 时按查询特征自动路由（返回引擎组：中文 → baidu，英文 → bing+duckduckgo）
+    const routed = pickDefaultEnginesForQuery(query, runtime.config.defaultSearchEngine, {
+        en: runtime.config.autoRouteEnEngines,
+        zh: runtime.config.autoRouteZhEngines
+    });
+    const allowed = runtime.config.allowedSearchEngines;
+    const filteredDefault = allowed.length > 0 ? routed.filter((engine) => allowed.includes(engine)) : routed;
+    const effectiveDefault = filteredDefault.length > 0
+        ? filteredDefault
+        : (allowed.length > 0 ? [allowed[0]] : routed);
+    const fallbackEngine = effectiveDefault[0];
 
     if (engines === undefined) {
-        return [fallbackEngine as SupportedSearchEngine];
+        return effectiveDefault as SupportedSearchEngine[];
     }
 
     if (!Array.isArray(engines) || engines.some((engine) => typeof engine !== 'string')) {

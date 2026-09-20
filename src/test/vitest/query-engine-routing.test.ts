@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pickDefaultEngineForQuery } from '../../core/search/queryEngineRouting.js';
+import { pickDefaultEngineForQuery, pickDefaultEnginesForQuery } from '../../core/search/queryEngineRouting.js';
 
 describe('pickDefaultEngineForQuery', () => {
     it('should keep the configured engine when not "auto"', () => {
@@ -16,6 +16,18 @@ describe('pickDefaultEngineForQuery', () => {
     it('should route English queries to bing in auto mode', () => {
         expect(pickDefaultEngineForQuery('hello world', 'auto')).toBe('bing');
         expect(pickDefaultEngineForQuery('best javascript framework', 'auto')).toBe('bing');
+    });
+
+    it('should return an engine GROUP for English queries (bing + duckduckgo fallback)', () => {
+        // 英文不再押注单点：默认并列 bing + duckduckgo
+        expect(pickDefaultEnginesForQuery('github-mcp-server v1.12 release notes', 'auto'))
+            .toEqual(['bing', 'duckduckgo']);
+        expect(pickDefaultEnginesForQuery('中文查询', 'auto')).toEqual(['baidu']);
+        // 显式默认引擎不受影响
+        expect(pickDefaultEnginesForQuery('anything', 'sogou')).toEqual(['sogou']);
+        // env 覆盖
+        expect(pickDefaultEnginesForQuery('english query', 'auto', { en: ['bing', 'startpage'] }))
+            .toEqual(['bing', 'startpage']);
     });
 
     it('should route CJK-containing queries to baidu regardless of latin technical terms', () => {

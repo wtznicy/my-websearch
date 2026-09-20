@@ -7,8 +7,9 @@ import {
     SUPPORTED_SEARCH_ENGINES,
     SupportedSearchEngine
 } from '../core/search/searchEngines.js';
-import { pickDefaultEngineForQuery } from '../core/search/queryEngineRouting.js';
+import { pickDefaultEnginesForQuery } from '../core/search/queryEngineRouting.js';
 import { mergeMultiQueryResults, mergeEngineMetricsAcrossQueries } from '../core/search/multiQuery.js';
+import { rankSearchResults } from '../core/search/resultRanking.js';
 import {
     validateArticleUrl,
     validateGithubRepositoryUrl,
@@ -283,19 +284,24 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                 // 多查询扇出时**逐 query 路由**——混合语言/多意图的 queries 不再整批退化成
                 // 首个 query 的引擎（此前 queries=[英,中,英] 会全部走 bing 并召回垃圾）。
                 const allowed = runtime.config.allowedSearchEngines;
-                const resolveSingleEngine = (queryText: string): SupportedSearchEngine => {
-                    let engine = pickDefaultEngineForQuery(queryText, runtime.config.defaultSearchEngine);
-                    if (allowed.length > 0 && !allowed.includes(engine)) {
-                        engine = allowed[0];
+                // auto 模式返回**一组**引擎（英文默认 bing+duckduckgo 并列，中文默认 baidu）
+                const resolveEnginesForQuery = (queryText: string): SupportedSearchEngine[] => {
+                    const picked = pickDefaultEnginesForQuery(queryText, runtime.config.defaultSearchEngine, {
+                        en: runtime.config.autoRouteEnEngines,
+                        zh: runtime.config.autoRouteZhEngines
+                    });
+                    const filtered = allowed.length > 0 ? picked.filter((engine) => allowed.includes(engine)) : picked;
+                    if (filtered.length > 0) {
+                        return filtered as SupportedSearchEngine[];
                     }
-                    return engine as SupportedSearchEngine;
+                    return (allowed.length > 0 ? [allowed[0]] : picked) as SupportedSearchEngine[];
                 };
                 const explicitEngines = engines && engines.length > 0
-                    ? resolveRequestedEngines(engines, allowed, resolveSingleEngine(primaryQuery)) as [SupportedSearchEngine, ...SupportedSearchEngine[]]
+                    ? resolveRequestedEngines(engines, allowed, resolveEnginesForQuery(primaryQuery)[0]) as [SupportedSearchEngine, ...SupportedSearchEngine[]]
                     : null;
                 const enginesPerQuery: SupportedSearchEngine[][] = explicitEngines
                     ? queryList.map(() => [...explicitEngines])
-                    : queryList.map((q) => [resolveSingleEngine(q)]);
+                    : queryList.map((q) => resolveEnginesForQuery(q));
                 const resolvedEngines = enginesPerQuery[0];
 
                 logTool(`Searching ${queryList.map((q, index) => `"${q}" [${enginesPerQuery[index].join(',')}]`).join(', ')}`);
@@ -320,8 +326,14 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                     }
                 }
 
+                // 多查询合并后再做一次全局重排（positionWeight=0：配额顺序不代表排名）；
+                // 相关性用所有 query 的 token 并集，让跨 query 内容信号（含入口页惩罚）决定顺序
                 const mergedResults = queryList.length > 1
-                    ? mergeMultiQueryResults(executed.map((one) => one.results), effectiveLimit).results
+                    ? rankSearchResults(
+                        mergeMultiQueryResults(executed.map((one) => one.results), effectiveLimit).results,
+                        queryList.join(' '),
+                        { positionWeight: 0 }
+                    )
                     : executed[0].results;
 
                 // text 保持 JSON（可被客户端 JSON.parse——紧凑格式省 token；模型友好的引用引导在工具描述里）

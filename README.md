@@ -156,7 +156,9 @@ npx cross-env DEFAULT_SEARCH_ENGINE=auto ENABLE_CORS=true my-websearch
 |----------|-------------------------|---------|-------------|
 | `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
 | `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
-| `DEFAULT_SEARCH_ENGINE` | `auto`                  | `auto`, `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine. `auto` routes by query: Chinese natural-language queries go to baidu, English/technical queries to bing |
+| `DEFAULT_SEARCH_ENGINE` | `auto`                  | `auto`, `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine. `auto` routes by query: Chinese queries go to the ZH engine group, English/technical to the EN engine group (see below) |
+| `AUTO_ROUTE_EN_ENGINES` | `bing,duckduckgo` | Comma-separated engines | English engine group for `auto` routing — two engines in parallel by default (bing alone degrades to site homepages on long-tail technical queries) |
+| `AUTO_ROUTE_ZH_ENGINES` | `baidu` | Comma-separated engines | Chinese engine group for `auto` routing |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
 | `PROXY_ENGINES` | empty (all engines) | Comma-separated engine names | With `USE_PROXY=true`, **only** the engines in this whitelist route through the proxy; others stay direct. Empty = all engines proxied (legacy global behavior). Recommended for mainland China: `PROXY_ENGINES=duckduckgo,exa,brave,startpage` (overseas engines via proxy, domestic engines direct) |
