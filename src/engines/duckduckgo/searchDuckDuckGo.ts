@@ -166,6 +166,12 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
       const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&t=h_&ia=web`;
       const response = await axios.get(searchUrl, requestOptions);
 
+      // 上游反爬升级：DDG 对非浏览器请求返回 202 挑战页（页面无 d.js preload URL）——
+      // 显式报错而非静默 0 结果，让 partialFailures 暴露真实原因
+      if (response.status === 202) {
+        throw new Error('DuckDuckGo returned a challenge page (HTTP 202) — upstream anti-bot; retry later or use another engine');
+      }
+
       let basePreloadUrl = '';
 
       // Method 1: Use cheerio to find preload links
@@ -295,6 +301,10 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
       new URLSearchParams({ q: query }).toString(),
       requestOptions
     );
+
+    if (response.status === 202) {
+      throw new Error('DuckDuckGo returned a challenge page (HTTP 202) — upstream anti-bot; retry later or use another engine');
+    }
 
     let parsedPage = parseDuckDuckGoHtmlResults(String(response.data || ''), maxResults, seenUrls);
     results.push(...parsedPage.results);

@@ -74,6 +74,8 @@ const networkFailurePatterns = [
     // Brave 的 429 被 buildBraveErrorMessage 包装为 "Brave rate limited (HTTP 429): ..."，
     // 不再含 axios 原始文案——代理/机房 IP 被上游节流属环境问题
     /Brave rate limited \(HTTP 429\)/i,
+    // DuckDuckGo 上游反爬挑战页（202）：环境/上游风控，非代码问题
+    /DuckDuckGo returned a challenge page/i,
     /page\.goto: Timeout \d+ms exceeded[\s\S]*navigating to/i,
     /Timeout \d+ms exceeded[\s\S]*(https?:\/\/|navigating to)/i
 ];
