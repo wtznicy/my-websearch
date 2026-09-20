@@ -34,6 +34,11 @@ export interface AppConfig {
     fakeIpCidrs: string[];
     /** 结果重排的额外权威域名（追加在内置白名单之后，逗号分隔） */
     authorityDomains: string[];
+    /** 工具未显式传 limit/minResults 时的服务端默认（把部署策略从工具参数移到 env） */
+    defaultSearchLimit: number;
+    defaultMinResults: number;
+    /** 搜索级总时间预算（ms）：到点后未完成的引擎按超时处理 */
+    searchDeadlineMs: number;
     fetchWebAllowInsecureTls: boolean;
     // Playwright configuration
     playwrightPackage: 'auto' | 'playwright' | 'playwright-core';
@@ -58,7 +63,9 @@ function readOptionalEnv(name: string): string | undefined {
 // Read from environment variables or use defaults
 export const config: AppConfig = {
     // Search engine configuration
-    defaultSearchEngine: (process.env.DEFAULT_SEARCH_ENGINE as AppConfig['defaultSearchEngine']) || 'bing',
+    // 默认 'auto'：按查询特征自动路由（中文 → baidu，英文/技术 → bing），
+    // 未配置该变量的客户端此前默认走 bing，中文查询召回质量差（实测）
+    defaultSearchEngine: (process.env.DEFAULT_SEARCH_ENGINE as AppConfig['defaultSearchEngine']) || 'auto',
     // Parse comma-separated list of allowed search engines
     allowedSearchEngines: process.env.ALLOWED_SEARCH_ENGINES ?
         process.env.ALLOWED_SEARCH_ENGINES.split(',').map(e => e.trim()) :
@@ -74,12 +81,18 @@ export const config: AppConfig = {
     proxyEngines: process.env.PROXY_ENGINES ?
         process.env.PROXY_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
         [],
+    // 默认放行 198.18.0.0/15：RFC 2544 基准测试保留段，公网不可路由，是 Clash/Mihomo
+    // fake-IP 的标准网段——默认拦截会把 TUN 用户的全部抓取误判为私网访问。
+    // 用户可用 FAKE_IP_CIDRS 追加/覆盖其他代理使用的伪造网段。
     fakeIpCidrs: process.env.FAKE_IP_CIDRS ?
         process.env.FAKE_IP_CIDRS.split(',').map(cidr => cidr.trim()).filter(Boolean) :
-        [],
+        ['198.18.0.0/15'],
     authorityDomains: process.env.SEARCH_AUTHORITY_DOMAINS ?
         process.env.SEARCH_AUTHORITY_DOMAINS.split(',').map(domain => domain.trim().toLowerCase()).filter(Boolean) :
         [],
+    defaultSearchLimit: Number(process.env.DEFAULT_SEARCH_LIMIT || '10'),
+    defaultMinResults: Number(process.env.DEFAULT_MIN_RESULTS || '5'),
+    searchDeadlineMs: Number(process.env.SEARCH_DEADLINE_MS || '30000'),
     fetchWebAllowInsecureTls: process.env.FETCH_WEB_INSECURE_TLS === 'true',
     playwrightPackage: (process.env.PLAYWRIGHT_PACKAGE as AppConfig['playwrightPackage']) || 'auto',
     playwrightModulePath: readOptionalEnv('PLAYWRIGHT_MODULE_PATH'),

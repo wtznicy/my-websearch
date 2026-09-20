@@ -95,9 +95,9 @@ function parseRequestedEngines(runtime: MyWebSearchRuntime, engines: unknown, qu
     ) as SupportedSearchEngine[];
 }
 
-function parseLimit(limit: unknown): number {
+function parseLimit(limit: unknown, fallback: number = 10): number {
     if (limit === undefined) {
-        return 10;
+        return fallback;
     }
 
     if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 50) {
@@ -169,9 +169,9 @@ function parseStartIndex(value: unknown): number | undefined {
     return value;
 }
 
-function parseMinResults(value: unknown): number | undefined {
+function parseMinResults(value: unknown, fallback: number = 0): number {
     if (value === undefined) {
-        return undefined;
+        return fallback;
     }
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
         throw new Error('minResults must be a non-negative integer');
@@ -294,10 +294,10 @@ export async function startLocalDaemon(
                 return;
             }
 
-            const limit = parseLimit(req.body?.limit);
+            const limit = parseLimit(req.body?.limit, runtime.config.defaultSearchLimit);
             const engines = parseRequestedEngines(runtime, req.body?.engines, query);
             const searchMode = parseSearchMode(req.body?.searchMode);
-            const minResults = parseMinResults(req.body?.minResults);
+            const minResults = parseMinResults(req.body?.minResults, Math.min(limit, runtime.config.defaultMinResults));
             const result = await runtime.services.search.execute({
                 query,
                 limit,

@@ -1,5 +1,5 @@
 import { SearchResult } from '../../types.js';
-import { AppConfig } from '../../config.js';
+import { AppConfig, config } from '../../config.js';
 import { distributeLimit, SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
 import { rankSearchResults } from './resultRanking.js';
 import { quoteModelLikeTerms } from '../../utils/queryPreprocess.js';
@@ -67,6 +67,8 @@ export type SearchExecutionResult = {
     cascadedEngines?: string[];
     /** SERP 首位的直接答案卡片文本（如百度汇率换算/百科摘要卡），LLM 可免抓详情页直接取事实 */
     directAnswer?: string;
+    /** 每引擎耗时/结果数/错误（可观测性：一眼区分超时与被拒/限流） */
+    engineMetrics?: Array<{ engine: string; ms: number; count: number; error?: string }>;
 };
 
 export type SearchExecutionInput = {
@@ -327,7 +329,7 @@ function buildHintedMessage(engine: string, message: string): string {
 }
 
 // 搜索级总时间预算：超过后未完成的引擎按超时处理，避免单个慢引擎（含重试）拖垮整次搜索
-export const SEARCH_DEADLINE_MS = 30000;
+export const SEARCH_DEADLINE_MS = config.searchDeadlineMs;
 
 // 查询长度上限：防止超长查询导致搜索引擎请求超时或被封禁
 export const MAX_QUERY_LENGTH = 500;
@@ -369,9 +371,14 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             const deadlineMs = SEARCH_DEADLINE_MS;
             const deadlineAt = Date.now() + deadlineMs;
 
+            // 每引擎耗时/数量/错误（可观测性：区分超时与被拒/限流）
+            const engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string }> = [];
             const tasks = engines.map(async (engine, index) => {
                 const executor = engineMap[engine];
                 const engineLimit = limits[index];
+                const startedAt = Date.now();
+                let resultCount = 0;
+                let metricError: string | undefined;
 
                 if (!executor) {
                     partialFailures.push({
@@ -401,6 +408,8 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                         if (attempt > 0) {
                             console.error(`✅ Engine ${engine} recovered after ${attempt} retries`);
                         }
+                        resultCount = results.length;
+                        engineMetrics[index] = { engine, ms: Date.now() - startedAt, count: resultCount };
                         return results;
                     } catch (error) {
                         lastError = error;
@@ -414,10 +423,12 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                     }
                 }
 
+                metricError = lastError instanceof Error ? lastError.message : String(lastError);
+                engineMetrics[index] = { engine, ms: Date.now() - startedAt, count: resultCount, error: metricError };
                 partialFailures.push({
                     engine,
                     code: 'engine_error',
-                    message: buildHintedMessage(engine, lastError instanceof Error ? lastError.message : String(lastError))
+                    message: buildHintedMessage(engine, metricError)
                 });
                 return [];
             });
@@ -580,7 +591,8 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 results: merged,
                 partialFailures,
                 ...(cascadedEngines.length > 0 ? { cascadedEngines } : {}),
-                ...(directAnswer ? { directAnswer } : {})
+                ...(directAnswer ? { directAnswer } : {}),
+                ...(engineMetrics.some(Boolean) ? { engineMetrics: engineMetrics.filter(Boolean) } : {})
             };
 
             // 失败/降级结果不缓存：有 partialFailures 或零结果时，下次相同查询应重试，

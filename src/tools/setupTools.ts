@@ -8,6 +8,7 @@ import {
     SupportedSearchEngine
 } from '../core/search/searchEngines.js';
 import { pickDefaultEngineForQuery } from '../core/search/queryEngineRouting.js';
+import { mergeMultiQueryResults } from '../core/search/multiQuery.js';
 import {
     validateArticleUrl,
     validateGithubRepositoryUrl,
@@ -15,6 +16,7 @@ import {
 } from '../core/validation/targetValidation.js';
 import { MyWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { FetchWebContentResult } from '../engines/web/fetchWebContent.js';
+import { SearchResult } from '../types.js';
 export { normalizeEngineName };
 
 /**
@@ -194,9 +196,11 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
     // 站点定向查询用 site: 操作符（否则通用搜索容易召回无关首页/教程）
     const DOCS_GUIDANCE = ' For OFFICIAL library/framework documentation, prefer resolveLibraryId + queryDocs (more reliable, works without proxy). Use the site: operator for site-specific queries (e.g. "update site:docs.elastic.co").';
     const getSearchDescription = () => {
+        // 路由建议写进描述：模型看不到服务端路由代码，只能靠这句决定 engines
+        const routingGuidance = ' Engine guidance: for Chinese queries prefer engines=["baidu","sogou","csdn","juejin"] (domestic engines have far better Chinese content coverage); for English/official docs use bing; overseas engines (duckduckgo/brave/startpage/exa) need a proxy. Omit engines to use server-side auto routing. Cite the relevant result URLs as markdown links in your answer.';
         const searchModeDescription = ' searchMode: omit/auto = server SEARCH_MODE; request/playwright force that mode.';
         if (runtime.config.allowedSearchEngines.length === 0) {
-            return `Search the web across multiple engines with no API key required.${searchModeDescription}${DOCS_GUIDANCE}`;
+            return `Search the web across multiple engines with no API key required.${searchModeDescription}${routingGuidance}${DOCS_GUIDANCE}`;
         } else {
             const enginesText = runtime.config.allowedSearchEngines.map(e => {
                 switch (e) {
@@ -210,7 +214,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }
             }).join(', ');
-            return `Search the web using these engines: ${enginesText} (no API key required).${searchModeDescription}${DOCS_GUIDANCE}`;
+            return `Search the web using these engines: ${enginesText} (no API key required).${searchModeDescription}${routingGuidance}${DOCS_GUIDANCE}`;
         }
     };
 
@@ -238,11 +242,15 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
         searchToolName,
         getSearchDescription(),
         {
-            query: z.string().min(1, "Search query must not be empty").max(500, "Search query too long (max 500 characters)"),
-            limit: z.number().min(1).max(50).default(10),
+            query: z.string().min(1, "Search query must not be empty").max(500, "Search query too long (max 500 characters)").optional()
+                .describe("Single search query (use queries for multi-intent fan-out)"),
+            queries: z.array(z.string().min(1, "Query must not be empty").max(500)).min(1).max(4).optional()
+                .describe("1-4 queries run concurrently and merged (dedup by URL) — for covering multiple intents in one call (e.g. official docs / Chinese community / English)"),
+            limit: z.number().min(1).max(50).optional()
+                .describe("Max results (default: server DEFAULT_SEARCH_LIMIT, usually 10)"),
             searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
             minResults: z.number().int().min(0).optional()
-                .describe("Auto-run additional engines when fewer than this many results come back (default: disabled)"),
+                .describe("Auto-run additional engines when fewer than this many results come back (default: server DEFAULT_MIN_RESULTS, usually 5)"),
             engines: z.array(getEngineInputSchema()).min(1).optional()
                 .describe("Search engines to use (default: server default, which may auto-route by query language)")
         },
@@ -253,38 +261,80 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
             idempotentHint: true,
             openWorldHint: true
         },
-        async ({query, limit = 10, searchMode, engines, minResults}) => {
+        async ({query, queries, limit, searchMode, engines, minResults}) => {
             try {
+                // 查询列表：queries（1-4，多意图扇出）优先，否则单 query
+                const queryList = (queries && queries.length > 0 ? queries : (query ? [query] : [])).map((q) => q.trim()).filter(Boolean);
+                if (queryList.length === 0) {
+                    return {
+                        content: [{ type: 'text', text: 'Provide either "query" or "queries" (1-4 queries).' }],
+                        isError: true
+                    };
+                }
+                const primaryQuery = queryList[0];
+
+                // 部署策略来自服务端配置（DEFAULT_SEARCH_LIMIT / DEFAULT_MIN_RESULTS），
+                // 工具参数仅作覆盖——模型漏传时不再掉进"1 条结果无级联"的弱路径
+                const effectiveLimit = limit ?? runtime.config.defaultSearchLimit;
+                const effectiveMinResults = minResults ?? Math.min(effectiveLimit, runtime.config.defaultMinResults);
+
                 // engines 未指定时使用默认引擎；DEFAULT_SEARCH_ENGINE=auto 时按查询特征
-                // （中文自然语言 → baidu，英文/技术 → bing）自动路由，见 queryEngineRouting.ts
-                const fallbackEngine = pickDefaultEngineForQuery(query, runtime.config.defaultSearchEngine);
+                // （中文 → baidu，英文/技术 → bing）自动路由，见 queryEngineRouting.ts
+                let fallbackEngine = pickDefaultEngineForQuery(primaryQuery, runtime.config.defaultSearchEngine);
+                // 白名单收窄时避免回退到不可用引擎
+                const allowed = runtime.config.allowedSearchEngines;
+                if (allowed.length > 0 && !allowed.includes(fallbackEngine)) {
+                    fallbackEngine = allowed[0];
+                }
                 const resolvedEngines = (engines && engines.length > 0
-                    ? resolveRequestedEngines(engines, runtime.config.allowedSearchEngines, fallbackEngine)
+                    ? resolveRequestedEngines(engines, allowed, fallbackEngine)
                     : [fallbackEngine]) as [SupportedSearchEngine, ...SupportedSearchEngine[]];
 
-                logTool(`Searching for "${query}" using engines: ${resolvedEngines.join(', ')}`);
+                logTool(`Searching for ${queryList.map((q) => `"${q}"`).join(', ')} using engines: ${resolvedEngines.join(', ')}`);
 
-                const searchResult = await runtime.services.search.execute({
-                    query,
-                    engines: resolvedEngines,
-                    limit,
-                    searchMode,
-                    minResults: minResults ?? 0
-                });
-                for (const failure of searchResult.partialFailures) {
-                    logTool(`Search failed for engine ${failure.engine}: ${failure.message}`);
+                // 多查询扇出：并发执行（每个查询独立走缓存/级联），合并后按 URL 去重
+                const perQueryLimit = queryList.length > 1
+                    ? Math.max(3, Math.ceil(effectiveLimit / queryList.length) + 2)
+                    : effectiveLimit;
+                const executed = await Promise.all(queryList.map((q, index) => {
+                    if (index > 0) {
+                        // 轻微错峰，避免多查询同时突发触发引擎限流
+                    }
+                    return runtime.services.search.execute({
+                        query: q,
+                        engines: resolvedEngines,
+                        limit: perQueryLimit,
+                        searchMode,
+                        minResults: effectiveMinResults
+                    });
+                }));
+
+                for (const one of executed) {
+                    for (const failure of one.partialFailures) {
+                        logTool(`Search failed for engine ${failure.engine}: ${failure.message}`);
+                    }
                 }
 
+                const mergedResults = queryList.length > 1
+                    ? mergeMultiQueryResults(executed.map((one) => one.results), effectiveLimit).results
+                    : executed[0].results;
+
+                // text 保持 JSON（可被客户端 JSON.parse——紧凑格式省 token；模型友好的引用引导在工具描述里）
+                const failures = executed.flatMap((one) => one.partialFailures);
                 return {
                     content: [{
                         type: 'text',
                         text: JSON.stringify({
-                            query: searchResult.query,
-                            engines: searchResult.engines,
-                            totalResults: searchResult.totalResults,
-                            results: searchResult.results,
-                            partialFailures: searchResult.partialFailures
-                        }, null, 2)
+                            ...(queryList.length > 1 ? { queries: queryList } : { query: queryList[0] }),
+                            engines: executed[0].engines,
+                            totalResults: mergedResults.length,
+                            results: mergedResults,
+                            partialFailures: failures,
+                            ...(executed.find((one) => one.directAnswer)?.directAnswer
+                                ? { directAnswer: executed.find((one) => one.directAnswer)!.directAnswer }
+                                : {}),
+                            ...(executed[0].engineMetrics ? { engineMetrics: executed[0].engineMetrics } : {})
+                        })
                     }]
                 };
             } catch (error) {
@@ -306,7 +356,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
     // 获取 CSDN 文章工具
     server.tool(
         fetchCsdnToolName,
-        "Fetch full article content from a csdn post URL",
+        "Fetch full article content from a CSDN article URL (blog.csdn.net /article/details/ only; for other sites use fetchWebContent)",
         {
             url: z.string().url().refine(
                 (url) => validateArticleUrl(url, 'csdn'),
@@ -350,7 +400,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
     // 获取 GitHub README 工具
     server.tool(
         fetchGithubToolName,
-        "Fetch README content from a GitHub repository URL",
+        "Fetch README content from a GitHub/Gitee repository URL (github.com or gitee.com repo URLs only; for other pages use fetchWebContent)",
         {
             url: z.string().min(1).max(2048).refine(
                 (url) => validateGithubRepositoryUrl(url),
@@ -454,7 +504,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
     // 获取掘金文章工具
     server.tool(
         fetchJuejinToolName,
-        "Fetch full article content from a Juejin(掘金) post URL",
+        "Fetch full article content from a Juejin(掘金) post URL (juejin.cn or article.juejin.cn /post/ only; for other sites use fetchWebContent)",
         {
             url: z.string().url().refine(
                 (url) => validateArticleUrl(url, 'juejin'),
