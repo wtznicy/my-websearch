@@ -278,31 +278,36 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                 const effectiveLimit = limit ?? runtime.config.defaultSearchLimit;
                 const effectiveMinResults = minResults ?? Math.min(effectiveLimit, runtime.config.defaultMinResults);
 
-                // engines 未指定时使用默认引擎；DEFAULT_SEARCH_ENGINE=auto 时按查询特征
-                // （中文 → baidu，英文/技术 → bing）自动路由，见 queryEngineRouting.ts
-                let fallbackEngine = pickDefaultEngineForQuery(primaryQuery, runtime.config.defaultSearchEngine);
-                // 白名单收窄时避免回退到不可用引擎
+                // engines 未指定时按查询特征路由（DEFAULT_SEARCH_ENGINE=auto：中文 → baidu，
+                // 英文/技术 → bing，见 queryEngineRouting.ts）。
+                // 多查询扇出时**逐 query 路由**——混合语言/多意图的 queries 不再整批退化成
+                // 首个 query 的引擎（此前 queries=[英,中,英] 会全部走 bing 并召回垃圾）。
                 const allowed = runtime.config.allowedSearchEngines;
-                if (allowed.length > 0 && !allowed.includes(fallbackEngine)) {
-                    fallbackEngine = allowed[0];
-                }
-                const resolvedEngines = (engines && engines.length > 0
-                    ? resolveRequestedEngines(engines, allowed, fallbackEngine)
-                    : [fallbackEngine]) as [SupportedSearchEngine, ...SupportedSearchEngine[]];
+                const resolveSingleEngine = (queryText: string): SupportedSearchEngine => {
+                    let engine = pickDefaultEngineForQuery(queryText, runtime.config.defaultSearchEngine);
+                    if (allowed.length > 0 && !allowed.includes(engine)) {
+                        engine = allowed[0];
+                    }
+                    return engine as SupportedSearchEngine;
+                };
+                const explicitEngines = engines && engines.length > 0
+                    ? resolveRequestedEngines(engines, allowed, resolveSingleEngine(primaryQuery)) as [SupportedSearchEngine, ...SupportedSearchEngine[]]
+                    : null;
+                const enginesPerQuery: SupportedSearchEngine[][] = explicitEngines
+                    ? queryList.map(() => [...explicitEngines])
+                    : queryList.map((q) => [resolveSingleEngine(q)]);
+                const resolvedEngines = enginesPerQuery[0];
 
-                logTool(`Searching for ${queryList.map((q) => `"${q}"`).join(', ')} using engines: ${resolvedEngines.join(', ')}`);
+                logTool(`Searching ${queryList.map((q, index) => `"${q}" [${enginesPerQuery[index].join(',')}]`).join(', ')}`);
 
                 // 多查询扇出：并发执行（每个查询独立走缓存/级联），合并后按 URL 去重
                 const perQueryLimit = queryList.length > 1
                     ? Math.max(3, Math.ceil(effectiveLimit / queryList.length) + 2)
                     : effectiveLimit;
                 const executed = await Promise.all(queryList.map((q, index) => {
-                    if (index > 0) {
-                        // 轻微错峰，避免多查询同时突发触发引擎限流
-                    }
                     return runtime.services.search.execute({
                         query: q,
-                        engines: resolvedEngines,
+                        engines: enginesPerQuery[index],
                         limit: perQueryLimit,
                         searchMode,
                         minResults: effectiveMinResults

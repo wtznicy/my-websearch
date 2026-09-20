@@ -143,6 +143,8 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
       // Configure request options
       const requestOptions = buildAxiosRequestOptions({ engine: 'duckduckgo',
         trustedStaticHost: true,
+        // 上界 10s：preload 与 HTML 两条路径各一次请求，避免单引擎累加超时吃光搜索总预算
+        timeout: 10000,
         headers: {
           "User-Agent": BROWSER_USER_AGENT,
           "Connection": "keep-alive",
@@ -273,6 +275,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
     // Configure request options
     const requestOptions = buildAxiosRequestOptions({ engine: 'duckduckgo',
     trustedStaticHost: true,
+    timeout: 10000,
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       'User-Agent': BROWSER_USER_AGENT,

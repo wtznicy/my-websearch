@@ -67,7 +67,7 @@ export type SearchExecutionResult = {
     cascadedEngines?: string[];
     /** SERP 首位的直接答案卡片文本（如百度汇率换算/百科摘要卡），LLM 可免抓详情页直接取事实 */
     directAnswer?: string;
-    /** 每引擎耗时/结果数/错误（可观测性：一眼区分超时与被拒/限流） */
+    /** 每引擎耗时/结果数/错误（可观测性：一眼区分超时与被拒/限流；error 为截断版，完整消息见 partialFailures） */
     engineMetrics?: Array<{ engine: string; ms: number; count: number; error?: string }>;
 };
 
@@ -79,6 +79,12 @@ export type SearchExecutionInput = {
     /** 当结果数低于此值时，自动用未请求的可用引擎补跑以凑足（默认 0 = 不启用） */
     minResults?: number;
 };
+
+/** metrics 的 error 只保留简短原因（完整消息仍在 partialFailures） */
+function truncateMetricError(message: string): string {
+    const normalized = message.replace(/\s+/g, ' ').trim();
+    return normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized;
+}
 
 function resolveSearchModeOverride(searchMode: AppConfig['searchMode'] | undefined): AppConfig['searchMode'] | undefined {
     // Agent 显式传 searchMode=auto 时，应与不传参数一致，优先使用环境变量值。不能优先使用HTTP请求，因为它会导致Bing返回垃圾结果。
@@ -370,13 +376,18 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // 搜索级总时间预算：到点后未完成的引擎按超时处理，避免单个慢引擎拖垮整次搜索
             const deadlineMs = SEARCH_DEADLINE_MS;
             const deadlineAt = Date.now() + deadlineMs;
+            // 单引擎超时上限：min(总预算 50%, 10s)。此前所有引擎共享总预算，
+            // 单个 hang 住的引擎（如代理链路上的 duckduckgo）会吃光 30s 导致级联完全不跑；
+            // 现在主阶段最多消耗 ~50% 预算，为级联保留剩余时间
+            const PER_ENGINE_TIMEOUT_MS = Math.min(Math.floor(deadlineMs * 0.5), 10000);
 
             // 每引擎耗时/数量/错误（可观测性：区分超时与被拒/限流）
             const engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string }> = [];
+            const startedAtByIndex: number[] = engines.map(() => Date.now());
             const tasks = engines.map(async (engine, index) => {
                 const executor = engineMap[engine];
                 const engineLimit = limits[index];
-                const startedAt = Date.now();
+                const startedAt = startedAtByIndex[index];
                 let resultCount = 0;
                 let metricError: string | undefined;
 
@@ -424,7 +435,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 }
 
                 metricError = lastError instanceof Error ? lastError.message : String(lastError);
-                engineMetrics[index] = { engine, ms: Date.now() - startedAt, count: resultCount, error: metricError };
+                engineMetrics[index] = { engine, ms: Date.now() - startedAt, count: resultCount, error: truncateMetricError(metricError) };
                 partialFailures.push({
                     engine,
                     code: 'engine_error',
@@ -438,16 +449,17 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // （CLI 一次性命令会白白多挂近 30 秒），同时也能避免 timer 回调对已 settle 的 race 做无用功。
             const engineResults = await Promise.all(tasks.map((task, index) => {
                 const remaining = deadlineAt - Date.now();
-                const wait = remaining > 0 ? remaining : 0;
+                const wait = Math.max(0, Math.min(remaining, PER_ENGINE_TIMEOUT_MS));
                 return new Promise<SearchResult[]>((resolve) => {
                     let done = false;
                     const timer = setTimeout(() => {
                         done = true;
+                        engineMetrics[index] = { engine: engines[index], ms: Date.now() - startedAtByIndex[index], count: 0, error: `timeout after ${wait}ms` };
                         if (!partialFailures.some((failure) => failure.engine === engines[index])) {
                             partialFailures.push({
                                 engine: engines[index],
                                 code: 'engine_error',
-                                message: buildHintedMessage(engines[index], `Search deadline exceeded (${deadlineMs}ms total budget)`)
+                                message: buildHintedMessage(engines[index], `Engine timeout after ${wait}ms (no response in time)`)
                             });
                         }
                         resolve([]);
@@ -519,27 +531,32 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                     // 与引擎 deadline 同理：候选提前完成时必须 clearTimeout，否则泄漏的 30s timer 延迟 Node 进程退出
                     const runCandidate = (candidate: string): Promise<SearchResult[]> => new Promise((resolve, reject) => {
                         let done = false;
+                        const cascadeStartedAt = Date.now();
+                        const wait = Math.max(0, Math.min(remaining, PER_ENGINE_TIMEOUT_MS));
                         const timer = setTimeout(() => {
                             done = true;
+                            engineMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: 0, error: `timeout after ${wait}ms` });
                             partialFailures.push({
                                 engine: candidate,
                                 code: 'engine_error',
-                                message: buildHintedMessage(candidate, `Search deadline exceeded (${deadlineMs}ms total budget)`)
+                                message: buildHintedMessage(candidate, `Engine timeout after ${wait}ms (no response in time)`)
                             });
                             resolve([]);
-                        }, remaining);
+                        }, wait);
 
                         (async () => {
                             const results = await engineMap[candidate]!(searchQuery, gap, { searchMode: effectiveSearchMode });
                             if (!done) {
                                 done = true;
                                 clearTimeout(timer);
+                                engineMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: results.length });
                                 resolve(results);
                             }
                         })().catch((error) => {
                             if (!done) {
                                 done = true;
                                 clearTimeout(timer);
+                                engineMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: 0, error: truncateMetricError(error instanceof Error ? error.message : String(error)) });
                                 reject(error);
                             }
                         });
