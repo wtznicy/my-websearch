@@ -100,6 +100,16 @@ function isForgivableNetworkFailure(test: RunningTest): boolean {
     return networkFailurePatterns.some((pattern) => pattern.test(output));
 }
 
+/** 提取命中的网络豁免模式（用于 EXCUSED 行展示具体原因，便于发版后追溯） */
+function matchedExcusePattern(output: string): string {
+    const hit = networkFailurePatterns.find((pattern) => pattern.test(output));
+    if (!hit) {
+        return 'unknown';
+    }
+    const source = hit.source;
+    return source.length > 60 ? `${source.slice(0, 57)}...` : source;
+}
+
 function printCapturedOutput(test: RunningTest): void {
     const output = getCapturedOutput(test);
     if (!output.trim()) {
@@ -244,7 +254,7 @@ function runAllTestsInParallel(): Promise<number> {
 
             if (isForgivableNetworkFailure(runningTest)) {
                 excused += 1;
-                console.warn(`===== EXCUSED ${testName}.js: 网络问题，已赦免 =====`);
+                console.warn(`===== EXCUSED ${testName}.js: 网络问题，已赦免（匹配: ${matchedExcusePattern(getCapturedOutput(runningTest))}） =====`);
                 printCapturedOutput(runningTest);
                 finishIfDone();
                 return;
