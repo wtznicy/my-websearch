@@ -17,7 +17,7 @@ import { SearchResult } from '../../types.js';
  */
 
 /** 报告/统计用的聚合指标形状（与 SearchExecutionResult.engineMetrics 一致） */
-export type EngineMetric = { engine: string; ms: number; count: number; error?: string };
+export type EngineMetric = { engine: string; ms: number; count: number; error?: string; timedOut?: boolean };
 
 /** URL 归一化：去 hash 与常见跟踪参数（与 searchService 的归一化保持一致的简化版） */
 function normalizeForDedupe(rawUrl: string): string {
@@ -120,6 +120,9 @@ export function mergeEngineMetricsAcrossQueries(
             existing.count += metric.count;
             if (!existing.error && metric.error) {
                 existing.error = metric.error;
+            }
+            if (metric.timedOut) {
+                existing.timedOut = true;
             }
         }
     }

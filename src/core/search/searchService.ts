@@ -67,8 +67,9 @@ export type SearchExecutionResult = {
     cascadedEngines?: string[];
     /** SERP 首位的直接答案卡片文本（如百度汇率换算/百科摘要卡），LLM 可免抓详情页直接取事实 */
     directAnswer?: string;
-    /** 每引擎耗时/结果数/错误（可观测性：一眼区分超时与被拒/限流；error 为截断版，完整消息见 partialFailures） */
-    engineMetrics?: Array<{ engine: string; ms: number; count: number; error?: string }>;
+    /** 每引擎耗时/结果数/错误（可观测性：一眼区分超时与被拒/限流；error 为截断版，完整消息见 partialFailures）
+     *  timedOut=true 表示该引擎触发了单引擎超时上限（结果已被丢弃；ms 为超时上限而非墙钟耗时） */
+    engineMetrics?: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }>;
 };
 
 export type SearchExecutionInput = {
@@ -382,7 +383,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             const PER_ENGINE_TIMEOUT_MS = Math.min(Math.floor(deadlineMs * 0.5), 10000);
 
             // 每引擎耗时/数量/错误（可观测性：区分超时与被拒/限流）
-            const engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string }> = [];
+            const engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }> = [];
             const startedAtByIndex: number[] = engines.map(() => Date.now());
             const tasks = engines.map(async (engine, index) => {
                 const executor = engineMap[engine];
@@ -420,7 +421,11 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                             console.error(`✅ Engine ${engine} recovered after ${attempt} retries`);
                         }
                         resultCount = results.length;
-                        engineMetrics[index] = { engine, ms: Date.now() - startedAt, count: resultCount };
+                        // 已触发单引擎超时的引擎：迟到完成的结果不会进入结果集（race 已 resolve([])），
+                        // metrics 保持超时口径，避免 16s 的墙钟耗时与"超时 10s"的 partialFailure 自相矛盾
+                        if (!engineMetrics[index]?.timedOut) {
+                            engineMetrics[index] = { engine, ms: Date.now() - startedAt, count: resultCount };
+                        }
                         return results;
                     } catch (error) {
                         lastError = error;
@@ -435,7 +440,9 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 }
 
                 metricError = lastError instanceof Error ? lastError.message : String(lastError);
-                engineMetrics[index] = { engine, ms: Date.now() - startedAt, count: resultCount, error: truncateMetricError(metricError) };
+                if (!engineMetrics[index]?.timedOut) {
+                    engineMetrics[index] = { engine, ms: Date.now() - startedAt, count: resultCount, error: truncateMetricError(metricError) };
+                }
                 partialFailures.push({
                     engine,
                     code: 'engine_error',
@@ -454,7 +461,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                     let done = false;
                     const timer = setTimeout(() => {
                         done = true;
-                        engineMetrics[index] = { engine: engines[index], ms: Date.now() - startedAtByIndex[index], count: 0, error: `timeout after ${wait}ms` };
+                        engineMetrics[index] = { engine: engines[index], ms: wait, count: 0, error: `timeout after ${wait}ms`, timedOut: true };
                         if (!partialFailures.some((failure) => failure.engine === engines[index])) {
                             partialFailures.push({
                                 engine: engines[index],
@@ -538,9 +545,11 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                         let done = false;
                         const cascadeStartedAt = Date.now();
                         const wait = Math.max(0, Math.min(remaining, PER_ENGINE_TIMEOUT_MS));
+                        let cascadeTimedOut = false;
                         const timer = setTimeout(() => {
                             done = true;
-                            engineMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: 0, error: `timeout after ${wait}ms` });
+                            cascadeTimedOut = true;
+                            engineMetrics.push({ engine: candidate, ms: wait, count: 0, error: `timeout after ${wait}ms`, timedOut: true });
                             partialFailures.push({
                                 engine: candidate,
                                 code: 'engine_error',
@@ -554,14 +563,18 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                             if (!done) {
                                 done = true;
                                 clearTimeout(timer);
-                                engineMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: results.length });
+                                if (!cascadeTimedOut) {
+                                    engineMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: results.length });
+                                }
                                 resolve(results);
                             }
                         })().catch((error) => {
                             if (!done) {
                                 done = true;
                                 clearTimeout(timer);
-                                engineMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: 0, error: truncateMetricError(error instanceof Error ? error.message : String(error)) });
+                                if (!cascadeTimedOut) {
+                                    engineMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: 0, error: truncateMetricError(error instanceof Error ? error.message : String(error)) });
+                                }
                                 reject(error);
                             }
                         });
