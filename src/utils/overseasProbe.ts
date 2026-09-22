@@ -21,6 +21,9 @@ import { detectSystemProxy, parseProxyUrl } from './systemProxy.js';
 const PROBE_TIMEOUT_MS = 3000;
 const PROBE_MAX_RETRIES = 1;
 const PROBE_CACHE_TTL_MS = 5 * 60 * 1000;
+// 失败结果短缓存：节点切换/网络恢复后 1 分钟内即可重新探测（此前一律 5 分钟，
+// 一次瞬时失败会把引擎"锁死"5 分钟——实测踩过）
+const PROBE_FAILURE_CACHE_TTL_MS = 60 * 1000;
 const PROBE_MAX_ENTRIES = 20;
 
 /** 探测目标：与各引擎实际请求的 host 保持一致（固定 https URL，无 SSRF 面） */
@@ -53,27 +56,64 @@ async function probeOnce(url: string, proxyUrl?: string): Promise<boolean> {
     }
 }
 
+/** 等待任一探测成功（短路；其余探测在后台自然结束，请求轻量无害） */
+async function anyProbeSucceeded(attempts: Array<Promise<boolean>>): Promise<boolean> {
+    return new Promise((resolve) => {
+        let pending = attempts.length;
+        if (pending === 0) {
+            resolve(false);
+            return;
+        }
+        for (const attempt of attempts) {
+            attempt
+                .then((ok) => {
+                    if (ok) {
+                        resolve(true);
+                    }
+                })
+                .catch(() => undefined)
+                .finally(() => {
+                    pending -= 1;
+                    if (pending === 0) {
+                        resolve(false);
+                    }
+                });
+        }
+    });
+}
+
 async function isDirectlyReachable(engine: 'duckduckgo' | 'brave' | 'startpage'): Promise<boolean> {
     const now = Date.now();
     const cached = probeCache.get(engine);
-    if (cached && now - cached.checkedAt < PROBE_CACHE_TTL_MS) {
-        return cached.reachable;
+    if (cached) {
+        const ttl = cached.reachable ? PROBE_CACHE_TTL_MS : PROBE_FAILURE_CACHE_TTL_MS;
+        if (now - cached.checkedAt < ttl) {
+            return cached.reachable;
+        }
     }
 
-    let reachable = false;
-    for (let attempt = 0; attempt <= PROBE_MAX_RETRIES && !reachable; attempt += 1) {
-        reachable = await probeOnce(PROBE_TARGETS[engine]);
-    }
-
-    // 直连不可达但检测到系统代理（Clash 等已开启、未显式配置 USE_PROXY）：经系统代理再探测一次
-    if (!reachable) {
-        const systemProxy = await detectSystemProxy();
-        if (systemProxy) {
+    // 直连与系统代理**并行**探测（有系统代理时），任一可达即放行：
+    // 串行时国内无直连环境要先白等直连 3s×2=6s 才轮到代理，这 6s 会吃掉引擎的搜索预算
+    const systemProxy = await detectSystemProxy();
+    const attempts: Array<Promise<boolean>> = [
+        (async () => {
+            let reachable = false;
+            for (let attempt = 0; attempt <= PROBE_MAX_RETRIES && !reachable; attempt += 1) {
+                reachable = await probeOnce(PROBE_TARGETS[engine]);
+            }
+            return reachable;
+        })()
+    ];
+    if (systemProxy) {
+        attempts.push((async () => {
+            let reachable = false;
             for (let attempt = 0; attempt <= PROBE_MAX_RETRIES && !reachable; attempt += 1) {
                 reachable = await probeOnce(PROBE_TARGETS[engine], systemProxy);
             }
-        }
+            return reachable;
+        })());
     }
+    const reachable = await anyProbeSucceeded(attempts);
 
     if (probeCache.size >= PROBE_MAX_ENTRIES) {
         const oldest = probeCache.keys().next().value;

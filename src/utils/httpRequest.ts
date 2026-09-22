@@ -352,6 +352,11 @@ export async function requestWithSafeRedirects(
             : undefined;
 
         if (location) {
+            // stopOnRedirect：调用方需要读取 3xx 响应本身（如 Set-Cookie 在 302 上、
+            // 跟随会丢失的场景，见 startpage Anubis 通关流程）
+            if ((options as { stopOnRedirect?: boolean }).stopOnRedirect) {
+                return response;
+            }
             currentUrl = new URL(String(location), currentUrl).toString();
             continue;
         }

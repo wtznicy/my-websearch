@@ -265,7 +265,7 @@ export class SearchTtlCache {
         return entry.value;
     }
 
-    set(input: SearchExecutionInput, value: SearchExecutionResult): void {
+    set(input: SearchExecutionInput, value: SearchExecutionResult, ttlMsOverride?: number): void {
         // 淘汰过期条目
         const now = Date.now();
         for (const [key, entry] of this.cache) {
@@ -281,7 +281,8 @@ export class SearchTtlCache {
             }
             this.cache.delete(oldestKey);
         }
-        this.cache.set(this.buildKey(input), { value, expiresAt: now + this.ttlMs, requestedLimit: input.limit });
+        const ttl = typeof ttlMsOverride === 'number' && ttlMsOverride > 0 ? ttlMsOverride : this.ttlMs;
+        this.cache.set(this.buildKey(input), { value, expiresAt: now + ttl, requestedLimit: input.limit });
     }
 
     clear(): void {
@@ -338,6 +339,9 @@ function buildHintedMessage(engine: string, message: string): string {
 
 // 搜索级总时间预算：超过后未完成的引擎按超时处理，避免单个慢引擎（含重试）拖垮整次搜索
 export const SEARCH_DEADLINE_MS = config.searchDeadlineMs;
+
+/** 降级结果（存在 partialFailures）的短缓存 TTL：既避免击穿，又不把故障钉太久 */
+const DEGRADED_CACHE_TTL_MS = 60 * 1000;
 
 // 查询长度上限：防止超长查询导致搜索引擎请求超时或被封禁
 export const MAX_QUERY_LENGTH = 500;
@@ -398,7 +402,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // 单引擎超时上限：min(总预算 50%, 10s)。此前所有引擎共享总预算，
             // 单个 hang 住的引擎（如代理链路上的 duckduckgo）会吃光 30s 导致级联完全不跑；
             // 现在主阶段最多消耗 ~50% 预算，为级联保留剩余时间
-            const PER_ENGINE_TIMEOUT_MS = Math.min(Math.floor(deadlineMs * 0.5), 10000);
+            const PER_ENGINE_TIMEOUT_MS = Math.min(Math.floor(deadlineMs * 0.5), 6000);
 
             // 每引擎耗时/数量/错误（可观测性：区分超时与被拒/限流）
             const engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }> = [];
@@ -654,10 +658,17 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 ...(engineMetrics.some(Boolean) ? { engineMetrics: engineMetrics.filter(Boolean) } : {})
             };
 
-            // 失败/降级结果不缓存：有 partialFailures 或零结果时，下次相同查询应重试，
-            // 避免引擎临时故障被钉死在 TTL 内。
-            if (partialFailures.length === 0 && merged.length > 0) {
-                ttlCache.set({ query: searchQuery, engines, limit, searchMode, minResults }, result);
+            // 缓存写入：只要拿到结果就写入。partialFailures 是多引擎场景的常态
+            // （no_results / 单引擎限流 / 超时），此前"零失败才缓存"会让重复查询每次
+            // 冷启动（实测缓存几乎 100% 击穿）。降级结果用短 TTL（1 分钟）保持新鲜度，
+            // 零结果仍不缓存（下次应重试）。
+            if (merged.length > 0) {
+                const degraded = partialFailures.length > 0;
+                ttlCache.set(
+                    { query: searchQuery, engines, limit, searchMode, minResults },
+                    result,
+                    degraded ? DEGRADED_CACHE_TTL_MS : undefined
+                );
             }
 
             return result;

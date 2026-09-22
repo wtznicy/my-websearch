@@ -4,10 +4,13 @@ import { config } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
+import { warmupWithAnubisPow } from './anubisSolver.js';
 
 const STARTPAGE_BASE_URL = 'https://www.startpage.com';
 const STARTPAGE_SEARCH_URL = `${STARTPAGE_BASE_URL}/sp/search`;
 const STARTPAGE_SC_TTL_MS = 30 * 60 * 1000;
+/** Anubis PoW 会话的 TTL：放行 JWT 有效期 5 分钟，取 4 分钟保守值 */
+const ANUBIS_SESSION_TTL_MS = 4 * 60 * 1000;
 const DEFAULT_PAGE_SIZE = 10;
 
 const COMMON_HEADERS = {
@@ -18,6 +21,8 @@ const COMMON_HEADERS = {
 let cachedScCode: string | undefined;
 let cachedCookies: string | undefined;
 let cachedScAt = 0;
+/** 当前缓存的会话 TTL（PoW 会话 4 分钟 / Playwright 会话 30 分钟） */
+let currentSessionTtlMs = STARTPAGE_SC_TTL_MS;
 
 function isCaptchaPage(html: string): boolean {
     const normalized = html.toLowerCase();
@@ -137,13 +142,32 @@ async function warmupStartpageSession(): Promise<void> {
 
 async function getScCode(): Promise<string> {
     const now = Date.now();
-    if (cachedScCode && now - cachedScAt < STARTPAGE_SC_TTL_MS) {
+    if (cachedScCode && now - cachedScAt < currentSessionTtlMs) {
         return cachedScCode;
     }
+
+    // ① 纯 HTTP Anubis PoW 求解（无浏览器；实测全流程约 2.6s，PoW 本身约 150ms）
+    try {
+        const session = await warmupWithAnubisPow();
+        if (session) {
+            cachedScCode = session.scCode;
+            cachedCookies = session.cookies;
+            cachedScAt = Date.now();
+            currentSessionTtlMs = ANUBIS_SESSION_TTL_MS;
+            console.error('✅ Startpage warmup via Anubis PoW (no browser needed)');
+            return cachedScCode;
+        }
+        console.warn('Startpage Anubis PoW warmup returned no session, falling back to Playwright');
+    } catch (error) {
+        console.warn('Startpage Anubis PoW warmup failed, falling back to Playwright:', error instanceof Error ? error.message : String(error));
+    }
+
+    // ② Playwright 兜底（hidden-headed 模式，见 warmupStartpageSession）
     await warmupStartpageSession();
     if (!cachedScCode) {
         throw new Error('Failed to extract Startpage search token');
     }
+    currentSessionTtlMs = STARTPAGE_SC_TTL_MS;
     return cachedScCode;
 }
 
