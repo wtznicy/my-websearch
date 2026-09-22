@@ -402,7 +402,10 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // 单引擎超时上限：min(总预算 50%, 10s)。此前所有引擎共享总预算，
             // 单个 hang 住的引擎（如代理链路上的 duckduckgo）会吃光 30s 导致级联完全不跑；
             // 现在主阶段最多消耗 ~50% 预算，为级联保留剩余时间
-            const PER_ENGINE_TIMEOUT_MS = Math.min(Math.floor(deadlineMs * 0.5), 6000);
+            // 10s：实测国内引擎（baidu/sogou）在真实网络+反爬下的正常耗时带为 5~9s
+            // （搜索请求 2~5s + 中转链接解析最多 3s 预算 + 反爬重试），6s/8s 都会稳定误杀；
+            // 链接解析已有 3s 总预算封顶，不会再出现 N+1 无限膨胀，10s 是"不误杀且不白等太久"的平衡点
+            const PER_ENGINE_TIMEOUT_MS = Math.min(Math.floor(deadlineMs * 0.5), 10000);
 
             // 每引擎耗时/数量/错误（可观测性：区分超时与被拒/限流）
             const engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }> = [];

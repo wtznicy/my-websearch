@@ -5,9 +5,13 @@ import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { normalizeText } from '../../utils/text.js';
 import { sleep } from '../../utils/timing.js';
+import { mapWithConcurrencyBudget } from '../../utils/concurrency.js';
 
 const SOGOU_SEARCH_URL = 'https://www.sogou.com/web';
 const SOGOU_PAGE_SIZE = 10;
+/** 跳转链解析总预算与并发（见 searchSogouPage） */
+const SOGOU_LINK_RESOLVE_BUDGET_MS = 2000;
+const SOGOU_LINK_RESOLVE_CONCURRENCY = 6;
 
 const COMMON_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
@@ -268,19 +272,30 @@ async function searchSogouPage(query: string, page: number): Promise<SearchResul
             throw error;
         }
         console.warn('Sogou returned an anti-bot page, retrying once after a short delay');
-        await sleep(1000 + Math.random() * 1000);
+        // 0.5~1s：重试需重跑多跳 fetch（含 cookie 管理），等待过长会与重试成本叠加，
+        // 把引擎整体耗时推过单引擎超时（实测 1~2s 等待 + 重试后稳定超 10s）
+        await sleep(500 + Math.random() * 500);
         parsed = parseSogouSearchResults(await fetchSogouHtml(url.toString()));
     }
 
-    // 跳转链并发解析成真实 URL；source 跟随真实 URL 重新提取（跳转链时只会是 www.sogou.com）
-    return mapWithConcurrency(parsed, 4, async (result) => {
-        const resolvedUrl = await resolveSogouLinkUrl(result.url);
-        return {
+    // 跳转链并发解析成真实 URL；source 跟随真实 URL 重新提取。
+    // 总预算 3s：预算耗尽后剩余结果保留原跳转链接（仍可用），避免 N+1 请求
+    // 把引擎整体耗时推过单引擎超时上限（实测 sogou 8.4s 被掐断）
+    const resolved = await mapWithConcurrencyBudget(
+        parsed,
+        SOGOU_LINK_RESOLVE_CONCURRENCY,
+        async (result) => ({
             ...result,
-            url: resolvedUrl,
-            source: extractSource(resolvedUrl, result.source)
-        };
-    });
+            url: await resolveSogouLinkUrl(result.url),
+            source: result.source
+        }),
+        SOGOU_LINK_RESOLVE_BUDGET_MS,
+        (result) => result
+    );
+    return resolved.map((result) => ({
+        ...result,
+        source: extractSource(result.url, result.source)
+    }));
 }
 
 export async function searchSogou(query: string, limit: number): Promise<SearchResult[]> {

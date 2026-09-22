@@ -3,6 +3,7 @@ import * as cheerio from 'cheerio';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { BROWSER_USER_AGENT as BAIDU_USER_AGENT } from '../../utils/constants.js';
+import { mapWithConcurrencyBudget } from '../../utils/concurrency.js';
 
 const BAIDU_LINK_PREFIX = 'http://www.baidu.com/link?url=';
 
@@ -82,19 +83,21 @@ async function resolveBaiduRedirectUrl(linkUrl: string): Promise<string> {
     }
 }
 
-/** 并发解析一批跳转链接（限制并发 4），避免逐条串行 HEAD（N+1）拖慢整页 */
+/** 链接解析总预算：预算耗尽后剩余结果保留原中转链接（用户/LLM 仍可用），
+ *  避免 N+1 的 HEAD 请求把引擎整体耗时推过单引擎超时上限（实测 10 条结果时
+ *  解析阶段可累积数秒，导致 baidu 整体 14.6s 被 6s 上限掐断） */
+const REDIRECT_RESOLVE_BUDGET_MS = 2000;
+const REDIRECT_RESOLVE_CONCURRENCY = 6;
+
+/** 带预算并发解析一批跳转链接：超预算的保留原链接 */
 async function resolveBaiduRedirectUrls(hrefs: string[]): Promise<string[]> {
-    const resolved = new Array<string>(hrefs.length);
-    let next = 0;
-    const workers = Array.from({ length: Math.min(4, hrefs.length) }, async () => {
-        while (next < hrefs.length) {
-            const index = next;
-            next += 1;
-            resolved[index] = await resolveBaiduRedirectUrl(hrefs[index]);
-        }
-    });
-    await Promise.all(workers);
-    return resolved;
+    return mapWithConcurrencyBudget(
+        hrefs,
+        REDIRECT_RESOLVE_CONCURRENCY,
+        (href) => resolveBaiduRedirectUrl(href),
+        REDIRECT_RESOLVE_BUDGET_MS,
+        (href) => href
+    );
 }
 
 /** 百度推广容器/链接特征：推广走加密跳转（baidu.php?url=）且常无描述，需在解析层剔除 */
