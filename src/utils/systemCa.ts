@@ -65,7 +65,11 @@ export function ensureCurlCaBundle(): Promise<void> {
                 process.env.CURL_CA_BUNDLE = CA_BUNDLE_PATH;
                 console.error(`🔐 Exported Windows root certificates for curl-impersonate: ${CA_BUNDLE_PATH}`);
             } catch (error) {
-                console.warn('Failed to export Windows root certificates for curl-impersonate (TLS verification will retry without verification on curl 60):', error instanceof Error ? error.message : String(error));
+                // 导出失败会走既有降级路径（curl 60 重试），属预期；默认静默避免启动噪音，
+                // 排查时用 OPEN_WEBSEARCH_DEBUG=1 打开
+                if (process.env.OPEN_WEBSEARCH_DEBUG === '1') {
+                    console.warn('Failed to export Windows root certificates for curl-impersonate (TLS verification will retry without verification on curl 60):', error instanceof Error ? error.message : String(error));
+                }
             }
         })();
     }

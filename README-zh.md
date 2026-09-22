@@ -276,6 +276,8 @@ PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium 
 
 CLI 适合一次性执行；本地 daemon 是常驻 HTTP 服务，适合反复调用。
 
+本地 daemon 还提供只读监控端点：`GET /health`、`GET /status`、`GET /metrics`（Prometheus 文本格式——各引擎成功/失败/耗时、搜索缓存命中率、进程内存与运行时长），可接入本地监控采集。
+
 ```bash
 # 构建（本地源码时）
 npm run build

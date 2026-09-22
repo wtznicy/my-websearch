@@ -7,6 +7,7 @@ import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } f
 import { pickDefaultEnginesForQuery } from '../../core/search/queryEngineRouting.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
 import { ErrorCode } from '../../core/errors.js';
+import { metrics } from '../../core/metrics.js';
 
 export type LocalDaemonOptions = {
     host?: string;
@@ -50,7 +51,8 @@ function getCapabilities(): string[] {
         'fetch-juejin',
         'fetch-github-readme',
         'resolve-library-id',
-        'query-docs'
+        'query-docs',
+        'metrics'
     ];
 }
 
@@ -272,6 +274,11 @@ export async function startLocalDaemon(
 
     app.get('/status', (_req, res) => {
         res.json(createSuccessEnvelope(getStatus()));
+    });
+
+    // Prometheus 文本格式指标（只读；供本地监控采集，复用 core/metrics 的进程内统计）
+    app.get('/metrics', (_req, res) => {
+        res.type('text/plain; version=0.0.4; charset=utf-8').send(metrics.renderPrometheus());
     });
 
     app.post('/cache/clear', async (_req, res) => {

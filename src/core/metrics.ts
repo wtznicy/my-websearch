@@ -178,6 +178,53 @@ class MetricsCollector {
         this.engineMetrics.clear();
         this.cacheMetrics = { hits: 0, misses: 0 };
     }
+
+    /**
+     * 渲染为 Prometheus 文本格式（供本地 daemon 的 GET /metrics 暴露）。
+     * 指标命名遵循 <namespace>_<subsystem>_<name>_<unit> 约定。
+     */
+    renderPrometheus(): string {
+        const snapshot = this.getMetrics();
+        const lines: string[] = [];
+        const push = (line: string) => lines.push(line);
+
+        push('# HELP mywebsearch_engine_searches_total Total engine search attempts by engine and outcome');
+        push('# TYPE mywebsearch_engine_searches_total counter');
+        push('# HELP mywebsearch_engine_search_duration_ms_total Cumulative engine search duration in milliseconds');
+        push('# TYPE mywebsearch_engine_search_duration_ms_total counter');
+        push('# HELP mywebsearch_engine_search_duration_ms_avg Average engine search duration in milliseconds');
+        push('# TYPE mywebsearch_engine_search_duration_ms_avg gauge');
+
+        for (const [engine, stats] of Object.entries(snapshot.engines)) {
+            const label = `engine="${engine.replace(/"/g, '')}"`;
+            push(`mywebsearch_engine_searches_total{${label},outcome="success"} ${stats.success}`);
+            push(`mywebsearch_engine_searches_total{${label},outcome="failure"} ${stats.failure}`);
+            push(`mywebsearch_engine_searches_total{${label},outcome="total"} ${stats.total}`);
+            push(`mywebsearch_engine_search_duration_ms_total{${label}} ${stats.avgDurationMs * stats.total}`);
+            push(`mywebsearch_engine_search_duration_ms_avg{${label}} ${stats.avgDurationMs}`);
+        }
+
+        push('# HELP mywebsearch_cache_hits_total Search cache hits');
+        push('# TYPE mywebsearch_cache_hits_total counter');
+        push(`mywebsearch_cache_hits_total ${snapshot.cache.hits}`);
+        push('# HELP mywebsearch_cache_misses_total Search cache misses');
+        push('# TYPE mywebsearch_cache_misses_total counter');
+        push(`mywebsearch_cache_misses_total ${snapshot.cache.misses}`);
+        push('# HELP mywebsearch_cache_hit_rate_percent Search cache hit rate in percent');
+        push('# TYPE mywebsearch_cache_hit_rate_percent gauge');
+        push(`mywebsearch_cache_hit_rate_percent ${snapshot.cache.hitRate}`);
+
+        // 进程基础指标（便于确认进程存活与内存占用）
+        const memory = process.memoryUsage();
+        push('# HELP mywebsearch_process_resident_memory_bytes Resident memory size in bytes');
+        push('# TYPE mywebsearch_process_resident_memory_bytes gauge');
+        push(`mywebsearch_process_resident_memory_bytes ${memory.rss}`);
+        push('# HELP mywebsearch_process_uptime_seconds Process uptime in seconds');
+        push('# TYPE mywebsearch_process_uptime_seconds counter');
+        push(`mywebsearch_process_uptime_seconds ${Math.round(process.uptime())}`);
+
+        return `${lines.join('\n')}\n`;
+    }
 }
 
 // 单例导出
