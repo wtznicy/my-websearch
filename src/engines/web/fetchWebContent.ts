@@ -425,19 +425,19 @@ export async function fetchWebContent(
     const startIndex = Math.max(0, Math.floor(options.startIndex ?? 0));
     const targetMaxChars = clampMaxChars(maxChars);
 
-    const requestOptions = buildRequestOptions(undefined, true);
-
     // Pre-flight check to avoid downloading oversized payloads when Content-Length is present.
     // 明显的小文件（.md/.txt/.json 等）跳过 HEAD 预检：HEAD 一次延迟翻倍，
     // 这些类型超 2MB 上限的概率极低，且部分站点禁 HEAD 会白等超时。
     // GET 请求自带 maxBodyLength 硬上限兜底（见 buildRequestOptions）。
     if (!isLikelySmallFile(parsedUrl)) {
         try {
-            const headResponse = await requestWithSafeRedirects('HEAD', parsedUrl.toString(), {
-                ...requestOptions,
+            // HEAD 预检与主请求同口径（直连优先、代理兜底）：此前写死 forceDirect=true，
+            // 需代理的环境下直连 HEAD 会白等一次超时（且拿不到 Content-Length 预检）
+            const headResponse = await requestDirectFirst('HEAD', parsedUrl.toString(), (forceDirect) => ({
+                ...buildRequestOptions(undefined, forceDirect),
                 responseType: 'json',
                 validateStatus: (status: number) => status >= 200 && status < 400
-            }, 'Request URL');
+            }), 'Request URL');
             const headLength = Number(headResponse.headers['content-length']);
             if (Number.isFinite(headLength) && headLength > MAX_DOWNLOAD_BYTES) {
                 const tooLargeError = new Error(`Response body too large (${headLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);

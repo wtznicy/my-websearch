@@ -2,6 +2,7 @@ import { SearchResult } from '../../types.js';
 import { AppConfig, config } from '../../config.js';
 import { distributeLimit, SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
 import { rankSearchResults, countUsableResults } from './resultRanking.js';
+import { isEngineCircuitOpen, getEngineCircuitRemainingMs } from './engineCircuitBreaker.js';
 import { quoteModelLikeTerms } from '../../utils/queryPreprocess.js';
 import { sleep } from '../../utils/timing.js';
 
@@ -53,7 +54,7 @@ export type SearchEngineExecutorMap = Partial<Record<string, SearchEngineExecuto
 
 export type SearchExecutionFailure = {
     engine: string;
-    code: 'engine_error' | 'unsupported_engine' | 'no_results';
+    code: 'engine_error' | 'unsupported_engine' | 'no_results' | 'circuit_open';
     message: string;
 };
 
@@ -370,8 +371,25 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             }
 
             try {
-            const limits = distributeLimit(limit, engines.length);
+            // 熔断中的引擎（近期 429 限流）跳过调用，配额平移给其余引擎——0ms 无感避障，
+            // 不必等它报错再走级联；全部熔断时保持原列表（仍尝试，避免无引擎可用）
+            const circuitOpenEngines = engines.filter((engine) => isEngineCircuitOpen(engine));
+            const executableEngines = circuitOpenEngines.length > 0 && circuitOpenEngines.length < engines.length
+                ? engines.filter((engine) => !isEngineCircuitOpen(engine))
+                : engines;
+
             const partialFailures: SearchExecutionFailure[] = [];
+            for (const engine of circuitOpenEngines) {
+                if (!executableEngines.includes(engine)) {
+                    partialFailures.push({
+                        engine,
+                        code: 'circuit_open',
+                        message: `Engine circuit open (recent HTTP 429 rate limiting, ~${Math.ceil(getEngineCircuitRemainingMs(engine) / 1000)}s cooldown left) — quota reallocated to other engines`
+                    });
+                }
+            }
+
+            const limits = distributeLimit(limit, executableEngines.length);
             const effectiveSearchMode = resolveSearchModeOverride(searchMode);
 
             // 搜索级总时间预算：到点后未完成的引擎按超时处理，避免单个慢引擎拖垮整次搜索
@@ -385,7 +403,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // 每引擎耗时/数量/错误（可观测性：区分超时与被拒/限流）
             const engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }> = [];
             const startedAtByIndex: number[] = engines.map(() => Date.now());
-            const tasks = engines.map(async (engine, index) => {
+            const tasks = executableEngines.map(async (engine, index) => {
                 const executor = engineMap[engine];
                 const engineLimit = limits[index];
                 const startedAt = startedAtByIndex[index];
@@ -461,10 +479,10 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                     let done = false;
                     const timer = setTimeout(() => {
                         done = true;
-                        engineMetrics[index] = { engine: engines[index], ms: wait, count: 0, error: `timeout after ${wait}ms`, timedOut: true };
-                        if (!partialFailures.some((failure) => failure.engine === engines[index])) {
+                        engineMetrics[index] = { engine: executableEngines[index], ms: wait, count: 0, error: `timeout after ${wait}ms`, timedOut: true };
+                        if (!partialFailures.some((failure) => failure.engine === executableEngines[index])) {
                             partialFailures.push({
-                                engine: engines[index],
+                                engine: executableEngines[index],
                                 code: 'engine_error',
                                 message: buildHintedMessage(engines[index], `Engine timeout after ${wait}ms (no response in time)`)
                             });
@@ -502,7 +520,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // 配额 >0 但引擎返回 0 条时，记录为可见的部分失败，便于 agent 区分
             // "该引擎没结果"（no_results，属正常空结果）与 "该引擎没被调用"（配额 0 的情况）。
             // 注意：不能把正常空结果报成 engine_error——冷门查询所有引擎都 0 条时会刷一墙误导性"故障"。
-            engines.forEach((engine, index) => {
+            executableEngines.forEach((engine, index) => {
                 const executor = engineMap[engine];
                 if (executor && limits[index] > 0 && engineResults[index].length === 0) {
                     if (!partialFailures.some((failure) => failure.engine === engine)) {
@@ -530,7 +548,9 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             if (minResults && minResults > usableCount) {
                 const usedEngines = new Set(engines);
                 const candidates = SUPPORTED_SEARCH_ENGINES.filter(
-                    (engine) => !usedEngines.has(engine) && typeof engineMap[engine] === 'function'
+                    (engine) => !usedEngines.has(engine)
+                        && typeof engineMap[engine] === 'function'
+                        && !isEngineCircuitOpen(engine)
                 );
                 for (let cursor = 0; cursor < candidates.length
                     && countUsableResults(merged, cleanQuery) < minResults; cursor += CASCADE_BATCH_SIZE) {
@@ -625,7 +645,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
 
             const result: SearchExecutionResult = {
                 query: cleanQuery,
-                engines,
+                engines: executableEngines,
                 totalResults: merged.length,
                 results: merged,
                 partialFailures,

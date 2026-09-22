@@ -5,6 +5,7 @@ import { buildAxiosRequestOptions } from "../../utils/httpRequest.js";
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { paginateSearch } from '../../utils/pagination.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
+import { tripEngineCircuit } from '../../core/search/engineCircuitBreaker.js';
 
 /** Brave 拦截/验证页的标题关键词（反爬时页面 title 变为这些） */
 const BRAVE_BLOCKED_TITLE_KEYWORDS = [
@@ -27,10 +28,16 @@ function isBraveBlockedPage(html: string): boolean {
 function buildBraveErrorMessage(error: unknown): Error {
     const status = (error as any)?.response?.status;
     if (status === 429) {
-        return new Error(
-            'Brave rate limited (HTTP 429): the proxy/datacenter IP is throttled by Brave. ' +
-            'Retry later, reduce search frequency, or use another engine (e.g. duckduckgo/startpage).'
+        // 实测 429 来自 AWS CloudFront + WAF 的 IP 级限流（响应带 x-cache: Error from cloudfront）：
+        // 被标记的出口 IP 在分钟级窗口内必然持续 429——标记不可重试（避免 3 次重试风暴浪费 5~8 秒）
+        // 并熔断该引擎 5 分钟，让配额平移给其他引擎（见 engineCircuitBreaker）
+        const err = new Error(
+            'Brave rate limited (HTTP 429): the proxy/datacenter IP is throttled by Brave (CloudFront IP-level rate rule). ' +
+            'Circuit opened for 5 minutes; quota reallocated to other engines. Retry later or use duckduckgo/startpage.'
         );
+        (err as any).retryable = false;
+        tripEngineCircuit('brave');
+        return err;
     }
     return error instanceof Error ? error : new Error(String(error));
 }

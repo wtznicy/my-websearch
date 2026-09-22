@@ -1,4 +1,5 @@
 import { SearchResult } from '../types.js';
+import { resetEngineCircuits, tripEngineCircuit } from '../core/search/engineCircuitBreaker.js';
 import {
     SUPPORTED_SEARCH_ENGINES,
     distributeLimit,
@@ -351,6 +352,44 @@ async function testSearchZeroQuotaEngines(): Promise<void> {
     console.log('✅ search service reports zero-quota engines distinctly from empty results');
 }
 
+async function testEngineCircuitQuotaTransfer(): Promise<void> {
+    resetEngineCircuits();
+    const calls: Record<string, number[]> = { bing: [], brave: [] };
+    const service = createSearchService({
+        bing: async (query, limit) => {
+            calls.bing.push(limit);
+            return Array.from({ length: limit }, (_, index) => createResult('bing', index + 1));
+        },
+        brave: async (query, limit) => {
+            calls.brave.push(limit);
+            return [createResult('brave', 1)];
+        }
+    });
+
+    // 熔断 brave（模拟 429 后的 5 分钟冷却）
+    tripEngineCircuit('brave');
+    const result = await service.execute({ query: 'circuit query', engines: ['bing', 'brave'], limit: 6 });
+
+    assertEqual(calls.brave.length, 0, 'circuit-open engine must not be invoked');
+    assertEqual(calls.bing[0], 6, 'quota transferred to remaining engine (6 instead of 3)');
+    assert(
+        result.partialFailures.some((failure) => failure.engine === 'brave' && failure.code === 'circuit_open'),
+        'circuit_open recorded in partialFailures'
+    );
+    assertEqual(result.engines.join(','), 'bing', 'result reports the engines actually executed');
+    assertEqual(result.results.length, 6, 'transferred quota yields the full result count');
+
+    // 全部熔断时保持原列表（仍尝试，避免无引擎可用）
+    resetEngineCircuits();
+    tripEngineCircuit('bing');
+    tripEngineCircuit('brave');
+    const allOpen = await service.execute({ query: 'all open', engines: ['bing', 'brave'], limit: 4 });
+    assert(allOpen.engines.length === 2, 'all-open circuits fall back to the requested engine list');
+
+    resetEngineCircuits();
+    console.log('✅ engine circuit breaker skips rate-limited engines and transfers quota');
+}
+
 async function testSearchServiceMinResultsCascade(): Promise<void> {
     const called: string[] = [];
     const engineMap: SearchEngineExecutorMap = {
@@ -449,6 +488,7 @@ async function main(): Promise<void> {
     await testSearchQueryTooLong();
     await testSearchZeroQuotaEngines();
     await testSearchServiceMinResultsCascade();
+    await testEngineCircuitQuotaTransfer();
     await testSearchServiceClearCache();
     await testPartialFailuresCarryHint();
     console.log('\nCore search tests passed.');
