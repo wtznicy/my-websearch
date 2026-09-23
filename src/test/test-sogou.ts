@@ -90,6 +90,10 @@ async function testSearchSogouFollowsRedirects(): Promise<void> {
     const requestedCookies: Array<string | undefined> = [];
 
     __setSogouHttpGetForTests(async (url: string, options: AxiosRequestConfig) => {
+        // 移动端路径返回空页：该用例专注 PC 路径的跳转解析/ cookie 行为
+        if (url.includes('m.sogou.com')) {
+            return makeResponse(200, {}, '<html><body>no results</body></html>');
+        }
         requestedUrls.push(url);
         requestedCookies.push((options.headers as Record<string, string> | undefined)?.Cookie);
 

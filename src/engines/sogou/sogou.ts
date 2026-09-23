@@ -289,7 +289,7 @@ async function fetchSogouHtml(initialUrl: string): Promise<string> {
 /** 请求搜狗移动端结果页（独立于 PC 端路径：移动端风控宽松，不需要指纹） */
 async function fetchSogouMobileHtml(query: string): Promise<string> {
     const url = `${SOGOU_MOBILE_URL}?keyword=${encodeURIComponent(query)}`;
-    const response = await axios.get(url, buildAxiosRequestOptions({ engine: 'sogou',
+    const response = await sogouHttpGet(url, buildAxiosRequestOptions({ engine: 'sogou',
         trustedStaticHost: true,
         headers: {
             'User-Agent': SOGOU_MOBILE_UA,
