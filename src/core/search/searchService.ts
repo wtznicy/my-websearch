@@ -309,6 +309,13 @@ function isRetryableEngineError(error: unknown): boolean {
     if (typeof status === 'number') {
         return status === 429 || status >= 500;
     }
+    // 反爬/验证页/挑战页类错误：不会在 1~2 秒内恢复，重试只会把引擎耗时翻倍
+    // （实测 sogou 命中反爬时每次尝试 4~5s，三层重试叠加后吃满 10s 上限报 timeout，
+    //  而快速失败只需 4~5s 就能让级联立刻补位）
+    const message = error instanceof Error ? error.message : String(error);
+    if (/anti-bot|verification page|challenge page|captcha|验证码|人机验证/i.test(message)) {
+        return false;
+    }
     return true;
 }
 

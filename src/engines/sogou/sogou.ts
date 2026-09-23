@@ -266,17 +266,24 @@ async function searchSogouPage(query: string, page: number): Promise<SearchResul
     try {
         parsed = parseSogouSearchResults(await fetchSogouHtml(url.toString()));
     } catch (error) {
-        // 反爬降级：命中验证页时等待 1-2 秒重试一次（给服务端一次冷却机会），
+        // 反爬降级：命中验证页时等待 0.5~1 秒重试一次（给服务端一次冷却机会），
         // 仍失败才向上抛（由 searchService 的 partialFailures/级联换引擎接管）
         const message = error instanceof Error ? error.message : String(error);
         if (!/anti-bot|verification/i.test(message)) {
             throw error;
         }
         console.warn('Sogou returned an anti-bot page, retrying once after a short delay');
-        // 0.5~1s：重试需重跑多跳 fetch（含 cookie 管理），等待过长会与重试成本叠加，
-        // 把引擎整体耗时推过单引擎超时（实测 1~2s 等待 + 重试后稳定超 10s）
+        // 0.5~1s：重试需重跑多跳 fetch（含 cookie 管理），等待过长会与重试成本叠加
         await sleep(500 + Math.random() * 500);
-        parsed = parseSogouSearchResults(await fetchSogouHtml(url.toString()));
+        try {
+            parsed = parseSogouSearchResults(await fetchSogouHtml(url.toString()));
+        } catch (retryError) {
+            // 引擎内已重试过一次：最终失败标记不可重试，避免 searchService 再叠加 3 次重试
+            // （否则 3 × ~4.5s 会吃满 10s 上限报 timeout，而不是快速失败交级联补位）
+            const finalError = retryError instanceof Error ? retryError : new Error(String(retryError));
+            (finalError as any).retryable = false;
+            throw finalError;
+        }
     }
 
     // 跳转链并发解析成真实 URL；source 跟随真实 URL 重新提取。
