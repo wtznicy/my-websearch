@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSogouSearchResults } from '../../engines/sogou/sogou.js';
+import { parseSogouSearchResults, parseSogouMobileResults } from '../../engines/sogou/sogou.js';
 
 const NORMAL_PAGE = `<!DOCTYPE html>
 <html>
@@ -62,5 +62,35 @@ describe('parseSogouSearchResults', () => {
 
     it('should return empty array for page without result containers', () => {
         expect(parseSogouSearchResults('<html><body>no results</body></html>')).toEqual([]);
+    });
+});
+const MOBILE_PAGE = `<!DOCTYPE html><html><body>
+<div class="vrResult" id="sogou_vr_1">
+  <h3><a class="resultLink" href="/web/searchList.jsp?keyword=x&url=https%3A%2F%2Fwww.cnblogs.com%2Fvkdoc%2Fp%2F19775542">博客园结果</a></h3>
+  <div class="text-layout">博客园的描述文本</div>
+</div>
+<div class="vrResult" id="sogou_vr_2">
+  <h3>广告位（无 resultLink）</h3>
+</div>
+<div class="vrResult" id="sogou_vr_3">
+  <h3><a class="resultLink" href="/web/searchList.jsp?keyword=x&url=https%3A%2F%2Fm.sogou.com%2Fnav">搜狗自身导航（应被过滤）</a></h3>
+</div>
+</body></html>`;
+
+describe('parseSogouMobileResults', () => {
+    it('should extract real links from the url= parameter and skip ads/self-links', () => {
+        const results = parseSogouMobileResults(MOBILE_PAGE);
+        expect(results).toHaveLength(1);
+        expect(results[0]).toMatchObject({
+            title: '博客园结果',
+            url: 'https://www.cnblogs.com/vkdoc/p/19775542',
+            description: '博客园的描述文本',
+            source: 'www.cnblogs.com',
+            engine: 'sogou'
+        });
+    });
+
+    it('should throw on a mobile verification page', () => {
+        expect(() => parseSogouMobileResults('<html><title>搜狗搜索验证</title>请输入验证码</html>')).toThrow(/anti-bot/i);
     });
 });

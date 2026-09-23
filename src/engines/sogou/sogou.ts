@@ -15,6 +15,12 @@ const SOGOU_LINK_RESOLVE_BUDGET_MS = 2000;
 // 4（而非 6）：多引擎并发时保留连接预算，避免与同批次其他引擎的解析争抢导致整体超时
 const SOGOU_LINK_RESOLVE_CONCURRENCY = 4;
 
+/** 搜狗移动端接口（WAP 集群）：风控规则远宽松于 PC 端——实测同一被标记的代理 IP 上
+ *  PC 端 100% 验证码拦截，移动端 200 且返回明文链接（a.resultLink 的 url= 参数），
+ *  无需再做跳转链解析（PC 端每条结果一次跳转跟随的 2~3s 开销归零）。 */
+const SOGOU_MOBILE_URL = 'https://m.sogou.com/web/searchList.jsp';
+const SOGOU_MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+
 const COMMON_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -280,6 +286,87 @@ async function fetchSogouHtml(initialUrl: string): Promise<string> {
     throw new Error('Sogou returned too many redirects');
 }
 
+/** 请求搜狗移动端结果页（独立于 PC 端路径：移动端风控宽松，不需要指纹） */
+async function fetchSogouMobileHtml(query: string): Promise<string> {
+    const url = `${SOGOU_MOBILE_URL}?keyword=${encodeURIComponent(query)}`;
+    const response = await axios.get(url, buildAxiosRequestOptions({ engine: 'sogou',
+        trustedStaticHost: true,
+        headers: {
+            'User-Agent': SOGOU_MOBILE_UA,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+        },
+        timeout: 15000,
+        validateStatus: (status) => status >= 200 && status < 400
+    }));
+    return String(response.data || '');
+}
+
+/**
+ * 解析搜狗移动端结果页。
+ * 只保留持 `a.resultLink` 且能解出明文 `url=` 的卡片——广告/推荐位天然被过滤；
+ * 真实链接直接来自 URL 参数，无需 HTTP 跟随（这是移动端路径最大的性能收益）。
+ */
+export function parseSogouMobileResults(html: string): SearchResult[] {
+    if (isSogouChallengePage(html)) {
+        throw new Error('Sogou returned a verification or anti-bot page');
+    }
+
+    const $ = cheerio.load(html);
+    const results: SearchResult[] = [];
+
+    $('.vrResult').each((_, element) => {
+        const card = $(element);
+        const link = card.find('a.resultLink[href*="url="]').first();
+        const href = String(link.attr('href') || '');
+        const urlMatch = href.match(/[?&]url=([^&]+)/);
+        if (!urlMatch) {
+            return; // 广告/推荐/插件位
+        }
+
+        let realUrl = '';
+        try {
+            realUrl = decodeURIComponent(urlMatch[1]);
+        } catch {
+            return;
+        }
+        if (!/^https?:\/\//i.test(realUrl)) {
+            return;
+        }
+        // 排除搜狗自身域名：移动端页面的导航/追踪链接也带 url= 参数，会误提取成"结果"
+        try {
+            if (/(^|\.)sogou\.com$/i.test(new URL(realUrl).hostname)) {
+                return;
+            }
+        } catch {
+            return;
+        }
+
+        const title = normalizeText(card.find('h3').first().text());
+        if (!title) {
+            return;
+        }
+
+        const description = normalizeText(card.find('.text-layout, .fz-mid, .str_info, .result-summary-exp, p').first().text());
+        let source = '';
+        try {
+            source = new URL(realUrl).hostname;
+        } catch {
+            source = '';
+        }
+
+        results.push({
+            title,
+            url: realUrl,
+            description,
+            source,
+            engine: 'sogou'
+        });
+    });
+
+    return results;
+}
+
 export function parseSogouSearchResults(html: string): SearchResult[] {
     if (isSogouChallengePage(html)) {
         throw new Error('Sogou returned a verification or anti-bot page');
@@ -384,21 +471,60 @@ async function searchSogouPage(query: string, page: number): Promise<SearchResul
 export async function searchSogou(query: string, limit: number): Promise<SearchResult[]> {
     const allResults: SearchResult[] = [];
     const seenUrls = new Set<string>();
-    const maxPage = Math.max(1, Math.ceil(limit / SOGOU_PAGE_SIZE));
 
-    for (let page = 1; page <= maxPage && allResults.length < limit; page += 1) {
-        const pageResults = await searchSogouPage(query, page);
-        for (const result of pageResults) {
+    const merge = (incoming: SearchResult[]): number => {
+        let added = 0;
+        for (const result of incoming) {
             if (seenUrls.has(result.url)) {
                 continue;
             }
             seenUrls.add(result.url);
             allResults.push(result);
+            added += 1;
+        }
+        return added;
+    };
+
+    // ① 移动端优先（WAP 集群风控宽松；明文链接免跳转解析）——被标记的代理 IP 下
+    //    这通常是唯一能出结果的路径
+    let mobileError: unknown;
+    try {
+        const mobileResults = await fetchSogouMobileHtml(query).then(parseSogouMobileResults);
+        if (mobileResults.length > 0) {
+            merge(mobileResults);
+            console.error(`✅ Sogou mobile endpoint: ${mobileResults.length} results (no redirect resolution needed)`);
+        }
+    } catch (error) {
+        mobileError = error;
+        console.warn('Sogou mobile endpoint failed, falling back to PC endpoint:', error instanceof Error ? error.message : String(error));
+    }
+
+    // ② PC 端补充（分页更全；被 WAF 拦时快速失败）。
+    //    移动端结果已达"够用线"（min(limit, 6)）时跳过 PC 端——否则每次都要为
+    //    WAF 失败路径白付 ~4s（移动端单页 6~7 条已覆盖大多数 limit 需求）
+    const mobileSufficient = allResults.length >= Math.min(limit, 6);
+    const maxPage = Math.max(1, Math.ceil(limit / SOGOU_PAGE_SIZE));
+    for (let page = 1; !mobileSufficient && page <= maxPage && allResults.length < limit; page += 1) {
+        let pageResults: SearchResult[];
+        try {
+            pageResults = await searchSogouPage(query, page);
+        } catch (error) {
+            if (allResults.length > 0) {
+                console.warn('Sogou PC endpoint failed after mobile results were collected:', error instanceof Error ? error.message : String(error));
+                break;
+            }
+            throw error;
         }
 
-        if (pageResults.length === 0) {
+        const added = merge(pageResults);
+        if (pageResults.length === 0 || added === 0) {
             break;
         }
+    }
+
+    // 两条路径都没拿到结果且移动端报过错：抛移动端的错误（更贴近真实原因）
+    if (allResults.length === 0 && mobileError) {
+        throw mobileError instanceof Error ? mobileError : new Error(String(mobileError));
     }
 
     return allResults.slice(0, limit);
