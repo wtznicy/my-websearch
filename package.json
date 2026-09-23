@@ -88,7 +88,7 @@
     "vitest": "^4.1.10"
   },
   "optionalDependencies": {
-    "curl-cffi-node": "^0.1.8",
+    "wreq-js": "^3.2.0",
     "jsdom": "^26.1.0",
     "koffi": "^2.16.0",
     "playwright-core": "^1.62.1"

@@ -1,179 +1,95 @@
-import * as zlib from 'node:zlib';
 import { config } from '../../config.js';
-import { SearchResult } from '../../types.js';
-import { isImpersonateAvailable } from '../bing/impersonate.js';
+import { EngineSearchResponse, SearchResult } from '../../types.js';
+import { createWreqSession, loadWreqModule } from '../bing/impersonate.js';
 export { isImpersonateAvailable } from '../bing/impersonate.js';
 import { isBaiduAntiBotPage, parseBaiduResultsPage } from './parser.js';
-import { loadPersistedBaiduCookies, savePersistedBaiduCookies } from '../../utils/cookieStore.js';
+import { loadPersistedBaiduCookies, savePersistedBaiduCookies, WreqCookie } from '../../utils/cookieStore.js';
 
 /**
- * Baidu HTTP 模式的浏览器指纹请求层（curl-cffi-node）。
+ * Baidu HTTP 模式的浏览器指纹请求层（wreq-js，Rust 实现）。
  *
  * 背景：百度对纯 HTTP 请求（无会话 cookie、TLS/JA3 非浏览器指纹）直接返回
- * <meta refresh> 跳转页（安全验证/首页），解析不到任何结果。curl-cffi-node
- * 的 Session 在 TLS/HTTP2 层复刻 Chrome 指纹，且自带 cookie 持久化——
- * 先访问一次百度首页种下 BAIDUID/BIDUPSID，再带会话 cookie 请求搜索页，
- * 与真实浏览器的首次访问路径一致。
+ * <meta refresh> 跳转页（安全验证/首页），解析不到任何结果。wreq-js 在 TLS/HTTP2
+ * 层复刻 Chrome 指纹，且 Session 自带 cookie jar——先访问一次百度首页种下
+ * BAIDUID/BIDUPSID，再带会话 cookie 请求搜索页，与真实浏览器的首次访问路径一致。
  *
- * 设计要点：
- * - 可用性检测复用 bing 的进程级探测（同一原生模块，探测结果天然共享）
- * - 每页结果解析复用 parser.ts，与 axios 路径输出结构一致
- * - 响应可能为 br/gzip 压缩（Chrome 默认 Accept-Encoding），需要手动解压
- * - TLS 证书验证失败（如 Windows 找不到系统 CA 报 curl 60）时降级关闭验证
- *   重试一次，并保留会话 cookie（搜索页面为公开内容，风险可控）
+ * 从 curl-cffi-node 迁移的收益同 bing：原生异步（不再阻塞事件循环）、上游活跃、
+ * Rust 自带根证书（无 curl 60 降级路径）。cookie 持久化改用 wreq 的对象数组格式。
  */
 
-type ImpersonateModule = {
-    Session: new (options: { impersonate: string; verify?: boolean; timeout?: number }) => ImpersonateSession;
-};
+const BAIDU_HOME_URL = 'https://www.baidu.com/';
 
-type ImpersonateSession = {
-    get(url: string, options?: { params?: Record<string, string | number>; timeout?: number }): Promise<ImpersonateResponse>;
-    cookies: string[];
-    importCookies(cookies: string[]): void;
-};
-
-type ImpersonateResponse = {
-    status: number;
-    headers: { get(name: string): string | null };
-    buffer(): Buffer;
-};
-
-let cachedModule: ImpersonateModule | null = null;
-
-async function loadImpersonateModule(): Promise<ImpersonateModule | null> {
-    if (cachedModule) {
-        return cachedModule;
-    }
-    if (!(await isImpersonateAvailable())) {
-        return null;
-    }
-    cachedModule = (await import('curl-cffi-node')) as unknown as ImpersonateModule;
-    return cachedModule;
-}
-
-/** 记录 TLS 验证是否曾在当前进程失败过（如 Windows 找不到系统 CA）。
- * 失败后直接跳过 verify:true 避免每次请求都先失败再重试；
- * 带冷却期：冷却结束后重置标志，允许重新尝试证书验证（系统 CA 可能已修复）。 */
-let tlsVerificationFailed = false;
-let tlsVerificationFailedAt = 0;
-const TLS_VERIFY_RETRY_MS = 10 * 60 * 1000;
-
-function decodeResponseBody(response: ImpersonateResponse): string {
-    const buf = response.buffer();
-    const encoding = String(response.headers.get('content-encoding') || '').toLowerCase();
-    try {
-        if (encoding.includes('br')) {
-            return zlib.brotliDecompressSync(buf).toString('utf8');
+/** 把持久化的 cookie 逐条写回会话（wreq 的 setCookie 为三参数形式） */
+function restoreCookies(session: { setCookie(name: string, value: string, url: string): void }, cookies: WreqCookie[]): void {
+    for (const cookie of cookies) {
+        try {
+            const host = (cookie.domain || 'www.baidu.com').replace(/^\./, '');
+            session.setCookie(cookie.name, cookie.value, `https://${host}/`);
+        } catch {
+            // 单条写入失败不影响其余 cookie
         }
-        if (encoding.includes('gzip')) {
-            return zlib.gunzipSync(buf).toString('utf8');
-        }
-        if (encoding.includes('deflate')) {
-            return zlib.inflateSync(buf).toString('utf8');
-        }
-    } catch (error) {
-        console.warn(`Baidu impersonate response decode failed (${encoding}): ${error instanceof Error ? error.message : String(error)}`);
     }
-    return buf.toString('utf8');
 }
 
 /**
- * 用 curl-cffi-node（Chrome TLS/HTTP2 指纹 + 会话 cookie）执行百度搜索。
+ * 用 wreq-js（Chrome TLS/HTTP2 指纹 + 会话 cookie）执行百度搜索。
  * 分页抓取与 axios 路径一致；页面被反爬拦截时抛错，由调用方决定回退。
  */
-export async function searchBaiduWithImpersonate(query: string, limit: number): Promise<SearchResult[]> {
-    const mod = await loadImpersonateModule();
+export async function searchBaiduWithImpersonate(query: string, limit: number): Promise<EngineSearchResponse> {
+    const mod = await loadWreqModule();
     if (!mod) {
-        throw new Error('curl-cffi-node is not available');
+        throw new Error('wreq-js is not available');
     }
 
-    let session = new mod.Session({
-        impersonate: config.bingImpersonateTarget,
-        verify: !tlsVerificationFailed,
-        timeout: 15
-    });
-
-    // 证书验证失败时重建会话并保留已种下的 cookie
-    const performWithTlsFallback = async (run: () => Promise<ImpersonateResponse>): Promise<ImpersonateResponse> => {
-        if (tlsVerificationFailed && Date.now() - tlsVerificationFailedAt > TLS_VERIFY_RETRY_MS) {
-            tlsVerificationFailed = false;
-        }
-        try {
-            return await run();
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            // curl 60 = 证书验证失败；部分平台 curl-impersonate 找不到系统 CA（如 Windows）
-            if (!tlsVerificationFailed && (message.includes('(60)') || /SSL|CERT_|certificate/i.test(message))) {
-                tlsVerificationFailed = true;
-                tlsVerificationFailedAt = Date.now();
-                console.warn('Baidu impersonate TLS verification failed (likely missing system CA), retrying without verification: ' + message);
-                const cookies = session.cookies;
-                session = new mod.Session({
-                    impersonate: config.bingImpersonateTarget,
-                    verify: false,
-                    timeout: 15
-                });
-                if (cookies.length > 0) {
-                    session.importCookies(cookies);
-                }
-                return await run();
+    const session = await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0]);
+    try {
+        // 会话 cookie：优先复用磁盘持久化的长期项（BAIDUID/BIDUPSID，省一次首页预热往返）；
+        // 无持久化/已过期时走首页预热，并把长期项回写磁盘供下次进程复用
+        const persistedCookies = await loadPersistedBaiduCookies();
+        if (persistedCookies && persistedCookies.length > 0) {
+            restoreCookies(session, persistedCookies);
+        } else {
+            try {
+                await session.fetch(BAIDU_HOME_URL, { timeout: 15000 });
+                await savePersistedBaiduCookies(session.getAllCookies());
+            } catch (error) {
+                console.warn('Baidu impersonate home page request failed, continuing with search:', error instanceof Error ? error.message : String(error));
             }
-            throw error;
         }
-    };
 
-    // 会话 cookie：优先复用磁盘持久化的长期项（BAIDUID/BIDUPSID，省一次首页预热往返）；
-    // 无持久化/已过期时走首页预热，并把长期项回写磁盘供下次进程复用
-    const persistedCookies = await loadPersistedBaiduCookies();
-    if (persistedCookies && persistedCookies.length > 0) {
-        session.importCookies(persistedCookies);
-    } else {
-        try {
-            await performWithTlsFallback(() => session.get('https://www.baidu.com/', { timeout: 15 }));
-            await savePersistedBaiduCookies(session.cookies);
-        } catch (error) {
-            console.warn('Baidu impersonate home page request failed, continuing with search:', error instanceof Error ? error.message : String(error));
+        const allResults: SearchResult[] = [];
+        const seenUrls = new Set<string>();
+        let directAnswer: string | undefined;
+        let pageNumber = 0;
+
+        while (allResults.length < limit) {
+            const url = `${BAIDU_HOME_URL}s?wd=${encodeURIComponent(query)}&pn=${pageNumber * 10}&ie=utf-8&tn=baiduhome_pg`;
+            const response = await session.fetch(url, { timeout: 15000 });
+            const html = await response.text();
+
+            if (isBaiduAntiBotPage(html)) {
+                throw new Error('Baidu returned an anti-bot or redirect page in impersonate mode (likely missing cookies or verification)');
+            }
+
+            const results = await parseBaiduResultsPage(html, seenUrls);
+            if (!directAnswer && results.directAnswer) {
+                directAnswer = results.directAnswer;
+            }
+            allResults.push(...results);
+
+            if (results.length === 0) {
+                break;
+            }
+
+            pageNumber += 1;
         }
+
+        const finalResults = allResults.slice(0, limit) as EngineSearchResponse;
+        if (directAnswer) {
+            finalResults.directAnswer = directAnswer;
+        }
+        return finalResults;
+    } finally {
+        await session.close().catch(() => undefined);
     }
-
-    const allResults: SearchResult[] = [];
-    const seenUrls = new Set<string>();
-    let directAnswer: string | undefined;
-    let pageNumber = 0;
-
-    while (allResults.length < limit) {
-        const response = await performWithTlsFallback(() => session.get('https://www.baidu.com/s', {
-            params: {
-                wd: query,
-                pn: pageNumber * 10,
-                ie: 'utf-8',
-                tn: 'baiduhome_pg'
-            },
-            timeout: 15
-        }));
-        const html = decodeResponseBody(response);
-
-        if (isBaiduAntiBotPage(html)) {
-            throw new Error('Baidu returned an anti-bot or redirect page in impersonate mode (likely missing cookies or verification)');
-        }
-
-        const results = await parseBaiduResultsPage(html, seenUrls);
-        if (!directAnswer && results.directAnswer) {
-            directAnswer = results.directAnswer;
-        }
-        allResults.push(...results);
-
-        if (results.length === 0) {
-            break;
-        }
-
-        pageNumber += 1;
-    }
-
-    const finalResults = allResults.slice(0, limit);
-    if (directAnswer) {
-        (finalResults as { directAnswer?: string }).directAnswer = directAnswer;
-    }
-    return finalResults;
 }

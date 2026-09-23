@@ -11,7 +11,8 @@ const SOGOU_SEARCH_URL = 'https://www.sogou.com/web';
 const SOGOU_PAGE_SIZE = 10;
 /** 跳转链解析总预算与并发（见 searchSogouPage） */
 const SOGOU_LINK_RESOLVE_BUDGET_MS = 2000;
-const SOGOU_LINK_RESOLVE_CONCURRENCY = 6;
+// 4（而非 6）：多引擎并发时保留连接预算，避免与同批次其他引擎的解析争抢导致整体超时
+const SOGOU_LINK_RESOLVE_CONCURRENCY = 4;
 
 const COMMON_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',

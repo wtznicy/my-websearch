@@ -1,58 +1,68 @@
-import * as zlib from 'node:zlib';
 import { config } from '../../config.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
-import { ensureCurlCaBundle } from '../../utils/systemCa.js';
 
 /**
- * Bing HTTP 模式的浏览器指纹请求层（curl-cffi-node）。
+ * Bing HTTP 模式的浏览器指纹请求层（wreq-js，Rust 实现）。
  *
  * 背景：Bing 对纯 HTTP 请求按请求特征（TLS/JA3、HTTP/2、头顺序等）做软降级——
  * 同一 IP 下真实浏览器（Playwright）返回完整结果，而 Node 默认 TLS（OpenSSL）
- * 的请求会被降级为无关结果。curl-cffi-node 通过 napi-rs 绑定 curl-impersonate，
- * 在 TLS/HTTP2 层 1:1 复刻 Chrome 指纹，规避该降级（实测 2/3 请求拿到完整结果，
- * 远好于默认客户端的稳定降级）。
+ * 的请求会被降级为无关结果。wreq-js 通过 Rust 的 wreq 客户端在 TLS/HTTP2 层
+ * 复刻 Chrome 指纹，规避该降级（spike 实测：与 curl-cffi-node 等价——同为
+ * 10 条完整结果、无验证码、首条相同）。
+ *
+ * 为什么从 curl-cffi-node 迁移（2026-09）：
+ * - curl-cffi-node 的 `Session.get()` 是**同步阻塞 FFI**（实测单次请求阻塞事件循环
+ *   2166ms），并发引擎互相拖累；wreq-js 是原生 Promise 异步（同步段 0ms）
+ * - 上游停更 5 个月（4 stars，Linux binding 的 libidn2 issue 无人处理）
+ * - wreq-js 由 Rust 自带根证书（rustls/webpki）——不再需要 Windows 系统 CA 导出
+ *   与 curl 60 的降级重试路径
  *
  * 设计要点：
  * - 原生模块懒加载检测，不可用时由调用方回退 axios（不影响现有行为）
- * - 复用 curl-impersonate 注入的浏览器默认头（defaultHeaders），不手动覆盖
- * - 响应可能为 br/gzip 压缩（Chrome 默认 Accept-Encoding），需要手动解压
- * - TLS 证书验证默认开启；部分平台（如 Windows）curl-impersonate 找不到系统 CA
- *   报 curl 60 时，自动降级关闭验证重试一次（搜索页面为公开内容，风险可控）
+ * - createSession 复用连接（实测复用后 1.0~1.2s/请求；顶层 fetch 每次重新握手会慢 2~3 倍）
+ * - 响应自动解压（无需手动 br/gzip 处理）
+ * - 会话用完显式 close()
  */
 
-type ImpersonateModule = {
-    Session: new (options: { impersonate: string; verify?: boolean }) => ImpersonateSession;
+type WreqModule = {
+    createSession: (options: { browser: string; os?: string }) => Promise<WreqSession>;
 };
 
-type ImpersonateSession = {
-    get(url: string): Promise<ImpersonateResponse>;
+type WreqSession = {
+    fetch(url: string, options?: { timeout?: number; headers?: Record<string, string> }): Promise<WreqResponse>;
+    getAllCookies(): Array<{ name: string; value: string; domain?: string; path?: string; secure?: boolean; httpOnly?: boolean; expiresAtMs?: number }>;
+    setCookie(name: string, value: string, url: string): void;
+    close(): Promise<void>;
 };
 
-type ImpersonateResponse = {
+type WreqResponse = {
     status: number;
     headers: { get(name: string): string | null };
-    buffer(): Buffer;
+    text(): Promise<string>;
 };
 
-let cachedModule: ImpersonateModule | null = null;
+let cachedModule: WreqModule | null = null;
 let availabilityPromise: Promise<boolean> | null = null;
 
-/** 检测 curl-cffi-node 原生模块是否可用（懒加载 + 结果缓存，进程内只探测一次） */
+/** 用配置的 profile 构造会话（上游类型把 browser/os 收窄为字符串联合，此处集中注入） */
+export async function createWreqSession(mod: WreqModule): Promise<WreqSession> {
+    return mod.createSession({ browser: config.impersonateBrowser, os: config.impersonateOs });
+}
+
+/** 检测 wreq-js 原生模块是否可用（懒加载 + 结果缓存，进程内只探测一次） */
 export function isImpersonateAvailable(): Promise<boolean> {
     if (!availabilityPromise) {
         availabilityPromise = (async () => {
             try {
-                // Windows 下先导出系统根证书给 curl（CURL_CA_BUNDLE），避免首次请求
-                // 报 curl 60 后降级关闭 TLS 校验的一次往返；失败静默走既有降级路径
-                await ensureCurlCaBundle();
-                const mod = await import('curl-cffi-node');
-                // 构造一次 Session 确认原生绑定真实可用（部分平台 prebuild 缺失时会抛错）
-                new mod.Session({ impersonate: config.bingImpersonateTarget, verify: true });
-                cachedModule = mod;
+                const mod = await import('wreq-js');
+                // 创建并关闭一次会话，确认原生 binding 真实可用（平台包缺失时会抛错）
+                const probe = await createWreqSession(mod as unknown as WreqModule);
+                await probe.close();
+                cachedModule = mod as unknown as WreqModule;
                 return true;
             } catch (error) {
-                console.warn(`curl-cffi-node unavailable, Bing will fall back to the default HTTP client: ${error instanceof Error ? error.message : String(error)}`);
+                console.warn(`wreq-js unavailable, Bing will fall back to the default HTTP client: ${error instanceof Error ? error.message : String(error)}`);
                 return false;
             }
         })();
@@ -71,97 +81,65 @@ function buildImpersonateSearchUrl(query: string, pageNumber: number): string {
     return url.toString();
 }
 
-function decodeResponseBody(response: ImpersonateResponse): string {
-    const buf = response.buffer();
-    const encoding = String(response.headers.get('content-encoding') || '').toLowerCase();
-    try {
-        if (encoding.includes('br')) {
-            return zlib.brotliDecompressSync(buf).toString('utf8');
-        }
-        if (encoding.includes('gzip')) {
-            return zlib.gunzipSync(buf).toString('utf8');
-        }
-        if (encoding.includes('deflate')) {
-            return zlib.inflateSync(buf).toString('utf8');
-        }
-    } catch (error) {
-        console.warn(`Bing impersonate response decode failed (${encoding}): ${error instanceof Error ? error.message : String(error)}`);
-    }
-    return buf.toString('utf8');
-}
-
 function isAntiBotPage(html: string): boolean {
     const title = (html.match(/<title>(.*?)<\/title>/i) || [])[1]?.toLowerCase() ?? '';
     return /captcha|verify|access denied|blocked|验证|人机验证/.test(title) && !html.includes('b_algo');
 }
 
-/** 记录 TLS 验证是否曾在当前进程失败过（如 Windows 找不到系统 CA）。
- * 失败后直接跳过 verify:true 避免每次请求都先失败再重试；
- * 带冷却期：冷却结束后重置标志，允许重新尝试证书验证（系统 CA 可能已修复）。 */
-let tlsVerificationFailed = false;
-let tlsVerificationFailedAt = 0;
-const TLS_VERIFY_RETRY_MS = 10 * 60 * 1000;
-
-async function requestWithTlsFallback(sessionFactory: (verify: boolean) => ImpersonateSession, url: string): Promise<ImpersonateResponse> {
-    if (tlsVerificationFailed && Date.now() - tlsVerificationFailedAt > TLS_VERIFY_RETRY_MS) {
-        tlsVerificationFailed = false;
+/** 供百度 impersonate 层复用（同一原生模块） */
+export async function loadWreqModule(): Promise<WreqModule | null> {
+    if (!(await isImpersonateAvailable())) {
+        return null;
     }
-    const verify = !tlsVerificationFailed;
-    try {
-        return await sessionFactory(verify).get(url);
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        // curl 60 = 证书验证失败；部分平台 curl-impersonate 找不到系统 CA（如 Windows）
-        if (verify && (message.includes('(60)') || /SSL|CERT_|certificate/i.test(message))) {
-            tlsVerificationFailed = true;
-            tlsVerificationFailedAt = Date.now();
-            console.warn('Bing impersonate TLS verification failed (likely missing system CA), retrying without verification: ' + message);
-            return await sessionFactory(false).get(url);
-        }
-        throw error;
-    }
+    return cachedModule;
 }
 
+export type { WreqSession, WreqResponse };
+
 /**
- * 用 curl-cffi-node（Chrome TLS/HTTP2 指纹）执行 Bing 搜索。
+ * 用 wreq-js（Chrome TLS/HTTP2 指纹）执行 Bing 搜索。
  * 分页抓取与 axios 路径一致；页面被反爬拦截时抛错，由调用方决定回退。
  */
-export async function searchBingWithImpersonate(query: string, limit: number): Promise<SearchResult[]> {
-    if (!cachedModule) {
-        throw new Error('curl-cffi-node is not available');
+export async function searchBingWithImpersonate(query: string, limit: number): Promise<EngineSearchResponse> {
+    const mod = await loadWreqModule();
+    if (!mod) {
+        throw new Error('wreq-js is not available');
     }
 
-    const sessionFactory = (verify: boolean) => new cachedModule!.Session({ impersonate: config.bingImpersonateTarget, verify });
-    // 同一会话内复用连接（更接近真实浏览器的连接池行为）
-    let allResults: SearchResult[] = [];
-    let directAnswer: string | undefined;
-    let pageNumber = 0;
+    const session = await createWreqSession(mod as unknown as WreqModule);
+    try {
+        let allResults: SearchResult[] = [];
+        let directAnswer: string | undefined;
+        let pageNumber = 0;
 
-    while (allResults.length < limit) {
-        const url = buildImpersonateSearchUrl(query, pageNumber);
-        const response = await requestWithTlsFallback(sessionFactory, url);
-        const html = decodeResponseBody(response);
+        while (allResults.length < limit) {
+            const url = buildImpersonateSearchUrl(query, pageNumber);
+            const response = await session.fetch(url, { timeout: 15000 });
+            const html = await response.text();
 
-        if (isAntiBotPage(html)) {
-            throw new Error('Bing returned a verification or anti-bot page in impersonate mode');
+            if (isAntiBotPage(html)) {
+                throw new Error('Bing returned a verification or anti-bot page in impersonate mode');
+            }
+
+            const results = parseBingSearchResults(html, limit - allResults.length);
+            if (!directAnswer && results.directAnswer) {
+                directAnswer = results.directAnswer;
+            }
+            allResults = allResults.concat(results);
+
+            if (results.length === 0) {
+                break;
+            }
+
+            pageNumber += 1;
         }
 
-        const results = parseBingSearchResults(html, limit - allResults.length);
-        if (!directAnswer && results.directAnswer) {
-            directAnswer = results.directAnswer;
+        const finalResults = allResults.slice(0, limit) as EngineSearchResponse;
+        if (directAnswer) {
+            finalResults.directAnswer = directAnswer;
         }
-        allResults = allResults.concat(results);
-
-        if (results.length === 0) {
-            break;
-        }
-
-        pageNumber += 1;
+        return finalResults;
+    } finally {
+        await session.close().catch(() => undefined);
     }
-
-    const finalResults = allResults.slice(0, limit) as EngineSearchResponse;
-    if (directAnswer) {
-        finalResults.directAnswer = directAnswer;
-    }
-    return finalResults;
 }

@@ -8,14 +8,14 @@ import {
     savePersistedBaiduCookies
 } from '../../utils/cookieStore.js';
 
-// Netscape 行格式：domain\tflag\tpath\tsecure\texpiry\tname\tvalue
+// wreq-js 的 cookie 对象格式
 const LONG_LIVED = [
-    '.baidu.com\tTRUE\t/\tFALSE\t1900000000\tBAIDUID\tABC123:FG=1',
-    '.baidu.com\tTRUE\t/\tFALSE\t1900000000\tBIDUPSID\tDEF456'
+    { name: 'BAIDUID', value: 'ABC123:FG=1', domain: '.baidu.com', path: '/', secure: true },
+    { name: 'BIDUPSID', value: 'DEF456', domain: '.baidu.com', path: '/', secure: true }
 ];
 const SHORT_LIVED = [
-    '.baidu.com\tTRUE\t/\tFALSE\t0\tBDSVRTM\t7',
-    '.baidu.com\tTRUE\t/\tFALSE\t0\tH_PS_PSSID\t1234_5678'
+    { name: 'BDSVRTM', value: '7', domain: '.baidu.com', path: '/' },
+    { name: 'H_PS_PSSID', value: '1234_5678', domain: '.baidu.com', path: '/' }
 ];
 
 let tempDir: string;
@@ -35,9 +35,7 @@ describe('filterLongLivedBaiduCookies', () => {
     it('should keep only whitelisted long-lived cookies', () => {
         const filtered = filterLongLivedBaiduCookies([...LONG_LIVED, ...SHORT_LIVED]);
         expect(filtered).toHaveLength(2);
-        expect(filtered.join('\n')).toContain('BAIDUID');
-        expect(filtered.join('\n')).toContain('BIDUPSID');
-        expect(filtered.join('\n')).not.toContain('BDSVRTM');
+        expect(filtered.map((cookie) => cookie.name).join(',')).toBe('BAIDUID,BIDUPSID');
     });
 });
 
@@ -46,7 +44,8 @@ describe('cookie persistence', () => {
         await savePersistedBaiduCookies([...LONG_LIVED, ...SHORT_LIVED]);
         const loaded = await loadPersistedBaiduCookies();
         expect(loaded).toHaveLength(2);
-        expect(loaded!.join('\n')).toContain('BAIDUID');
+        expect(loaded![0].name).toBe('BAIDUID');
+        expect(loaded![0].value).toBe('ABC123:FG=1');
     });
 
     it('should return null when nothing persisted', async () => {
