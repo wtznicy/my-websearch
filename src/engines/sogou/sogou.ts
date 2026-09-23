@@ -6,6 +6,7 @@ import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { normalizeText } from '../../utils/text.js';
 import { sleep } from '../../utils/timing.js';
 import { mapWithConcurrencyBudget } from '../../utils/concurrency.js';
+import { createWreqSession, loadWreqModule, WreqSession } from '../bing/impersonate.js';
 
 const SOGOU_SEARCH_URL = 'https://www.sogou.com/web';
 const SOGOU_PAGE_SIZE = 10;
@@ -23,10 +24,84 @@ const COMMON_HEADERS = {
 
 type SogouHttpGet = (url: string, options: AxiosRequestConfig) => Promise<AxiosResponse>;
 
-let sogouHttpGet: SogouHttpGet = (url, options) => axios.get(url, options);
+/**
+ * 搜狗的会话级指纹请求（wreq-js，Chrome TLS/HTTP2 指纹）。
+ * 实测：纯 axios 请求搜狗搜索页会被 WAF 直接 403；换用 TLS 指纹后 403 → 200
+ * （残留的图形验证码是针对代理出口 IP 的风险控制，非请求特征层可解）。
+ * Session 懒创建并复用（连接复用，第二次起约 1s/请求）。
+ */
+let sogouWreqSessionPromise: Promise<WreqSession | null> | null = null;
+
+async function ensureSogouWreqSession(): Promise<WreqSession | null> {
+    if (!sogouWreqSessionPromise) {
+        sogouWreqSessionPromise = (async () => {
+            const mod = await loadWreqModule();
+            if (!mod) {
+                return null;
+            }
+            try {
+                return await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0]);
+            } catch (error) {
+                console.warn('Sogou wreq session creation failed, falling back to axios:', error instanceof Error ? error.message : String(error));
+                return null;
+            }
+        })();
+    }
+    return sogouWreqSessionPromise;
+}
+
+/** 把 wreq 响应转成 axios 形状（现有重定向/cookie 逻辑按 axios 响应读取） */
+function toAxiosLikeResponse(
+    status: number,
+    headers: { forEach(cb: (value: string, key: string) => void): void; getSetCookie?(): string[] },
+    data: string,
+    options: AxiosRequestConfig
+): AxiosResponse {
+    const normalizedHeaders: Record<string, string | string[]> = {};
+    headers.forEach((value, key) => {
+        normalizedHeaders[key.toLowerCase()] = value;
+    });
+    const setCookies = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : [];
+    if (setCookies.length > 0) {
+        normalizedHeaders['set-cookie'] = setCookies;
+    }
+    return {
+        status,
+        statusText: '',
+        headers: normalizedHeaders,
+        data,
+        config: options,
+        request: {}
+    } as unknown as AxiosResponse;
+}
+
+async function sogouHttpGetWithImpersonate(url: string, options: AxiosRequestConfig): Promise<AxiosResponse> {
+    const session = await ensureSogouWreqSession();
+    if (!session) {
+        throw new Error('wreq session unavailable');
+    }
+    // redirect: manual —— 保留 fetchSogouHtml 的手动重定向/ cookie 合并逻辑
+    const response = await session.fetch(url, {
+        timeout: (options.timeout as number) || 20000,
+        redirect: 'manual'
+    });
+    const body = await response.text();
+    return toAxiosLikeResponse(response.status, response.headers, body, options);
+}
+
+const defaultSogouHttpGet: SogouHttpGet = async (url, options) => {
+    try {
+        return await sogouHttpGetWithImpersonate(url, options);
+    } catch (error) {
+        console.warn('Sogou impersonate request failed, falling back to axios:', error instanceof Error ? error.message : String(error));
+        return axios.get(url, options);
+    }
+};
+
+let sogouHttpGet: SogouHttpGet = defaultSogouHttpGet;
 
 export function __setSogouHttpGetForTests(impl?: SogouHttpGet): void {
-    sogouHttpGet = impl ?? ((url, options) => axios.get(url, options));
+    sogouHttpGet = impl ?? defaultSogouHttpGet;
 }
 
 function isSogouChallengePage(html: string): boolean {

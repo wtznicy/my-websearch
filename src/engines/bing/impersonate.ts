@@ -30,7 +30,7 @@ type WreqModule = {
 };
 
 type WreqSession = {
-    fetch(url: string, options?: { timeout?: number; headers?: Record<string, string> }): Promise<WreqResponse>;
+    fetch(url: string, options?: { timeout?: number; headers?: Record<string, string>; redirect?: 'manual' | 'follow' }): Promise<WreqResponse>;
     getAllCookies(): Array<{ name: string; value: string; domain?: string; path?: string; secure?: boolean; httpOnly?: boolean; expiresAtMs?: number }>;
     setCookie(name: string, value: string, url: string): void;
     close(): Promise<void>;
@@ -38,7 +38,11 @@ type WreqSession = {
 
 type WreqResponse = {
     status: number;
-    headers: { get(name: string): string | null };
+    headers: {
+        get(name: string): string | null;
+        forEach(callback: (value: string, key: string) => void): void;
+        getSetCookie?(): string[];
+    };
     text(): Promise<string>;
 };
 
