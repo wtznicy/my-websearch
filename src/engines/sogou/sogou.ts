@@ -468,6 +468,18 @@ async function searchSogouPage(query: string, page: number): Promise<SearchResul
     }));
 }
 
+/** PC 端被反爬拦截后的"暂停期"：期间直接走移动端，避免每次白等 PC 端的失败路径 */
+const SOGOU_PC_BLOCK_TTL_MS = 10 * 60 * 1000;
+let sogouPcBlockedUntil = 0;
+
+/**
+ * 双端策略（实测数据驱动）：
+ * - 两端共享同一索引，但 **PC 端更全**（同 query 实测 9 条 vs 移动端 6 条，
+ *   移动端基本是 PC 端的子集 + 少量独有结果）；
+ * - 因此 **PC 端优先**（含分页补全），仅在 PC 被反爬拦截时用**移动端兜底**
+ *   （WAP 集群风控宽松，被标记 IP 下通常是唯一可用路径，且明文链接免跳转解析）；
+ * - PC 端被拦后记住 10 分钟，期间跳过 PC 端直接走移动端（省掉每次 ~4s 的失败开销）。
+ */
 export async function searchSogou(query: string, limit: number): Promise<SearchResult[]> {
     const allResults: SearchResult[] = [];
     const seenUrls = new Set<string>();
@@ -485,46 +497,49 @@ export async function searchSogou(query: string, limit: number): Promise<SearchR
         return added;
     };
 
-    // ① 移动端优先（WAP 集群风控宽松；明文链接免跳转解析）——被标记的代理 IP 下
-    //    这通常是唯一能出结果的路径
-    let mobileError: unknown;
-    try {
-        const mobileResults = await fetchSogouMobileHtml(query).then(parseSogouMobileResults);
-        if (mobileResults.length > 0) {
-            merge(mobileResults);
-            console.error(`✅ Sogou mobile endpoint: ${mobileResults.length} results (no redirect resolution needed)`);
-        }
-    } catch (error) {
-        mobileError = error;
-        console.warn('Sogou mobile endpoint failed, falling back to PC endpoint:', error instanceof Error ? error.message : String(error));
-    }
+    let lastError: unknown;
 
-    // ② PC 端补充（分页更全；被 WAF 拦时快速失败）。
-    //    移动端结果已达"够用线"（min(limit, 6)）时跳过 PC 端——否则每次都要为
-    //    WAF 失败路径白付 ~4s（移动端单页 6~7 条已覆盖大多数 limit 需求）
-    const mobileSufficient = allResults.length >= Math.min(limit, 6);
-    const maxPage = Math.max(1, Math.ceil(limit / SOGOU_PAGE_SIZE));
-    for (let page = 1; !mobileSufficient && page <= maxPage && allResults.length < limit; page += 1) {
-        let pageResults: SearchResult[];
-        try {
-            pageResults = await searchSogouPage(query, page);
-        } catch (error) {
-            if (allResults.length > 0) {
-                console.warn('Sogou PC endpoint failed after mobile results were collected:', error instanceof Error ? error.message : String(error));
+    // ① PC 端优先（结果更全）
+    if (Date.now() >= sogouPcBlockedUntil) {
+        const maxPage = Math.max(1, Math.ceil(limit / SOGOU_PAGE_SIZE));
+        for (let page = 1; page <= maxPage && allResults.length < limit; page += 1) {
+            let pageResults: SearchResult[];
+            try {
+                pageResults = await searchSogouPage(query, page);
+            } catch (error) {
+                lastError = error;
+                const message = error instanceof Error ? error.message : String(error);
+                // 反爬/403 类拦截：进入暂停期，本次转移动端兜底
+                if (/anti-bot|verification|challenge|403|访问过于频繁|验证码/i.test(message)) {
+                    sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
+                }
+                console.warn('Sogou PC endpoint failed, falling back to mobile:', message);
                 break;
             }
-            throw error;
-        }
 
-        const added = merge(pageResults);
-        if (pageResults.length === 0 || added === 0) {
-            break;
+            const added = merge(pageResults);
+            if (pageResults.length === 0 || added === 0) {
+                break;
+            }
         }
     }
 
-    // 两条路径都没拿到结果且移动端报过错：抛移动端的错误（更贴近真实原因）
-    if (allResults.length === 0 && mobileError) {
-        throw mobileError instanceof Error ? mobileError : new Error(String(mobileError));
+    // ② 移动端兜底（PC 被拦时的主要来源；也用于补足 PC 端未达 limit 的部分）
+    if (allResults.length < limit) {
+        try {
+            const mobileResults = await fetchSogouMobileHtml(query).then(parseSogouMobileResults);
+            if (mobileResults.length > 0) {
+                merge(mobileResults);
+                console.error(`✅ Sogou mobile endpoint: ${mobileResults.length} results (fallback)`);
+            }
+        } catch (error) {
+            lastError = lastError ?? error;
+            console.warn('Sogou mobile endpoint failed:', error instanceof Error ? error.message : String(error));
+        }
+    }
+
+    if (allResults.length === 0 && lastError) {
+        throw lastError instanceof Error ? lastError : new Error(String(lastError));
     }
 
     return allResults.slice(0, limit);
