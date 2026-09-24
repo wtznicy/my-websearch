@@ -56,7 +56,11 @@ export async function searchCsdn(query: string, limit: number): Promise<SearchRe
                 trustedStaticHost: true,
                 params: {
                     q: query,
-                    p: pn
+                    p: pn,
+                    // t=blog：只召回技术博文，避开 download.csdn.net 资源包
+                    // （实测：30 条里 download 从 1 条降为 0 条；下载站内容正文价值低，
+                    //  且被下面的过滤规则剔除后会白白消耗配额）
+                    t: 'blog'
                 },
                 headers: {
                     'Pragma': 'no-cache',
