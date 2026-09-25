@@ -100,13 +100,15 @@ describe('solveDuckDuckGoJsaChallenge', () => {
         expect(solvedUrl).not.toBeNull();
         expect(solvedUrl).toContain('https://links.duckduckgo.com/d.js?');
         expect(solvedUrl).toContain('jsa_hash=ac5ead55c2764494f1b2e4a122851a97');
-        // uKrynyKw(973): 973 + 27 = 1000
-        // BgTJaLJR(1000): 1000 + 29 = 1029
-        // dQyekWwv(1029): 1029 * 3 = 3087
-        // GSpNeQcZ(3087): 3087 + 33 = 3120
-        // VlPBxDiI(3120): 3120 + 27 = 3147
-        // PcUrkYdu(3147): 3147 + 33 = 3180
-        expect(solvedUrl).toContain('&jsa=3180');
+        // 各步用 HTML5 规范解析（浏览器/jsdom 一致）补全残缺标签后的 innerHTML 长度：
+        //   uKrynyKw(973)  '<p><div></p><p></div'             → 973 + 32 = 1005
+        //   BgTJaLJR(1005) '<li><div></li><li></div'          → 1005 + 29 = 1034
+        //   dQyekWwv(1034) * 3                                → 3102
+        //   GSpNeQcZ(3102) '<div><div></div><div></div'       → 3102 + 33 = 3135
+        //   VlPBxDiI(3135) '<p><div></p><p></div'             → 3135 + 32 = 3167
+        //   PcUrkYdu(3167) '<div><div></div><div></div'       → 3167 + 33 = 3200
+        // （首版断言写成 3180 是手算长度有误：漏了 32/33 的差别；jsdom 与 cheerio 复算均为 3200）
+        expect(solvedUrl).toContain('&jsa=3200');
     });
 
     it('should reject untrusted host or non-JSA payload', () => {
