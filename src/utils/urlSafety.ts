@@ -97,10 +97,45 @@ export function isBlackholeAddress(address: string): boolean {
     }
 }
 
+/**
+ * 把任意 IP 编码进主机名的通配 DNS 服务（DNS rebinding 常用手法）：
+ * `127.0.0.1.nip.io` / `10.0.0.1.sslip.io` / `localtest.me` 等。
+ *
+ * 这类域名必须**按主机名直接拒绝**，不能只看解析结果：
+ * ① 它们的解析结果就是域名里写的那个内网地址（实测 2026-09-25：`127.0.0.1.nip.io:18092`
+ *    在 `USE_PROXY=true` 下读出本机服务内容）；
+ * ② TUN/fake-ip 环境下本地解析会得到 198.18.x.x 之类的伪造地址，看 IP 反而判不出来；
+ * ③ 代理模式下连接由代理发起，代理侧解析这类域名同样落在内网。
+ */
+const REBINDING_DNS_SUFFIXES = [
+    'nip.io',
+    'sslip.io',
+    'xip.io',
+    'vcap.me',
+    'lvh.me',
+    'local.gd',
+    'localtest.me',
+    'localtest.pro',
+    'lacolhost.com',
+    'traefik.me'
+];
+
+/** 主机名是否为"把 IP 编码进域名"的重绑定类服务（含其子域） */
+export function isRebindingStyleHostname(hostname: string): boolean {
+    const host = stripIpv6Brackets(hostname.trim().toLowerCase()).replace(/\.$/, '');
+    if (!host) {
+        return false;
+    }
+    return REBINDING_DNS_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+}
+
 export function isPublicHttpUrl(url: string): boolean {
     try {
         const parsed = new URL(url);
         if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return false;
+        }
+        if (isRebindingStyleHostname(parsed.hostname)) {
             return false;
         }
         return !isPrivateOrLocalHostname(parsed.hostname);
@@ -113,6 +148,9 @@ export function assertPublicHttpUrl(url: string | URL, label: string = 'URL'): v
     const parsed = typeof url === 'string' ? new URL(url) : url;
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         throw new Error(`${label} must use HTTP or HTTPS`);
+    }
+    if (isRebindingStyleHostname(parsed.hostname)) {
+        throw new Error(`${label} uses a wildcard DNS service that can point at private addresses (DNS rebinding), which is not allowed`);
     }
     if (isPrivateOrLocalHostname(parsed.hostname)) {
         throw new Error(`${label} points to a private or local network target, which is not allowed`);
@@ -134,13 +172,6 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
         return;
     }
 
-    // 代理模式下 DNS 交由代理在远端解析，本地只做字面量/私网检查，
-    // 避免本机 DNS 被污染（如 raw.githubusercontent.com → 0.0.0.0）时误拦截。
-    // 注意：上方 assertPublicHttpUrl 已对字面量 IP 做了私网/黑洞检查，此处无需重复。
-    if (config.useProxy) {
-        return;
-    }
-
     let resolved: LookupResult;
     try {
         resolved = await dnsLookupForSafety(host);
@@ -149,8 +180,18 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
     }
     const blackholeHit = resolved.find((entry) => isBlackholeAddress(entry.address));
     if (blackholeHit) {
+        // 0.0.0.0/8 是"本地 DNS 屏蔽/污染"的信号，不是安全信号（原始设计意图）：
+        // 代理模式下请求由代理远端解析，本地污染不应导致误拦，交给代理处理
+        if (config.useProxy) {
+            return;
+        }
         throw new Error(`${label} resolves to ${blackholeHit.address} (0.0.0.0/8 blackhole) — likely local DNS blocking/pollution; check DNS or enable a proxy`);
     }
+
+    // 代理模式同样做本地解析判定（此前这里直接 return，导致 USE_PROXY=true 时
+    // "解析到内网"的域名完全不设防——实测可读出本机服务内容）。
+    // 本地答案虽然不是代理的实际连接依据，但攻击者用的正是"在公网 DNS 上就解析到内网"的域名，
+    // 本地解析能识别出来；fake-ip（Clash TUN 等代理伪造段）仍按配置放行，否则会误杀 TUN 用户的正常抓取。
     const blockedEntry = resolved.find((entry) => isPrivateOrLocalHostname(entry.address) && !isAllowedFakeIp(entry.address));
     if (blockedEntry) {
         throw new Error(`${label} resolves to a private or local network target, which is not allowed${hintFakeIpBlockedAddress(blockedEntry.address)}`);
