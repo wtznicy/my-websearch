@@ -76,8 +76,6 @@ const networkFailurePatterns = [
     /Brave rate limited \(HTTP 429\)/i,
     // DuckDuckGo 上游反爬挑战页（202）：环境/上游风控，非代码问题
     /DuckDuckGo returned a challenge page/i,
-    // CSDN 间歇性限流空壳（实测时好时坏，非代码问题）
-    /CSDN returned an empty response shell/i,
     // context7 匿名月度配额耗尽（按出口 IP 计；实测重置日 2026-10-01）：上游配额状态，非代码问题。
     // 修复后该状态快速失败并带上此文案（此前会盲从 Retry-After 挂起数天）
     /Context7 anonymous quota exhausted/i,
