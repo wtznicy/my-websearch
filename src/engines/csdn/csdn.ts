@@ -75,6 +75,14 @@ export async function searchCsdn(query: string, limit: number): Promise<SearchRe
             const payload = response.data;
             // 反爬/异常时 CSDN 可能返回 HTML 文本而非 JSON：直接解构会得到 undefined 并静默 break，
             // 首页失败应抛错，让 partialFailures 暴露真实原因（而非伪装成"没有结果"）
+            if (typeof payload === 'object' && payload !== null && pn === 1) {
+                // 限流空壳检测：CSDN 风控时返回 ~600 字节的骨架响应（字段多为 null、result_vos 空），
+                // 与"冷门 query 真无结果"（正常响应，通常数 KB 起）不同——显式报错而非静默 0 结果
+                const rawLength = JSON.stringify(payload).length;
+                if (rawLength < 1000 && Array.isArray(payload.result_vos) && payload.result_vos.length === 0) {
+                    throw new Error('CSDN returned an empty response shell (likely rate-limited or throttled)');
+                }
+            }
             if (typeof payload !== 'object' || payload === null) {
                 if (pn === 1) {
                     throw new Error('CSDN search returned a non-JSON response (likely blocked or rate-limited)');

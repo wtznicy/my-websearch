@@ -76,6 +76,8 @@ const networkFailurePatterns = [
     /Brave rate limited \(HTTP 429\)/i,
     // DuckDuckGo 上游反爬挑战页（202）：环境/上游风控，非代码问题
     /DuckDuckGo returned a challenge page/i,
+    // CSDN 间歇性限流空壳（实测时好时坏，非代码问题）
+    /CSDN returned an empty response shell/i,
     /page\.goto: Timeout \d+ms exceeded[\s\S]*navigating to/i,
     /Timeout \d+ms exceeded[\s\S]*(https?:\/\/|navigating to)/i
 ];
