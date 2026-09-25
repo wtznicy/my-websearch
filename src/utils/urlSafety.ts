@@ -2,6 +2,16 @@ import * as dns from 'node:dns/promises';
 import { isIP } from 'node:net';
 import ipaddr from 'ipaddr.js';
 import { config } from '../config.js';
+import { metrics } from '../core/metrics.js';
+
+/** SSRF 拦截审计（需 SECURITY_AUDIT=true）：此前 ssrf_blocked 事件类型零埋点 */
+function reportBlocked(targetUrl: string | URL, reason: string): void {
+    metrics.recordSecurityEvent({
+        type: 'ssrf_blocked',
+        targetUrl: typeof targetUrl === 'string' ? targetUrl : targetUrl.toString(),
+        reason
+    });
+}
 
 // URL.hostname preserves the brackets for IPv6 literals (`[::1]`), which
 // break isIP and dns.lookup. Strip them once here.
@@ -150,9 +160,11 @@ export function assertPublicHttpUrl(url: string | URL, label: string = 'URL'): v
         throw new Error(`${label} must use HTTP or HTTPS`);
     }
     if (isRebindingStyleHostname(parsed.hostname)) {
+        reportBlocked(parsed, `${label} uses a wildcard DNS service (DNS rebinding)`);
         throw new Error(`${label} uses a wildcard DNS service that can point at private addresses (DNS rebinding), which is not allowed`);
     }
     if (isPrivateOrLocalHostname(parsed.hostname)) {
+        reportBlocked(parsed, `${label} points to a private or local network target`);
         throw new Error(`${label} points to a private or local network target, which is not allowed`);
     }
 }
@@ -194,6 +206,7 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
     // 本地解析能识别出来；fake-ip（Clash TUN 等代理伪造段）仍按配置放行，否则会误杀 TUN 用户的正常抓取。
     const blockedEntry = resolved.find((entry) => isPrivateOrLocalHostname(entry.address) && !isAllowedFakeIp(entry.address));
     if (blockedEntry) {
+        reportBlocked(parsed, `${label} resolves to ${blockedEntry.address} (private or local)`);
         throw new Error(`${label} resolves to a private or local network target, which is not allowed${hintFakeIpBlockedAddress(blockedEntry.address)}`);
     }
 }

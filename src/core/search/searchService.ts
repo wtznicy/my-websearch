@@ -6,6 +6,7 @@ import { isEngineCircuitOpen, getEngineCircuitRemainingMs } from './engineCircui
 import { quoteModelLikeTerms } from '../../utils/queryPreprocess.js';
 import { sleep } from '../../utils/timing.js';
 import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
+import { metrics } from '../metrics.js';
 
 // ---------------------------------------------------------------------------
 // 简单信号量：限制并发搜索数
@@ -374,8 +375,10 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // 缓存命中直接返回
             const cached = ttlCache.get({ query: searchQuery, engines, limit, searchMode, minResults });
             if (cached) {
+                metrics.recordCacheHit();
                 return cached;
             }
+            metrics.recordCacheMiss();
 
             // 全局并发限制：等待信号量
             if (globalSemaphore) {
@@ -516,6 +519,14 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                     });
                 });
             }));
+            // 引擎指标埋点（数据仅在本进程收集，导出需 METRICS_ENABLED=true）：
+            // 此前 metrics.ts 定义了 recordEngineSearch/recordCacheHit/Miss 但生产代码零调用，
+            // /metrics 暴露的引擎成功率与缓存命中率永远是 0（测评报告 P2-15）
+            executableEngines.forEach((engine, index) => {
+                const engineResult = engineResults[index] ?? [];
+                metrics.recordEngineSearch(engine, Date.now() - startedAtByIndex[index], engineResult.length > 0);
+            });
+
             // 不提前 slice(0, limit)：提前截断会让"噪声占满前 N 位"时把后面的好结果
             // （含级联补来的）永久丢掉；截断统一放在最终重排之后
             let merged = mergeSearchResults(engineResults)
@@ -606,6 +617,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                                 clearTimeout(timer);
                                 if (!cascadeTimedOut) {
                                     engineMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: results.length });
+                                    metrics.recordEngineSearch(candidate, Date.now() - cascadeStartedAt, results.length > 0);
                                 }
                                 resolve(results);
                             }
@@ -615,6 +627,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                                 clearTimeout(timer);
                                 if (!cascadeTimedOut) {
                                     engineMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: 0, error: truncateMetricError(error instanceof Error ? error.message : String(error)) });
+                                    metrics.recordEngineSearch(candidate, Date.now() - cascadeStartedAt, false);
                                 }
                                 reject(error);
                             }

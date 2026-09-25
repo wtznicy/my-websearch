@@ -283,7 +283,12 @@ export async function startLocalDaemon(
 
     // Prometheus 文本格式指标（只读；供本地监控采集，复用 core/metrics 的进程内统计）
     app.get('/metrics', (_req, res) => {
-        res.type('text/plain; version=0.0.4; charset=utf-8').send(metrics.renderPrometheus());
+        // 指标收集是 opt-in（METRICS_ENABLED=true）：未启用时计数器恒为 0，直接说明原因，
+        // 免得使用者以为是坏掉的仪表盘（测评报告 P2-15 的"指标恒为 0"一半来自这里）
+        const notice = process.env.METRICS_ENABLED === 'true'
+            ? ''
+            : '# note: METRICS_ENABLED is not set to "true" — engine/cache counters stay at 0 by design\n';
+        res.type('text/plain; version=0.0.4; charset=utf-8').send(notice + metrics.renderPrometheus());
     });
 
     app.post('/cache/clear', async (_req, res) => {
