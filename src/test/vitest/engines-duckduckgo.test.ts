@@ -1,10 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import {
     parseDuckDuckGoJsonpPayload,
-    parseDuckDuckGoHtmlResults
+    parseDuckDuckGoHtmlResults,
+    solveDuckDuckGoJsaChallenge
 } from '../../engines/duckduckgo/searchDuckDuckGo.js';
 
 const JSONP_PAYLOAD = `DDG.pageLayout.load('d', [{"t":"<b>MCP</b> title","u":"https://example.com/one","a":"desc with <b>bold</b>","i":"example.com"},{"t":"Second","u":"https://example.com/two","a":"<b>second</b> desc","sn":"source-org"},{"n":true,"t":"navigation item"}]);`;
+
+const REAL_JSA_CHALLENGE = `window.execDeep = function() { 
+let jsa = 973;
+try {
+let PcUrkYdu = function(num) {const el = document.createElement('div');el.innerHTML = \`<div><div></div><div></div\`;return num + el.innerHTML.length;};let BgTJaLJR = function(num) {const el = document.createElement('div');el.innerHTML = \`<li><div></li><li></div\`;return num + el.innerHTML.length;};let GSpNeQcZ = function(num) {const el = document.createElement('div');el.innerHTML = \`<div><div></div><div></div\`;return num + el.innerHTML.length;};let uKrynyKw = function(num) {const el = document.createElement('div');el.innerHTML = \`<p><div></p><p></div\`;return num + el.innerHTML.length;};let dQyekWwv = function(num) {return num * 3;};let VlPBxDiI = function(num) {const el = document.createElement('div');el.innerHTML = \`<p><div></p><p></div\`;return num + el.innerHTML.length;};jsa = uKrynyKw(jsa);jsa = BgTJaLJR(jsa);jsa = dQyekWwv(jsa);jsa = GSpNeQcZ(jsa);jsa = VlPBxDiI(jsa);jsa = PcUrkYdu(jsa);
+} catch (e) { jsa = -1; }
+
+DDG.deep.initialize('/d.js?q=model%20context%20protocol&t=A&l=us-en&s=0&dp=H6fVT8bhXJT&jsa_hash=ac5ead55c2764494f1b2e4a122851a97&jsa=' + jsa, false);
+    
+return {isJsaChallenge: true};
+};`;
 
 const HTML_PAGE = `<!DOCTYPE html>
 <html><body>
@@ -81,3 +93,29 @@ describe('parseDuckDuckGoHtmlResults', () => {
         expect(parsed.rawCount).toBe(0);
     });
 });
+
+describe('solveDuckDuckGoJsaChallenge', () => {
+    it('should solve real HTTP 202 isJsaChallenge (window.execDeep) HTML5 + math challenge', () => {
+        const solvedUrl = solveDuckDuckGoJsaChallenge(REAL_JSA_CHALLENGE);
+        expect(solvedUrl).not.toBeNull();
+        expect(solvedUrl).toContain('https://links.duckduckgo.com/d.js?');
+        expect(solvedUrl).toContain('jsa_hash=ac5ead55c2764494f1b2e4a122851a97');
+        // uKrynyKw(973): 973 + 27 = 1000
+        // BgTJaLJR(1000): 1000 + 29 = 1029
+        // dQyekWwv(1029): 1029 * 3 = 3087
+        // GSpNeQcZ(3087): 3087 + 33 = 3120
+        // VlPBxDiI(3120): 3120 + 27 = 3147
+        // PcUrkYdu(3147): 3147 + 33 = 3180
+        expect(solvedUrl).toContain('&jsa=3180');
+    });
+
+    it('should reject untrusted host or non-JSA payload', () => {
+        expect(solveDuckDuckGoJsaChallenge('DDG.deep.anomalyDetectionBlock()')).toBeNull();
+        const evilScript = REAL_JSA_CHALLENGE.replace(
+            "DDG.deep.initialize('/d.js?",
+            "DDG.deep.initialize('https://evil.example.com/d.js?"
+        );
+        expect(solveDuckDuckGoJsaChallenge(evilScript)).toBeNull();
+    });
+});
+

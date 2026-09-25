@@ -1,9 +1,12 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import vm from 'node:vm';
 import {SearchResult} from "../../types.js";
 import {buildAxiosRequestOptions} from "../../utils/httpRequest.js";
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
+
+const CHROME_133_SEC_CH_UA = '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"';
 
 export function isTrustedDuckDuckGoPreloadUrl(value: string): boolean {
   try {
@@ -16,6 +19,64 @@ export function isTrustedDuckDuckGoPreloadUrl(value: string): boolean {
       && parsed.pathname === '/d.js';
   } catch {
     return false;
+  }
+}
+
+/**
+ * 求解 DuckDuckGo links.duckduckgo.com/d.js 在 HTTP 202 时返回的
+ * `window.execDeep` (`isJsaChallenge`) HTML5 解析器 + 算术挑战。
+ * 成功后返回带 `&jsa_hash=...&jsa=<computed>` 的受信任 https://links.duckduckgo.com/d.js URL。
+ */
+export function solveDuckDuckGoJsaChallenge(scriptText: string): string | null {
+  if (!scriptText || !scriptText.includes('isJsaChallenge') || !scriptText.includes('window.execDeep')) {
+    return null;
+  }
+
+  try {
+    let initializedPath: string | null = null;
+    const sandbox = {
+      window: {} as Record<string, unknown>,
+      document: {
+        createElement() {
+          let serializedHtml = '';
+          return {
+            set innerHTML(val: unknown) {
+              const $ = cheerio.load(`<div>${String(val ?? '')}</div>`, null, false);
+              serializedHtml = $('div').first().html() || '';
+            },
+            get innerHTML() {
+              return serializedHtml;
+            }
+          };
+        }
+      },
+      DDG: {
+        deep: {
+          initialize(path: unknown) {
+            if (typeof path === 'string') {
+              initializedPath = path;
+            }
+          }
+        }
+      }
+    };
+
+    vm.runInNewContext(`${scriptText}\nif (typeof window.execDeep === 'function') { window.execDeep(); }`, sandbox, {
+      timeout: 500
+    });
+
+    if (!initializedPath) {
+      return null;
+    }
+
+    const resolvedUrl = new URL(initializedPath, 'https://links.duckduckgo.com').toString();
+    if (!isTrustedDuckDuckGoPreloadUrl(resolvedUrl) || resolvedUrl.includes('&jsa=-1')) {
+      return null;
+    }
+
+    return resolvedUrl;
+  } catch {
+    return null;
   }
 }
 
@@ -150,16 +211,15 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
           "Connection": "keep-alive",
           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
           "Accept-Encoding": "gzip, deflate, br",
-          "sec-ch-ua": "\"Chromium\";v=\"112\", \"Google Chrome\";v=\"112\", \"Not:A-Brand\";v=\"99\"",
+          "sec-ch-ua": CHROME_133_SEC_CH_UA,
           "sec-ch-ua-mobile": "?0",
           "sec-ch-ua-platform": "\"Windows\"",
           "upgrade-insecure-requests": "1",
-          "sec-fetch-site": "same-origin",
+          "sec-fetch-site": "none",
           "sec-fetch-mode": "navigate",
           "sec-fetch-user": "?1",
           "sec-fetch-dest": "document",
-          "referer": "https://duckduckgo.com/",
-          "accept-language": "zh-CN,zh;q=0.9,en;q=0.8"
+          "accept-language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7"
         }
       });
 
@@ -214,6 +274,21 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
       // Loop to get results from all pages until maxResults is satisfied or no more results
       let hasMoreResults = true;
 
+      const scriptRequestHeaders = {
+        "User-Agent": BROWSER_USER_AGENT,
+        "Connection": "keep-alive",
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br",
+        "sec-ch-ua": CHROME_133_SEC_CH_UA,
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"Windows\"",
+        "sec-fetch-site": "same-site",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "script",
+        "referer": "https://duckduckgo.com/",
+        "accept-language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7"
+      };
+
       while (results.length < maxResults && hasMoreResults) {
         // Update s parameter (offset)
         preloadUrlObj.searchParams.set('s', offset.toString());
@@ -222,26 +297,38 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
         const currentPageUrl = preloadUrlObj.toString();
 
         // Request search results using current page URL
-        const dataResponse = await axios.get(currentPageUrl, {
+        let dataResponse = await axios.get(currentPageUrl, {
           ...requestOptions,
-          headers: {
-            "User-Agent": BROWSER_USER_AGENT,
-            "Connection": "keep-alive",
-            "Accept": "*/*",
-            "Accept-Encoding": "gzip, deflate, br",
-            "sec-ch-ua": "\"Chromium\";v=\"112\", \"Google Chrome\";v=\"112\", \"Not:A-Brand\";v=\"99\"",
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": "\"Windows\"",
-            "sec-fetch-site": "same-site",
-            "sec-fetch-mode": "no-cors",
-            "sec-fetch-dest": "script",
-            "referer": "https://duckduckgo.com/",
-            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8"
-          }
+          headers: scriptRequestHeaders
         });
 
+        let rawScript = String(dataResponse.data || '');
+
+        // 若 links.duckduckgo.com/d.js 返回 HTTP 202 且携带 isJsaChallenge (window.execDeep)，
+        // 自动求解 HTML5 + 算术挑战并重放带 jsa_hash & jsa 的验证 URL
+        if (dataResponse.status === 202 || rawScript.includes('isJsaChallenge')) {
+          const solvedUrl = solveDuckDuckGoJsaChallenge(rawScript);
+          if (solvedUrl) {
+            dataResponse = await axios.get(solvedUrl, {
+              ...requestOptions,
+              headers: scriptRequestHeaders
+            });
+            rawScript = String(dataResponse.data || '');
+            // 同步更新 dp 令牌以便后续分页复用已验证会话
+            const solvedUrlObj = new URL(solvedUrl);
+            const newDp = solvedUrlObj.searchParams.get('dp');
+            if (newDp) {
+              preloadUrlObj.searchParams.set('dp', newDp);
+            }
+          }
+        }
+
+        if (rawScript.includes('anomalyDetectionBlock')) {
+          throw new Error('DuckDuckGo d.js returned anomalyDetectionBlock (HTTP 202) — exit IP rate-limited');
+        }
+
         // Extract JSON data from JSONP response
-        const pageResults = parseDuckDuckGoJsonpPayload(String(dataResponse.data || ''));
+        const pageResults = parseDuckDuckGoJsonpPayload(rawScript);
 
         // If no results, means no more data
         if (pageResults.length === 0) {
