@@ -1,764 +1,318 @@
 <div align="center">
 
-# MyWebSearch
+# 🔍 MyWebSearch
 
-**[🇨🇳 中文](./README-zh.md) | 🇺🇸 English**
+**Keyless Multi-Engine AI Web Search & High-Purity Content Extraction Engine**  
+*MCP Server · CLI · Local HTTP Daemon · Skill-Guided Agent Workflows*
 
-![npm version](https://img.shields.io/npm/v/my-websearch)
-![npm downloads](https://img.shields.io/npm/dm/my-websearch)
-![license](https://img.shields.io/npm/l/my-websearch)
-![GitHub stars](https://img.shields.io/github/stars/wtznicy/my-websearch)
+**[🇨🇳 简体中文](./README-zh.md) | [🇺🇸 English](./README.md)**
+
+![npm version](https://img.shields.io/npm/v/my-websearch?style=flat-square&color=blue)
+![npm downloads](https://img.shields.io/npm/dm/my-websearch?style=flat-square&color=brightgreen)
+![license](https://img.shields.io/npm/l/my-websearch?style=flat-square)
+![GitHub stars](https://img.shields.io/github/stars/wtznicy/my-websearch?style=flat-square)
 [![M8ven Live Monitored](https://m8ven.ai/badge/mcp/wtznicy-my-websearch-1nmaw4)](https://m8ven.ai/mcp/wtznicy-my-websearch-1nmaw4)
 
 </div>
 
-`my-websearch` provides an MCP server, CLI, and local daemon, and can also be paired with skill-guided agent workflows for live web search and content retrieval without API keys.
+---
 
+## ✨ Why MyWebSearch?
 
-## Features
+`my-websearch` is a full-stack web retrieval and documentation engine built for AI coding agents and MCP clients (**Claude Desktop, Cursor, Windsurf, Cherry Studio, Cline, ZCode**, etc.). It delivers **9-engine federated search**, **version-pinned official library documentation via Context7**, and **clean Markdown web page extraction**—with **zero paid API keys required**.
 
-- Web search using multi-engine results
-    - Domestic engines (no proxy needed): bing, baidu, csdn, juejin, sogou
-    - Overseas engines (⚠️ **proxy required in mainland China**): duckduckgo, exa, brave, startpage
-- HTTP proxy configuration support for accessing restricted resources
-- No API keys or authentication required
-- Returns structured results with titles, URLs, and descriptions
-- Configurable number of results per search
-- Customizable default search engine
-- Support for fetching individual article content
-    - csdn
-    - github (README files)
-    - generic HTTP(S) page / Markdown content
+- 🌐 **9-Engine Smart Orchestration**: Combines direct domestic engines (**Bing, Baidu, CSDN, Juejin, Sogou**) and global engines (**DuckDuckGo, Brave, Startpage, Exa**) with language-aware `auto` routing, parallel multi-query execution (`queries: string[]`), cross-engine URL deduplication/ranking, circuit breakers, and `minResults` automatic cascade fallback.
+- 🛡️ **Native Anti-Bot & Challenge Solvers (Zero-Browser Fast Path)**:
+  - **Chrome TLS/HTTP2 Fingerprint Impersonation**: Powered by `wreq-js` with persistent session cookie jars (e.g., automatic Alibaba Cloud `https_waf_cookie` persistence on CSDN and Chrome 131/133 TLS handshakes on Bing/Brave/Startpage).
+  - **Millisecond Cryptographic & JS Challenge Solvers**: Built-in pure-JS/Rust solvers for **Startpage's Anubis SHA-256 Proof-of-Work (PoW)** and **DuckDuckGo's `d.js` (`isJsaChallenge` / `window.execDeep`) HTML5-parser + arithmetic challenge**—bypassing HTTP 202 / 429 anti-bot walls in milliseconds without spawning a 400MB headless browser.
+  - **Deep Ad-Stripping & Real URL Resolution**: Automatically strips sponsored ads on Brave (`data-type="ad"`, `/a/redirect`) and Sogou, and resolves encrypted redirect links (`/link?url=`, `uigs_para` token replay, Baidu `Location` headers, Bing `u=a1...` Base64 links) to clean target URLs.
+- 📄 **AI-Ready Content Extraction & GFM Markdown**:
+  - Combines `@mozilla/readability` with container-level noise stripping (`stripChromeNoiseWithGuard`) to remove `<nav>`, `<aside>`, `<footer>`, sidebars, and breadcrumbs while **preserving `<article><header><h1>` article titles**.
+  - Full `format: "markdown"` support (`turndown` + GFM tables/fenced code blocks) across both Readability and container-fallback paths, plus automatic GBK/GB2312 decoding and `startIndex` pagination.
+- 📚 **Built-in Context7 Official Library Docs**: Native `resolveLibraryId` and `queryDocs` tools fetch up-to-date, version-specific documentation and code snippets without running a separate Context7 MCP server.
+- 🌏 **Split-Horizon Proxy (`PROXY_ENGINES`) & Clash Fake-IP Ready**:
+  - Route only overseas engines (`duckduckgo,exa,brave,startpage`) through your proxy while keeping domestic engines on fast direct connections.
+  - Built-in `FAKE_IP_CIDRS` (`198.18.0.0/15` enabled by default) works seamlessly with Clash TUN / Fake-IP setups while enforcing strict SSRF protection against private-network access.
 
-## Choose the Right Path
+---
 
-- `MCP`
-  - Best when you want to connect `my-websearch` to Claude Desktop, Cherry Studio, Cursor, or another MCP client.
-- `CLI`
-  - Best for one-shot local commands, shell scripts, and direct terminal usage.
-- `Local daemon`
-  - Best when you want a reusable long-lived local HTTP service exposing `status`, `GET /health`, and `POST /search` / `POST /fetch-*`. Start it explicitly with `my-websearch serve` and check it with `my-websearch status`.
-- `Skill`
-  - Best as an agent-facing guidance layer for setup and usage. A skill does not replace MCP, CLI, or the local daemon; it typically works together with the CLI and/or local daemon to help an agent discover, activate, and use the smallest working path.
+## 🏗️ Architecture
 
-## Use with a Skill
+```mermaid
+flowchart TB
+    subgraph Clients["🤖 Entrypoints"]
+        MCP["MCP Server<br/>(STDIO / Streamable HTTP / SSE)"]
+        CLI["CLI One-Shot Commands<br/>(my-websearch search / fetch-*)"]
+        Daemon["Local HTTP Daemon<br/>(127.0.0.1:3210 · /health · /metrics)"]
+    end
 
-Install the `my-websearch` skill for your agent first:
+    subgraph Core["🧠 Search & Fetch Orchestrator"]
+        Router["Language-Aware Auto Router<br/>ZH → Baidu | EN/Tech → Bing + DuckDuckGo"]
+        Cascade["minResults Cascade & Circuit Breaker<br/>(Auto Fallback + 5min TTL Cache)"]
+        Ranker["Cross-Engine URL Deduplication & Relevance Ranking"]
+    end
+
+    subgraph Transport["🛡️ Anti-Bot & Secure Transport Layer"]
+        Wreq["wreq-js Native Chrome TLS/H2 Fingerprint<br/>+ Automatic Session Cookie Jars"]
+        Solvers["Millisecond Challenge Solvers<br/>Startpage Anubis PoW | DDG JSA Solver"]
+        PW["Playwright Stealth Browser Fallback<br/>(Auto-discovers System Edge/Chrome or CDP)"]
+        Guard["SSRF Guard & Clash Fake-IP Support<br/>(PROXY_ENGINES Split Routing + 198.18.0.0/15)"]
+    end
+
+    subgraph Engines["🌍 9 Search Engines + 6 Content/Docs Tools"]
+        CN["🇨🇳 Direct Engines<br/>Bing · Baidu · CSDN · Juejin · Sogou"]
+        INTL["🌐 Global Engines<br/>DuckDuckGo · Brave · Startpage · Exa"]
+        Docs["📚 Content & Official Docs<br/>fetchWebContent · Context7 · GitHub/Gitee · CSDN/Juejin"]
+    end
+
+    Clients --> Core
+    Core --> Transport
+    Transport --> Engines
+```
+
+---
+
+## 🌍 9 Search Engines Overview
+
+| Engine | Connectivity (Mainland China) | API Key | Anti-Bot & Parsing Architecture | Best For |
+| :--- | :--- | :---: | :--- | :--- |
+| **`bing`** | 🇨🇳 Direct | None | `wreq-js` Chrome TLS impersonation + Base64 `u=a1` URL decoding + optional Playwright fallback | General technical search, mixed EN/ZH queries |
+| **`baidu`** | 🇨🇳 Direct | None | Parallel redirect resolution (`Location` header extraction) + anti-bot page detection | Chinese news, documentation, domestic communities |
+| **`csdn`** | 🇨🇳 Direct | None | `wreq-js` session auto-persisting Alibaba Cloud `https_waf_cookie` + empty-shell auto-retry | Chinese error messages, debugging notes |
+| **`juejin`** | 🇨🇳 Direct | None | Official Juejin search API integration | Modern frontend/backend/mobile Chinese articles |
+| **`sogou`** | 🇨🇳 Direct | None | Desktop `/web` + Mobile `m.sogou.com` dual parser + `uigs_para` real URL resolution + ad filtering | WeChat ecosystem articles & Chinese long-tail queries |
+| **`duckduckgo`** | 🌐 Proxy in CN | None | Preload `d.js` JSONP + **built-in `isJsaChallenge` (`window.execDeep`) HTML5/math solver** | English technical search, open-source discussions |
+| **`startpage`** | 🌐 Proxy in CN | None | **Built-in Anubis SHA-256 PoW solver** + `wreq-js` session cookies (no browser needed) | Google-backed search results with high privacy |
+| **`brave`** | 🌐 Proxy in CN | None | `wreq-js` TLS fingerprint + strict sponsored-ad filtering (`data-type="ad"`, `/a/redirect`) | Independent English index & technical blogs |
+| **`exa`** | 🌐 Direct API | Optional Free Key | Official semantic search API (enabled via `EXA_API_KEY`; fails fast if unset) | AI papers, GitHub repositories, semantic lookup |
+
+---
+
+## 🛠️ 7 MCP Tools Reference
+
+| Tool Name | Purpose | Key Parameters & Highlights |
+| :--- | :--- | :--- |
+| **`search`** | Multi-engine federated web search | Supports `query` or parallel `queries: string[]`, `engines`, `limit`, `minResults` (auto-cascades to additional engines when results are insufficient) |
+| **`fetchWebContent`** | Generic web page & Markdown extraction | Supports `format: "markdown"` (preserves code blocks & tables), `readability: true`, `includeLinks`, `startIndex` pagination, GBK/UTF-8 auto-decoding, chrome noise stripping while rescuing `<article><header><h1/h2>` titles |
+| **`resolveLibraryId`** | Resolve package name to Context7 ID | Turns `"Next.js"`, `"prisma"`, etc. into Context7 library IDs with trust & snippet count metadata |
+| **`queryDocs`** | Fetch official versioned library docs | Retrieves code examples and API docs by Context7 ID (supports version pinning like `"/vercel/next.js@v15.1.8"`) |
+| **`fetchGithubReadme`** | Fetch GitHub or Gitee repo README | Supports HTTPS, SSH, `.git` URLs; **Gitee uses official API (reachable in mainland China without proxy)** |
+| **`fetchCsdnArticle`** | Fetch full CSDN blog article | Clean `#content_views` extraction with automatic browser-cookie fallback if blocked |
+| **`fetchJuejinArticle`** | Fetch full Juejin article | Direct API extraction returning clean article body |
+
+---
+
+## 🚀 Quick Start
+
+### 1. Run Immediately with NPX
+
+```bash
+# Basic startup (STDIO + HTTP)
+npx -y my-websearch@latest
+
+# 🇨🇳 Recommended for Mainland China (Overseas engines via proxy, domestic engines direct)
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brave,startpage npx -y my-websearch@latest
+```
+
+### 2. Configure in MCP Clients
+
+#### 🔹 Claude Desktop / Cursor / Windsurf / Cline (`mcpServers` Config)
+
+```json
+{
+  "mcpServers": {
+    "my-websearch": {
+      "command": "npx",
+      "args": ["-y", "my-websearch@latest"],
+      "env": {
+        "MODE": "stdio",
+        "DEFAULT_SEARCH_ENGINE": "auto",
+        "DEFAULT_MIN_RESULTS": "5",
+        "USE_PROXY": "true",
+        "PROXY_URL": "http://127.0.0.1:7890",
+        "PROXY_ENGINES": "duckduckgo,exa,brave,startpage",
+        "FAKE_IP_CIDRS": "198.18.0.0/15"
+      }
+    }
+  }
+}
+```
+
+> 💡 **Windows CMD Wrapper** (if your client requires `cmd /c` to locate `npx`):
+> ```json
+> {
+>   "mcpServers": {
+>     "my-websearch": {
+>       "command": "cmd",
+>       "args": ["/c", "npx", "-y", "my-websearch@latest"],
+>       "env": {
+>         "MODE": "stdio",
+>         "DEFAULT_SEARCH_ENGINE": "auto",
+>         "SYSTEMROOT": "C:/Windows"
+>       }
+>     }
+>   }
+> }
+> ```
+
+#### 🔹 Cherry Studio (STDIO or Streamable HTTP)
+
+- **STDIO Mode**: Use the standard JSON config above.
+- **Streamable HTTP Mode** (start server with `npx my-websearch@latest`, default port `3211`):
+  ```json
+  {
+    "mcpServers": {
+      "web-search": {
+        "name": "MyWebSearch",
+        "type": "streamableHttp",
+        "baseUrl": "http://localhost:3211/mcp"
+      }
+    }
+  }
+  ```
+
+#### 🔹 Client Config File Locations
+
+| Client / Harness | Config File Location |
+| :--- | :--- |
+| **Claude Desktop** | macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`<br/>Windows: `%APPDATA%\Claude\claude_desktop_config.json` |
+| **Cursor** | `~/.cursor/mcp.json` or workspace `.cursor/mcp.json` |
+| **ZCode / zcode** | `~/.zcode/cli/config.json` → `mcp.servers.mywebsearch.env` |
+| **Gemini CLI / Antigravity** | `mcp_config.json` → `mcpServers.mywebsearch.env` |
+| **DSH (DeepSeek Harness)** | `cordis.patch.yml` → `mcp-mywebsearch.env` |
+| **Reasonix** | `~/.reasonix/config.toml` |
+
+---
+
+## 💻 CLI, Local HTTP Daemon & Agent Skill
+
+Beyond MCP, `my-websearch` provides a fast **CLI** and a **long-lived Local HTTP Daemon (`127.0.0.1:3210`)** that keeps connection pools, 5-minute search caches, and solved anti-bot sessions warm across calls.
+
+### 1. Install the Agent Skill
 
 ```bash
 npx skills add https://gitee.com/wtznicy/my-websearch --skill my-websearch
 ```
 
-On first use, the skill typically follows this path: detect whether a usable `my-websearch` path already exists, guide setup/enablement if it does not, validate that the capability is active, and only then continue with search or fetch through the smallest working path.
-
-If the current environment cannot complete setup or activation automatically, you can explicitly have the agent start the local daemon first:
+### 2. Common CLI & Daemon Commands
 
 ```bash
-my-websearch serve
-my-websearch status
-```
-
-Keep installation proxy settings separate from runtime proxy settings:
-
-- Installation proxy / mirror
-  - Use this when the skill or agent is installing `my-websearch`, `playwright`, or other npm packages.
-  - In restricted networks, npm-specific flags or npm config often work better than generic shell proxy variables, for example:
-
-```bash
-npm --proxy http://127.0.0.1:7890 --https-proxy http://127.0.0.1:7890 install -g my-websearch
-```
-
-- Runtime proxy
-  - Use this when the daemon is already installed and is about to perform live `search` / `fetch` work.
-  - This affects the `my-websearch` network traffic after `serve` starts, for example:
-
-```bash
-USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 my-websearch serve
-```
-
-If the agent can only get through the package-install step with npm proxy settings, but live search/fetch also needs a proxy after startup, those are two separate configuration steps and should be handled separately.
-
-## CLI and Local Daemon
-
-CLI is for one-shot execution. The local daemon is a long-lived local HTTP service for repeated calls with lower startup friction. Use `my-websearch serve` as the explicit daemon start command and `my-websearch status` as the explicit daemon status command.
-
-The daemon also exposes read-only endpoints for local monitoring: `GET /health`, `GET /status`, and `GET /metrics` (Prometheus text format — engine success/failure/timing, search cache hit rate, process memory/uptime).
-
-> **Windows console note**: CLI JSON output is UTF-8. On the legacy Windows console (GBK code page 936) Chinese characters may render as mojibake in cmd/other terminals (redirecting to a file is fine). Run `chcp 65001` first, or use Windows Terminal.
-
-Action commands such as `search` and `fetch-web` try the default local daemon first when it is available. If you pass `--daemon-url`, that daemon path becomes explicit and silent fallback to direct execution is disabled.
-
-Build first:
-
-```bash
-npm run build
-```
-
-Start the local daemon:
-
-```bash
-npm run serve
-# globally installed: my-websearch serve
-```
-
-Check status:
-
-```bash
-npm run status -- --json
-# globally installed: my-websearch status --json
-```
-
-Run a one-shot local CLI search:
-
-```bash
-npm run search:cli -- "open web search" --json
-```
-
-Notes:
-- Bare `my-websearch` is the MCP server compatibility entrypoint, not the recommended daemon start command for agent automation.
-- For content extraction, prefer searching first and then fetching a more specific result page. Some homepages and JS-heavy landing pages may not expose readable article text through `fetch-web`.
-- `--min-results N` on `search` auto-runs additional engines (not already requested) until at least N results come back; defaults to off.
-- Bing's HTTP mode is the most anti-bot-prone engine. If you hit verification pages often: (a) spread load with `engines: ["duckduckgo", "brave"]` on Bing-unrelated queries, or (b) set `BING_PLAYWRIGHT_FALLBACK=false` plus `--min-results` so a blocked Bing automatically cascades to lighter engines instead of launching a Playwright browser.
-- `cache-clear` clears the in-memory search TTL cache — useful after an engine recovers from an outage or when a stale anti-bot page got cached:
-  ```bash
-  my-websearch cache-clear
-  ```
-
-For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`, `POST /fetch-*`, `POST /cache/clear`), see [docs/http-api.md](docs/http-api.md).
-
-## Installation Guide
-
-If you are using `my-websearch` as an MCP server, continue with the MCP-oriented setup below.
-
-### NPX Quick Start (Recommended)
-
-The fastest way to get started:
-
-```bash
-# Basic usage
-npx my-websearch@latest
-
-# With environment variables (Linux/macOS)
-DEFAULT_SEARCH_ENGINE=auto ENABLE_CORS=true npx my-websearch@latest
-
-# Windows PowerShell
-$env:DEFAULT_SEARCH_ENGINE="bing"; $env:ENABLE_CORS="true"; npx my-websearch@latest
-
-# Windows CMD
-set MODE=stdio && set DEFAULT_SEARCH_ENGINE=auto && npx my-websearch@latest
-
-# Cross-platform (requires cross-env, Used for local development)
+# Install globally
 npm install -g my-websearch
-npx cross-env DEFAULT_SEARCH_ENGINE=auto ENABLE_CORS=true my-websearch
+
+# Start the background-ready local HTTP daemon (port 3210)
+my-websearch serve
+
+# Check daemon health and active configuration
+my-websearch status --json
+
+# Run a one-shot search (automatically reuses the local daemon if running)
+my-websearch search "Model Context Protocol specification" --limit 5 --min-results 5 --json
+
+# Extract clean Markdown from any web page
+my-websearch fetch-web "https://blog.vuejs.org/posts/vue-3-5" --max-chars 15000 --json
+
+# Clear the 5-minute in-memory search cache
+my-websearch cache-clear
 ```
 
-**Environment Variables:**
+> 📊 **Prometheus Metrics & Health Endpoints**: The daemon exposes `GET /health`, `GET /status`, and `GET /metrics` (engine latency, success/failure counters, cache hit ratio, memory/uptime). See [docs/http-api.md](docs/http-api.md) for the complete HTTP API.
 
-| Variable | Default                 | Options | Description |
-|----------|-------------------------|---------|-------------|
-| `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
-| `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
-| `DEFAULT_SEARCH_ENGINE` | `auto`                  | `auto`, `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine. `auto` routes by query: Chinese queries go to the ZH engine group, English/technical to the EN engine group (see below) |
-| `AUTO_ROUTE_EN_ENGINES` | `bing,duckduckgo` | Comma-separated engines | English engine group for `auto` routing — two engines in parallel by default (bing alone degrades to site homepages on long-tail technical queries) |
-| `AUTO_ROUTE_ZH_ENGINES` | `baidu` | Comma-separated engines | Chinese engine group for `auto` routing |
-| `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
-| `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
-| `PROXY_ENGINES` | empty (all engines) | Comma-separated engine names | With `USE_PROXY=true`, **only** the engines in this whitelist route through the proxy; others stay direct. Empty = all engines proxied (legacy global behavior). Recommended for mainland China: `PROXY_ENGINES=duckduckgo,exa,brave,startpage` (overseas engines via proxy, domestic engines direct) |
-| `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
-| `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | Disable TLS certificate verification for `fetchWebContent` only. Use only when a target site has a broken certificate chain |
-| `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
-| `PORT` | `3211`                  | 1-65535 | Server port (MCP HTTP/S; CLI daemon uses 3210 by default) |
-| `ALLOWED_SEARCH_ENGINES` | empty (all available) | Comma-separated engine names | Limit which search engines can be used; if the default engine is not in this list, the first allowed engine becomes the default |
-| `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | Search strategy. Currently only affects Bing: request only, request then Playwright fallback, or force Playwright |
-| `BING_IMPERSONATE_TARGET` | `chrome131` | Any curl-cffi-node impersonate target (e.g. `chrome131`, `chrome124`, `chrome116`) | Browser fingerprint target for Bing's HTTP mode. Bing soft-degrades pure-HTTP requests by TLS/HTTP2 fingerprint; this enables Chrome fingerprint impersonation (2/3 requests return full results vs stable degradation otherwise). Fallback to the default HTTP client is automatic if the native module is unavailable |
-| `BING_PLAYWRIGHT_FALLBACK` | `true` | `true`, `false` | In auto mode, when Bing's request mode hits an anti-bot page: `true` = launch a Playwright browser (slow, ~400MB); `false` = surface the error so the search service can cascade to lighter engines (e.g. duckduckgo/brave) via `minResults` |
-| `STARTPAGE_PLAYWRIGHT_FALLBACK` | `true` | `true`, `false` | `false` = do not launch a Playwright browser for Startpage's Anubis anti-bot warmup (saves ~400MB memory and seconds of latency); surface the error so `minResults` can cascade to lighter engines instead |
-| `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | Which Playwright client package to resolve when browser mode is enabled |
-| `PLAYWRIGHT_MODULE_PATH` | empty | Absolute path or project-relative path | Reuse an existing Playwright client package outside this project |
-| `PLAYWRIGHT_EXECUTABLE_PATH` | empty | Any valid browser binary path | Launch an existing Chromium/Chrome executable without installing bundled browsers |
-| `PLAYWRIGHT_WS_ENDPOINT` | empty | Valid Playwright `ws://` / `wss://` endpoint | Connect to an existing remote Playwright browser server |
-| `PLAYWRIGHT_CDP_ENDPOINT` | empty | Valid Chromium CDP endpoint | Connect to an existing Chromium instance over CDP |
-| `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Whether Playwright Chromium runs in headless mode |
-| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | Positive integer | Timeout for Playwright navigation and Bing result waits |
-| `MCP_TOOL_SEARCH_NAME` | `search` | Valid MCP tool name | Custom name for the search tool |
-| `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | Valid MCP tool name | Custom name for the CSDN article fetch tool |
-| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | Valid MCP tool name | Custom name for the GitHub README fetch tool |
-| `MCP_TOOL_FETCH_JUEJIN_NAME` | `fetchJuejinArticle` | Valid MCP tool name | Custom name for the Juejin article fetch tool |
-| `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | Valid MCP tool name | Custom name for generic web/Markdown fetch tool |
-| `EXA_API_KEY` | empty | Any valid Exa API key | **可选**（仅 exa 引擎需要）。exa 的免 key 网页端点已失效，想用 exa 引擎时在 [https://dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) 免费申请并配置到 MCP 客户端 env；不配置只影响 exa 一个引擎，其余引擎不受影响 |
-| `MAX_CONCURRENT_SEARCHES` | `0` | Non-negative integer | 全局并发搜索限制（daemon 模式下多客户端生效）。`0` = 不限制，CLI 一次性调用不受影响 |
-| `METRICS_ENABLED` | `false` | `true`, `false` | 启用引擎指标收集（成功率、缓存命中率、平均响应时间） |
-| `SECURITY_AUDIT` | `false` | `true`, `false` | 启用安全审计日志（SSRF 拦截、TLS 白名单触发等事件） |
-| `LOG_LEVEL` | `info` | `quiet`, `debug`, `info`, `warn`, `error` | 日志级别。`quiet` 完全静默，`debug` 最详细 |
-| `OPEN_WEBSEARCH_QUIET_STARTUP` | `false` | `true`, `false` | 抑制启动配置日志（兼容开关，`LOG_LEVEL=quiet` 与之等价） |
+---
 
-**Optional: configure EXA_API_KEY (only needed if you want to use the exa engine)**
+## 📖 Tool Usage Examples
 
-`EXA_API_KEY` is **optional** — every other engine (bing, baidu, csdn, juejin, sogou, duckduckgo, brave, startpage) works without it. Only configure it if you want to use `exa`: its old keyless web endpoint has been shut down by upstream (returns 500), so exa needs a free key from [https://dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys), configured in your MCP client:
+### 1. `search` — Multi-Engine & Multi-Query Search
 
-**Claude Desktop** (`claude_desktop_config.json`):
 ```json
 {
-  "mcpServers": {
-    "web-search": {
-      "command": "npx",
-      "args": ["-y", "my-websearch@latest"],
-      "env": {
-        "MODE": "stdio",
-        "EXA_API_KEY": "<your-key>"
-      }
-    }
-  }
+  "queries": [
+    "Rust tokio async runtime tutorial",
+    "tokio spawn blocking best practices"
+  ],
+  "engines": ["duckduckgo", "bing", "startpage"],
+  "limit": 8,
+  "minResults": 6
 }
 ```
 
-**Cherry Studio / VSCode (Claude Dev):** same `env` field, add `"EXA_API_KEY": "<your-key>"` to the server's environment variables.
+### 2. `fetchWebContent` — Clean Markdown Extraction
 
-**ZCode** (`~/.zcode/cli/config.json` → `mcp.servers`):
 ```json
-"my-websearch": {
-  "type": "stdio",
-  "command": "D:/nodejs/node.exe",
-  "args": ["D:/path/to/build/index.js"],
-  "env": {
-    "MODE": "stdio",
-    "EXA_API_KEY": "<your-key>"
-  }
+{
+  "url": "https://blog.vuejs.org/posts/vue-3-5",
+  "format": "markdown",
+  "readability": true,
+  "includeLinks": true,
+  "maxChars": 20000,
+  "startIndex": 0
+}
+```
+> When `truncated: true`, pass the returned `nextStartIndex` as `startIndex` in your next call to page through long documents.
+
+### 3. `resolveLibraryId` + `queryDocs` — Official Library Documentation
+
+```json
+// Step 1: Resolve library ID
+{
+  "libraryName": "Next.js",
+  "query": "App Router middleware authentication"
+}
+
+// Step 2: Query version-specific documentation snippets
+{
+  "libraryId": "/vercel/next.js",
+  "query": "how to protect routes in middleware.ts",
+  "limit": 5
 }
 ```
 
-**CLI one-shot (no config file needed):**
-```bash
-EXA_API_KEY=<your-key> my-websearch search "query" --engines exa
-# Windows PowerShell:
-# $env:EXA_API_KEY="<your-key>"; my-websearch search "query" --engines exa
-```
+---
 
-If the key is missing, the exa engine fails fast with an error message that includes these instructions instead of silently returning nothing.
+## ⚙️ Environment Variables Reference
 
-**Common configurations:**
-```bash
-# Enable proxy for restricted regions
-USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx my-websearch@latest
+| Variable | Default | Options / Format | Description |
+| :--- | :--- | :--- | :--- |
+| **`DEFAULT_SEARCH_ENGINE`** | `auto` | `auto`, `bing`, `baidu`, `csdn`, `juejin`, `sogou`, `duckduckgo`, `brave`, `startpage`, `exa` | Default engine. `auto` routes Chinese queries to `AUTO_ROUTE_ZH_ENGINES` and English/technical queries to `AUTO_ROUTE_EN_ENGINES` |
+| **`AUTO_ROUTE_EN_ENGINES`** | `bing,duckduckgo` | Comma-separated engines | Parallel engine group for English/technical queries under `auto` routing |
+| **`AUTO_ROUTE_ZH_ENGINES`** | `baidu` | Comma-separated engines | Primary engine group for Chinese queries under `auto` routing (auto-cascades via `minResults` when needed) |
+| **`DEFAULT_MIN_RESULTS`** | `5` | Non-negative integer | Automatically cascades to other engines when initial engines return fewer than `N` results |
+| **`ALLOWED_SEARCH_ENGINES`** | empty (all) | Comma-separated engines | Restrict which search engines can be used |
+| **`USE_PROXY`** | `false` | `true`, `false` | Enable explicit HTTP/HTTPS proxy (if unset, OS system proxy is auto-detected when needed) |
+| **`PROXY_URL`** | `http://127.0.0.1:7890` | Valid proxy URL | Proxy URL (automatically passed to both `axios` and `wreq-js` native TLS sessions) |
+| **`PROXY_ENGINES`** | empty (all) | Comma-separated engines | **Recommended for Mainland China: `duckduckgo,exa,brave,startpage`**. Routes only listed engines via proxy while domestic engines stay direct |
+| **`FAKE_IP_CIDRS`** | `198.18.0.0/15` | Comma-separated CIDRs | **Required for Clash TUN / Fake-IP**: treats DNS answers in these ranges as synthetic proxy IPs instead of blocking them as private IPs |
+| **`BING_IMPERSONATE_TARGET`** | `chrome131` | `wreq-js` browser target | Browser TLS/HTTP2 fingerprint target used for Bing HTTP requests |
+| **`BING_PLAYWRIGHT_FALLBACK`** | `true` | `true`, `false` | Set `false` to skip launching Playwright when Bing is challenged (saves ~400MB RAM and lets `minResults` cascade to lighter engines) |
+| **`STARTPAGE_PLAYWRIGHT_FALLBACK`** | `true` | `true`, `false` | Startpage uses the built-in Anubis SHA-256 PoW solver first; set `false` to disable Playwright fallback if PoW fails |
+| **`EXA_API_KEY`** | empty | Exa API Key | **Optional**: only required if you explicitly use the `exa` engine (get a free key at [dashboard.exa.ai](https://dashboard.exa.ai/api-keys)) |
+| **`CONTEXT7_API_KEY`** | empty | Context7 API Key | **Optional**: anonymous usage includes 200 requests/month per egress IP; set a free key ([context7.com/dashboard](https://context7.com/dashboard)) for higher quotas |
+| **`FETCH_WEB_INSECURE_TLS`** | `false` | `true`, `false` | Disable TLS verification for `fetchWebContent` only (use only for legacy sites with broken certificate chains) |
+| **`MODE`** | `both` | `both`, `http`, `stdio` | MCP server transport mode |
+| **`PORT`** | `3211` | `1-65535` | MCP HTTP/SSE listen port (CLI local daemon uses `3210` by default) |
+| **`MAX_CONCURRENT_SEARCHES`** | `0` | Non-negative integer | Max concurrent searches in daemon mode (`0` = unlimited) |
+| **`METRICS_ENABLED`** | `false` | `true`, `false` | Enable Prometheus metrics collection (`GET /metrics`) |
+| **`SECURITY_AUDIT`** | `false` | `true`, `false` | Enable security audit logging (SSRF blocks, TLS overrides) |
+| **`LOG_LEVEL`** | `info` | `quiet`, `debug`, `info`, `warn`, `error` | Logging verbosity (`quiet` silences startup and runtime logs) |
 
-# Only if a target website has a broken certificate chain
-FETCH_WEB_INSECURE_TLS=true npx my-websearch@latest
+---
 
-# Request first, then fallback to Playwright if available
-SEARCH_MODE=auto npx my-websearch@latest
+## 🤝 Contributing & Acknowledgements
 
-# Force request-only Bing search
-SEARCH_MODE=request npx my-websearch@latest
+Issues and Pull Requests are welcome! To build and run the test suite locally:
 
-# Full configuration
-DEFAULT_SEARCH_ENGINE=auto ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx my-websearch@latest
-```
-
-**Proxy guidance for mainland China:**
-
-`duckduckgo`, `exa`, `brave`, and `startpage` are overseas engines and **cannot be reached without a proxy from mainland China** — they will time out or return errors. Domestic engines (`bing`, `baidu`, `csdn`, `juejin`, `sogou`) work without a proxy.
-
-Use `PROXY_ENGINES` to keep domestic engines on a fast direct connection while routing only the overseas engines through the proxy (avoiding the redirects/timeouts that a global proxy causes for Chinese engines):
-
-```bash
-USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brave,startpage npx my-websearch@latest
-```
-
-If a search includes overseas engines but the proxy is off, those engines will fail fast instead of hanging until timeout: my-websearch probes direct connectivity to `duckduckgo`/`brave`/`startpage` (3s timeout, one retry, result cached for 5 minutes) — unreachable engines immediately return a "proxy required, or use domestic engines" error, while reachable engines (e.g. overseas users) work normally. `exa` is excluded from probing because `api.exa.ai` is directly reachable from mainland China. When the proxy is on, engines in `PROXY_ENGINES` are never probed — they go straight through the proxy.
-
-Browser-enhanced Bing fallback and the `startpage` engine work out of the box: `playwright-core` is bundled as an optional dependency (auto-installed with the package, no browser download — system browsers are auto-discovered, e.g. Edge on Windows). If that install fails (network/platform), browser-based features degrade gracefully and all other engines stay unaffected.
-
-Optional advanced setups (full Playwright with its own browser, custom module paths, remote/CDP browsers):
-
-1. Full local Playwright install:
-```bash
-npm install playwright
-npx playwright install chromium
-SEARCH_MODE=auto npx my-websearch@latest
-```
-
-2. Reuse an existing browser binary with a slim client:
-```bash
-npm install playwright-core
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium SEARCH_MODE=auto npx my-websearch@latest
-```
-
-3. Reuse a Playwright package that already exists elsewhere on the machine:
-```bash
-PLAYWRIGHT_MODULE_PATH=/absolute/path/to/node_modules/playwright SEARCH_MODE=playwright npx my-websearch@latest
-```
-
-4. Connect to an existing remote browser:
-```bash
-npm install playwright-core
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ SEARCH_MODE=auto npx my-websearch@latest
-```
-
-5. Reuse a local Chrome/Chromium session over CDP:
-```bash
-npm install playwright-core
-
-# Start Chrome/Chromium with a debugging port first
-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/my-websearch-chrome
-
-# Then connect through CDP
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_CDP_ENDPOINT=http://127.0.0.1:9222 SEARCH_MODE=auto npx my-websearch@latest
-```
-This is the most practical setup when you want to reuse your own logged-in or previously verified browser session.
-
-Windows PowerShell example:
-```powershell
-npm install playwright-core
-
-& "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe" `
-  --remote-debugging-port=9222 `
-  --user-data-dir="$env:TEMP\my-websearch-chrome"
-
-$env:PLAYWRIGHT_PACKAGE="playwright-core"
-$env:PLAYWRIGHT_CDP_ENDPOINT="http://127.0.0.1:9222"
-$env:SEARCH_MODE="auto"
-npx my-websearch@latest
-```
-
-Mode behavior:
-- `request`: only uses request-based Bing scraping
-- `auto`: tries request first, and only falls back to Playwright when request fails and a manually accessible Playwright client + browser are available
-- `playwright`: forces Playwright and errors if the configured Playwright client or browser target is unavailable
-
-Notes:
-- `PLAYWRIGHT_MODULE_PATH` takes precedence over `PLAYWRIGHT_PACKAGE`
-- `PLAYWRIGHT_WS_ENDPOINT` takes precedence over `PLAYWRIGHT_CDP_ENDPOINT`
-- Remote endpoints ignore `PLAYWRIGHT_EXECUTABLE_PATH` and local proxy launch flags
-- When Playwright is available, blocked CSDN/Zhihu article fetches and generic web fetches can also retry with browser-acquired cookies
-- Without Playwright, `fetchWebContent` stays on the request-only path. Public pages can still work, but pages that require browser cookies or browser-rendered HTML may fail.
-
-### Local Installation
-
-1. Clone or download this repository
-2. Install dependencies:
 ```bash
 npm install
-```
-   This installs the core MCP server only. Browser fallback remains optional until you install or connect a Playwright client yourself.
-3. Build the server:
-```bash
 npm run build
-```
-4. Add the server to your MCP configuration:
-
-**Cherry Studio:**
-```json
-{
-  "mcpServers": {
-    "web-search": {
-      "name": "Web Search MCP",
-      "type": "streamableHttp",
-      "description": "Multi-engine web search with article fetching",
-      "isActive": true,
-      "baseUrl": "http://localhost:3211/mcp"
-    }
-  }
-}
+npm run test:vitest   # Run 134+ Vitest unit tests
+npm test              # Run bounded-concurrency integration test suite
 ```
 
-**VSCode (Claude Dev Extension):**
-```json
-{
-  "mcpServers": {
-    "web-search": {
-      "transport": {
-        "type": "streamableHttp",
-        "url": "http://localhost:3211/mcp"
-      }
-    },
-    "web-search-sse": {
-      "transport": {
-        "type": "sse",
-        "url": "http://localhost:3211/sse"
-      }
-    }
-  }
-}
-```
-
-**Claude Desktop:**
-```json
-{
-  "mcpServers": {
-    "web-search": {
-      "type": "http",
-      "url": "http://localhost:3211/mcp"
-    },
-    "web-search-sse": {
-      "type": "sse",
-      "url": "http://localhost:3211/sse"
-    }
-  }
-}
-```
-
-**NPX Command Line Configuration:**
-```json
-{
-  "mcpServers": {
-    "web-search": {
-      "args": [
-        "my-websearch@latest"
-      ],
-      "command": "npx",
-      "env": {
-        "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "auto",
-        "ALLOWED_SEARCH_ENGINES": "bing,duckduckgo,exa"
-      }
-    }
-  }
-}
-```
-
-Windows NPX configuration:
-```json
-{
-  "mcpServers": {
-    "web-search": {
-      "command": "cmd",
-      "args": [
-        "/c",
-        "npx",
-        "-y",
-        "my-websearch@latest"
-      ],
-      "env": {
-        "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "auto",
-        "SYSTEMROOT": "C:/Windows"
-      }
-    }
-  }
-}
-```
-
-Proxy and TLS notes:
-- my-websearch now disables Axios environment-proxy auto-detection internally and only uses the explicit `USE_PROXY` + `PROXY_URL` path.
-- When `USE_PROXY=true`, all Axios-based network requests follow the configured `PROXY_URL` path instead of mixing direct requests with environment-proxy behavior.
-- If `PROXY_URL` points to a local rule-based proxy client, that client can still decide which destinations go `DIRECT` and which ones are proxied.
-- If `PROXY_URL` points to a fixed upstream proxy or overseas egress, region-sensitive sites such as Baidu, CSDN, Juejin, or GitHub may behave differently than before.
-- If your host machine already sets `HTTP_PROXY` or `HTTPS_PROXY`, they will no longer override the server's internal request behavior.
-- Prefer configuring `NODE_EXTRA_CA_CERTS` on Windows when a site has a missing intermediate CA.
-- Use `FETCH_WEB_INSECURE_TLS=true` only as a last resort for `fetchWebContent`, since it weakens TLS verification.
-
-**Local STDIO Configuration for Cherry Studio (Windows):**
-```json
-{
-  "mcpServers": {
-    "my-websearch-local": {
-      "command": "node",
-      "args": ["C:/path/to/your/project/build/index.js"],
-      "env": {
-        "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "auto",
-        "ALLOWED_SEARCH_ENGINES": "bing,duckduckgo,exa"
-      }
-    }
-  }
-}
-```
-
-## Usage Guide
-
-The server provides seven tools: `search`, `resolveLibraryId`, `queryDocs`, `fetchCsdnArticle`, `fetchGithubReadme`, `fetchJuejinArticle`, and `fetchWebContent`.
-
-For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`, `POST /fetch-*`), see [docs/http-api.md](docs/http-api.md).
-
-### search Tool Usage
-
-```typescript
-{
-  "query": string,        // Search query
-  "limit": number,        // Optional: Number of results to return (default: 10)
-  "engines": string[],    // Optional: Engines to use (bing,baidu,csdn,duckduckgo,exa,brave,juejin,startpage,sogou) default runtime-configured engine. Note: duckduckgo/exa/brave/startpage need a proxy from mainland China (see PROXY_ENGINES)
-  "searchMode": string    // Optional: request, auto, or playwright (currently only affects Bing)
-}
-```
-
-Usage example:
-```typescript
-use_mcp_tool({
-  server_name: "web-search",
-  tool_name: "search",
-  arguments: {
-    query: "search content",
-    limit: 3,  // Optional parameter
-    engines: ["bing", "csdn", "duckduckgo", "exa", "brave", "juejin", "sogou"] // Optional parameter, supports multi-engine combined search
-  }
-})
-```
-
-Response example:
-```json
-[
-  {
-    "title": "Example Search Result",
-    "url": "https://example.com",
-    "description": "Description text of the search result...",
-    "source": "Source",
-    "engine": "Engine used"
-  }
-]
-```
-
-### fetchCsdnArticle Tool Usage
-
-Used to fetch complete content of CSDN blog articles.
-
-```typescript
-{
-  "url": string    // URL from CSDN search results using the search tool
-}
-```
-
-Usage example:
-```typescript
-use_mcp_tool({
-  server_name: "web-search",
-  tool_name: "fetchCsdnArticle",
-  arguments: {
-    url: "https://blog.csdn.net/xxx/article/details/xxx"
-  }
-})
-```
-
-Response example:
-```json
-[
-  {
-    "content": "Example search result"
-  }
-]
-```
-
-### fetchGithubReadme Tool Usage
-
-Used to fetch README content from GitHub or Gitee repositories (Gitee uses the official API, reachable without a proxy).
-
-```typescript
-{
-  "url": string    // GitHub/Gitee repository URL (supports HTTPS, SSH formats)
-}
-```
-
-Usage example:
-```typescript
-use_mcp_tool({
-  server_name: "web-search",
-  tool_name: "fetchGithubReadme",
-  arguments: {
-    url: "https://gitee.com/wtznicy/my-websearch"
-  }
-})
-```
-
-Supported URL formats:
-- GitHub HTTPS: `https://github.com/owner/repo`
-- GitHub HTTPS with .git: `https://github.com/owner/repo.git`
-- GitHub SSH: `git@github.com:owner/repo.git`
-- URLs with parameters: `https://github.com/owner/repo?tab=readme`
-- Gitee HTTPS: `https://gitee.com/owner/repo`
-- Gitee SSH: `git@gitee.com:owner/repo.git`
-
-Response example:
-```json
-[
-  {
-    "content": "<div align=\"center\">\n\n# MyWebSearch MCP Server..."
-  }
-]
-```
-
-### fetchWebContent Tool Usage
-
-Fetch content directly from public HTTP(S) links, including Markdown files (`.md`) and ordinary web pages.
-
-```typescript
-{
-  "url": string,         // Public HTTP(S) URL
-  "maxChars": number     // Optional: max returned content length (1000-200000, default 30000)
-}
-```
-
-Usage example:
-```typescript
-use_mcp_tool({
-  server_name: "web-search",
-  tool_name: "fetchWebContent",
-  arguments: {
-    url: "https://gitee.com/wtznicy/my-websearch/raw/main/README.md",
-    maxChars: 12000
-  }
-})
-```
-
-Response example:
-```json
-{
-  "url": "https://gitee.com/wtznicy/my-websearch/raw/main/README.md",
-  "finalUrl": "https://gitee.com/wtznicy/my-websearch/raw/main/README.md",
-  "contentType": "text/plain; charset=utf-8",
-  "title": "",
-  "truncated": false,
-  "content": "# MyWebSearch MCP Server ..."
-}
-```
-
-### fetchJuejinArticle Tool Usage
-
-Used to fetch complete content of Juejin articles.
-
-```typescript
-{
-  "url": string    // Juejin article URL from search results
-}
-```
-
-Usage example:
-```typescript
-use_mcp_tool({
-  server_name: "web-search",
-  tool_name: "fetchJuejinArticle",
-  arguments: {
-    url: "https://juejin.cn/post/7520959840199360563"
-  }
-})
-```
-
-Supported URL format:
-- `https://juejin.cn/post/{article_id}`
-
-Response example:
-```json
-[
-  {
-    "content": "🚀 开源 AI 联网搜索工具：MyWebSearch MCP 全新升级，支持多引擎 + 流式响应..."
-  }
-]
-```
-
-## Usage Limitations
-
-Since this tool works by scraping multi-engine search results, please note the following important limitations:
-
-1. **Rate Limiting**:
-    - Too many searches in a short time may cause the used engines to temporarily block requests
-    - Recommendations:
-        - Maintain reasonable search frequency
-        - Use the limit parameter judiciously
-        - Add delays between searches when necessary
-    - **Brave is the strictest**: it throttles consecutive automated requests aggressively — a burst of searches triggers HTTP 429 for minutes (even from residential proxy IPs), and the block window outlasts short cooldowns. Use brave at low frequency; prefer `duckduckgo` / `startpage` as the daily overseas engines (they are stable and of similar quality). A 429 on brave fails fast and `minResults` cascade automatically falls back to other engines.
-
-2. **Result Accuracy**:
-    - Depends on the HTML structure of corresponding engines, may fail when engines update
-    - Some results may lack metadata like descriptions
-    - Complex search operators may not work as expected
-
-3. **Legal Terms**:
-    - This tool is for personal use only
-    - Please comply with the terms of service of corresponding engines
-    - Implement appropriate rate limiting based on your actual use case
-
-4. **Search Engine Configuration**:
-   - Default search engine can be set via the `DEFAULT_SEARCH_ENGINE` environment variable
-   - Supported engines: bing, duckduckgo, exa, brave, baidu, csdn, juejin, startpage, sogou
-   - Overseas engines (duckduckgo, exa, brave, startpage) require a proxy from mainland China (see `PROXY_ENGINES`); domestic engines (bing, baidu, csdn, juejin, sogou) work direct
-   - The default engine is used when searching specific websites
-
-5. **Proxy Configuration**:
-   - HTTP proxy can be configured when certain search engines are unavailable in specific regions
-   - Enable proxy with environment variable `USE_PROXY=true`
-   - Configure proxy server address with `PROXY_URL`
-   - With `USE_PROXY=true`, `PROXY_ENGINES` (comma-separated whitelist) limits which engines route through the proxy; empty = all engines proxied. Overseas engines (`duckduckgo`, `exa`, `brave`, `startpage`) require a proxy from mainland China, while domestic engines stay direct — recommended: `PROXY_ENGINES=duckduckgo,exa,brave,startpage`
-   - For Clash fake-ip / TUN setups, configure synthetic DNS ranges with `FAKE_IP_CIDRS` (for example `198.18.0.0/15`)
-   - `FAKE_IP_CIDRS` is **required** for Clash TUN/fake-ip modes: DNS answers in that range (e.g. `198.18.x.x`) are otherwise blocked by the SSRF guard as private-network targets (`DNS lookup ... is private IP address`), which breaks search and fetch
-   - Without `USE_PROXY`, the server auto-detects the OS-level proxy (1.0.11+): just run your proxy client and overseas engines work; with `USE_PROXY=true` configured but the proxy client down, overseas engines fail fast instead
-
-### Recommended environment (deployment policy lives server-side; tool args only override)
-
-| Variable | Value | Purpose |
-|---|---|---|
-| `DEFAULT_SEARCH_ENGINE` | `auto` | Route by query language (Chinese → baidu, English → bing); already the default |
-| `DEFAULT_MIN_RESULTS` | `5` | Cascade to other engines when results are insufficient; already the default |
-| `USE_PROXY` + `PROXY_URL` | `true` + `http://127.0.0.1:7897` | Overseas engines via proxy; without it, the OS proxy is auto-detected |
-| `PROXY_ENGINES` | `duckduckgo,exa,brave,startpage` | Proxy only overseas engines; domestic engines stay direct |
-| `FAKE_IP_CIDRS` | `198.18.0.0/15` | Clash TUN/fake-ip setups (the range is included by default; set it explicitly for auditability) |
-
-**Where each client's MCP config lives** (put the env vars into the corresponding `env` field):
-
-| Client | Config file |
-|---|---|
-| DSH (DeepSeek Harness) | `cordis.patch.yml` → `mcp-mywebsearch.env` |
-| Gemini | `mcp_config.json` → `mcpServers.mywebsearch.env` |
-| ZCode / zcode | `~/.zcode/cli/config.json` → `mcp.servers.mywebsearch.env` |
-| Reasonix | `~/.reasonix/config.toml` (also set `PROXY_URL`, otherwise the code default `7890` is used) |
-
-## Contributing
-
-Welcome to submit issue reports and feature improvement suggestions!
-
-### resolveLibraryId Tool Usage
-
-Resolves a library/package name into a Context7-compatible library ID, with reputation and quality metadata. Powered by the [Context7](https://context7.com) documentation index — official, version-specific library docs without needing a separate MCP server.
-
-```typescript
-{
-  "libraryName": string,  // e.g. "Next.js", "express", "prisma"
-  "query": string,        // The user's question, used to rank matches (e.g. "how to implement authentication")
-  "limit": number         // Optional: max matches (default 5, max 10)
-}
-```
-
-Usage example:
-```typescript
-use_mcp_tool({
-  server_name: "web-search",
-  tool_name: "resolveLibraryId",
-  arguments: {
-    libraryName: "Next.js",
-    query: "how to set up middleware with auth"
-  }
-})
-```
-
-### queryDocs Tool Usage
-
-Retrieves up-to-date, version-specific documentation snippets and code examples for a library. Use `resolveLibraryId` first if you don't know the library ID.
-
-```typescript
-{
-  "libraryId": string,  // Context7-compatible ID, e.g. "/vercel/next.js", "/packages/express" (optional version: "/vercel/next.js@v15.1.8")
-  "query": string,      // The question or task to get relevant documentation for
-  "limit": number       // Optional: max code snippets (default 5, max 10)
-}
-```
-
-Usage example:
-```typescript
-use_mcp_tool({
-  server_name: "web-search",
-  tool_name: "queryDocs",
-  arguments: {
-    libraryId: "/vercel/next.js",
-    query: "how to set up middleware with authentication"
-  }
-})
-```
-
-> **Note:** Both Context7 tools call the public REST API directly (no API key required). The anonymous quota is **200 requests/month per egress IP** (under TUN/proxy this is the proxy node's IP, shared with other users, so it can run out easily). Once exhausted, upstream returns 429 with a multi-day `Retry-After` — the tools **fail fast** with the quota state and reset date instead of retrying. Set `CONTEXT7_API_KEY` (free: https://context7.com/dashboard) for much higher limits.
-
-## Author & Acknowledgements
+### Acknowledgements
 
 **Author: wtznicy**
 
-This project is a modified fork of **Open-WebSearch** (originally by Aas-ee) — thanks to the original author for the great work.
-
-Thanks also to these open-source projects:
-- **context7** (Upstash): powers the `resolveLibraryId` / `queryDocs` library-docs lookup
-- **fetch** (official MCP servers): reference for the `fetchWebContent` web-fetching design
+This project evolved from **Open-WebSearch** (originally created by Aas-ee) — special thanks to the original author. Thanks also to:
+- **[wreq-js](https://www.npmjs.com/package/wreq-js)** for native Chrome TLS/HTTP2 fingerprint impersonation and session cookie management
+- **[Context7](https://context7.com)** (Upstash) for powering `resolveLibraryId` and `queryDocs`
+- **[Mozilla Readability](https://github.com/mozilla/readability) & [Turndown](https://github.com/mixmark-io/turndown)** for clean article extraction and GFM Markdown conversion
