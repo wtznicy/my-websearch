@@ -31,6 +31,44 @@ describe('htmlToMarkdown', () => {
     });
 });
 
+/**
+ * 报告 P0-2 的复现用例：旧判据 `pre.firstChild?.nodeName === 'CODE'` 对格式化后的 HTML 失效
+ * （首子节点是换行/缩进空白文本），导致语言丢失、甚至退化成行内代码。
+ */
+describe('htmlToMarkdown 代码块围栏（真实页面结构）', () => {
+    it('code 前有换行空白时仍应产出带语言的围栏（旧实现会退化成行内代码）', () => {
+        const markdown = htmlToMarkdown('<pre>\n  <code class="language-python">print(1)</code></pre>');
+        expect(markdown).toContain('```python');
+        expect(markdown).toContain('print(1)');
+        expect(markdown).not.toContain('`print(1)`');
+    });
+
+    it('语言标识应支持 pre[lang] / pre[data-lang] / code[data-lang]', () => {
+        expect(htmlToMarkdown('<pre lang="ts">const a = 1</pre>')).toContain('```ts');
+        expect(htmlToMarkdown('<pre data-lang="go">x := 1</pre>')).toContain('```go');
+        expect(htmlToMarkdown('<pre><code data-lang="rust">let a = 1;</code></pre>')).toContain('```rust');
+    });
+
+    it('hljs 这类无语言信息的高亮类名不应被当成语言', () => {
+        const noLang = htmlToMarkdown('<pre><code class="hljs">x = 1</code></pre>');
+        expect(noLang).toContain('```\nx = 1\n```');
+        const withLang = htmlToMarkdown('<pre><code class="hljs language-ts">x = 1</code></pre>');
+        expect(withLang).toContain('```ts');
+    });
+
+    it('SyntaxHighlighter 的 brush 语法应识别出语言', () => {
+        const markdown = htmlToMarkdown('<pre class="brush: js; toolbar: false;">var a = 1;</pre>');
+        expect(markdown).toContain('```js');
+        expect(markdown).toContain('var a = 1;');
+    });
+
+    it('代码内容含三反引号时应用更长的围栏，避免结构破损', () => {
+        const markdown = htmlToMarkdown('<pre><code class="language-md">line1\n```\nline3</code></pre>');
+        expect(markdown).toContain('````md');
+        expect(markdown).toContain('line1\n```\nline3');
+    });
+});
+
 describe('fetchWebContent noise stripping & format=markdown', () => {
     it('strips nested nav/aside/footer noise inside main/body and converts to markdown without requiring readability=true', async () => {
         const { fetchWebContent } = await import('../../engines/web/fetchWebContent.js');
@@ -123,5 +161,37 @@ describe('fetchWebContent noise stripping & format=markdown', () => {
             __setAxiosRequestForTests();
             __setDnsLookupForTests();
         }
+    });
+});
+
+describe('htmlToMarkdown VitePress/Shiki 结构', () => {
+    it('语言类在外层容器、且带可见语言标签时，应产出带语言的围栏且不残留标签文本', () => {
+        const html = '<div class="language-html vp-adaptive-theme"><span class="lang">html</span>'
+            + '<pre class="shiki"><code>&lt;div id="app"&gt;&lt;/div&gt;</code></pre></div>';
+        const markdown = htmlToMarkdown(html);
+
+        expect(markdown).toContain('```html');
+        expect(markdown).toContain('<div id="app"></div>');
+        // 语言标签不应作为普通文本漏进正文
+        expect(markdown).not.toMatch(/^\s*html\s*$/m);
+    });
+
+    it('外层有语言类但无标签元素时同样识别', () => {
+        const html = '<div class="language-ts"><pre><code>const a = 1;</code></pre></div>';
+        expect(htmlToMarkdown(html)).toContain('```ts');
+    });
+});
+
+describe('htmlToMarkdown 代码组 Tabs 标签', () => {
+    it('VitePress 代码组的 Tab 标签不应连成噪声文本', () => {
+        const html = '<div class="vp-code-group"><div class="tabs">'
+            + '<input type="radio" checked><label data-title="npm">npm</label>'
+            + '<label data-title="pnpm">pnpm</label><label data-title="yarn">yarn</label></div>'
+            + '<div class="language-sh"><span class="lang">sh</span><pre><code>$ npm create vue@latest</code></pre></div></div>';
+        const markdown = htmlToMarkdown(html);
+
+        expect(markdown).toContain('```sh');
+        expect(markdown).toContain('$ npm create vue@latest');
+        expect(markdown).not.toContain('npmpnpmyarn');
     });
 });
