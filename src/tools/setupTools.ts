@@ -8,6 +8,7 @@ import {
     SupportedSearchEngine
 } from '../core/search/searchEngines.js';
 import { pickDefaultEnginesForQuery } from '../core/search/queryEngineRouting.js';
+import { isKnownUnreachableOverseasEngine } from '../utils/overseasProbe.js';
 import { mergeMultiQueryResults, mergeEngineMetricsAcrossQueries } from '../core/search/multiQuery.js';
 import { rankSearchResults } from '../core/search/resultRanking.js';
 import {
@@ -297,11 +298,15 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                         en: runtime.config.autoRouteEnEngines,
                         zh: runtime.config.autoRouteZhEngines
                     });
-                    const filtered = allowed.length > 0 ? picked.filter((engine) => allowed.includes(engine)) : picked;
+                    // 已知不可达的境外引擎（探测失败缓存 1 分钟内、且未走代理）从 auto 默认路由里排除，
+                    // 否则每次查询都要白等它 3s×2 探测（实测英文路由 20.7s）。显式指定 engines 的调用不受影响。
+                    const reachable = picked.filter((engine) => !isKnownUnreachableOverseasEngine(engine));
+                    const routable = reachable.length > 0 ? reachable : picked;
+                    const filtered = allowed.length > 0 ? routable.filter((engine) => allowed.includes(engine)) : routable;
                     if (filtered.length > 0) {
                         return filtered as SupportedSearchEngine[];
                     }
-                    return (allowed.length > 0 ? [allowed[0]] : picked) as SupportedSearchEngine[];
+                    return (allowed.length > 0 ? [allowed[0]] : routable) as SupportedSearchEngine[];
                 };
                 const explicitEngines = engines && engines.length > 0
                     ? resolveRequestedEngines(engines, allowed, resolveEnginesForQuery(primaryQuery)[0]) as [SupportedSearchEngine, ...SupportedSearchEngine[]]

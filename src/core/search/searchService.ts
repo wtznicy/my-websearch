@@ -5,6 +5,7 @@ import { rankSearchResults, countUsableResults } from './resultRanking.js';
 import { isEngineCircuitOpen, getEngineCircuitRemainingMs } from './engineCircuitBreaker.js';
 import { quoteModelLikeTerms } from '../../utils/queryPreprocess.js';
 import { sleep } from '../../utils/timing.js';
+import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 
 // ---------------------------------------------------------------------------
 // 简单信号量：限制并发搜索数
@@ -561,10 +562,14 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             const usableCount = countUsableResults(merged, cleanQuery);
             if (minResults && minResults > usableCount) {
                 const usedEngines = new Set(engines);
+                // 已知不可达的境外引擎不进候选：它们的可达性探测要 3s×2 次才失败，
+                // 每一批级联都白等一次（实测英文路由 + 级联被拖到 20.7s，而失败结果本就缓存 1 分钟）。
+                // 只排除"已知"的（探测失败缓存内且未走代理），首次探测行为不变。
                 const candidates = SUPPORTED_SEARCH_ENGINES.filter(
                     (engine) => !usedEngines.has(engine)
                         && typeof engineMap[engine] === 'function'
                         && !isEngineCircuitOpen(engine)
+                        && !isKnownUnreachableOverseasEngine(engine)
                 );
                 for (let cursor = 0; cursor < candidates.length
                     && countUsableResults(merged, cleanQuery) < minResults; cursor += CASCADE_BATCH_SIZE) {

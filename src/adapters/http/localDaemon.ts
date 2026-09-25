@@ -5,6 +5,7 @@ import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
 import { pickDefaultEnginesForQuery } from '../../core/search/queryEngineRouting.js';
+import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
 import { ErrorCode } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
@@ -76,11 +77,15 @@ function parseRequestedEngines(runtime: MyWebSearchRuntime, engines: unknown, qu
         en: runtime.config.autoRouteEnEngines,
         zh: runtime.config.autoRouteZhEngines
     });
+    // 已知不可达的境外引擎（探测失败缓存内且未走代理）从默认路由排除，避免每次查询白等探测；
+    // 显式指定 engines 的请求不受影响（下面 engines !== undefined 的分支走原逻辑）
+    const reachableRouted = routed.filter((engine) => !isKnownUnreachableOverseasEngine(engine));
+    const routable = reachableRouted.length > 0 ? reachableRouted : routed;
     const allowed = runtime.config.allowedSearchEngines;
-    const filteredDefault = allowed.length > 0 ? routed.filter((engine) => allowed.includes(engine)) : routed;
+    const filteredDefault = allowed.length > 0 ? routable.filter((engine) => allowed.includes(engine)) : routable;
     const effectiveDefault = filteredDefault.length > 0
         ? filteredDefault
-        : (allowed.length > 0 ? [allowed[0]] : routed);
+        : (allowed.length > 0 ? [allowed[0]] : routable);
     const fallbackEngine = effectiveDefault[0];
 
     if (engines === undefined) {

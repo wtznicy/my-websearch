@@ -126,6 +126,29 @@ async function isDirectlyReachable(engine: 'duckduckgo' | 'brave' | 'startpage')
 }
 
 /**
+ * 同步查询"该境外引擎此刻是否**已知**不可达"——只读缓存，不触发探测。
+ *
+ * 供编排层（级联候选、auto 默认路由）排除这类引擎：否则每一批级联都要等它
+ * 探测 3s×2 次才失败（实测英文路由被拖到 20.7s）。保守判定：
+ * - 引擎已配置走代理 → 不排除（可达性由代理保证，代理开关切换后应立刻恢复尝试）
+ * - 无缓存记录 / 缓存说可达 / 失败缓存已过期（>1 分钟）→ 不排除
+ * 也就是说它只用来**避免重复踩已知的坑**，不会改变首次探测行为。
+ */
+export function isKnownUnreachableOverseasEngine(engine: string): boolean {
+    if (!Object.prototype.hasOwnProperty.call(PROBE_TARGETS, engine)) {
+        return false;
+    }
+    if (engineShouldUseProxy(engine)) {
+        return false;
+    }
+    const cached = probeCache.get(engine);
+    if (!cached || cached.reachable) {
+        return false;
+    }
+    return Date.now() - cached.checkedAt < PROBE_FAILURE_CACHE_TTL_MS;
+}
+
+/**
  * 境外引擎可用性断言：调用方（引擎入口）在发起搜索前调用。
  * - 引擎已配置走代理 → 直接放行（不探测）
  * - 未配置代理 → 探测直连，不可达时立即抛错（快速失败）
