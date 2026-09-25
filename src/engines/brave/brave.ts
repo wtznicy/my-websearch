@@ -124,6 +124,17 @@ export function parseBraveResults(html: string, seenUrls: Set<string>): SearchRe
         const mainLink = content.find('> a').first();
         const url = mainLink.attr('href');
 
+        // 顶部商业推广卡（服务端注入的 JSON-LD "SearchResultAd"）：实测搜 'vue3' 时第 1 条
+        // 是 booking.com 酒店广告，href 为相对跳转 /a/redirect?click_url=...（LLM 无法访问的坏链）。
+        // 判据取自实测 DOM：广告卡带 data-type="ad" 且 id="search-ad"，正常结果为 data-type="web"。
+        if (resultElement.attr('data-type') === 'ad' || resultElement.attr('id') === 'search-ad') {
+            return;
+        }
+        // 只保留绝对 http(s) 链接：相对跳转（/a/redirect 等广告或站内跳转）对调用方无意义
+        if (!url || !/^https?:\/\//i.test(url)) {
+            return;
+        }
+
         // Title is inside .search-snippet-title
         const title = mainLink.find('.search-snippet-title').text().trim();
 
