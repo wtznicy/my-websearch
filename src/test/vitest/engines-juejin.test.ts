@@ -61,3 +61,28 @@ describe('highlightToText', () => {
         expect(highlightToText(undefined as never)).toBe('');
     });
 });
+
+describe('parseJuejinResults 容错（上游字段缺失）', () => {
+    it('单条结果缺 tags/category/author 时不应抛错（实测 tags.map 曾抛 TypeError 拖垮整个引擎）', () => {
+        const data = [
+            {
+                result_type: 0,
+                result_model: { article_id: '123', article_info: { digg_count: 1, view_count: 2 } },
+                title_highlight: '标题',
+                content_highlight: '摘要'
+            }
+        ] as never;
+
+        const results = parseJuejinResults(data);
+
+        expect(results).toHaveLength(1);
+        expect(results[0].url).toBe('https://juejin.cn/post/123');
+        expect(results[0].source).toBe('');
+        expect(results[0].description).toContain('标签: ');
+    });
+
+    it('data 不是数组时返回空数组（不再抛 reading map）', () => {
+        expect(parseJuejinResults(undefined as never)).toEqual([]);
+        expect(parseJuejinResults({} as never)).toEqual([]);
+    });
+});

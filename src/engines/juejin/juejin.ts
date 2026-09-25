@@ -48,23 +48,32 @@ export function highlightToText(html: string): string {
 
 /** 把掘金搜索 API 的一页 data 映射为 SearchResult（高亮转纯文本 + 描述拼装），供请求路径复用 */
 export function parseJuejinResults(data: JuejinSearchResponse['data']): SearchResult[] {
+    if (!Array.isArray(data)) {
+        return [];
+    }
+
     return data.map((item) => {
         const { result_model, title_highlight, content_highlight } = item;
-        const { article_info, author_user_info, category, tags } = result_model;
+        // 上游偶发返回字段缺失的条目（实测 2026-09-25：级联调用时 result_model.tags 为 undefined，
+        // `tags.map` 抛出 TypeError 把整个引擎拖垮）。这里逐项容错：缺字段按空值渲染，不整页失败。
+        const { article_info, author_user_info, category, tags } = result_model || ({} as JuejinSearchResponse['data'][number]['result_model']);
+        const tagList = Array.isArray(tags) ? tags : [];
+        const article = article_info || ({} as typeof article_info);
+        const author = author_user_info || ({} as typeof author_user_info);
 
         // 高亮片段转纯文本：去 <em> 标签并解码 HTML 实体
         const cleanTitle = highlightToText(title_highlight);
         const cleanContent = highlightToText(content_highlight);
 
         // 构建描述信息
-        const tagNames = tags.map(tag => tag.tag_name).join(', ');
-        const description = `${cleanContent} | 分类: ${category.category_name} | 标签: ${tagNames} | 👍 ${article_info.digg_count} | 👀 ${article_info.view_count}`;
+        const tagNames = tagList.map((tag) => tag?.tag_name).filter(Boolean).join(', ');
+        const description = `${cleanContent} | 分类: ${category?.category_name ?? ''} | 标签: ${tagNames} | 👍 ${article.digg_count ?? 0} | 👀 ${article.view_count ?? 0}`;
 
         return {
             title: cleanTitle,
-            url: `https://juejin.cn/post/${result_model.article_id}`,
+            url: `https://juejin.cn/post/${result_model?.article_id ?? ''}`,
             description: description,
-            source: author_user_info.user_name,
+            source: author.user_name ?? '',
             engine: 'juejin'
         };
     });
