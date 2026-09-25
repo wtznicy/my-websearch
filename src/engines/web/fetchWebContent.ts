@@ -114,6 +114,11 @@ const CHROME_NOISE_SELECTOR = [
  * 在克隆节点上剥离导航栏/侧边栏/页脚等非正文区块。
  * 若剥离后剩余正文长度仍达标（>= minChars），则采用净化后的节点；
  * 否则保留原节点（防止短页面或把正文写在 header 里的非常规页面被误清空）。
+ *
+ * 剥离时**保留噪声节点内的 h1/h2 标题**：`<article><header><h1>标题</h1></header>` 是
+ * 博客/资讯站的常见结构（实测 blog.vuejs.org/posts/vue-3-5：整篇正文的 H1 在 <header> 里，
+ * 直接 remove 会让提取结果丢掉文章标题——旧逻辑 6905 字符含标题，剥离后 6584 字符标题消失）。
+ * 只救 h1/h2：它们承载标题语义；nav/侧边栏里的 h3~h6 多为栏目标签，属噪声。
  */
 function stripChromeNoiseWithGuard(
     $: cheerio.CheerioAPI,
@@ -123,7 +128,14 @@ function stripChromeNoiseWithGuard(
     const rawText = normalizeText(element.text());
     const rawHtml = element.html() || '';
     const cloned = element.clone();
-    cloned.find(CHROME_NOISE_SELECTOR).remove();
+    cloned.find(CHROME_NOISE_SELECTOR).each((_, node) => {
+        const noise = $(node);
+        const headings = noise.find('h1, h2');
+        if (headings.length > 0) {
+            noise.before(headings.clone());
+        }
+        noise.remove();
+    });
     const cleanedText = normalizeText(cloned.text());
     if (cleanedText.length >= minChars || (rawText.length < minChars && cleanedText.length > 0)) {
         return { text: cleanedText, html: cloned.html() || rawHtml };

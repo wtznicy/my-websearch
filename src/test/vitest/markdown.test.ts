@@ -76,4 +76,52 @@ describe('fetchWebContent noise stripping & format=markdown', () => {
             __setDnsLookupForTests();
         }
     });
+
+    it('keeps the article title when it lives inside <header> (blog/docs 常见结构)', async () => {
+        const { fetchWebContent } = await import('../../engines/web/fetchWebContent.js');
+        const { __setAxiosRequestForTests } = await import('../../utils/httpRequest.js');
+        const { __setDnsLookupForTests } = await import('../../utils/urlSafety.js');
+
+        __setDnsLookupForTests(async () => [{ address: '93.184.216.34', family: 4 }]);
+        // 实测结构（blog.vuejs.org/posts/vue-3-5）：文章标题的 <h1> 在 <article><header> 内，
+        // 剥离 header 时若不救回 h1/h2，正文标题会整条消失
+        __setAxiosRequestForTests(async (cfg: any) => ({
+            status: 200,
+            statusText: 'OK',
+            headers: { 'content-type': 'text/html; charset=utf-8' },
+            data: `
+                <html>
+                  <head><title>Announcing Vue 3.5 | The Vue Point</title></head>
+                  <body>
+                    <article>
+                      <header>
+                        <h1>Announcing Vue 3.5</h1>
+                        <p>Evan You · 2024-09-03</p>
+                      </header>
+                      <nav class="breadcrumb">Home › Blog › Vue 3.5</nav>
+                      <p>${'Today we are excited to announce the release of Vue 3.5. '.repeat(4)}</p>
+                      <footer>© 2024 Vue.js</footer>
+                    </article>
+                  </body>
+                </html>
+            `,
+            config: cfg,
+            request: { res: { responseUrl: cfg.url } }
+        } as any));
+
+        try {
+            const res = await fetchWebContent('https://blog.example.com/posts/vue-3-5', 10000, {
+                format: 'markdown'
+            });
+            // 标题保留（markdown 模式下是 H1）
+            expect(res.content).toContain('Announcing Vue 3.5');
+            expect(res.content).toMatch(/^#+\s+Announcing Vue 3\.5/m);
+            // 导航/页脚仍然被剥离
+            expect(res.content).not.toContain('Home › Blog');
+            expect(res.content).not.toContain('© 2024 Vue.js');
+        } finally {
+            __setAxiosRequestForTests();
+            __setDnsLookupForTests();
+        }
+    });
 });
