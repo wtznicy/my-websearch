@@ -16,7 +16,7 @@ function loadJsdom(): Promise<typeof import('jsdom')> {
     if (!jsdomModulePromise) {
         jsdomModulePromise = import('jsdom').catch((error) => {
             if (error instanceof Error && /Cannot find package|Cannot find module|ERR_MODULE_NOT_FOUND/.test(error.message)) {
-                throw new Error('jsdom is not available (optional dependency not installed); readability/link extraction is disabled');
+                throw new JsdomUnavailableError('jsdom is not available (optional dependency not installed); readability/link extraction is disabled');
             }
             throw error;
         });
@@ -43,6 +43,8 @@ export interface FetchWebContentResult {
     /** Offset to pass as startIndex on the next call to continue reading. */
     nextStartIndex?: number;
     readabilityApplied?: boolean;
+    /** 请求了 readability 但降级为普通提取时的原因（显式告知调用方，避免静默降级） */
+    degraded?: string[];
     readableHtml?: string;
     links?: ExtractedLink[];
     byline?: string;
@@ -154,6 +156,9 @@ type ReadabilityArticle = {
 };
 
 class ReadabilityUnavailableError extends Error {}
+
+/** jsdom（optionalDependencies）缺失：readability 与链接提取都不可用，需显式告知调用方而非静默降级 */
+export class JsdomUnavailableError extends Error {}
 
 function normalizeText(text: string): string {
     return text
@@ -568,6 +573,7 @@ export async function fetchWebContent(
     let extractedContent = '';
     let htmlExtraction: HtmlExtractionResult | undefined;
     let readabilityApplied = false;
+    const degradedNotices: string[] = [];
     let readableHtml: string | undefined;
     let links: ExtractedLink[] | undefined;
     let byline: string | undefined;
@@ -635,13 +641,15 @@ export async function fetchWebContent(
                     }
                 } else {
                     logReadabilityFallback('parser returned no article content');
+                    degradedNotices.push('readability: parser returned no article content (fell back to container extraction)');
                 }
             } catch (error) {
-                if (error instanceof ReadabilityUnavailableError) {
+                if (error instanceof ReadabilityUnavailableError || error instanceof JsdomUnavailableError) {
                     throw error;
                 }
 
                 logReadabilityFallback('falling back to existing extractor after parser error', error);
+                degradedNotices.push('readability: parser error (fell back to container extraction)');
             }
         }
 
@@ -699,6 +707,7 @@ export async function fetchWebContent(
         startIndex,
         ...(truncated ? { hasMore: true, nextStartIndex: startIndex + pageContent.length } : {}),
         ...(options.readability ? { readabilityApplied } : {}),
+        ...(degradedNotices.length > 0 ? { degraded: degradedNotices } : {}),
         ...(options.includeReadableHtml && readableHtml ? { readableHtml } : {}),
         ...(options.format === 'markdown' ? { format: 'markdown' as const } : {}),
         ...(links ? { links } : {}),
