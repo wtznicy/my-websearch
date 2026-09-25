@@ -501,12 +501,10 @@ export async function fetchWebContent(
             if (error?.code === 'ERR_RESPONSE_TOO_LARGE') {
                 throw error;
             }
-            const status = error?.response?.status;
-            // Some servers don't support HEAD correctly; continue and rely on GET download limits.
-            // 429（限流）与 5xx（服务端暂时故障）也不作为 HEAD 预检的致命错误——GET 可能成功或由上层重试处理。
-            if (status !== undefined && ![400, 403, 404, 405, 406, 429, 501].includes(status) && status < 500) {
-                throw error;
-            }
+            // HEAD 预检只是"提前发现超大响应"的优化，任何失败都不应否决后续 GET：
+            // 部分站点对 HEAD 直接回 401/402/407/410 等（对 GET 却正常），此前这些状态被当成致命错误
+            // 直接终止抓取（测评报告 P1-8）。这里一律降级——继续用 GET + 下载上限兜底。
+            void error;
         }
     }
 
