@@ -1,6 +1,9 @@
 {
   "name": "my-websearch",
   "version": "1.0.16",
+  "engines": {
+    "node": ">=18"
+  },
   "mcpName": "io.github.wtznicy/my-websearch",
   "description": "MyWebSearch - multi-engine web search MCP server, CLI and local daemon. No API keys required.",
   "license": "Apache-2.0",
@@ -26,7 +29,8 @@
     "my-websearch": "build/index.js"
   },
   "files": [
-    "build"
+    "build",
+    "!build/test"
   ],
   "scripts": {
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
@@ -62,7 +66,8 @@
     "test:web-content": "tsc && node build/test/test-web-content.js",
     "test:web-content:live": "tsc && node build/test/test-web-content-live.js",
     "test:bing:live": "tsc && node build/test/test-bing-live.js",
-    "test:article-fetch:live": "tsc && node build/test/test-article-fetch-live.js"
+    "test:article-fetch:live": "tsc && node build/test/test-article-fetch-live.js",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
