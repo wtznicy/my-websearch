@@ -41,7 +41,7 @@ export async function searchBaiduWithImpersonate(query: string, limit: number): 
         throw new Error('wreq-js is not available');
     }
 
-    const session = await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0]);
+    const session = await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0], 'baidu');
     try {
         // 会话 cookie：优先复用磁盘持久化的长期项（BAIDUID/BIDUPSID，省一次首页预热往返）；
         // 无持久化/已过期时走首页预热，并把长期项回写磁盘供下次进程复用

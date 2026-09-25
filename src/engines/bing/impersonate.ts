@@ -1,4 +1,4 @@
-import { config } from '../../config.js';
+import { config, engineShouldUseProxy, getProxyUrl } from '../../config.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 
@@ -26,7 +26,7 @@ import { parseBingSearchResults } from './parser.js';
  */
 
 type WreqModule = {
-    createSession: (options: { browser: string; os?: string }) => Promise<WreqSession>;
+    createSession: (options: { browser: string; os?: string; proxy?: string }) => Promise<WreqSession>;
 };
 
 type WreqSession = {
@@ -49,9 +49,31 @@ type WreqResponse = {
 let cachedModule: WreqModule | null = null;
 let availabilityPromise: Promise<boolean> | null = null;
 
-/** 用配置的 profile 构造会话（上游类型把 browser/os 收窄为字符串联合，此处集中注入） */
-export async function createWreqSession(mod: WreqModule): Promise<WreqSession> {
-    return mod.createSession({ browser: config.impersonateBrowser, os: config.impersonateOs });
+/**
+ * 解析该引擎的 wreq 会话应走的代理，口径与 axios 路径的显式代理分支一致：
+ * USE_PROXY=true 且引擎在白名单（或白名单为空 = 全部走代理）时，会话绑定 PROXY_URL。
+ *
+ * 只处理**显式代理**，不接入系统代理兜底（getSystemProxyFallbackUrl）：axios 路径的
+ * "系统代理"是靠 requestDirectFirst 的"直连优先、失败再走代理"保护的，而 wreq 会话的
+ * proxy 是一绑到底、没有这条路——若系统代理注册表项陈旧（代理软件已关）却绑上会话，
+ * TUN 环境下原本可直连的请求会直接失败。所以未设 USE_PROXY 时保持原行为（wreq 直连，
+ * 网络层失败由调用方回退 axios，由 axios 处理系统代理）。
+ */
+export function resolveWreqProxyUrl(engine?: string): string | undefined {
+    if (engine === undefined || !engineShouldUseProxy(engine)) {
+        return undefined;
+    }
+    return getProxyUrl();
+}
+
+/** 用配置的 profile 构造会话（引擎名用于解析显式代理；不传则不带代理） */
+export async function createWreqSession(mod: WreqModule, engine?: string): Promise<WreqSession> {
+    const proxy = resolveWreqProxyUrl(engine);
+    return mod.createSession({
+        browser: config.impersonateBrowser,
+        os: config.impersonateOs,
+        ...(proxy ? { proxy } : {})
+    });
 }
 
 /** 检测 wreq-js 原生模块是否可用（懒加载 + 结果缓存，进程内只探测一次） */
@@ -110,7 +132,7 @@ export async function searchBingWithImpersonate(query: string, limit: number): P
         throw new Error('wreq-js is not available');
     }
 
-    const session = await createWreqSession(mod as unknown as WreqModule);
+    const session = await createWreqSession(mod as unknown as WreqModule, 'bing');
     try {
         let allResults: SearchResult[] = [];
         let directAnswer: string | undefined;

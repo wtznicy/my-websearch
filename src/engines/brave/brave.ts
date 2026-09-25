@@ -45,7 +45,7 @@ async function ensureBraveWreqSession(): Promise<WreqSession | null> {
                 return null;
             }
             try {
-                return await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0]);
+                return await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0], 'brave');
             } catch (error) {
                 console.warn('Brave wreq session creation failed, falling back to axios:', error instanceof Error ? error.message : String(error));
                 return null;

@@ -73,7 +73,7 @@ async function ensureCsdnWreqSession(): Promise<WreqSession | null> {
                 return null;
             }
             try {
-                return await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0]);
+                return await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0], 'csdn');
             } catch (error) {
                 console.warn('CSDN wreq session creation failed, falling back to axios:', error instanceof Error ? error.message : String(error));
                 return null;
