@@ -7,7 +7,7 @@ import { isImpersonateAvailable, searchBaiduWithImpersonate } from './impersonat
 import { isBaiduAntiBotPage, parseBaiduResultsPage } from './parser.js';
 
 export async function searchBaidu(query: string, limit: number): Promise<SearchResult[]> {
-    // 首选 curl-cffi-node（Chrome TLS/HTTP2 指纹 + 会话 cookie），规避纯 HTTP
+    // 首选 wreq-js 指纹请求（Chrome TLS/HTTP2 指纹 + 会话 cookie），规避纯 HTTP
     // 无 cookie 被重定向到安全验证页的问题；原生模块不可用或请求失败时回退到
     // axios 路径，不影响现有行为。
     if (await isImpersonateAvailable()) {

@@ -7,6 +7,7 @@ import { normalizeText } from '../../utils/text.js';
 import { sleep } from '../../utils/timing.js';
 import { mapWithConcurrencyBudget } from '../../utils/concurrency.js';
 import { createWreqSession, loadWreqModule, WreqSession } from '../bing/impersonate.js';
+import { toAxiosLikeResponse } from '../../utils/wreqRequest.js';
 
 const SOGOU_SEARCH_URL = 'https://www.sogou.com/web';
 const SOGOU_PAGE_SIZE = 10;
@@ -54,31 +55,6 @@ async function ensureSogouWreqSession(): Promise<WreqSession | null> {
         })();
     }
     return sogouWreqSessionPromise;
-}
-
-/** 把 wreq 响应转成 axios 形状（现有重定向/cookie 逻辑按 axios 响应读取） */
-function toAxiosLikeResponse(
-    status: number,
-    headers: { forEach(cb: (value: string, key: string) => void): void; getSetCookie?(): string[] },
-    data: string,
-    options: AxiosRequestConfig
-): AxiosResponse {
-    const normalizedHeaders: Record<string, string | string[]> = {};
-    headers.forEach((value, key) => {
-        normalizedHeaders[key.toLowerCase()] = value;
-    });
-    const setCookies = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : [];
-    if (setCookies.length > 0) {
-        normalizedHeaders['set-cookie'] = setCookies;
-    }
-    return {
-        status,
-        statusText: '',
-        headers: normalizedHeaders,
-        data,
-        config: options,
-        request: {}
-    } as unknown as AxiosResponse;
 }
 
 async function sogouHttpGetWithImpersonate(url: string, options: AxiosRequestConfig): Promise<AxiosResponse> {
@@ -198,21 +174,6 @@ async function resolveSogouLinkUrl(linkUrl: string): Promise<string> {
         // 解析失败保留原链接
     }
     return linkUrl;
-}
-
-/** 限制并发数地批量解析（N+1 串行请求会拖慢整页） */
-async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-    const results = new Array<R>(items.length);
-    let next = 0;
-    const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-        while (next < items.length) {
-            const index = next;
-            next += 1;
-            results[index] = await fn(items[index]);
-        }
-    });
-    await Promise.all(workers);
-    return results;
 }
 
 function isAllowedSogouRedirectUrl(url: URL): boolean {

@@ -18,9 +18,9 @@ export interface AppConfig {
     // Set BING_PLAYWRIGHT_FALLBACK=false to instead surface the error so the search
     // service can cascade to lighter engines (duckduckgo/brave) via minResults.
     bingPlaywrightFallback: boolean;
-    // Bing HTTP 模式使用的浏览器指纹目标（curl-cffi-node impersonate 参数，
-    // 如 chrome131 / chrome124 / chrome116）。Chrome 指纹保鲜期以年计，
-    // 被反爬标记时才需要切到更新的目标。
+    // Bing HTTP 模式使用的浏览器指纹目标（wreq-js 的 impersonate profile，
+    // 见下方 impersonateBrowser；Chrome 指纹保鲜期以年计，
+    // 被反爬标记时才需要切到更新的目标）。
     /** 指纹请求（wreq-js）的浏览器 profile 与平台，如 chrome_149 / windows */
     impersonateBrowser: string;
     impersonateOs: string;
