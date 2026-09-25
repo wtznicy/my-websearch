@@ -751,7 +751,7 @@ use_mcp_tool({
 })
 ```
 
-> **Note:** Both Context7 tools call the public REST API directly (no API key required at low rate limits). Set `CONTEXT7_API_KEY` for higher rate limits.
+> **Note:** Both Context7 tools call the public REST API directly (no API key required). The anonymous quota is **200 requests/month per egress IP** (under TUN/proxy this is the proxy node's IP, shared with other users, so it can run out easily). Once exhausted, upstream returns 429 with a multi-day `Retry-After` — the tools **fail fast** with the quota state and reset date instead of retrying. Set `CONTEXT7_API_KEY` (free: https://context7.com/dashboard) for much higher limits.
 
 ## Author & Acknowledgements
 

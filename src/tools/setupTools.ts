@@ -17,6 +17,7 @@ import {
 } from '../core/validation/targetValidation.js';
 import { MyWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { FetchWebContentResult } from '../engines/web/fetchWebContent.js';
+import { isContext7QuotaExhaustedError } from '../engines/context7/context7.js';
 import { SearchResult } from '../types.js';
 export { normalizeEngineName };
 
@@ -31,6 +32,12 @@ const RESPONSE_CAP_BYTES = Number.isFinite(rawResponseCap) && rawResponseCap > 0
 function withErrorHint(message: string, hint: string): string {
     return `${message}\nHint: ${hint}`;
 }
+
+// context7 匿名配额（200 次/月，按出口 IP 计）用尽后，重试不会自愈——
+// 用专门 Hint 替代"稍后重试"，避免 LLM 反复重试。
+const CONTEXT7_QUOTA_HINT =
+    'Context7 匿名配额已用尽（200 次/月，按出口 IP 计，TUN 下即代理节点 IP）；'
+    + '设置 CONTEXT7_API_KEY 可立即恢复（免费申请 https://context7.com/dashboard），否则需等配额重置。';
 
 /**
  * 从错误中提取 HTTP 状态码：优先结构化字段（AxiosError.response.status），
@@ -604,7 +611,9 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                         type: 'text',
                         text: withErrorHint(
                             `Failed to resolve library: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                            '可检查网络连通性（context7.com），或稍后重试。'
+                            isContext7QuotaExhaustedError(error)
+                                ? CONTEXT7_QUOTA_HINT
+                                : '可检查网络连通性（context7.com），或稍后重试。'
                         )
                     }],
                     isError: true
@@ -650,7 +659,9 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                         type: 'text',
                         text: withErrorHint(
                             `Failed to fetch docs: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                            '可先用 resolveLibraryId 确认 libraryId 正确，或稍后重试。'
+                            isContext7QuotaExhaustedError(error)
+                                ? CONTEXT7_QUOTA_HINT
+                                : '可先用 resolveLibraryId 确认 libraryId 正确，或稍后重试。'
                         )
                     }],
                     isError: true

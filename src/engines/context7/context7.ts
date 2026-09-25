@@ -130,6 +130,99 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// ---- 429 / 配额耗尽处理 ----
+// context7 匿名配额（200 次/月，按出口 IP 计）用尽时返回：
+//   HTTP 429 + body {"error":"Quota Exceeded","message":"Monthly quota exceeded..."}
+//   且带 ratelimit-remaining: 0 与超长 retry-after（实测 499415s ≈ 5.8 天，直到月度重置）。
+// 两条必须的防护：
+// 1) 等待封顶：曾因盲从 Retry-After 而 `await sleep(499415000)`，调用挂死数天；
+// 2) 配额耗尽属终态：重置前重试必然失败，直接快速失败并给出可行动提示。
+const RETRY_AFTER_CAP_MS = 2000;
+const QUOTA_RETRY_AFTER_THRESHOLD_S = 3600;
+
+/** 配额耗尽终态错误的稳定标识（工具层据此选择对应 Hint） */
+export const CONTEXT7_QUOTA_EXHAUSTED_MARKER = 'Context7 anonymous quota exhausted';
+
+type Context7ErrorResponse = {
+    status?: number;
+    data?: unknown;
+    headers?: Record<string, unknown>;
+};
+
+function readHeaderNumber(headers: Record<string, unknown> | undefined, name: string): number | undefined {
+    const raw = headers?.[name];
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    if (value === undefined || value === null || value === '') {
+        return undefined;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function isQuotaExhaustedResponse(response: Context7ErrorResponse): boolean {
+    if (response.status !== 429) {
+        return false;
+    }
+    const data = response.data;
+    const bodyText = typeof data === 'string'
+        ? data
+        : `${(data as { error?: unknown } | null)?.error ?? ''} ${(data as { message?: unknown } | null)?.message ?? ''}`;
+    if (/quota exceeded|monthly quota/i.test(bodyText)) {
+        return true;
+    }
+    // 无 body 时的兜底判据：配额已归零 + 重试窗口长到不像瞬时限流
+    const remaining = readHeaderNumber(response.headers, 'ratelimit-remaining');
+    const retryAfter = readHeaderNumber(response.headers, 'retry-after');
+    return remaining === 0 && retryAfter !== undefined && retryAfter > QUOTA_RETRY_AFTER_THRESHOLD_S;
+}
+
+/**
+ * 配额耗尽判定：兼容"上游 429 原始错误"与"已转换的终态 Error"两种形态，
+ * 供内部重试逻辑与工具层 Hint 复用。
+ */
+export function isContext7QuotaExhaustedError(error: unknown): boolean {
+    const response = (error as { response?: Context7ErrorResponse } | undefined)?.response;
+    if (response && isQuotaExhaustedResponse(response)) {
+        return true;
+    }
+    return error instanceof Error && error.message.includes(CONTEXT7_QUOTA_EXHAUSTED_MARKER);
+}
+
+/** 重试等待：尊重 Retry-After 但封顶；无该头时指数退避（含抖动，避免多请求同拍重试） */
+export function computeContext7RetryDelayMs(retryAfterSeconds: number | undefined, attempt: number, baseMs: number): number {
+    if (retryAfterSeconds !== undefined && retryAfterSeconds > 0) {
+        return Math.min(retryAfterSeconds * 1000, RETRY_AFTER_CAP_MS);
+    }
+    return baseMs * (2 ** attempt) + Math.random() * 250;
+}
+
+function buildQuotaExhaustedError(error: unknown): Error {
+    const response = (error as { response?: Context7ErrorResponse } | undefined)?.response;
+    const resetEpoch = readHeaderNumber(response?.headers, 'ratelimit-reset');
+    const resetHint = resetEpoch !== undefined && resetEpoch > 0
+        ? ` Quota resets on ${new Date(resetEpoch * 1000).toISOString().slice(0, 10)} (UTC).`
+        : '';
+    return new Error(
+        `${CONTEXT7_QUOTA_EXHAUSTED_MARKER} (200 requests/month per egress IP).${resetHint}`
+        + ' Set CONTEXT7_API_KEY for higher limits (free key: https://context7.com/dashboard).'
+    );
+}
+
+/** 可注入的 GET 实现：生产走 requestDirectFirst，测试用假实现验证重试/退避策略 */
+export type Context7GetImpl = (url: string, params: Record<string, unknown> | undefined) => Promise<any>;
+
+function defaultContext7Get(url: string, params: Record<string, unknown> | undefined): Promise<any> {
+    return requestDirectFirst(
+        'GET',
+        url,
+        (forceDirect) => ({
+            ...context7RequestOptions(forceDirect),
+            params
+        }),
+        'context7 API'
+    );
+}
+
 /**
  * 带退避重试的 context7 GET：429（限流）与 5xx（上游故障）最多重试 2 次并尊重 Retry-After。
  * 无 API key 时低速率限流（429）是预期失败模式，重试耗尽后转成带明确提示的错误，
@@ -137,22 +230,24 @@ function sleep(ms: number): Promise<void> {
  *
  * 请求走"直连优先、代理兜底"（requestDirectFirst）：context7 API 国内直连可达
  * （无需代理），配置了代理但代理不可达时不会被卡死——先直连成功即返回。
+ *
+ * 配额耗尽（月度匿名额度用尽）是终态：不重试，立即抛出带重置日期与配置指引的错误。
  */
-async function context7GetWithRetry(url: string, options: any, retries = 3): Promise<any> {
+export async function context7GetWithRetry(
+    url: string,
+    options: { params?: Record<string, unknown> },
+    retries = 3,
+    getImpl: Context7GetImpl = defaultContext7Get
+): Promise<any> {
     let lastError: any;
     for (let attempt = 0; attempt < retries; attempt += 1) {
         try {
-            return await requestDirectFirst(
-                'GET',
-                url,
-                (forceDirect) => ({
-                    ...context7RequestOptions(forceDirect),
-                    params: options.params
-                }),
-                'context7 API'
-            );
+            return await getImpl(url, options.params);
         } catch (error: any) {
             lastError = error;
+            if (isContext7QuotaExhaustedError(error)) {
+                throw buildQuotaExhaustedError(error);
+            }
             const status = error?.response?.status;
             if (status !== 429 && (status === undefined || status < 500)) {
                 throw error; // 非限流、非上游故障：直接抛
@@ -160,12 +255,9 @@ async function context7GetWithRetry(url: string, options: any, retries = 3): Pro
             if (attempt >= retries - 1) {
                 break;
             }
-            const retryAfter = Number(error?.response?.headers?.['retry-after']);
+            const retryAfter = readHeaderNumber(error?.response?.headers, 'retry-after');
             const base = status === 429 ? 1500 : 800;
-            const wait = Number.isFinite(retryAfter) && retryAfter > 0
-                ? retryAfter * 1000
-                : base * (2 ** attempt) + Math.random() * 250;
-            await sleep(wait);
+            await sleep(computeContext7RetryDelayMs(retryAfter, attempt, base));
         }
     }
     if (lastError?.response?.status === 429) {

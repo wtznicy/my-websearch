@@ -314,6 +314,8 @@ MCP 共提供 7 个工具：
 | `resolveLibraryId` | 把库/框架名解析为 context7 库 ID（带信誉/质量评分） |
 | `queryDocs` | 按库 ID 检索官方文档片段与代码示例（版本可钉定） |
 
+> **context7 配额说明**：两个工具直连 context7 公开 REST API（无需 key）。匿名配额为 **200 次/月，按出口 IP 计**——TUN/代理下用的是代理节点 IP，与其他用户共享，容易用尽。用尽后上游返回 429 且 `Retry-After` 长达数天，工具现在会**快速失败**并给出配额状态与重置日期（不再重试挂起）。设置 `CONTEXT7_API_KEY`（免费：https://context7.com/dashboard）可大幅提高配额。
+
 ### search 示例
 
 ```json
