@@ -97,25 +97,28 @@ function writeSubresourceClassification(hostname: string, allowed: boolean): voi
 // lookup per asset, while hostname-to-private resolutions are still caught.
 export async function classifyBrowserSubresourceUrl(targetUrl: string): Promise<void> {
     const parsed = new URL(targetUrl);
-    // Protocol + literal-IP private check first (sync, free).
-    assertPublicHttpUrl(parsed, 'Browser subresource URL');
-
-    // URL.hostname brackets IPv6 literals; any IP literal is already cleared above.
-    const { hostname } = parsed;
-    if (isIP(hostname) !== 0 || hostname.startsWith('[')) {
-        return;
-    }
-
-    const cacheKey = hostname.toLowerCase();
+    const cacheKey = parsed.hostname.toLowerCase();
     const cached = readSubresourceClassification(cacheKey);
+
     if (cached === true) {
+        // 已判定放行过的主机名：协议检查仍逐 URL 执行（不可缓存），其余判定跳过
+        assertPublicHttpUrl(parsed, 'Browser subresource URL');
         return;
     }
     if (cached === false) {
         throw new Error('Browser subresource URL points to a private or local network target, which is not allowed');
     }
 
+    // 未缓存：先做同步的协议/字面量 IP/重绑定主机名判定，再按需做 DNS 判定；
+    // 无论成败都按主机名写入缓存（重绑定类域名在过去会绕过缓存写入——它在同步判定处就抛了，
+    // 于是同一主机名的后续子资源要重复判定）
     try {
+        assertPublicHttpUrl(parsed, 'Browser subresource URL');
+        // URL.hostname brackets IPv6 literals; any IP literal is already cleared above.
+        const { hostname } = parsed;
+        if (isIP(hostname) !== 0 || hostname.startsWith('[')) {
+            return;
+        }
         await assertPublicHttpUrlResolved(parsed, 'Browser subresource URL');
         writeSubresourceClassification(cacheKey, true);
     } catch (err) {

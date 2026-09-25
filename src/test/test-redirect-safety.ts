@@ -55,11 +55,11 @@ async function assertRejects(
     throw new Error(`${label}: expected rejection, got success`);
 }
 
-async function assertPrivateRedirectRejected(from: string, to: string, label: string): Promise<void> {
+async function assertPrivateRedirectRejected(from: string, to: string, label: string, expected?: RegExp): Promise<void> {
     stubAxios({ [from]: { status: 302, location: to } });
     await assertRejects(
         () => requestWithSafeRedirects('GET', from, {}),
-        /private or local network/,
+        expected ?? /private or local network/,
         label
     );
     console.log(`✅ ${label}`);
@@ -73,7 +73,8 @@ async function run(): Promise<void> {
     if (await isFakeIpDnsEnvironment()) {
         console.log('⏭️  Skipped DNS-resolved redirect case: system DNS is behind a TUN/fake-ip proxy (198.18.0.0/15)');
     } else {
-        await assertPrivateRedirectRejected('http://8.8.8.8/', 'http://127.0.0.1.nip.io/admin', 'redirect to hostname that DNS-resolves to 127.0.0.1 is rejected');
+        // 127.0.0.1.nip.io 现在被重绑定域名规则按主机名先拒（不再依赖 DNS 解析），两者都算拒绝
+        await assertPrivateRedirectRejected('http://8.8.8.8/', 'http://127.0.0.1.nip.io/admin', 'redirect to hostname that DNS-resolves to 127.0.0.1 is rejected', /private or local network|wildcard DNS|rebinding/i);
     }
 
     // Public-to-public redirect: helper follows cleanly, responseUrl tracks final hop.

@@ -108,35 +108,66 @@ export function isBlackholeAddress(address: string): boolean {
 }
 
 /**
- * 把任意 IP 编码进主机名的通配 DNS 服务（DNS rebinding 常用手法）：
- * `127.0.0.1.nip.io` / `10.0.0.1.sslip.io` / `localtest.me` 等。
+ * DNS rebinding 类主机名：把内网地址藏进域名，本地/fake-ip 解析都看不出真相。
  *
- * 这类域名必须**按主机名直接拒绝**，不能只看解析结果：
- * ① 它们的解析结果就是域名里写的那个内网地址（实测 2026-09-25：`127.0.0.1.nip.io:18092`
- *    在 `USE_PROXY=true` 下读出本机服务内容）；
- * ② TUN/fake-ip 环境下本地解析会得到 198.18.x.x 之类的伪造地址，看 IP 反而判不出来；
- * ③ 代理模式下连接由代理发起，代理侧解析这类域名同样落在内网。
+ * 分两类处理：
+ * ① 设计上就解析到回环的通配域名（localtest.me / lvh.me / vcap.me …）——一律拒绝；
+ * ② 把 IP 编码进域名的通配服务（nip.io / sslip.io / xip.io / traefik.me）——**按嵌入的 IP 判定**：
+ *    嵌入私网/保留地址才拒绝；`8.8.8.8.nip.io` 这类指向公网 IP 的写法保持可用
+ *    （集成测试明确要求放行后者）。
+ *
+ * 为什么不能只看解析结果：① 实测 2026-09-25 用 `127.0.0.1.nip.io:18092` + USE_PROXY=true
+ * 读出了本机服务内容；② Clash TUN/fake-ip 下这类域名解析成 198.18.x.x，看 IP 反而判不出来。
  */
-const REBINDING_DNS_SUFFIXES = [
+const LOOPBACK_DNS_DOMAINS = [
+    'localtest.me',
+    'localtest.pro',
+    'lvh.me',
+    'vcap.me',
+    'local.gd',
+    'lacolhost.com'
+];
+
+const IP_ENCODING_DNS_SUFFIXES = [
     'nip.io',
     'sslip.io',
     'xip.io',
-    'vcap.me',
-    'lvh.me',
-    'local.gd',
-    'localtest.me',
-    'localtest.pro',
-    'lacolhost.com',
     'traefik.me'
 ];
 
-/** 主机名是否为"把 IP 编码进域名"的重绑定类服务（含其子域） */
+/** host 等于 suffix 或为其子域时返回去掉 suffix 的前缀（无子域返回空串；不匹配返回 null） */
+function matchDomainSuffix(host: string, suffix: string): string | null {
+    if (host === suffix) {
+        return '';
+    }
+    return host.endsWith(`.${suffix}`) ? host.slice(0, host.length - suffix.length - 1) : null;
+}
+
+/** 取出域名里编码的 IP：`127.0.0.1.nip.io` / `127-0-0-1.sslip.io` / `10.0.0.1.traefik.me` */
+function embeddedAddress(host: string): string | null {
+    for (const suffix of IP_ENCODING_DNS_SUFFIXES) {
+        const prefix = matchDomainSuffix(host, suffix);
+        if (prefix === null || prefix === '') {
+            continue;
+        }
+        // sslip.io 支持用连字符代替点（127-0-0-1）；多段子域（如 a.b.nip.io）解析不出 IP，交给 DNS 判定
+        const candidate = prefix.replace(/-/g, '.');
+        return isIP(candidate) !== 0 ? candidate : null;
+    }
+    return null;
+}
+
+/** 主机名是否为"解析到内网"的重绑定类服务（含其子域） */
 export function isRebindingStyleHostname(hostname: string): boolean {
     const host = stripIpv6Brackets(hostname.trim().toLowerCase()).replace(/\.$/, '');
     if (!host) {
         return false;
     }
-    return REBINDING_DNS_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+    if (LOOPBACK_DNS_DOMAINS.some((domain) => matchDomainSuffix(host, domain) !== null)) {
+        return true;
+    }
+    const address = embeddedAddress(host);
+    return address !== null && isPrivateOrLocalHostname(address);
 }
 
 export function isPublicHttpUrl(url: string): boolean {

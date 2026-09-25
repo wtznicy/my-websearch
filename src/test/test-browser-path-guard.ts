@@ -55,9 +55,11 @@ async function run(): Promise<void> {
     console.log('✅ getBrowserCookieHeader rejects IMDS pre-navigation');
 
     if (!skipDnsCases) {
+        // `127.0.0.1.nip.io` 属于"把 IP 编码进域名"的通配 DNS 服务，现在被重绑定规则**先于 DNS 解析**拒绝
+        // （不再依赖解析结果），因此接受两种拒绝文案——安全结论一致，仅措辞不同
         await assertRejects(
             () => getBrowserCookieHeader('http://127.0.0.1.nip.io/admin'),
-            /private or local network/,
+            /private or local network|wildcard DNS|rebinding/i,
             'getBrowserCookieHeader with DNS-resolved private'
         );
         console.log('✅ getBrowserCookieHeader rejects DNS-resolved private pre-navigation');
@@ -81,7 +83,7 @@ async function run(): Promise<void> {
     if (!skipDnsCases) {
         await assertRejects(
             () => fetchPageHtmlWithBrowser('http://127.0.0.1.nip.io/admin'),
-            /private or local network/,
+            /private or local network|wildcard DNS|rebinding/i,
             'fetchPageHtmlWithBrowser with DNS-resolved private'
         );
         console.log('✅ fetchPageHtmlWithBrowser rejects DNS-resolved private pre-navigation');
@@ -115,7 +117,7 @@ async function run(): Promise<void> {
     if (!skipDnsCases) {
         await assertRejects(
             () => classifyBrowserSubresourceUrl('http://127.0.0.1.nip.io/img.png'),
-            /private or local network/,
+            /private or local network|wildcard DNS|rebinding/i,
             'subresource DNS-resolved private'
         );
         console.log('✅ subresource guard rejects DNS-resolved private (first call)');
@@ -127,7 +129,7 @@ async function run(): Promise<void> {
 
         await assertRejects(
             () => classifyBrowserSubresourceUrl('http://127.0.0.1.nip.io/img2.png'),
-            /private or local network/,
+            /private or local network|wildcard DNS|rebinding/i,
             'subresource DNS-resolved private (second call, cached)'
         );
         console.log('✅ subresource guard rejects repeated DNS-resolved private (cache hit)');

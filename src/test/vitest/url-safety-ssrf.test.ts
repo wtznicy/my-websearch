@@ -38,9 +38,14 @@ describe('isRebindingStyleHostname', () => {
 
         expect(isRebindingStyleHostname('127.0.0.1.nip.io')).toBe(true);
         expect(isRebindingStyleHostname('10.0.0.1.sslip.io')).toBe(true);
+        expect(isRebindingStyleHostname('127-0-0-1.sslip.io')).toBe(true);
+        // 嵌入公网 IP 的写法保持可用（集成测试与真实用法都依赖，如 8.8.8.8.nip.io）
+        expect(isRebindingStyleHostname('8.8.8.8.nip.io')).toBe(false);
         expect(isRebindingStyleHostname('localtest.me')).toBe(true);
         expect(isRebindingStyleHostname('Foo.Localtest.Me')).toBe(true);
-        expect(isRebindingStyleHostname('xip.io')).toBe(true);
+        expect(isRebindingStyleHostname('10.0.0.1.xip.io')).toBe(true);
+        // 裸通配域名（无嵌入 IP）交给 DNS 判定，不在主机名层拦截
+        expect(isRebindingStyleHostname('xip.io')).toBe(false);
         expect(isRebindingStyleHostname('example.com')).toBe(false);
         expect(isRebindingStyleHostname('notnip.io.example.com')).toBe(false);
     });
