@@ -76,6 +76,9 @@ const networkFailurePatterns = [
     /Brave rate limited \(HTTP 429\)/i,
     // DuckDuckGo 上游反爬挑战页（202）：环境/上游风控，非代码问题
     /DuckDuckGo returned a challenge page/i,
+    // 百度间歇性反爬（把无 cookie/被限流的请求 302 到验证页，实测时好时坏、约 20 分钟后自行恢复）：
+    // 引擎已把它转成显式且不可重试的反爬错误；这是上游状态而非代码缺陷
+    /Baidu returned an anti-bot or redirect page/i,
     // context7 匿名月度配额耗尽（按出口 IP 计；实测重置日 2026-10-01）：上游配额状态，非代码问题。
     // 修复后该状态快速失败并带上此文案（此前会盲从 Retry-After 挂起数天）
     /Context7 anonymous quota exhausted/i,
