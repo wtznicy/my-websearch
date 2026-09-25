@@ -1,0 +1,27 @@
+name: CI
+
+# 只跑确定性检查（编译 + 单元测试），不跑 live 网络测试：
+# live 测试依赖海外引擎可达性/上游反爬状态，必须在本地手动执行（npm test）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # optionalDependencies（wreq-js 原生 binding / playwright-core 等）在 CI 上可能装不上，
+      # 这正是设计上的降级路径：缺失时相关引擎回退 axios，单测不应依赖它们
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm run test:vitest
