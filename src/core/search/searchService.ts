@@ -499,7 +499,9 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                             partialFailures.push({
                                 engine: executableEngines[index],
                                 code: 'engine_error',
-                                message: buildHintedMessage(engines[index], `Engine timeout after ${wait}ms (no response in time)`)
+                                // 索引口径必须与上面 engineMetrics/失败项一致：executableEngines 是熔断过滤后的列表，
+                                // 用原始 engines[index] 在熔断发生时会让提示文案指向错误的引擎（测评报告 P1-7）
+                                message: buildHintedMessage(executableEngines[index], `Engine timeout after ${wait}ms (no response in time)`)
                             });
                         }
                         resolve([]);
