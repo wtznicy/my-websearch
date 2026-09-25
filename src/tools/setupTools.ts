@@ -70,6 +70,12 @@ function buildFetchWebErrorHint(error: unknown): string {
     const message = error instanceof Error ? error.message : String(error);
     const status = extractErrorStatus(error);
 
+    // 安全拦截放在最前：私网拦截的文案里含 "network" 一词，若先走网络分支会把
+    // "已被安全策略拒绝"提示成"开启代理重试"——等于引导调用方绕过防护（测评报告 P1-6）
+    if (/private or local network|wildcard DNS|rebinding|blackhole|0\.0\.0\.0\/8/i.test(message)) {
+        return '该地址指向内网/本地，或使用了可指向内网的不可信域名，已被安全策略拒绝——这是预期行为，请改用公开可访问的 URL。';
+    }
+
     if (typeof status === 'number') {
         if (status === 404) {
             return '目标页面不存在（404）——检查 URL 是否正确、页面是否已删除、或站点需要登录后才能访问。';
@@ -82,7 +88,11 @@ function buildFetchWebErrorHint(error: unknown): string {
         }
     }
 
-    if (/timeout|timed out|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network|ENETUNREACH/i.test(message)) {
+    if (/could not be resolved|ENOTFOUND|EAI_AGAIN/i.test(message)) {
+        return '域名解析失败——检查域名拼写；若本机 DNS 解析不了该站点，可配置代理（USE_PROXY=true + PROXY_URL）后重试。';
+    }
+
+    if (/timeout|timed out|ECONN|ETIMEDOUT|socket hang up|network|ENETUNREACH/i.test(message)) {
         return '网络错误——可稍后重试；若目标站点需代理访问，开启 USE_PROXY=true + PROXY_URL 后重试。';
     }
 
@@ -258,8 +268,8 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
             limit: z.number().min(1).max(50).optional()
                 .describe("Max results (default: server DEFAULT_SEARCH_LIMIT, usually 10)"),
             searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
-            minResults: z.number().int().min(0).optional()
-                .describe("Auto-run additional engines when fewer than this many USABLE results (relevant, non-entry-page) come back (default: server DEFAULT_MIN_RESULTS, usually 5)"),
+            minResults: z.number().int().min(0).max(50).optional()
+                .describe("Auto-run additional engines when fewer than this many USABLE results (relevant, non-entry-page) come back (default: server DEFAULT_MIN_RESULTS, usually 5; max 50 — larger values only burn the search deadline)"),
             engines: z.array(getEngineInputSchema()).min(1).optional()
                 .describe("Search engines to use (default: server default, which may auto-route by query language)")
         },
