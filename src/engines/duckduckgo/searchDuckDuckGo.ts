@@ -180,6 +180,7 @@ export function parseDuckDuckGoHtmlResults(html: string, maxResults: number, see
 export async function searchDuckDuckGo(query: string, limit: number): Promise<SearchResult[]> {
   // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂 15s 超时拖累整次搜索
   await assertOverseasEngineUsable('duckduckgo');
+  let preloadError: unknown = null;
   // Try using the preloaded URL method
   try {
     const results = await searchDuckDuckGoPreloadUrl(query, limit);
@@ -187,10 +188,18 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
       return results;
     }
   } catch (error) {
+    preloadError = error;
     console.warn('预加载URL方法失败，尝试HTML方法:', error instanceof Error ? error.message : String(error));
   }
 
-  return await searchDuckDuckGoHtml(query, limit);
+  try {
+    return await searchDuckDuckGoHtml(query, limit);
+  } catch (htmlError) {
+    if (preloadError instanceof Error && htmlError instanceof Error) {
+      throw new Error(`${htmlError.message} (preload path: ${preloadError.message})`);
+    }
+    throw htmlError;
+  }
   }
 
   /**
