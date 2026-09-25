@@ -177,6 +177,12 @@ function runAllTestsInParallel(): Promise<number> {
     let excused = 0;
     let failed = 0;
     let failFastStarted = false;
+    // 有界并发池：此前全部测试子进程在同一毫秒 spawn，瞬时并发风暴会让各引擎在同一秒密集
+    // 请求上游（CSDN/搜狗/必应/Brave），本来就是"单跑必过、全量偶发 WAF 限流/超时"的人为来源
+    const maxConcurrentTests = Math.max(1, Number(process.env.TEST_CONCURRENCY || '6') || 6);
+    const pendingTests = [...runnableTestNames];
+    let activeTests = 0;
+    let abandonedTests = 0;
     let resolveExitCode: (exitCode: number) => void;
     const done = new Promise<number>((resolve) => {
         resolveExitCode = resolve;
@@ -191,7 +197,7 @@ function runAllTestsInParallel(): Promise<number> {
     }
 
     function finishIfDone(): void {
-        if (completed < runnableTestNames.length) {
+        if (completed + abandonedTests < runnableTestNames.length) {
             return;
         }
 
@@ -209,9 +215,9 @@ function runAllTestsInParallel(): Promise<number> {
     if (skippedTestNames.length > 0) {
         console.log(`全量测试跳过 ${skippedTestNames.length} 个需单独运行的测试：${skippedTestNames.map((name) => `${name}.js`).join(', ')}`);
     }
-    console.log(`将并行运行 ${runnableTestNames.length} 个当前 TypeScript 测试；非网络失败会立即终止其它测试。`);
+    console.log(`将并行运行 ${runnableTestNames.length} 个当前 TypeScript 测试（并发上限 ${maxConcurrentTests}，TEST_CONCURRENCY 可调）；非网络失败会立即终止其它测试。`);
 
-    for (const testName of runnableTestNames) {
+    function startTest(testName: string): void {
         const compiledTestPath = path.join(compiledTestDir, `${testName}.js`);
         console.log(`===== START ${testName}.js =====`);
 
@@ -240,18 +246,19 @@ function runAllTestsInParallel(): Promise<number> {
         });
         child.on('close', (code, signal) => {
             runningTests.delete(testName);
+            activeTests -= 1;
             completed += 1;
 
             if (runningTest.killRequested) {
                 console.warn(`===== STOPPED ${testName}.js (${signal || (code ?? 'unknown')}) =====`);
-                finishIfDone();
+                afterTestSettled();
                 return;
             }
 
             if (!runningTest.spawnError && code === 0) {
                 passed += 1;
                 console.log(`===== PASS ${testName}.js =====`);
-                finishIfDone();
+                afterTestSettled();
                 return;
             }
 
@@ -259,7 +266,7 @@ function runAllTestsInParallel(): Promise<number> {
                 excused += 1;
                 console.warn(`===== EXCUSED ${testName}.js: 网络问题，已赦免（匹配: ${matchedExcusePattern(getCapturedOutput(runningTest))}） =====`);
                 printCapturedOutput(runningTest);
-                finishIfDone();
+                afterTestSettled();
                 return;
             }
 
@@ -271,11 +278,32 @@ function runAllTestsInParallel(): Promise<number> {
                 failFastStarted = true;
                 // 修复全量测试等待过久的问题：第一个非网络失败出现后立即终止其它并行测试。
                 stopOtherTests(testName);
+                // 尚未启动的测试不再启动（计入完成数，否则 finishIfDone 永不 resolve）
+                abandonedTests = pendingTests.length;
+                if (abandonedTests > 0) {
+                    console.warn(`===== SKIP ${abandonedTests} 个未启动的测试（已被失败终止）: ${pendingTests.join(', ')} =====`);
+                }
+                pendingTests.length = 0;
             }
 
-            finishIfDone();
+            afterTestSettled();
         });
     }
+
+    /** 一个测试结束（无论结果）：补位启动下一个，再检查是否全部完成 */
+    function afterTestSettled(): void {
+        startNextTests();
+        finishIfDone();
+    }
+
+    function startNextTests(): void {
+        while (!failFastStarted && activeTests < maxConcurrentTests && pendingTests.length > 0) {
+            activeTests += 1;
+            startTest(pendingTests.shift() as string);
+        }
+    }
+
+    startNextTests();
 
     return done;
 }
