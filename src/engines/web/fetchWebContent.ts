@@ -92,8 +92,44 @@ const MIN_METADATA_FALLBACK_CHARS = 200;
 type HtmlExtractionResult = {
     title: string;
     text: string;
+    html?: string;
     mode: 'container' | 'body' | 'metadata';
 };
+
+const CHROME_NOISE_SELECTOR = [
+    'nav',
+    'header',
+    'footer',
+    'aside',
+    '[role="navigation"]',
+    '[role="banner"]',
+    '[role="contentinfo"]',
+    '.sidebar',
+    '.navbar',
+    '.breadcrumb',
+    '.pagination'
+].join(', ');
+
+/**
+ * 在克隆节点上剥离导航栏/侧边栏/页脚等非正文区块。
+ * 若剥离后剩余正文长度仍达标（>= minChars），则采用净化后的节点；
+ * 否则保留原节点（防止短页面或把正文写在 header 里的非常规页面被误清空）。
+ */
+function stripChromeNoiseWithGuard(
+    $: cheerio.CheerioAPI,
+    element: cheerio.Cheerio<any>,
+    minChars: number
+): { text: string; html: string } {
+    const rawText = normalizeText(element.text());
+    const rawHtml = element.html() || '';
+    const cloned = element.clone();
+    cloned.find(CHROME_NOISE_SELECTOR).remove();
+    const cleanedText = normalizeText(cloned.text());
+    if (cleanedText.length >= minChars || (rawText.length < minChars && cleanedText.length > 0)) {
+        return { text: cleanedText, html: cloned.html() || rawHtml };
+    }
+    return { text: rawText, html: rawHtml };
+}
 
 type ReadabilityArticle = {
     title?: string | null;
@@ -188,6 +224,7 @@ function extractMainTextFromHtml(html: string): HtmlExtractionResult {
     ];
 
     let selectedText = '';
+    let selectedHtml: string | undefined;
     let mode: HtmlExtractionResult['mode'] = 'metadata';
     for (const selector of preferredContainers) {
         const container = $(selector).first();
@@ -195,9 +232,10 @@ function extractMainTextFromHtml(html: string): HtmlExtractionResult {
             continue;
         }
 
-        const candidate = normalizeText(container.text());
+        const { text: candidate, html: candidateHtml } = stripChromeNoiseWithGuard($, container, 120);
         if (candidate.length >= 120) {
             selectedText = candidate;
+            selectedHtml = candidateHtml;
             mode = 'container';
             break;
         }
@@ -205,8 +243,11 @@ function extractMainTextFromHtml(html: string): HtmlExtractionResult {
 
     if (!selectedText) {
         const body = $('body');
-        selectedText = normalizeText((body.length > 0 ? body : $.root() as any).text());
-        if (selectedText) {
+        const target = body.length > 0 ? body : $.root() as any;
+        const { text: bodyText, html: bodyHtml } = stripChromeNoiseWithGuard($, target, 120);
+        if (bodyText) {
+            selectedText = bodyText;
+            selectedHtml = bodyHtml;
             mode = 'body';
         }
     }
@@ -218,7 +259,7 @@ function extractMainTextFromHtml(html: string): HtmlExtractionResult {
         mode = 'metadata';
     }
 
-    return { title, text: selectedText, mode };
+    return { title, text: selectedText, html: selectedHtml, mode };
 }
 
 async function extractReadableTextFromHtml(html: string): Promise<string> {
@@ -591,6 +632,19 @@ export async function fetchWebContent(
                 }
 
                 logReadabilityFallback('falling back to existing extractor after parser error', error);
+            }
+        }
+
+        // 当调用方指定 format='markdown' 但未显式传 readability=true（或 Readability 未抽取出正文回退到容器提取）时，
+        // 对已剥离导航噪音的主容器 HTML 执行 htmlToMarkdown，确保代码块与 GFM 表格不丢失
+        if (options.format === 'markdown' && !readabilityApplied && htmlExtraction?.html && htmlExtraction.mode !== 'metadata') {
+            try {
+                const markdown = htmlToMarkdown(htmlExtraction.html);
+                if (markdown) {
+                    extractedContent = markdown;
+                }
+            } catch (error) {
+                console.warn('Container Markdown conversion failed, falling back to plain text:', error instanceof Error ? error.message : String(error));
             }
         }
     }

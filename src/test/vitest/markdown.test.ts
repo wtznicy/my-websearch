@@ -30,3 +30,50 @@ describe('htmlToMarkdown', () => {
         expect(htmlToMarkdown('   ')).toBe('');
     });
 });
+
+describe('fetchWebContent noise stripping & format=markdown', () => {
+    it('strips nested nav/aside/footer noise inside main/body and converts to markdown without requiring readability=true', async () => {
+        const { fetchWebContent } = await import('../../engines/web/fetchWebContent.js');
+        const { __setAxiosRequestForTests } = await import('../../utils/httpRequest.js');
+        const { __setDnsLookupForTests } = await import('../../utils/urlSafety.js');
+
+        __setDnsLookupForTests(async () => [{ address: '93.184.216.34', family: 4 }]);
+        __setAxiosRequestForTests(async (cfg: any) => ({
+            status: 200,
+            statusText: 'OK',
+            headers: { 'content-type': 'text/html; charset=utf-8' },
+            data: `
+                <html>
+                  <head><title>Doc Page</title></head>
+                  <body>
+                    <main>
+                      <nav class="navbar">Home | Pricing | Login | Sign Up</nav>
+                      <aside class="sidebar">Sidebar Link 1 | Sidebar Link 2</aside>
+                      <h2>Quick Start Guide</h2>
+                      <p>${'This is the real technical documentation content explaining configuration. '.repeat(3)}</p>
+                      <pre><code class="language-ts">export const answer = 42;</code></pre>
+                      <footer>Copyright 2026 All rights reserved</footer>
+                    </main>
+                  </body>
+                </html>
+            `,
+            config: cfg,
+            request: { res: { responseUrl: cfg.url } }
+        } as any));
+
+        try {
+            const res = await fetchWebContent('https://example.com/docs/guide.html', 10000, {
+                format: 'markdown'
+            });
+            expect(res.content).toContain('## Quick Start Guide');
+            expect(res.content).toContain('```ts');
+            expect(res.content).toContain('export const answer = 42;');
+            expect(res.content).not.toContain('Home | Pricing | Login');
+            expect(res.content).not.toContain('Sidebar Link 1');
+            expect(res.content).not.toContain('Copyright 2026');
+        } finally {
+            __setAxiosRequestForTests();
+            __setDnsLookupForTests();
+        }
+    });
+});
