@@ -66,4 +66,32 @@ describe('cookie persistence', () => {
         fs.writeFileSync(storePath, JSON.stringify(store), 'utf8');
         expect(await loadPersistedBaiduCookies()).toBeNull();
     });
+
+    it('should correctly parse legacy Netscape string cookies from disk and convert to WreqCookie', async () => {
+        const storePath = path.join(tempDir, 'cookies.json');
+        const legacyStore = {
+            baidu: {
+                cookies: [
+                    '.baidu.com\tTRUE\t/\tFALSE\t1824365820\tBIDUPSID\t2FD7E49C17E421FE37CF0DDD3FC47B7F',
+                    '.baidu.com\tTRUE\t/\tFALSE\t1821341832\tBAIDUID\t2FD7E49C17E421FE37CF0DDD3FC47B7F:FG=1',
+                    '.baidu.com\tTRUE\t/\tTRUE\t1821341832\tBAIDUID_BFESS\t2FD7E49C17E421FE37CF0DDD3FC47B7F:FG=1'
+                ],
+                savedAt: Date.now()
+            }
+        };
+        fs.writeFileSync(storePath, JSON.stringify(legacyStore), 'utf8');
+        const loaded = await loadPersistedBaiduCookies();
+        expect(loaded).not.toBeNull();
+        expect(loaded).toHaveLength(3);
+        expect(loaded![0]).toMatchObject({
+            name: 'BIDUPSID',
+            value: '2FD7E49C17E421FE37CF0DDD3FC47B7F',
+            domain: '.baidu.com'
+        });
+        expect(loaded![1]).toMatchObject({
+            name: 'BAIDUID',
+            value: '2FD7E49C17E421FE37CF0DDD3FC47B7F:FG=1',
+            domain: '.baidu.com'
+        });
+    });
 });

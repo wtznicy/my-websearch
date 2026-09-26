@@ -24,13 +24,19 @@ export async function searchBaidu(query: string, limit: number): Promise<SearchR
     // 首选 wreq-js 指纹请求（Chrome TLS/HTTP2 指纹 + 会话 cookie），规避纯 HTTP
     // 无 cookie 被重定向到安全验证页的问题；原生模块不可用或请求失败时回退到
     // axios 路径，不影响现有行为。
-    let impersonateAntiBot = false;
     if (await isImpersonateAvailable()) {
         try {
             return await searchBaiduWithImpersonate(query, limit);
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            impersonateAntiBot = /anti-bot|redirect page/i.test(message);
+            const isAntiBot = /anti-bot|redirect page/i.test(message);
+            if (isAntiBot) {
+                // 指纹请求（Chrome TLS + 会话 Cookie）已被百度判定为反爬时，
+                // 严禁再用 axios（裸 OpenSSL TLS、无 Cookie）兜底发起请求！
+                // 裸请求不仅 100% 会触发 302，而且会加速该 IP 的封禁；
+                // 立即抛出不可重试的反爬错误，交由 minResults 级联换其他国内引擎（Bing/CSDN/搜狗）补齐。
+                throw buildBaiduAntiBotError(message);
+            }
             console.warn('Baidu impersonate request failed, falling back to axios:', message);
         }
     }
@@ -77,11 +83,6 @@ export async function searchBaidu(query: string, limit: number): Promise<SearchR
             }
         });
     } catch (error) {
-        // 两条路径都失败且其中一条已判定为反爬时，向上抛"反爬"这一更有信息量的结论，
-        // 而不是让裸的网络/状态码错误把它盖掉（实测：伪装路径报反爬 → axios 兜底 302 → 外层只看到 AxiosError）
-        if (impersonateAntiBot && isRedirectStatus((error as { response?: { status?: number } })?.response?.status)) {
-            throw buildBaiduAntiBotError('impersonate + axios both blocked');
-        }
         throw error;
     }
 }

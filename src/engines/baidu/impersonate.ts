@@ -88,6 +88,9 @@ export async function searchBaiduWithImpersonate(query: string, limit: number): 
         if (directAnswer) {
             finalResults.directAnswer = directAnswer;
         }
+        if (finalResults.length > 0) {
+            await savePersistedBaiduCookies(session.getAllCookies());
+        }
         return finalResults;
     } finally {
         await session.close().catch(() => undefined);

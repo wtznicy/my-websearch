@@ -7,3 +7,4 @@ build/
 .github/prompts*.tgz
 mcp-publisher*
 .agents/skills/mywebsearch-release/
+.workbuddy/

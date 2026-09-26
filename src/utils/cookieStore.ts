@@ -72,12 +72,50 @@ function writeStore(store: CookieStoreFile): void {
     }
 }
 
-/** 筛出长期 cookie（按名称白名单） */
-export function filterLongLivedBaiduCookies(cookies: WreqCookie[]): WreqCookie[] {
-    return cookies.filter((cookie) => cookie?.name && BAIDU_LONG_LIVED_COOKIE_NAMES.has(cookie.name.toUpperCase()));
+/** 把未知格式（WreqCookie 对象或遗留的 Netscape 格式制表符字符串）规范化为 WreqCookie */
+export function normalizeWreqCookie(raw: unknown): WreqCookie | null {
+    if (!raw) {
+        return null;
+    }
+    if (typeof raw === 'object' && typeof (raw as WreqCookie).name === 'string' && typeof (raw as WreqCookie).value === 'string') {
+        return raw as WreqCookie;
+    }
+    if (typeof raw === 'string') {
+        const parts = raw.split('\t');
+        if (parts.length >= 7) {
+            const domain = parts[0];
+            const path = parts[2];
+            const secure = parts[3]?.toLowerCase() === 'true';
+            const expiresSec = Number(parts[4]);
+            const name = parts[5];
+            const value = parts.slice(6).join('\t');
+            if (name && value) {
+                return {
+                    name,
+                    value,
+                    domain,
+                    path,
+                    secure,
+                    expiresAtMs: Number.isFinite(expiresSec) ? expiresSec * 1000 : undefined
+                };
+            }
+        }
+    }
+    return null;
 }
 
-/** 读取持久化的百度长期 cookie（不存在/过期时返回 null） */
+/** 筛出长期 cookie（按名称白名单，且要求必须为有效结构体） */
+export function filterLongLivedBaiduCookies(cookies: unknown[]): WreqCookie[] {
+    if (!Array.isArray(cookies)) {
+        return [];
+    }
+    const normalized = cookies
+        .map(normalizeWreqCookie)
+        .filter((c): c is WreqCookie => c !== null);
+    return normalized.filter((cookie) => cookie.name && BAIDU_LONG_LIVED_COOKIE_NAMES.has(cookie.name.toUpperCase()));
+}
+
+/** 读取持久化的百度长期 cookie（不存在/过期/无有效长期项时返回 null） */
 export async function loadPersistedBaiduCookies(): Promise<WreqCookie[] | null> {
     const store = readStore();
     const entry = store.baidu;
@@ -87,7 +125,11 @@ export async function loadPersistedBaiduCookies(): Promise<WreqCookie[] | null> 
     if (Date.now() - entry.savedAt > getTtlMs()) {
         return null;
     }
-    return entry.cookies;
+    const validCookies = filterLongLivedBaiduCookies(entry.cookies);
+    if (validCookies.length === 0) {
+        return null;
+    }
+    return validCookies;
 }
 
 /** 持久化百度长期 cookie（best-effort；空数组不写盘） */
