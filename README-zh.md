@@ -98,7 +98,7 @@ flowchart TB
 | **`queryDocs`** | 查询库/框架的最新官方文档 | 按 Context7 库 ID（支持钉定版本如 `"/vercel/next.js@v15.1.8"`）获取最新 API 用法与代码示例 |
 | **`fetchGithubReadme`** | 获取 GitHub / Gitee 仓库 README | 支持 HTTPS / SSH / `.git` URL；**Gitee 自动走官方 API（国内免代理秒开）** |
 | **`fetchCsdnArticle`** | 获取 CSDN 博客文章全文 | 精准提取 `#content_views` 正文并转纯文本/结构化内容，支持浏览器 Cookie 自动续命 |
-| **`fetchJuejinArticle`** | 获取稀土掘金文章全文 | 直调掘金文章接口提取干净 Markdown/正文内容 |
+| **`fetchJuejinArticle`** | 获取稀土掘金文章全文 | 直调掘金文章接口提取干净正文；传 `format: "markdown"` 可保留代码围栏（含语言）与 GFM 表格 |
 
 ---
 
@@ -289,9 +289,13 @@ my-websearch cache-clear
 | **`STARTPAGE_PLAYWRIGHT_FALLBACK`** | `true` | `true`, `false` | Startpage 默认优先用内置 Anubis PoW 算力求解器直通；设为 `false` 时若 PoW 失败也不拉起浏览器 |
 | **`EXA_API_KEY`** | 空 | Exa 官方 API Key | **可选**：仅在使用 `exa` 引擎时需要（前往 [dashboard.exa.ai](https://dashboard.exa.ai/api-keys) 免费获取） |
 | **`CONTEXT7_API_KEY`** | 空 | Context7 API Key | **可选**：匿名享有 200 次/月免费配额；配置免费 Key（[context7.com/dashboard](https://context7.com/dashboard)）可大幅提升配额 |
+| **`GITHUB_TOKEN`** | 空 | GitHub Personal Access Token | **可选**：提高 `fetchGithubReadme` 的速率上限（匿名 raw 额度在频繁抓取后会 403，导致抓取整体失败） |
 | **`FETCH_WEB_INSECURE_TLS`** | `false` | `true`, `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（仅在目标旧站点证书链损坏时临时启用） |
 | **`MODE`** | `both` | `both`, `http`, `stdio` | MCP 服务器传输模式 |
 | **`PORT`** | `3211` | `1-65535` | MCP HTTP/SSE 监听端口（CLI 本地 Daemon 默认使用 `3210`） |
+| **`MCP_SESSION_TTL_MS`** | `1800000` | 毫秒 | MCP HTTP/SSE 会话空闲多久后被回收（默认 30 分钟） |
+| **`MCP_MAX_SESSIONS`** | `100` | 正整数 | 保留的 MCP HTTP 会话上限，超出时优先回收最久未活跃的会话 |
+| **`MCP_SESSION_REAPER_MS`** | `300000` | 毫秒 | 会话回收器的巡检间隔（默认 5 分钟） |
 | **`MAX_CONCURRENT_SEARCHES`** | `0` | 非负整数 | Daemon 模式下全局最大并发搜索数（`0` 表示不限制） |
 | **`METRICS_ENABLED`** | `false` | `true`, `false` | 是否启用 Prometheus 引擎性能与缓存命中率指标采集 |
 | **`SECURITY_AUDIT`** | `false` | `true`, `false` | 是否输出 SSRF 拦截、TLS 白名单等安全审计日志 |

@@ -98,7 +98,7 @@ flowchart TB
 | **`queryDocs`** | Fetch official versioned library docs | Retrieves code examples and API docs by Context7 ID (supports version pinning like `"/vercel/next.js@v15.1.8"`) |
 | **`fetchGithubReadme`** | Fetch GitHub or Gitee repo README | Supports HTTPS, SSH, `.git` URLs; **Gitee uses official API (reachable in mainland China without proxy)** |
 | **`fetchCsdnArticle`** | Fetch full CSDN blog article | Clean `#content_views` extraction with automatic browser-cookie fallback if blocked |
-| **`fetchJuejinArticle`** | Fetch full Juejin article | Direct API extraction returning clean article body |
+| **`fetchJuejinArticle`** | Fetch full Juejin article | Direct API extraction returning clean article body; pass `format: "markdown"` to keep fenced code blocks (with language) and GFM tables |
 
 ---
 
@@ -287,9 +287,13 @@ my-websearch cache-clear
 | **`STARTPAGE_PLAYWRIGHT_FALLBACK`** | `true` | `true`, `false` | Startpage uses the built-in Anubis SHA-256 PoW solver first; set `false` to disable Playwright fallback if PoW fails |
 | **`EXA_API_KEY`** | empty | Exa API Key | **Optional**: only required if you explicitly use the `exa` engine (get a free key at [dashboard.exa.ai](https://dashboard.exa.ai/api-keys)) |
 | **`CONTEXT7_API_KEY`** | empty | Context7 API Key | **Optional**: anonymous usage includes 200 requests/month per egress IP; set a free key ([context7.com/dashboard](https://context7.com/dashboard)) for higher quotas |
+| **`GITHUB_TOKEN`** | empty | GitHub Personal Access Token | **Optional**: raises the rate limit for `fetchGithubReadme` (anonymous raw quota returns 403 under frequent re-fetching, failing the fetch entirely) |
 | **`FETCH_WEB_INSECURE_TLS`** | `false` | `true`, `false` | Disable TLS verification for `fetchWebContent` only (use only for legacy sites with broken certificate chains) |
 | **`MODE`** | `both` | `both`, `http`, `stdio` | MCP server transport mode |
 | **`PORT`** | `3211` | `1-65535` | MCP HTTP/SSE listen port (CLI local daemon uses `3210` by default) |
+| **`MCP_SESSION_TTL_MS`** | `1800000` | Milliseconds | Idle TTL for MCP HTTP/SSE sessions before the reaper closes them (default 30 min) |
+| **`MCP_MAX_SESSIONS`** | `100` | Positive integer | Max retained MCP HTTP sessions; the least-recently-active ones are closed first |
+| **`MCP_SESSION_REAPER_MS`** | `300000` | Milliseconds | How often the session reaper runs (default 5 min) |
 | **`MAX_CONCURRENT_SEARCHES`** | `0` | Non-negative integer | Max concurrent searches in daemon mode (`0` = unlimited) |
 | **`METRICS_ENABLED`** | `false` | `true`, `false` | Enable Prometheus metrics collection (`GET /metrics`) |
 | **`SECURITY_AUDIT`** | `false` | `true`, `false` | Enable security audit logging (SSRF blocks, TLS overrides) |
