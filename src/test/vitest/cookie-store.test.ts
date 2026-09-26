@@ -95,3 +95,21 @@ describe('cookie persistence', () => {
         });
     });
 });
+
+describe('hasBaiduSessionCookie（注入不变量校验）', () => {
+    it('会话里没有 BAIDUID 系 cookie 时必须判为需要预热', async () => {
+        const { hasBaiduSessionCookie } = await import('../../engines/baidu/impersonate.js');
+
+        // 2026-09 故障：磁盘返回 3 条但注入全失败 → 会话为空，却因 length>0 跳过预热
+        expect(hasBaiduSessionCookie([])).toBe(false);
+        expect(hasBaiduSessionCookie([{ name: 'BIDUPSID' }, { name: 'BD_HOME' }])).toBe(false);
+        expect(hasBaiduSessionCookie([{ name: undefined }, {} as { name?: string }])).toBe(false);
+    });
+
+    it('会话里存在 BAIDUID / BAIDUID_BFESS 时判为无需预热', async () => {
+        const { hasBaiduSessionCookie } = await import('../../engines/baidu/impersonate.js');
+
+        expect(hasBaiduSessionCookie([{ name: 'BAIDUID' }])).toBe(true);
+        expect(hasBaiduSessionCookie([{ name: 'BIDUPSID' }, { name: 'BAIDUID_BFESS' }])).toBe(true);
+    });
+});

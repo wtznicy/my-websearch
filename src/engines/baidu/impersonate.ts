@@ -19,16 +19,34 @@ import { loadPersistedBaiduCookies, savePersistedBaiduCookies, WreqCookie } from
 
 const BAIDU_HOME_URL = 'https://www.baidu.com/';
 
-/** 把持久化的 cookie 逐条写回会话（wreq 的 setCookie 为三参数形式） */
-function restoreCookies(session: { setCookie(name: string, value: string, url: string): void }, cookies: WreqCookie[]): void {
+/**
+ * 会话里是否已有百度的会话 cookie（BAIDUID 系）。
+ *
+ * 这是"cookie 注入成功"的**不变量校验**：只信 store 的返回长度是不够的——
+ * 2026-09 的故障正是"磁盘返回 3 条（判据为真）→ 跳过预热，但注入全部失败 → 每次搜索都是零 cookie 裸刷"，
+ * 最终把出口 IP 刷成了百度的人机验证名单。任何一次注入失败都要能让预热兜住。
+ */
+export function hasBaiduSessionCookie(cookies: Array<{ name?: string }>): boolean {
+    return cookies.some((cookie) => typeof cookie?.name === 'string' && /^BAIDUID/i.test(cookie.name));
+}
+
+/** 把持久化的 cookie 逐条写回会话（wreq 的 setCookie 为三参数形式）；返回失败条数并告警 */
+function restoreCookies(session: { setCookie(name: string, value: string, url: string): void }, cookies: WreqCookie[]): number {
+    const failures: string[] = [];
     for (const cookie of cookies) {
         try {
             const host = (cookie.domain || 'www.baidu.com').replace(/^\./, '');
             session.setCookie(cookie.name, cookie.value, `https://${host}/`);
-        } catch {
-            // 单条写入失败不影响其余 cookie
+        } catch (error) {
+            // 不中断其余 cookie，但**必须留痕**：此前这里是无输出的空 catch，
+            // 导致"注入全失败"被静默吞掉、并被误判为"cookie 已在会话里"
+            failures.push(`${cookie?.name ?? '(无名)'}: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
+    if (failures.length > 0) {
+        console.warn(`Baidu cookie restore: ${failures.length}/${cookies.length} 条注入失败（${failures.slice(0, 3).join('; ')}）`);
+    }
+    return failures.length;
 }
 
 /**
@@ -44,11 +62,12 @@ export async function searchBaiduWithImpersonate(query: string, limit: number): 
     const session = await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0], 'baidu');
     try {
         // 会话 cookie：优先复用磁盘持久化的长期项（BAIDUID/BIDUPSID，省一次首页预热往返）；
-        // 无持久化/已过期时走首页预热，并把长期项回写磁盘供下次进程复用
+        // 无持久化/已过期/**注入后会话里仍没有 BAIDUID** 时都走首页预热
         const persistedCookies = await loadPersistedBaiduCookies();
         if (persistedCookies && persistedCookies.length > 0) {
             restoreCookies(session, persistedCookies);
-        } else {
+        }
+        if (!hasBaiduSessionCookie(session.getAllCookies())) {
             try {
                 await session.fetch(BAIDU_HOME_URL, { timeout: 15000 });
                 await savePersistedBaiduCookies(session.getAllCookies());
