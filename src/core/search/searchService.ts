@@ -573,6 +573,10 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             const cascadedEngines: string[] = [];
             const CASCADE_BATCH_SIZE = 2;
             const MIN_CASCADE_BATCH_BUDGET_MS = 3000;
+            // 批次上限：探测缓存为空时（冷启动）级联会一路试遍全部候选，
+            // 实测首次中文查询因此跑到 23s（其中 startpage 必然吃掉 10s 超时）；
+            // 热态只跑 2 批、约 5s。给批次封顶让冷启动的最坏情况可控（复评报告 P1-2）。
+            const MAX_CASCADE_BATCHES = 3;
             // 级联判据用"可用条数"而非原始条数：入口页噪声与零相关（词义漂移）结果
             // 不应让级联误判为"结果已够"——噪声占位时仍需补跑其他引擎
             const usableCount = countUsableResults(merged, cleanQuery);
@@ -587,12 +591,15 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                         && !isEngineCircuitOpen(engine)
                         && !isKnownUnreachableOverseasEngine(engine)
                 );
+                let cascadeBatches = 0;
                 for (let cursor = 0; cursor < candidates.length
-                    && countUsableResults(merged, cleanQuery) < minResults; cursor += CASCADE_BATCH_SIZE) {
+                    && countUsableResults(merged, cleanQuery) < minResults
+                    && cascadeBatches < MAX_CASCADE_BATCHES; cursor += CASCADE_BATCH_SIZE) {
                     const remaining = deadlineAt - Date.now();
                     if (remaining < MIN_CASCADE_BATCH_BUDGET_MS) {
                         break;
                     }
+                    cascadeBatches += 1;
                     const batch = candidates.slice(cursor, cursor + CASCADE_BATCH_SIZE);
                     const gap = minResults - countUsableResults(merged, cleanQuery);
                     // 与引擎 deadline 同理：候选提前完成时必须 clearTimeout，否则泄漏的 30s timer 延迟 Node 进程退出
