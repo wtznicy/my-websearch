@@ -26,7 +26,7 @@ const RAW_GITHUB_BASE = 'https://raw.githubusercontent.com';
 // URL shape: https://cdn.jsdelivr.net/gh/{owner}/{repo}@{ref}/{file}
 // An empty ref uses the repository's default branch.
 const JSDELIVR_CDN_BASE = 'https://cdn.jsdelivr.net/gh';
-const JSDELIVR_REF_CANDIDATES = ['', '@main', '@master'];
+const JSDELIVR_REF_CANDIDATES = ['', '@main', '@master', '@dev', '@develop'];
 
 // Set GITHUB_README_CDN_FIRST=true to skip raw.githubusercontent.com and go
 // straight to the jsDelivr CDN (useful when GitHub is unreachable).
@@ -85,6 +85,9 @@ async function isRawDirectlyReachable(): Promise<boolean> {
 type ReadmeFetchOutcome =
     | { status: 'ok'; content: string }
     | { status: 'notfound' }
+    // 'invalid' 是**内容级**失败（HTTP 200 但内容为空/无效）：不能当作"域名不可达"，
+    // 否则同一 host 下的后续候选文件名（README.markdown 等）会被整轮跳过
+    | { status: 'invalid'; message: string }
     | { status: 'error'; message: string };
 
 /** 构造 README 抓取请求选项；forceDirect=true 时直连（raw 直连额外用可信 host 语义） */
@@ -92,7 +95,9 @@ function buildReadmeOptions(label: string, forceDirect: boolean, timeout: number
     return {
         ...buildAxiosRequestOptions({
             headers: {
-                'User-Agent': 'GitHub-README-Fetcher/1.0'
+                'User-Agent': 'GitHub-README-Fetcher/1.0',
+                // 可选 GITHUB_TOKEN：提高 raw 的速率上限（匿名额度用尽时会 403，README 抓取整体失败）
+                ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
             },
             trustedStaticHost: label === 'raw' && forceDirect,
             forceDirect,
@@ -161,7 +166,7 @@ async function fetchReadmeSource(url: string, label: string, timeout: number): P
             return { status: 'ok', content: response.data };
         }
 
-        return { status: 'error', message: 'Empty or invalid README content' };
+        return { status: 'invalid', message: 'Empty or invalid README content' };
     } catch (error: any) {
         const isTimeout = error?.code === 'ECONNABORTED';
         const status = typeof error?.response?.status === 'number' ? error.response.status : undefined;
