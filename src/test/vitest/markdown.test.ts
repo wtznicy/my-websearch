@@ -229,3 +229,34 @@ describe('htmlToMarkdown 表格单元格 | 转义（测评报告 P0-2 建议 ④
     });
 });
 
+
+describe('htmlToMarkdown Readability 链路（语言标签被规整成段落）', () => {
+    // 实测 cn.vuejs.org + readability:true 后的真实形态：Readability 把
+    // `<span class="lang">js</span>` 变成 `<p>js</p>`，并丢掉 language-* 外层 div（只剩 tab 名）
+    it('应从紧邻的纯语言段落取语言，并把该段落从正文删掉', () => {
+        // 真实结构（cn.vuejs.org + readability）：`<div class="options-api"><p>js</p><pre class="shiki">…`
+        // —— p 与 pre 是兄弟节点，语言只存在于 p 的文本里
+        const html = '<div class="vt-doc"><div class="options-api"><p>js</p>'
+            + '<pre class="shiki github-dark"><code>const a = 1</code></pre></div></div>';
+        const markdown = htmlToMarkdown(html);
+
+        expect(markdown).toContain('```js');
+        expect(markdown).toContain('const a = 1');
+        // 标签段落不应作为正文漏出
+        expect(markdown).not.toMatch(/^\s*js\s*$/m);
+    });
+
+    it('紧邻的语言 span 形态（VitePress 原始结构）同样生效', () => {
+        const html = '<div><span class="lang">template</span>'
+            + '<pre class="shiki"><code>&lt;div&gt;</code></pre></div>';
+        const markdown = htmlToMarkdown(html);
+
+        expect(markdown).toContain('```template');
+        expect(markdown).not.toMatch(/^\s*template\s*$/m);
+    });
+
+    it('不应把普通段落误当成语言标签删除', () => {
+        const markdown = htmlToMarkdown('<p>这是一段正常说明文字。</p><pre><code>x = 1</code></pre>');
+        expect(markdown).toContain('这是一段正常说明文字。');
+    });
+});

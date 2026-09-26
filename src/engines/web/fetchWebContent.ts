@@ -211,7 +211,10 @@ let readabilityParser: (html: string, finalUrl: string) => Promise<ReadabilityAr
         const readabilityModule = await import(moduleName);
         const { JSDOM } = await loadJsdom();
         const dom = new JSDOM(html, { url: finalUrl });
-        return new readabilityModule.Readability(dom.window.document).parse();
+        // keepClasses：Readability 默认会剥掉所有 class，而代码块语言只存在于
+        // `<code class="language-x">` / 外层 `language-x` 容器上——剥掉后下游 Markdown 转换
+        // 拿不到语言（实测 readability:true 时 7 个围栏 0 带语言 + 语言标签漏成正文；不传 readability 时 7/7 带语言）
+        return new readabilityModule.Readability(dom.window.document, { keepClasses: true }).parse();
     } catch (error) {
         if (error instanceof Error && /Cannot find package|Cannot find module|ERR_MODULE_NOT_FOUND/.test(error.message)) {
             throw new ReadabilityUnavailableError('Mozilla Readability is not available. Install `@mozilla/readability` to use readability mode.');
@@ -437,7 +440,9 @@ export function __setReadabilityParserForTests(parser?: (html: string, finalUrl:
             const readabilityModule = await import(moduleName);
             const { JSDOM } = await loadJsdom();
             const dom = new JSDOM(html, { url: finalUrl });
-            return new readabilityModule.Readability(dom.window.document).parse();
+            // keepClasses 同 defaultReadabilityParser：保住 `<code class="language-x">`，
+            // 否则 readability 链路下的 Markdown 围栏必然丢语言
+            return new readabilityModule.Readability(dom.window.document, { keepClasses: true }).parse();
         } catch (error) {
             if (error instanceof Error && /Cannot find package|Cannot find module|ERR_MODULE_NOT_FOUND/.test(error.message)) {
                 throw new ReadabilityUnavailableError('Mozilla Readability is not available. Install `@mozilla/readability` to use readability mode.');
