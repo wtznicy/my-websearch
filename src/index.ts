@@ -75,6 +75,16 @@ async function main() {
     return;
   }
 
+  // MODE 非法值此前是"静默空转"：stdio 分支只认 undefined/both/stdio，HTTP 分支只认 both/http，
+  // 于是 MODE=bogus 时两个传输都不启动、无报错、退出码 0（实测：打印一行误导性的
+  // "HTTP server disabled, running in STDIO mode only" 后直接退出，任何 JSON-RPC 请求都无响应）。
+  // 这里显式校验：非法值直接报错退出，省掉使用者半小时排查。
+  const modeValue = process.env.MODE;
+  if (modeValue !== undefined && !['both', 'http', 'stdio'].includes(modeValue)) {
+    console.error(`❌ Invalid MODE="${modeValue}". Expected one of: both, http, stdio (or leave MODE unset for "both").`);
+    process.exit(1);
+  }
+
   // Enable STDIO mode if MODE is 'both' or 'stdio' or not specified
   if (process.env.MODE === undefined || process.env.MODE === 'both' || process.env.MODE === 'stdio') {
     console.error('🔌 Starting STDIO transport...');
