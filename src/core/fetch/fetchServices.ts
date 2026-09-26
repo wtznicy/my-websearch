@@ -5,7 +5,8 @@ import {
     validatePublicWebUrl
 } from '../validation/targetValidation.js';
 
-export type ArticleFetcher = (url: string) => Promise<{ content: string }>;
+export type ArticleFetchOptions = { format?: 'text' | 'markdown' };
+export type ArticleFetcher = (url: string, options?: ArticleFetchOptions) => Promise<{ content: string }>;
 export type GithubReadmeFetcher = (url: string) => Promise<string | null>;
 export type WebFetcher = (url: string, maxChars: number, options?: FetchWebContentOptions) => Promise<FetchWebContentResult>;
 
@@ -14,12 +15,13 @@ export function createArticleFetchService(
     fetcher: ArticleFetcher
 ) {
     return {
-        async execute({ url }: { url: string }): Promise<{ content: string }> {
+        async execute({ url, format }: { url: string; format?: ArticleFetchOptions['format'] }): Promise<{ content: string }> {
             if (!validateArticleUrl(url, type)) {
                 throw new Error(`Invalid ${type} article URL`);
             }
 
-            return fetcher(url);
+            // format 目前仅掘金实现（markdown 保留代码围栏与表格）；CSDN 忽略该参数
+            return fetcher(url, { format });
         }
     };
 }

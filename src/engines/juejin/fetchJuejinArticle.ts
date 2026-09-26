@@ -1,11 +1,19 @@
 import * as cheerio from 'cheerio';
 import { buildAxiosRequestOptions, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { htmlToMarkdown } from '../../utils/markdown.js';
 
 function shouldDebug(): boolean {
     return process.env.OPEN_WEBSEARCH_DEBUG === '1';
 }
 
-export async function fetchJuejinArticle(url: string): Promise<{ content: string }> {
+/**
+ * 输出格式：默认纯文本（行为兼容）。`markdown` 会把正文容器转成 Markdown，
+ * 保留代码围栏（含语言）与表格——掘金正文原本只走 `.text()`，代码缩进/表格结构/语言标识全丢
+ * （测评报告 P1-10），且没有 markdown 输出路径。
+ */
+export type JuejinArticleOptions = { format?: 'text' | 'markdown' };
+
+export async function fetchJuejinArticle(url: string, options: JuejinArticleOptions = {}): Promise<{ content: string }> {
     try {
         console.error(`🔍 Fetching Juejin article: ${url}`);
 
@@ -47,6 +55,7 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
         ];
 
         let content = '';
+        let contentHtml = '';
 
         // 尝试多个选择器
         for (const selector of selectors) {
@@ -61,6 +70,7 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
                 // 移除脚本和样式标签
                 element.find('script, style, .code-block-extension, .hljs-ln-numbers').remove();
                 content = element.text().trim();
+                contentHtml = element.html() || '';
 
                 if (content.length > 100) { // 确保内容足够长
                     break;
@@ -75,6 +85,19 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
             }
             $('script, style, nav, header, footer, .sidebar, .comment').remove();
             content = $('body').text().trim();
+            contentHtml = $('body').html() || '';
+        }
+
+        // format=markdown：保留代码围栏（含语言）与表格结构；转换失败时保留纯文本
+        if (options.format === 'markdown' && contentHtml) {
+            try {
+                const markdown = htmlToMarkdown(contentHtml);
+                if (markdown) {
+                    content = markdown;
+                }
+            } catch (error) {
+                console.error('⚠️ Juejin markdown conversion failed, keeping plain text:', error instanceof Error ? error.message : String(error));
+            }
         }
 
         // 内容仍为空时抛错，而不是静默返回成功——空成功响应会让 LLM 误以为抓到了文章

@@ -556,7 +556,9 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
             url: z.string().url().refine(
                 (url) => validateArticleUrl(url, 'juejin'),
                 "URL must be from juejin.cn and contain /post/ path"
-            )
+            ),
+            format: z.enum(['text', 'markdown']).optional()
+                .describe("Output format (default: text). 'markdown' keeps fenced code blocks (with language) and GFM tables — recommended for technical posts")
         },
         {
             // 全部工具均为只读、幂等、开放世界操作（搜索/抓取不修改任何持久状态）
@@ -565,10 +567,10 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
             idempotentHint: true,
             openWorldHint: true
         },
-        async ({url}) => {
+        async ({url, format}) => {
             try {
                 logTool(`Fetching Juejin article: ${url}`);
-                const result = await runtime.services.fetchJuejinArticle.execute({ url });
+                const result = await runtime.services.fetchJuejinArticle.execute({ url, format });
 
                 return {
                     content: [{

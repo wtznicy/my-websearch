@@ -11,8 +11,11 @@ export type SearchService = {
     readonly cacheSize: number;
 };
 
+export type ArticleFormat = 'text' | 'markdown';
+
 export type FetchArticleService = {
-    execute(input: { url: string }): Promise<{ content: string }>;
+    /** format 目前由掘金实现（markdown 保留代码围栏与表格）；CSDN 忽略该参数 */
+    execute(input: { url: string; format?: ArticleFormat }): Promise<{ content: string }>;
 };
 
 export type GithubReadmeService = {
