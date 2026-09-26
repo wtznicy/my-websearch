@@ -140,6 +140,20 @@ function getService(): TurndownService {
         replacement: () => ''
     });
 
+    // GFM 表格单元格：转义单元格文本内的 '|' 为 '\|'，防止内容中的竖线被误当成列分隔符破坏表格结构（测评报告 P0-2 建议 ④）
+    // 注意：turndown-plugin-gfm 原生的 tableCell 未转义竖线；tableRow 在生成对齐分割线时直接调用内部 cell()，
+    // 因此覆盖 tableCell 不会影响列对齐声明（:-- / :-: / --:），仅保护单元格内容本身。
+    instance.addRule('tableCell', {
+        filter: ['th', 'td'],
+        replacement: (content, node) => {
+            const parent = (node as any).parentNode;
+            const index = Array.prototype.indexOf.call(parent ? parent.childNodes : [], node);
+            const prefix = index === 0 ? '| ' : ' ';
+            const escaped = content.replace(/(?<!\\)\|/g, '\\|');
+            return `${prefix}${escaped} |`;
+        }
+    });
+
     service = instance;
     return instance;
 }

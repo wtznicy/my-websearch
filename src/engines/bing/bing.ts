@@ -54,7 +54,11 @@ const SEC_CH_UA_VARIANTS = [
 ];
 
 function pickRandom<T>(items: readonly T[]): T {
-    return items[Math.floor(Math.random() * items.length)];
+    const item = items[Math.floor(Math.random() * items.length)];
+    if (item === undefined) {
+        throw new Error('Cannot pick from an empty array');
+    }
+    return item;
 }
 
 function generateMuid(): string {

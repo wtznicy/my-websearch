@@ -608,7 +608,7 @@ export function peekNamedPipe(readHandle: any): number {
     if (!w.PeekNamedPipe(readHandle, null, 0, null, totalAvail, null)) {
         return -1;
     }
-    return totalAvail[0];
+    return totalAvail[0] ?? -1;
 }
 
 /**

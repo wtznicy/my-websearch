@@ -86,7 +86,7 @@ function parseRequestedEngines(runtime: MyWebSearchRuntime, engines: unknown, qu
     const effectiveDefault = filteredDefault.length > 0
         ? filteredDefault
         : (allowed.length > 0 ? [allowed[0]] : routable);
-    const fallbackEngine = effectiveDefault[0];
+    const fallbackEngine = effectiveDefault[0] || 'bing';
 
     if (engines === undefined) {
         return effectiveDefault as SupportedSearchEngine[];

@@ -61,7 +61,7 @@ export function mergeMultiQueryResults(
 
     // 单查询：退化为去重 + 截断
     if (queryCount === 1) {
-        for (const result of perQueryResults[0]) {
+        for (const result of perQueryResults[0] ?? []) {
             if (picked.length >= limit) {
                 break;
             }
@@ -76,7 +76,8 @@ export function mergeMultiQueryResults(
         let taken = 0;
         let index = 0;
         while (index < list.length && taken < perQueryQuota && picked.length < limit) {
-            if (tryTake(list[index])) {
+            const item = list[index];
+            if (item && tryTake(item)) {
                 taken += 1;
             }
             index += 1;
@@ -90,10 +91,18 @@ export function mergeMultiQueryResults(
         progress = false;
         for (let i = 0; i < queryCount && picked.length < limit; i += 1) {
             const list = perQueryResults[i];
-            while (cursors[i] < list.length) {
-                const result = list[cursors[i]];
-                cursors[i] += 1;
-                if (tryTake(result)) {
+            const currentCursor = cursors[i];
+            if (!list || currentCursor === undefined) {
+                continue;
+            }
+            while (currentCursor < list.length) {
+                const cur = cursors[i] ?? currentCursor;
+                if (cur >= list.length) {
+                    break;
+                }
+                const result = list[cur];
+                cursors[i] = cur + 1;
+                if (result && tryTake(result)) {
                     progress = true;
                     break;
                 }

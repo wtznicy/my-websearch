@@ -357,7 +357,7 @@ function decodeResponseBuffer(buffer: ArrayBuffer, contentType: string): string 
     // 1) 从 Content-Type 头提取 charset
     let charset = '';
     const charsetMatch = contentType.match(/charset=["']?([\w-]+)["']?/i);
-    if (charsetMatch) {
+    if (charsetMatch?.[1]) {
         charset = charsetMatch[1];
     }
 
@@ -365,7 +365,7 @@ function decodeResponseBuffer(buffer: ArrayBuffer, contentType: string): string 
     if (!charset) {
         const headSample = new TextDecoder('utf-8', { fatal: false }).decode(bytes.slice(0, 1024));
         const metaMatch = headSample.match(/<meta[^>]+charset=["']?([\w-]+)["']?/i);
-        if (metaMatch) {
+        if (metaMatch?.[1]) {
             charset = metaMatch[1];
         }
     }

@@ -54,7 +54,7 @@ async function readWindowsSystemProxy(): Promise<string | null> {
     ]);
     const serverLine = serverOut.split(/\r?\n/).find((line) => line.includes('ProxyServer')) ?? serverOut;
     const match = serverLine.match(/(?:https?=)?([^=\s;]+:\d+)/);
-    return match ? match[1] : null;
+    return match?.[1] ?? null;
 }
 
 async function readMacSystemProxy(): Promise<string | null> {

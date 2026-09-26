@@ -33,6 +33,7 @@
     "!build/test"
   ],
   "scripts": {
+    "typecheck:strict": "tsc --project tsconfig.strict.json",
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",

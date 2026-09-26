@@ -82,7 +82,7 @@ export const cachedDnsLookup: DnsLookupFn = (hostname, options, callback) => {
         if (options.all) {
             callback(null, cached.addresses.map((address) => ({ address, family: cached.family })));
         } else {
-            callback(null, cached.addresses[0], cached.family);
+            callback(null, cached.addresses[0] ?? '', cached.family);
         }
         return;
     }
@@ -92,11 +92,12 @@ export const cachedDnsLookup: DnsLookupFn = (hostname, options, callback) => {
             const addresses = options.all
                 ? (rest[0] as dns.LookupAddress[])
                 : [{ address: rest[0] as string, family: rest[1] as number }];
-            if (addresses.length > 0 && addresses[0].address) {
+            const first = addresses[0];
+            if (addresses.length > 0 && first && first.address) {
                 evictExpired();
                 cache.set(hostname, {
                     addresses: addresses.map((item) => item.address),
-                    family: addresses[0].family ?? 4,
+                    family: first.family ?? 4,
                     all: !!options.all,
                     expiresAt: now + CACHE_TTL_MS
                 });

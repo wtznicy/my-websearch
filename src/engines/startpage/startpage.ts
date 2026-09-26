@@ -56,12 +56,13 @@ function extractScCode(html: string): string | undefined {
 
 function extractInterstitialPayload(html: string): Record<string, string> | undefined {
     const match = html.match(/var data = (\{[\s\S]*?\});/);
-    if (!match) {
+    const payloadJson = match?.[1];
+    if (!payloadJson) {
         return undefined;
     }
 
     try {
-        const payload = JSON.parse(match[1]) as Record<string, unknown>;
+        const payload = JSON.parse(payloadJson) as Record<string, unknown>;
         if (typeof payload?.query !== 'string' || typeof payload?.sgt !== 'string') {
             return undefined;
         }

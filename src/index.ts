@@ -183,7 +183,7 @@ async function main() {
       const streamableIds = Object.keys(transports.streamable);
       if (streamableIds.length > MAX_SESSIONS) {
         streamableIds
-          .sort((a, b) => (transports.streamable[a].lastActiveAt ?? 0) - (transports.streamable[b].lastActiveAt ?? 0))
+          .sort((a, b) => (transports.streamable[a]?.lastActiveAt ?? 0) - (transports.streamable[b]?.lastActiveAt ?? 0))
           .slice(0, streamableIds.length - MAX_SESSIONS)
           .forEach((id) => closeSession('streamable', id));
       }

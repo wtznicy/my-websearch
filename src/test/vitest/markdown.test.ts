@@ -195,3 +195,37 @@ describe('htmlToMarkdown 代码组 Tabs 标签', () => {
         expect(markdown).not.toContain('npmpnpmyarn');
     });
 });
+
+describe('htmlToMarkdown 表格单元格 | 转义（测评报告 P0-2 建议 ④）', () => {
+    it('表头与单元格中含竖线时应转义为 \\|，防止列分裂与表格破损', () => {
+        const html = '<table><thead><tr><th>Header a|b</th><th>Type</th></tr></thead>'
+            + '<tbody><tr><td>case 1|2</td><td>int|float</td></tr></tbody></table>';
+        const markdown = htmlToMarkdown(html);
+        expect(markdown).toContain('| Header a\\|b | Type |');
+        expect(markdown).toContain('| case 1\\|2 | int\\|float |');
+    });
+
+    it('单元格内的行内代码含竖线时也应正确转义', () => {
+        const html = '<table><thead><tr><th>Pattern</th><th>Desc</th></tr></thead>'
+            + '<tbody><tr><td><code>cat|dog</code></td><td>regex</td></tr></tbody></table>';
+        const markdown = htmlToMarkdown(html);
+        expect(markdown).toContain('| `cat\\|dog` | regex |');
+    });
+
+    it('已有转义的 \\| 不应被额外添加转义', () => {
+        const html = '<table><thead><tr><th>Escaped</th></tr></thead>'
+            + '<tbody><tr><td>foo\\|bar</td></tr></tbody></table>';
+        const markdown = htmlToMarkdown(html);
+        expect(markdown).toContain('| foo\\\\|bar |');
+        expect(markdown).not.toContain('foo\\\\\\|bar');
+    });
+
+    it('保留表格列对齐属性（:-- / :-: / --:）', () => {
+        const html = '<table><thead><tr><th align="left">L|1</th><th align="center">C|2</th><th align="right">R|3</th></tr></thead>'
+            + '<tbody><tr><td>left</td><td>center</td><td>right</td></tr></tbody></table>';
+        const markdown = htmlToMarkdown(html);
+        expect(markdown).toContain('| :-- | :-: | --: |');
+        expect(markdown).toContain('| L\\|1 | C\\|2 | R\\|3 |');
+    });
+});
+

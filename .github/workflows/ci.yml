@@ -22,6 +22,8 @@ jobs:
       # 这正是设计上的降级路径：缺失时相关引擎回退 axios，单测不应依赖它们
       - run: npm ci
 
+      - run: npm run typecheck:strict
+
       - run: npm run build
 
       - run: npm run test:vitest

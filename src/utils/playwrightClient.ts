@@ -1024,9 +1024,41 @@ function isProcessInspectionTimeoutError(error: unknown): boolean {
     return error instanceof Error && error.name === 'LocalBrowserProcessInspectionTimeoutError';
 }
 
+/**
+ * 进程级命令行缓存：
+ * 进程运行期间其启动命令行是不可变的。缓存避免每次会话复用探测重复拉起
+ * powershell.exe / ps 造成 500~2000ms 的同步阻塞（最多 5s）。
+ */
+const processCommandLineCache = new Map<number, string>();
+
+interface CandidatesCacheEntry {
+    timestamp: number;
+    candidates: LocalBrowserProcessCandidate[];
+}
+const localBrowserCandidatesCache = new Map<string, CandidatesCacheEntry>();
+const CANDIDATES_CACHE_TTL_MS = 2000;
+
+function invalidateLocalBrowserCandidatesCache(tempDir?: string): void {
+    if (tempDir) {
+        for (const key of localBrowserCandidatesCache.keys()) {
+            if (key.startsWith(tempDir)) {
+                localBrowserCandidatesCache.delete(key);
+            }
+        }
+    } else {
+        localBrowserCandidatesCache.clear();
+    }
+}
+
 function getProcessCommandLine(pid: number): string | null {
     if (!processExists(pid)) {
+        processCommandLineCache.delete(pid);
         return null;
+    }
+
+    const cached = processCommandLineCache.get(pid);
+    if (cached !== undefined) {
+        return cached;
     }
 
     try {
@@ -1041,14 +1073,22 @@ function getProcessCommandLine(pid: number): string | null {
                 ],
                 { encoding: 'utf8', windowsHide: true, timeout: 5000 }
             );
-            return output.trim() || null;
+            const trimmed = output.trim() || null;
+            if (trimmed) {
+                processCommandLineCache.set(pid, trimmed);
+            }
+            return trimmed;
         }
 
         const output = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
             encoding: 'utf8',
             timeout: 5000
         });
-        return output.trim() || null;
+        const trimmed = output.trim() || null;
+        if (trimmed) {
+            processCommandLineCache.set(pid, trimmed);
+        }
+        return trimmed;
     } catch (error) {
         if (process.platform === 'win32' && isExecTimeoutError(error)) {
             throw createProcessInspectionTimeoutError(
@@ -1123,6 +1163,11 @@ function quotePowerShellSingleQuotedString(value: string): string {
 
 function listLocalBrowserCandidatesByTempDir(tempDir: string, debugPort?: number): LocalBrowserProcessCandidate[] {
     const debugPortFragment = getLocalBrowserDebugPortCommandLineFragment(debugPort);
+    const cacheKey = `${tempDir}::${debugPort ?? ''}`;
+    const cached = localBrowserCandidatesCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CANDIDATES_CACHE_TTL_MS) {
+        return cached.candidates.filter((candidate) => processExists(candidate.pid));
+    }
 
     if (process.platform !== 'win32') {
         try {
@@ -1130,15 +1175,22 @@ function listLocalBrowserCandidatesByTempDir(tempDir: string, debugPort?: number
                 encoding: 'utf8',
                 timeout: 5000
             });
-            return raw.split(/\r?\n/u)
+            const candidates = raw.split(/\r?\n/u)
                 .map((line) => {
                     const match = line.match(/^\s*(\d+)\s+(.*)$/u);
                     if (!match) return null;
                     const pid = Number(match[1]);
                     const commandLine = match[2];
+                    if (!commandLine) return null;
+                    if (Number.isInteger(pid)) {
+                        processCommandLineCache.set(pid, commandLine);
+                    }
                     return createLocalBrowserCandidateFromCommandLine(pid, commandLine, tempDir, debugPort);
                 })
                 .filter((candidate): candidate is LocalBrowserProcessCandidate => candidate !== null && processExists(candidate.pid));
+
+            localBrowserCandidatesCache.set(cacheKey, { timestamp: Date.now(), candidates });
+            return candidates;
         } catch {
             return [];
         }
@@ -1157,22 +1209,26 @@ function listLocalBrowserCandidatesByTempDir(tempDir: string, debugPort?: number
         ).trim();
 
         if (!raw) {
+            localBrowserCandidatesCache.set(cacheKey, { timestamp: Date.now(), candidates: [] });
             return [];
         }
 
         const parsed = JSON.parse(raw) as Array<{ ProcessId?: number; CommandLine?: string }> | { ProcessId?: number; CommandLine?: string };
         const processes = Array.isArray(parsed) ? parsed : [parsed];
-        return processes
+        const candidates = processes
             .map((processInfo) => {
                 const pid = processInfo.ProcessId;
                 const commandLine = processInfo.CommandLine;
                 if (!Number.isInteger(pid) || typeof commandLine !== 'string') {
                     return null;
                 }
-
+                processCommandLineCache.set(pid as number, commandLine);
                 return createLocalBrowserCandidateFromCommandLine(pid as number, commandLine, tempDir, debugPort);
             })
             .filter((candidate): candidate is LocalBrowserProcessCandidate => candidate !== null && processExists(candidate.pid));
+
+        localBrowserCandidatesCache.set(cacheKey, { timestamp: Date.now(), candidates });
+        return candidates;
     } catch (error) {
         if (isExecTimeoutError(error)) {
             throw createProcessInspectionTimeoutError(
@@ -1196,7 +1252,7 @@ function resolveLocalBrowserCandidate(preferredPid: number | undefined, tempDir:
     const exactCandidates = listLocalBrowserCandidatesByTempDir(tempDir, debugPort);
     if (exactCandidates.length > 0) {
         // Edge 在 Windows 上可能先返回 launcher PID；最终可复用进程只能按 tempDir/debugPort 重新枚举候选。
-        return exactCandidates[0];
+        return exactCandidates[0] ?? null;
     }
 
     if (isValidLocalBrowserDebugPort(debugPort)) {
@@ -1368,7 +1424,7 @@ async function waitForBrowserReadyViaStdout(
                 if (!chunk || chunk.length === 0) break; // pipe broken / EOF
                 accumulated += chunk.toString('utf-8');
                 const match = accumulated.match(/DevTools listening on (ws:\/\/[^\s]+)/);
-                if (match) return match[1];
+                if (match?.[1]) return match[1];
             }
             throw new Error('Pipe closed before browser emitted DevTools ready signal');
         })();
@@ -1593,10 +1649,17 @@ function createForceKill(browserPid?: number, tempDir?: string, browser?: any, d
         }
 
         if (browserPid) {
+            processCommandLineCache.delete(browserPid);
             if (process.platform === 'win32') {
                 try {
                     // stdio: 'ignore'：taskkill 的 stderr（"没有找到进程"等）绝不外泄到宿主日志
-                    execFileSync('taskkill', ['/F', '/T', '/PID', String(browserPid)], { windowsHide: true, timeout: 5000, stdio: 'ignore' });
+                    // 改为 spawn detached 非阻塞执行，避免 taskkill 最多 5s 同步阻塞冻结 STDIO MCP 事件循环
+                    const child = spawn('taskkill', ['/F', '/T', '/PID', String(browserPid)], {
+                        windowsHide: true,
+                        stdio: 'ignore',
+                        detached: true
+                    });
+                    child.unref();
                 } catch {
                     // Ignore kill errors.
                 }
@@ -1615,6 +1678,7 @@ function createForceKill(browserPid?: number, tempDir?: string, browser?: any, d
         }
 
         if (tempDir) {
+            invalidateLocalBrowserCandidatesCache(tempDir);
             try {
                 if (domainKey) {
                     clearBrowserDomainMetadata(domainKey, tempDir);

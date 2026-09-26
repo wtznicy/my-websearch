@@ -42,5 +42,5 @@ export function pickDefaultEnginesForQuery(
 
 /** 兼容单引擎调用方（返回路由组的首个引擎） */
 export function pickDefaultEngineForQuery(query: string, configuredDefault: string): string {
-    return pickDefaultEnginesForQuery(query, configuredDefault)[0];
+    return pickDefaultEnginesForQuery(query, configuredDefault)[0] ?? (configuredDefault || 'bing');
 }

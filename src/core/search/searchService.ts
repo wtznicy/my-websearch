@@ -420,11 +420,11 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
 
             // 每引擎耗时/数量/错误（可观测性：区分超时与被拒/限流）
             const engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }> = [];
-            const startedAtByIndex: number[] = engines.map(() => Date.now());
+            const startedAtByIndex: number[] = executableEngines.map(() => Date.now());
             const tasks = executableEngines.map(async (engine, index) => {
                 const executor = engineMap[engine];
-                const engineLimit = limits[index];
-                const startedAt = startedAtByIndex[index];
+                const engineLimit = limits[index] ?? 0;
+                const startedAt = startedAtByIndex[index] ?? Date.now();
                 let resultCount = 0;
                 let metricError: string | undefined;
 
@@ -491,20 +491,21 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // 注意：task 提前完成时必须 clearTimeout，否则 30s 的 ref'd timer 会阻止 Node 进程退出
             // （CLI 一次性命令会白白多挂近 30 秒），同时也能避免 timer 回调对已 settle 的 race 做无用功。
             const engineResults = await Promise.all(tasks.map((task, index) => {
+                const engine = executableEngines[index] ?? '';
                 const remaining = deadlineAt - Date.now();
                 const wait = Math.max(0, Math.min(remaining, PER_ENGINE_TIMEOUT_MS));
                 return new Promise<SearchResult[]>((resolve) => {
                     let done = false;
                     const timer = setTimeout(() => {
                         done = true;
-                        engineMetrics[index] = { engine: executableEngines[index], ms: wait, count: 0, error: `timeout after ${wait}ms`, timedOut: true };
-                        if (!partialFailures.some((failure) => failure.engine === executableEngines[index])) {
+                        engineMetrics[index] = { engine, ms: wait, count: 0, error: `timeout after ${wait}ms`, timedOut: true };
+                        if (engine && !partialFailures.some((failure) => failure.engine === engine)) {
                             partialFailures.push({
-                                engine: executableEngines[index],
+                                engine,
                                 code: 'engine_error',
                                 // 索引口径必须与上面 engineMetrics/失败项一致：executableEngines 是熔断过滤后的列表，
                                 // 用原始 engines[index] 在熔断发生时会让提示文案指向错误的引擎（测评报告 P1-7）
-                                message: buildHintedMessage(executableEngines[index], `Engine timeout after ${wait}ms (no response in time)`)
+                                message: buildHintedMessage(engine, `Engine timeout after ${wait}ms (no response in time)`)
                             });
                         }
                         resolve([]);
@@ -524,7 +525,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // /metrics 暴露的引擎成功率与缓存命中率永远是 0（测评报告 P2-15）
             executableEngines.forEach((engine, index) => {
                 const engineResult = engineResults[index] ?? [];
-                metrics.recordEngineSearch(engine, Date.now() - startedAtByIndex[index], engineResult.length > 0);
+                metrics.recordEngineSearch(engine, Date.now() - (startedAtByIndex[index] ?? Date.now()), engineResult.length > 0);
             });
 
             // 不提前 slice(0, limit)：提前截断会让"噪声占满前 N 位"时把后面的好结果
@@ -550,7 +551,9 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             // 注意：不能把正常空结果报成 engine_error——冷门查询所有引擎都 0 条时会刷一墙误导性"故障"。
             executableEngines.forEach((engine, index) => {
                 const executor = engineMap[engine];
-                if (executor && limits[index] > 0 && engineResults[index].length === 0) {
+                const limitForEngine = limits[index] ?? 0;
+                const engineResult = engineResults[index] ?? [];
+                if (executor && limitForEngine > 0 && engineResult.length === 0) {
                     if (!partialFailures.some((failure) => failure.engine === engine)) {
                         partialFailures.push({
                             engine,
@@ -641,28 +644,32 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                     for (let index = 0; index < settled.length; index += 1) {
                         const candidate = batch[index];
                         const outcome = settled[index];
-                        if (outcome.status === 'fulfilled' && outcome.value.length > 0) {
-                            const before = merged.length;
-                            cascadedEngines.push(candidate);
-                            engineResults.push(outcome.value);
-                            merged = mergeSearchResults(engineResults)
-                                .filter((result) => !isPlaceholderResult(result));
-                            batchNewResults += merged.length - before;
-                        } else {
-                            batchAllReturnedNonEmpty = false;
-                            if (outcome.status === 'fulfilled') {
+                        if (!candidate || !outcome) {
+                            continue;
+                        }
+                        if (outcome.status === 'fulfilled') {
+                            if (outcome.value.length > 0) {
+                                const before = merged.length;
+                                cascadedEngines.push(candidate);
+                                engineResults.push(outcome.value);
+                                merged = mergeSearchResults(engineResults)
+                                    .filter((result) => !isPlaceholderResult(result));
+                                batchNewResults += merged.length - before;
+                            } else {
+                                batchAllReturnedNonEmpty = false;
                                 partialFailures.push({
                                     engine: candidate,
                                     code: 'no_results',
                                     message: 'Engine returned no results for the cascaded quota'
                                 });
-                            } else {
-                                partialFailures.push({
-                                    engine: candidate,
-                                    code: 'engine_error',
-                                    message: buildHintedMessage(candidate, outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason))
-                                });
                             }
+                        } else {
+                            batchAllReturnedNonEmpty = false;
+                            partialFailures.push({
+                                engine: candidate,
+                                code: 'engine_error',
+                                message: buildHintedMessage(candidate, outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason))
+                            });
                         }
                     }
                     // 所有候选都返回了结果但去重后 0 新增：继续尝试其他引擎只会重复同样的事

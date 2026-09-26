@@ -190,7 +190,8 @@ export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>)
     const resolvedHrefs = await resolveBaiduRedirectUrls(collected.map((item) => item.href));
     const results: SearchResult[] = [];
     collected.forEach((item, index) => {
-        const url = normalizeResultUrl(resolvedHrefs[index]);
+        const resolvedHref = resolvedHrefs[index];
+        const url = resolvedHref ? normalizeResultUrl(resolvedHref) : '';
         if (!url || seenUrls.has(url)) {
             return;
         }

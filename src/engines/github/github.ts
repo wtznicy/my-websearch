@@ -213,11 +213,12 @@ function extractOwnerAndRepo(url: string): { owner: string; repo: string; host: 
             const match = trimmedUrl.match(pattern);
             if (match) {
                 const [, owner, rawRepo] = match;
-
-                // Clean repo name: remove query params, fragments, .git suffix, paths
-                const repo = rawRepo.replace(/(?:[?#].*$|\.git$|\/.*$)/g, '');
-                if (owner && repo && owner.length > 0 && repo.length > 0) {
-                    return { owner: owner.trim(), repo: repo.trim(), host };
+                if (owner && rawRepo) {
+                    // Clean repo name: remove query params, fragments, .git suffix, paths
+                    const repo = rawRepo.replace(/(?:[?#].*$|\.git$|\/.*$)/g, '');
+                    if (owner.length > 0 && repo.length > 0) {
+                        return { owner: owner.trim(), repo: repo.trim(), host };
+                    }
                 }
             }
         }

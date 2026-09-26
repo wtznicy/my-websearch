@@ -290,7 +290,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                         isError: true
                     };
                 }
-                const primaryQuery = queryList[0];
+                const primaryQuery = queryList[0] ?? '';
 
                 // 部署策略来自服务端配置（DEFAULT_SEARCH_LIMIT / DEFAULT_MIN_RESULTS），
                 // 工具参数仅作覆盖——模型漏传时不再掉进"1 条结果无级联"的弱路径
@@ -316,17 +316,17 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                     if (filtered.length > 0) {
                         return filtered as SupportedSearchEngine[];
                     }
-                    return (allowed.length > 0 ? [allowed[0]] : routable) as SupportedSearchEngine[];
+                    return (allowed.length > 0 && allowed[0] ? [allowed[0]] : routable) as SupportedSearchEngine[];
                 };
                 const explicitEngines = engines && engines.length > 0
-                    ? resolveRequestedEngines(engines, allowed, resolveEnginesForQuery(primaryQuery)[0]) as [SupportedSearchEngine, ...SupportedSearchEngine[]]
+                    ? resolveRequestedEngines(engines, allowed, resolveEnginesForQuery(primaryQuery)[0] || 'bing') as [SupportedSearchEngine, ...SupportedSearchEngine[]]
                     : null;
                 const enginesPerQuery: SupportedSearchEngine[][] = explicitEngines
                     ? queryList.map(() => [...explicitEngines])
                     : queryList.map((q) => resolveEnginesForQuery(q));
-                const resolvedEngines = enginesPerQuery[0];
+                const resolvedEngines = enginesPerQuery[0] ?? ['bing'];
 
-                logTool(`Searching ${queryList.map((q, index) => `"${q}" [${enginesPerQuery[index].join(',')}]`).join(', ')}`);
+                logTool(`Searching ${queryList.map((q, index) => `"${q}" [${(enginesPerQuery[index] ?? []).join(',')}]`).join(', ')}`);
 
                 // 多查询扇出：并发执行（每个查询独立走缓存/级联），合并后按 URL 去重
                 const perQueryLimit = queryList.length > 1
@@ -335,7 +335,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                 const executed = await Promise.all(queryList.map((q, index) => {
                     return runtime.services.search.execute({
                         query: q,
-                        engines: enginesPerQuery[index],
+                        engines: enginesPerQuery[index] ?? ['bing'],
                         limit: perQueryLimit,
                         searchMode,
                         minResults: effectiveMinResults
@@ -356,7 +356,7 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                         queryList.join(' '),
                         { positionWeight: 0 }
                     )
-                    : executed[0].results;
+                    : (executed[0]?.results ?? []);
 
                 // text 保持 JSON（可被客户端 JSON.parse——紧凑格式省 token；模型友好的引用引导在工具描述里）
                 const failures = executed.flatMap((one) => one.partialFailures);
@@ -370,9 +370,9 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
                             ...(queryList.length > 1
                                 ? {
                                     queries: queryList,
-                                    queryEngines: queryList.map((q, index) => ({ query: q, engines: executed[index].engines }))
+                                    queryEngines: queryList.map((q, index) => ({ query: q, engines: executed[index]?.engines ?? [] }))
                                 }
-                                : { query: queryList[0] }),
+                                : { query: queryList[0] ?? '' }),
                             engines: allEngines,
                             totalResults: mergedResults.length,
                             results: mergedResults,

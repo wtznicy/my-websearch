@@ -194,7 +194,9 @@ function mergeSetCookie(cookieHeader: string, setCookie: string | string[] | und
             continue;
         }
         const [name] = trimmed.split('=', 1);
-        cookieMap.set(name, trimmed);
+        if (name) {
+            cookieMap.set(name, trimmed);
+        }
     }
 
     const values = Array.isArray(setCookie) ? setCookie : [setCookie];
@@ -204,7 +206,9 @@ function mergeSetCookie(cookieHeader: string, setCookie: string | string[] | und
             continue;
         }
         const [name] = pair.split('=', 1);
-        cookieMap.set(name, pair);
+        if (name) {
+            cookieMap.set(name, pair);
+        }
     }
 
     return Array.from(cookieMap.values()).join('; ');
@@ -281,13 +285,14 @@ export function parseSogouMobileResults(html: string): SearchResult[] {
         const link = card.find('a.resultLink[href*="url="]').first();
         const href = String(link.attr('href') || '');
         const urlMatch = href.match(/[?&]url=([^&]+)/);
-        if (!urlMatch) {
+        const encodedUrl = urlMatch?.[1];
+        if (!encodedUrl) {
             return; // 广告/推荐/插件位
         }
 
         let realUrl = '';
         try {
-            realUrl = decodeURIComponent(urlMatch[1]);
+            realUrl = decodeURIComponent(encodedUrl);
         } catch {
             return;
         }

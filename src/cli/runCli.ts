@@ -44,11 +44,11 @@ const MCP_TO_CLI_COMMAND_HINTS: Record<string, string> = {
 };
 
 export function commandNeedsRuntime(argv: string[]): boolean {
-    if (argv.length === 0) {
+    const [command] = argv;
+    if (!command) {
         return false;
     }
 
-    const [command] = argv;
     return COMMANDS_REQUIRING_RUNTIME.has(command);
 }
 
@@ -175,6 +175,9 @@ function extractDaemonTransportArgs(argv: string[]): DaemonTransportArgs {
 
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
+        if (!arg) {
+            continue;
+        }
 
         if (arg === '--spawn') {
             shouldSpawn = true;
@@ -218,6 +221,9 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
 
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
+        if (!arg) {
+            continue;
+        }
 
         if (arg === '--json') {
             json = true;
@@ -329,6 +335,9 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
 
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
+        if (!arg) {
+            continue;
+        }
 
         if (arg === '--json') {
             json = true;
@@ -435,6 +444,9 @@ export function parseStatusArgs(argv: string[]): ParsedStatusArgs {
 
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
+        if (!arg) {
+            continue;
+        }
 
         if (arg === '--json') {
             json = true;
@@ -476,6 +488,9 @@ export function parseServeArgs(argv: string[]): ParsedServeArgs {
 
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
+        if (!arg) {
+            continue;
+        }
 
         if (arg === '--host') {
             const next = argv[index + 1];
@@ -873,11 +888,11 @@ export async function runCli(
     io: CliIo,
     options: RunCliOptions = {}
 ): Promise<number | null> {
-    if (argv.length === 0) {
+    const [first, ...rest] = argv;
+    if (!first) {
         return null;
     }
-
-    const [command, ...rest] = argv;
+    const command = first;
 
     if (command === '--help' || command === '-h' || command === 'help') {
         io.stdout(formatCliHelp());

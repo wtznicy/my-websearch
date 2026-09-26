@@ -48,11 +48,12 @@ export function solveAnubisPow(randomData: string, difficulty: number): { nonce:
 /** 从挑战页 HTML 解析 Anubis payload（challenge.id / randomData / rules.difficulty） */
 export function parseAnubisChallenge(html: string): { id: string; randomData: string; difficulty: number } | null {
     const match = html.match(/id="anubis_challenge"[^>]*>([\s\S]*?)<\/script>/);
-    if (!match) {
+    const jsonText = match?.[1]?.trim();
+    if (!jsonText) {
         return null;
     }
     try {
-        const payload = JSON.parse(match[1].trim()) as {
+        const payload = JSON.parse(jsonText) as {
             rules?: { difficulty?: number };
             challenge?: { id?: string; randomData?: string };
         };
@@ -78,7 +79,7 @@ export function extractStartpageScToken(html: string): string | undefined {
 function collectSetCookies(response: { headers?: Record<string, unknown> }): string[] {
     const raw = response.headers?.['set-cookie'];
     const values = Array.isArray(raw) ? raw : (typeof raw === 'string' ? [raw] : []);
-    return values.map((value) => String(value).split(';')[0]).filter(Boolean);
+    return values.map((value) => String(value).split(';')[0] ?? '').filter(Boolean);
 }
 
 function mergeCookiePairs(...groups: string[][]): string {

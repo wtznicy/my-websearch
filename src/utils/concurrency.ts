@@ -27,10 +27,13 @@ export async function mapWithConcurrencyBudget<T, R>(
             }
             const index = next;
             next += 1;
-            try {
-                results[index] = await fn(items[index]);
-            } catch {
-                // 单条失败保留 fallback 值
+            const item = items[index];
+            if (item !== undefined) {
+                try {
+                    results[index] = await fn(item);
+                } catch {
+                    // 单条失败保留 fallback 值
+                }
             }
         }
     });

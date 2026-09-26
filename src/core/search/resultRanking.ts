@@ -274,7 +274,7 @@ export function rankSearchResults(
 
     const scored = results.map((result, index) => {
         const positionScore = 1 / (1 + index * 0.35);
-        const relevance = bm25[index] / maxBm25;
+        const relevance = (bm25[index] ?? 0) / maxBm25;
         const isEntryPage = applyEntryPagePenalty && isLikelySiteEntryPage(result.url);
         const authority = isEntryPage ? 0 : authorityScore(result.url);
         const consensus = Math.min(result.engineHits ?? 1, 3) / 3;
