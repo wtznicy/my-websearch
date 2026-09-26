@@ -1,6 +1,5 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import vm from 'node:vm';
 import {SearchResult} from "../../types.js";
 import {buildAxiosRequestOptions} from "../../utils/httpRequest.js";
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
@@ -22,10 +21,197 @@ export function isTrustedDuckDuckGoPreloadUrl(value: string): boolean {
   }
 }
 
+/** 从脚本里取出 `DDG.deep.initialize(<表达式>, false)` 的第一个参数表达式 */
+function extractInitializeExpression(scriptText: string): string | null {
+  const match = scriptText.match(/DDG\s*\.\s*deep\s*\.\s*initialize\s*\(([\s\S]*?)\)\s*;/);
+  if (!match?.[1]) {
+    return null;
+  }
+  // 参数形如 `<表达式>, false`：按顶层逗号切开取第一段
+  const args = match[1];
+  let depth = 0;
+  for (let i = 0; i < args.length; i += 1) {
+    const ch = args[i];
+    if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+    else if (ch === ')' || ch === ']' || ch === '}') depth -= 1;
+    else if (ch === ',' && depth === 0) return args.slice(0, i).trim();
+  }
+  return args.trim();
+}
+
 /**
- * 求解 DuckDuckGo links.duckduckgo.com/d.js 在 HTTP 202 时返回的
- * `window.execDeep` (`isJsaChallenge`) HTML5 解析器 + 算术挑战。
- * 成功后返回带 `&jsa_hash=...&jsa=<computed>` 的受信任 https://links.duckduckgo.com/d.js URL。
+ * 把 initialize 的参数表达式拆成「前缀 + 累加变量 + 后缀」。
+ * 只接受"字符串字面量与单个标识符用 + 连接"的形状，其它一律返回 null（宁可不解，也不猜）。
+ */
+function splitInitializeExpression(expression: string): { prefix: string; accumulator: string | null; suffix: string } {
+  const parts: Array<{ literal: string } | { identifier: string }> = [];
+  let i = 0;
+  while (i < expression.length) {
+    const ch = expression[i] ?? '';
+    if (ch === '+' || /\s/.test(ch)) {
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch;
+      let value = '';
+      i += 1;
+      while (i < expression.length && expression[i] !== quote) {
+        if (expression[i] === '\\') {
+          value += expression[i] + (expression[i + 1] ?? '');
+          i += 2;
+          continue;
+        }
+        value += expression[i];
+        i += 1;
+      }
+      if (i >= expression.length) {
+        return { prefix: '', accumulator: null, suffix: '' };
+      }
+      i += 1;
+      parts.push({ literal: value });
+      continue;
+    }
+    const identifierMatch = /^[A-Za-z_$][\w$]*/.exec(expression.slice(i));
+    if (identifierMatch) {
+      parts.push({ identifier: identifierMatch[0] });
+      i += identifierMatch[0].length;
+      continue;
+    }
+    // 数字/括号/函数调用等未预期的形状 → 放弃静态解析
+    return { prefix: '', accumulator: null, suffix: '' };
+  }
+
+  const identifiers = parts.filter((part): part is { identifier: string } => 'identifier' in part);
+  const firstIdentifier = identifiers[0];
+  if (identifiers.length !== 1 || !firstIdentifier) {
+    return { prefix: '', accumulator: null, suffix: '' };
+  }
+  const accumulator = firstIdentifier.identifier;
+  const accumulatorIndex = parts.findIndex((part) => 'identifier' in part);
+  const prefix = parts.slice(0, accumulatorIndex).map((part) => ('literal' in part ? part.literal : '')).join('');
+  const suffix = parts.slice(accumulatorIndex + 1).map((part) => ('literal' in part ? part.literal : '')).join('');
+  return { prefix, accumulator, suffix };
+}
+
+/** 累加变量的初始值（`let jsa = 973;`） */
+function extractInitialValue(scriptText: string, accumulator: string): number | null {
+  const escaped = accumulator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = scriptText.match(new RegExp(String.raw`(?:let|var|const)\s+${escaped}\s*=\s*(\d+)\b`));
+  return match?.[1] ? Number(match[1]) : null;
+}
+
+type ChallengeHelper =
+  | { kind: 'multiply'; factor: number }
+  | { kind: 'addConstant'; delta: number }
+  | { kind: 'addLength'; length: number }
+  | { kind: 'unknown' };
+
+/** HTML5 规范解析后的 innerHTML 长度（与浏览器一致：cheerio 会补全缺失的闭合标签） */
+function serializedFragmentLength(fragment: string): number {
+  const $ = cheerio.load(`<div>${fragment}</div>`, null, false);
+  return ($('div').first().html() || '').length;
+}
+
+/** 提取挑战脚本里 `let NAME = function(num){...}` 形式的 helper 及其语义 */
+function extractChallengeHelpers(scriptText: string): Map<string, ChallengeHelper> {
+  const helpers = new Map<string, ChallengeHelper>();
+  const definitionRe = /(?:let|var|const)\s+([A-Za-z_$][\w$]*)\s*=\s*function\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\{([\s\S]*?)\};/g;
+  let match: RegExpExecArray | null;
+  while ((match = definitionRe.exec(scriptText)) !== null) {
+    const [, name, param, body] = match;
+    if (!name || !param || !body) {
+      continue;
+    }
+
+    const multiply = body.match(new RegExp(String.raw`return\s+${param}\s*\*\s*(\d+)`));
+    if (multiply?.[1]) {
+      helpers.set(name, { kind: 'multiply', factor: Number(multiply[1]) });
+      continue;
+    }
+    const addConstant = body.match(new RegExp(String.raw`return\s+${param}\s*\+\s*(\d+)`));
+    if (addConstant?.[1]) {
+      helpers.set(name, { kind: 'addConstant', delta: Number(addConstant[1]) });
+      continue;
+    }
+
+    // 「把片段写进 innerHTML 后 return num + el.innerHTML.length」——片段的规范化长度即增量
+    const mutableFragment = body.match(/innerHTML\s*=\s*([`'"])([\s\S]*?)\1/);
+    const addsLength = new RegExp(String.raw`return\s+${param}\s*\+\s*[A-Za-z_$][\w$]*\s*\.\s*innerHTML\s*\.\s*length`).test(body);
+    if (mutableFragment?.[2] !== undefined && addsLength && !mutableFragment[2].includes('${')) {
+      helpers.set(name, { kind: 'addLength', length: serializedFragmentLength(mutableFragment[2]) });
+      continue;
+    }
+
+    helpers.set(name, { kind: 'unknown' });
+  }
+  return helpers;
+}
+
+/** 按脚本里出现的顺序抽取 `acc = helper(acc)` / `acc = acc * K` / `acc = K + acc` 等单位运算链 */
+function extractOperationChain(
+  scriptText: string,
+  accumulator: string,
+  helpers: Map<string, ChallengeHelper>
+): Array<(value: number) => number> | null {
+  if (!helpers.size) {
+    return [];
+  }
+  const escaped = accumulator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const statementRe = new RegExp(
+    [
+      String.raw`\b${escaped}\s*=\s*([A-Za-z_$][\w$]*)\s*\(\s*${escaped}\s*\)`,
+      String.raw`\b${escaped}\s*=\s*${escaped}\s*([*+])\s*(\d+)`,
+      String.raw`\b${escaped}\s*=\s*(\d+)\s*([*+])\s*${escaped}`
+    ].join('|'),
+    'g'
+  );
+
+  const operations: Array<(value: number) => number> = [];
+  let match: RegExpExecArray | null;
+  while ((match = statementRe.exec(scriptText)) !== null) {
+    const [, helperName, rightOperator, rightOperand, leftOperand, leftOperator] = match;
+    if (helperName) {
+      const helper = helpers.get(helperName);
+      if (!helper || helper.kind === 'unknown') {
+        return null;
+      }
+      if (helper.kind === 'multiply') {
+        const factor = helper.factor;
+        operations.push((value) => value * factor);
+      } else if (helper.kind === 'addConstant') {
+        const delta = helper.delta;
+        operations.push((value) => value + delta);
+      } else {
+        const length = helper.length;
+        operations.push((value) => value + length);
+      }
+      continue;
+    }
+    const operator = rightOperator ?? leftOperator;
+    const operand = Number(rightOperand ?? leftOperand);
+    if (!operator || !Number.isFinite(operand)) {
+      return null;
+    }
+    operations.push((value) => (operator === '*' ? value * operand : value + operand));
+  }
+  return operations;
+}
+
+/**
+ * 求解 DuckDuckGo links.duckduckgo.com/d.js 的 `window.execDeep`（`isJsaChallenge`）挑战。
+ *
+ * **静态解析，不执行远端脚本（无 eval、无 node:vm）**。挑战脚本的形状固定为三部分：
+ *   ① 累加变量（`let jsa = 973;`）；
+ *   ② 若干纯函数 helper——要么 `return num * K`，要么「把 HTML 片段写进 el.innerHTML、
+ *      再 `return num + el.innerHTML.length`」；
+ *   ③ 一串 `jsa = helper(jsa)`，最后 `DDG.deep.initialize('/d.js?…&jsa_hash=…&jsa=' + jsa, false)`。
+ * 片段长度用 cheerio（HTML5 规范解析，实测与浏览器/jsdom 逐字节一致）算出，运算链由本文件的小解释器执行。
+ *
+ * 为什么不 eval：此前是 `vm.runInNewContext(scriptText, sandbox)`，而 sandbox 里传的是宿主对象/宿主函数，
+ * 脚本可经 `window.constructor.constructor('return process')()` 爬回宿主 realm 执行任意代码
+ * （2026-09-26 实测确认，500ms 超时拦不住）。静态解析不执行任何远端代码；形状不匹配就返回 null，
+ * 外层按"挑战未破"优雅失败（不重试、交给级联）。
  */
 export function solveDuckDuckGoJsaChallenge(scriptText: string): string | null {
   if (!scriptText || !scriptText.includes('isJsaChallenge') || !scriptText.includes('window.execDeep')) {
@@ -33,43 +219,30 @@ export function solveDuckDuckGoJsaChallenge(scriptText: string): string | null {
   }
 
   try {
-    let initializedPath: string | null = null;
-    const sandbox = {
-      window: {} as Record<string, unknown>,
-      document: {
-        createElement() {
-          let serializedHtml = '';
-          return {
-            set innerHTML(val: unknown) {
-              const $ = cheerio.load(`<div>${String(val ?? '')}</div>`, null, false);
-              serializedHtml = $('div').first().html() || '';
-            },
-            get innerHTML() {
-              return serializedHtml;
-            }
-          };
-        }
-      },
-      DDG: {
-        deep: {
-          initialize(path: unknown) {
-            if (typeof path === 'string') {
-              initializedPath = path;
-            }
-          }
-        }
-      }
-    };
-
-    vm.runInNewContext(`${scriptText}\nif (typeof window.execDeep === 'function') { window.execDeep(); }`, sandbox, {
-      timeout: 500
-    });
-
-    if (!initializedPath) {
+    const expression = extractInitializeExpression(scriptText);
+    if (!expression) {
+      return null;
+    }
+    const { prefix, accumulator, suffix } = splitInitializeExpression(expression);
+    if (!accumulator) {
+      return null;
+    }
+    const initialValue = extractInitialValue(scriptText, accumulator);
+    if (initialValue === null) {
+      return null;
+    }
+    const helpers = extractChallengeHelpers(scriptText);
+    const operations = extractOperationChain(scriptText, accumulator, helpers);
+    if (!operations || operations.length === 0) {
       return null;
     }
 
-    const resolvedUrl = new URL(initializedPath, 'https://links.duckduckgo.com').toString();
+    let value = initialValue;
+    for (const operation of operations) {
+      value = operation(value);
+    }
+
+    const resolvedUrl = new URL(`${prefix}${value}${suffix}`, 'https://links.duckduckgo.com').toString();
     if (!isTrustedDuckDuckGoPreloadUrl(resolvedUrl) || resolvedUrl.includes('&jsa=-1')) {
       return null;
     }
@@ -329,6 +502,10 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
             if (newDp) {
               preloadUrlObj.searchParams.set('dp', newDp);
             }
+          } else if (rawScript.includes('isJsaChallenge')) {
+            // 静态解析失败（上游改了挑战脚本形状）→ 显式报错，不要静默返回 0 结果。
+            // 文案匹配既有豁免模式 "DuckDuckGo returned a challenge page"，且按反爬类不可重试处理
+            throw new Error('DuckDuckGo returned a challenge page (jsa challenge could not be solved statically)');
           }
         }
 

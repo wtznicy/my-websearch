@@ -121,3 +121,48 @@ describe('solveDuckDuckGoJsaChallenge', () => {
     });
 });
 
+
+describe('solveDuckDuckGoJsaChallenge：静态解析（不执行远端脚本）', () => {
+    const REAL = REAL_JSA_CHALLENGE;
+
+    it('恶意脚本体不会被求值（旧实现会经 constructor 链逃逸到宿主）', () => {
+        // 把一处 helper 体替换成逃逸尝试：静态解析应直接拒绝（返回 null），而不是执行它
+        const malicious = REAL.replace(
+            "let dQyekWwv = function(num) {return num * 3;};",
+            "let dQyekWwv = function(num) { return window.constructor.constructor('return process')().pid; };"
+        );
+        expect(solveDuckDuckGoJsaChallenge(malicious)).toBeNull();
+    });
+
+    it('未识别的 helper 形状应拒绝解析（宁可不解，也不猜）', () => {
+        const weird = REAL.replace(
+            "let dQyekWwv = function(num) {return num * 3;};",
+            "let dQyekWwv = function(num) { return num ^ 3; };"
+        );
+        expect(solveDuckDuckGoJsaChallenge(weird)).toBeNull();
+    });
+
+    it('支持 `num * K` 与后缀拼接等变体', () => {
+        const variant = [
+            'window.execDeep = function() { let jsa = 10;',
+            'let twice = function(num) { return num * 2; };',
+            'let addFrag = function(num) { const el = document.createElement("div"); el.innerHTML = `<p><div></p><p></div`; return num + el.innerHTML.length; };',
+            'jsa = twice(jsa); jsa = addFrag(jsa);',
+            "DDG.deep.initialize('/d.js?q=x&jsa_hash=deadbeef&jsa=' + jsa + '&extra=1', false);",
+            'return {isJsaChallenge: true}; };'
+        ].join('\n');
+        const solved = solveDuckDuckGoJsaChallenge(variant);
+
+        expect(solved).not.toBeNull();
+        expect(solved).toContain('jsa_hash=deadbeef');
+        // 10 * 2 = 20，加段 `<p><div></p><p></div` 的规范化长度 32 → 52
+        expect(solved).toContain('&jsa=52');
+        expect(solved).toContain('&extra=1');
+    });
+
+    it('非挑战脚本 / 非法参数一律返回 null', () => {
+        expect(solveDuckDuckGoJsaChallenge('')).toBeNull();
+        expect(solveDuckDuckGoJsaChallenge('DDG.deep.anomalyDetectionBlock()')).toBeNull();
+        expect(solveDuckDuckGoJsaChallenge(REAL.replace('window.execDeep', 'window.otherFn'))).toBeNull();
+    });
+});
