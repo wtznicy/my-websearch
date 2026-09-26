@@ -61,6 +61,9 @@ if (process.argv.includes('--list')) {
 const networkFailurePatterns = [
     /\b(EAI_AGAIN|ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ESOCKETTIMEDOUT|ENETUNREACH|EHOSTUNREACH|ECONNABORTED)\b/i,
     /\b(socket hang up|network timeout|network error|fetch failed|ERR_NETWORK)\b/i,
+    // 上游在 TLS 握手阶段直接断开（实测 CSDN 风控期会 RST：同一时刻裸 curl 也复现）——环境性，
+    // 但文案不含上面任何关键词，必须单独精确匹配
+    /Client network socket disconnected before secure TLS connection was established/i,
     // axios 超时格式（"timeout of 30000ms exceeded"）——并行全量测试下偶发
     /timeout of \d+ms exceeded/i,
     // 海外引擎直连探测失败（无代理不可达）：确定性网络环境错误，与错误码模式等效
