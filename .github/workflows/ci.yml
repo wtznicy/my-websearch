@@ -24,6 +24,9 @@ jobs:
 
       - run: npm run typecheck:strict
 
+      # any 增量卡点（ratchet）：新文件禁止引入 any，历史文件的 any 总量受 --max-warnings 封顶
+      - run: npm run lint
+
       - run: npm run build
 
       - run: npm run test:vitest

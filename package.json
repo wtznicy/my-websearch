@@ -47,6 +47,8 @@
     "test:both": "node -e \"process.env.MODE='both'; import('./build/index.js')\"",
     "test": "tsc && node build/tools/runCurrentTests.js",
     "test:vitest": "vitest run",
+    "lint": "eslint src --max-warnings 178",
+    "lint:fix": "eslint src --fix",
     "test:list": "tsc && node build/tools/runCurrentTests.js --list",
     "test:bing-parser": "tsc && node build/test/test-bing-parser.js",
     "test:cli": "tsc && node build/test/test-cli-search.js",
@@ -90,13 +92,15 @@
     "@types/jsdom": "^21.1.7",
     "@types/node": "^20.17.10",
     "@types/turndown": "^5.0.6",
+    "eslint": "^10.11.0",
     "typescript": "^5.3.3",
+    "typescript-eslint": "^8.70.1",
     "vitest": "^4.1.10"
   },
   "optionalDependencies": {
-    "wreq-js": "^3.2.0",
     "jsdom": "^26.1.0",
     "koffi": "^2.16.0",
-    "playwright-core": "^1.62.1"
+    "playwright-core": "^1.62.1",
+    "wreq-js": "^3.2.0"
   }
 }
