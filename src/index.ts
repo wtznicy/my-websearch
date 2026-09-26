@@ -28,12 +28,15 @@ type StreamableSession = {
   server: McpServer;
   transport: StreamableHTTPServerTransport;
   closed: boolean;
+  /** 最后活跃时间（毫秒）：客户端异常断开时也能被 reaper 回收 */
+  lastActiveAt?: number;
 };
 
 type SseSession = {
   server: McpServer;
   transport: SSEServerTransport;
   closed: boolean;
+  lastActiveAt?: number;
 };
 
 function createServer(runtime: MyWebSearchRuntime): McpServer {
@@ -125,6 +128,71 @@ async function main() {
       sse: {} as Record<string, SseSession>
     };
 
+    // 会话卫生：客户端异常断开（未触发 onclose）时条目会永久滞留，
+    // 因此给每个会话记录最后活跃时间，由 reaper 回收空闲会话，并对总量设上限。
+    // 之前这里是无上限、无 TTL 的裸对象（测评报告 P1-11）。
+    // 三个参数可用环境变量覆盖（默认 30 分钟空闲 / 上限 100 / 每 5 分钟巡检），便于测试与调优。
+    const SESSION_IDLE_TTL_MS = Number(process.env.MCP_SESSION_TTL_MS || 30 * 60 * 1000);
+    const MAX_SESSIONS = Number(process.env.MCP_MAX_SESSIONS || 100);
+    const SESSION_REAPER_INTERVAL_MS = Number(process.env.MCP_SESSION_REAPER_MS || 5 * 60 * 1000);
+    const touchSession = (req: any) => {
+      const sessionId = req.headers?.['mcp-session-id'] as string | undefined;
+      const session = sessionId ? transports.streamable[sessionId] : undefined;
+      if (session) {
+        session.lastActiveAt = Date.now();
+      }
+    };
+    app.use((req, _res, next) => {
+      touchSession(req);
+      next();
+    });
+
+    const closeSession = (kind: 'streamable' | 'sse', id: string) => {
+      const session = (kind === 'streamable' ? transports.streamable : transports.sse)[id];
+      if (!session) {
+        return;
+      }
+      try {
+        void session.transport.close?.();
+      } catch (error) {
+        console.error(`❌ Failed to close ${kind} session ${id}:`, error);
+      }
+      if (kind === 'streamable') {
+        delete transports.streamable[id];
+      } else {
+        delete transports.sse[id];
+      }
+    };
+
+    const sessionReaper = setInterval(() => {
+      const now = Date.now();
+      for (const [id, session] of Object.entries(transports.streamable)) {
+        if (now - (session.lastActiveAt ?? now) > SESSION_IDLE_TTL_MS) {
+          console.error(`🧹 Closing idle streamable session ${id}`);
+          closeSession('streamable', id);
+        }
+      }
+      for (const [id, session] of Object.entries(transports.sse)) {
+        if (now - (session.lastActiveAt ?? now) > SESSION_IDLE_TTL_MS) {
+          console.error(`🧹 Closing idle SSE session ${id}`);
+          closeSession('sse', id);
+        }
+      }
+
+      // 超量时按最后活跃时间从旧到新回收
+      const streamableIds = Object.keys(transports.streamable);
+      if (streamableIds.length > MAX_SESSIONS) {
+        streamableIds
+          .sort((a, b) => (transports.streamable[a].lastActiveAt ?? 0) - (transports.streamable[b].lastActiveAt ?? 0))
+          .slice(0, streamableIds.length - MAX_SESSIONS)
+          .forEach((id) => closeSession('streamable', id));
+      }
+    }, SESSION_REAPER_INTERVAL_MS);
+    // 不让 reaper 拖住进程退出（否则 CLI 一次性命令会挂住）
+    if (typeof sessionReaper.unref === 'function') {
+      sessionReaper.unref();
+    }
+
     // Handle POST requests for client-to-server communication
     app.post('/mcp', async (req, res) => {
       // Check for existing session ID
@@ -150,6 +218,8 @@ async function main() {
         session.server = server;
         session.transport = transport;
         session.closed = false;
+        // 创建即计时：否则从未带上 session 头的会话（如只做过 initialize）不会被 reaper 回收
+        session.lastActiveAt = Date.now();
 
         // Clean up transport when closed
         transport.onclose = () => {
@@ -220,7 +290,8 @@ async function main() {
       const session: SseSession = {
         server,
         transport,
-        closed: false
+        closed: false,
+        lastActiveAt: Date.now()
       };
 
       transports.sse[transport.sessionId] = session;
@@ -271,9 +342,30 @@ async function main() {
     // 如需局域网/公网访问，设置 OPEN_WEBSEARCH_HOST=0.0.0.0 显式放开。
     const HOST = process.env.OPEN_WEBSEARCH_HOST || '127.0.0.1';
 
-    app.listen(PORT, HOST, () => {
+    const httpServer = app.listen(PORT, HOST, () => {
       console.error(`✅ HTTP server running on ${HOST}:${PORT}`)
     });
+
+    // MCP 路径此前完全没有信号处理（测评报告 P1-11）：SIGINT/SIGTERM 时不关会话、不关
+    // HTTP server，会话条目与浏览器会话可能残留。这里做最小优雅关闭。
+    const shutdown = (signal: string) => {
+      console.error(`👋 Received ${signal}: closing MCP sessions and HTTP server...`);
+      for (const id of Object.keys(transports.streamable)) {
+        closeSession('streamable', id);
+      }
+      for (const id of Object.keys(transports.sse)) {
+        closeSession('sse', id);
+      }
+      clearInterval(sessionReaper);
+      httpServer.close(() => process.exit(0));
+      // 长连接可能让 close 回调迟迟不来，留一个兜底强制退出
+      const force = setTimeout(() => process.exit(0), 1500);
+      if (typeof force.unref === 'function') {
+        force.unref();
+      }
+    };
+    process.once('SIGINT', () => shutdown('SIGINT'));
+    process.once('SIGTERM', () => shutdown('SIGTERM'));
   } else {
     console.error('ℹ️ HTTP server disabled, running in STDIO mode only')
   }
