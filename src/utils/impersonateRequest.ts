@@ -31,6 +31,21 @@ export async function getOrCreateWreqSession(engine: string): Promise<WreqSessio
     return sessionPromise;
 }
 
+/**
+ * 销毁并重置指定引擎的会话（当遇到网络层断开、TLS RST 或会话损坏时调用）
+ */
+export function invalidateWreqSession(engine: string): void {
+    const sessionPromise = engineSessions.get(engine);
+    engineSessions.delete(engine);
+    if (sessionPromise) {
+        sessionPromise.then((session) => {
+            if (session) {
+                session.close().catch(() => undefined);
+            }
+        }).catch(() => undefined);
+    }
+}
+
 export type ImpersonateHttpOptions = {
     redirect?: 'manual' | 'follow';
     failOnHttpError?: boolean;

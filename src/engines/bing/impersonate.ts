@@ -119,17 +119,51 @@ export async function loadWreqModule(): Promise<WreqModule | null> {
 
 export type { WreqSession, WreqResponse };
 
+let cachedBingSession: WreqSession | null = null;
+let bingSessionPromise: Promise<WreqSession | null> | null = null;
+
+async function getOrCreateBingSession(): Promise<WreqSession | null> {
+    if (cachedBingSession) {
+        return cachedBingSession;
+    }
+    if (bingSessionPromise) {
+        return bingSessionPromise;
+    }
+    bingSessionPromise = (async () => {
+        const mod = await loadWreqModule();
+        if (!mod) {
+            return null;
+        }
+        try {
+            cachedBingSession = await createWreqSession(mod as unknown as WreqModule, 'bing');
+            return cachedBingSession;
+        } catch (error) {
+            console.warn('Bing wreq session creation failed:', error instanceof Error ? error.message : String(error));
+            return null;
+        } finally {
+            bingSessionPromise = null;
+        }
+    })();
+    return bingSessionPromise;
+}
+
+export function invalidateBingSession(): void {
+    if (cachedBingSession) {
+        cachedBingSession.close().catch(() => undefined);
+        cachedBingSession = null;
+    }
+}
+
 /**
  * 用 wreq-js（Chrome TLS/HTTP2 指纹）执行 Bing 搜索。
- * 分页抓取与 axios 路径一致；页面被反爬拦截时抛错，由调用方决定回退。
+ * 进程级复用会话以复用 TLS 与 HTTP/2 连接，避免重复握手；页面被反爬拦截时抛错，由调用方决定回退。
  */
 export async function searchBingWithImpersonate(query: string, limit: number): Promise<EngineSearchResponse> {
-    const mod = await loadWreqModule();
-    if (!mod) {
+    const session = await getOrCreateBingSession();
+    if (!session) {
         throw new Error('wreq-js is not available');
     }
 
-    const session = await createWreqSession(mod as unknown as WreqModule, 'bing');
     try {
         let allResults: SearchResult[] = [];
         let directAnswer: string | undefined;
@@ -162,7 +196,10 @@ export async function searchBingWithImpersonate(query: string, limit: number): P
             finalResults.directAnswer = directAnswer;
         }
         return finalResults;
-    } finally {
-        await session.close().catch(() => undefined);
+    } catch (error) {
+        if (error instanceof Error && /socket|tls|econnreset|pipe|closed|reset/i.test(error.message)) {
+            invalidateBingSession();
+        }
+        throw error;
     }
 }

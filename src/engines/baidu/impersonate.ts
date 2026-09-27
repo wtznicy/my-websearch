@@ -1,6 +1,7 @@
 import { config } from '../../config.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { createWreqSession, loadWreqModule } from '../bing/impersonate.js';
+import type { WreqSession } from '../bing/impersonate.js';
 export { isImpersonateAvailable } from '../bing/impersonate.js';
 import { isBaiduAntiBotPage, parseBaiduResultsPage } from './parser.js';
 import { loadPersistedBaiduCookies, savePersistedBaiduCookies, WreqCookie } from '../../utils/cookieStore.js';
@@ -49,31 +50,69 @@ function restoreCookies(session: { setCookie(name: string, value: string, url: s
     return failures.length;
 }
 
+let cachedBaiduSession: WreqSession | null = null;
+let baiduSessionPromise: Promise<WreqSession | null> | null = null;
+let baiduSessionWarmedUp = false;
+
+async function getOrCreateBaiduSession(): Promise<WreqSession | null> {
+    if (cachedBaiduSession) {
+        return cachedBaiduSession;
+    }
+    if (baiduSessionPromise) {
+        return baiduSessionPromise;
+    }
+    baiduSessionPromise = (async () => {
+        const mod = await loadWreqModule();
+        if (!mod) {
+            return null;
+        }
+        try {
+            cachedBaiduSession = await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0], 'baidu');
+            return cachedBaiduSession;
+        } catch (error) {
+            console.warn('Baidu wreq session creation failed:', error instanceof Error ? error.message : String(error));
+            return null;
+        } finally {
+            baiduSessionPromise = null;
+        }
+    })();
+    return baiduSessionPromise;
+}
+
+export function invalidateBaiduSession(): void {
+    if (cachedBaiduSession) {
+        cachedBaiduSession.close().catch(() => undefined);
+        cachedBaiduSession = null;
+    }
+    baiduSessionWarmedUp = false;
+}
+
 /**
  * 用 wreq-js（Chrome TLS/HTTP2 指纹 + 会话 cookie）执行百度搜索。
- * 分页抓取与 axios 路径一致；页面被反爬拦截时抛错，由调用方决定回退。
+ * 进程级复用会话以复用 TLS 连接与在内存 cookie，避免重复握手与多余首页预热。
  */
 export async function searchBaiduWithImpersonate(query: string, limit: number): Promise<EngineSearchResponse> {
-    const mod = await loadWreqModule();
-    if (!mod) {
+    const session = await getOrCreateBaiduSession();
+    if (!session) {
         throw new Error('wreq-js is not available');
     }
 
-    const session = await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0], 'baidu');
     try {
-        // 会话 cookie：优先复用磁盘持久化的长期项（BAIDUID/BIDUPSID，省一次首页预热往返）；
-        // 无持久化/已过期/**注入后会话里仍没有 BAIDUID** 时都走首页预热
-        const persistedCookies = await loadPersistedBaiduCookies();
-        if (persistedCookies && persistedCookies.length > 0) {
-            restoreCookies(session, persistedCookies);
-        }
-        if (!hasBaiduSessionCookie(session.getAllCookies())) {
-            try {
-                await session.fetch(BAIDU_HOME_URL, { timeout: 15000 });
-                await savePersistedBaiduCookies(session.getAllCookies());
-            } catch (error) {
-                console.warn('Baidu impersonate home page request failed, continuing with search:', error instanceof Error ? error.message : String(error));
+        // 会话 cookie：优先复用会话内现存 cookie；若尚未预热或缺少 BAIDUID 时才从持久化读取或首页预热
+        if (!baiduSessionWarmedUp || !hasBaiduSessionCookie(session.getAllCookies())) {
+            const persistedCookies = await loadPersistedBaiduCookies();
+            if (persistedCookies && persistedCookies.length > 0) {
+                restoreCookies(session, persistedCookies);
             }
+            if (!hasBaiduSessionCookie(session.getAllCookies())) {
+                try {
+                    await session.fetch(BAIDU_HOME_URL, { timeout: 15000 });
+                    await savePersistedBaiduCookies(session.getAllCookies());
+                } catch (error) {
+                    console.warn('Baidu impersonate home page request failed, continuing with search:', error instanceof Error ? error.message : String(error));
+                }
+            }
+            baiduSessionWarmedUp = true;
         }
 
         const allResults: SearchResult[] = [];
@@ -111,7 +150,10 @@ export async function searchBaiduWithImpersonate(query: string, limit: number): 
             await savePersistedBaiduCookies(session.getAllCookies());
         }
         return finalResults;
-    } finally {
-        await session.close().catch(() => undefined);
+    } catch (error) {
+        if (error instanceof Error && /socket|tls|econnreset|pipe|closed|reset/i.test(error.message)) {
+            invalidateBaiduSession();
+        }
+        throw error;
     }
 }

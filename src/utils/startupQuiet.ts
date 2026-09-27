@@ -1,11 +1,12 @@
 /**
- * 启动日志静默前置模块。
+ * 启动日志静默前置模块与 libuv 线程池初始化。
  *
- * 必须在 build/index.js 的【第一个 import】位置加载：index.js 的静态依赖链
- * （playwrightClient → config 等）会在 main() 执行前就求值 config.js 并打印
- * 启动配置日志，那时再设置 env 已经太晚。ESM 按 import 声明顺序深度优先求值，
- * 因此本模块先于所有其他依赖执行，可以提前把 OPEN_WEBSEARCH_QUIET_STARTUP 设好。
+ * 必须在 build/index.js 的【第一个 import】位置加载：
+ * 1. 在静态依赖链求值前决定是否静默启动日志；
+ * 2. 在任何 C++ 异步 binding 初始化 libuv 线程池前扩容 UV_THREADPOOL_SIZE（默认仅 4），
+ *    防止并发 DNS 查询与文件 I/O 耗尽线程池。
  */
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '16';
 const argv = process.argv.slice(2);
 const [command] = argv;
 const isQuietInvocation =

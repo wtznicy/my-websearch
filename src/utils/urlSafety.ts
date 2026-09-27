@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 import ipaddr from 'ipaddr.js';
 import { config } from '../config.js';
 import { metrics } from '../core/metrics.js';
+import { cachedDnsLookup } from './dnsCache.js';
 
 /** SSRF 拦截审计（需 SECURITY_AUDIT=true）：此前 ssrf_blocked 事件类型零埋点 */
 function reportBlocked(targetUrl: string | URL, reason: string): void {
@@ -22,9 +23,25 @@ function stripIpv6Brackets(host: string): string {
 type LookupResult = Array<{ address: string }>;
 type DnsLookupFn = (hostname: string) => Promise<LookupResult>;
 
-let dnsLookupForSafety: DnsLookupFn = async (hostname) => {
-    return dns.lookup(hostname, { all: true, verbatim: true });
+const defaultDnsLookupForSafety: DnsLookupFn = (hostname) => {
+    return new Promise<LookupResult>((resolve, reject) => {
+        cachedDnsLookup(hostname, { all: true }, (err, address) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+            if (Array.isArray(address)) {
+                resolve(address.map((item) => ({ address: typeof item === 'string' ? item : item.address })));
+            } else if (address) {
+                resolve([{ address: typeof address === 'string' ? address : (address as { address: string }).address }]);
+            } else {
+                resolve([]);
+            }
+        });
+    });
 };
+
+let dnsLookupForSafety: DnsLookupFn = defaultDnsLookupForSafety;
 
 /** 常见 fake-IP 网段（代理伪造）：命中但未被 fakeIpCidrs 覆盖时，错误信息里给出配置提示 */
 const COMMON_FAKE_IP_HINTS: Array<{ cidr: string; example: string }> = [
@@ -74,7 +91,7 @@ function isAllowedFakeIp(address: string): boolean {
 }
 
 export function __setDnsLookupForTests(lookup?: DnsLookupFn): void {
-    dnsLookupForSafety = lookup ?? (async (hostname) => dns.lookup(hostname, { all: true, verbatim: true }));
+    dnsLookupForSafety = lookup ?? defaultDnsLookupForSafety;
 }
 
 export function isPrivateOrLocalHostname(hostname: string): boolean {

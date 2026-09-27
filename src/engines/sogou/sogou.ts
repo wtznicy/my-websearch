@@ -203,9 +203,10 @@ async function fetchSogouHtml(initialUrl: string): Promise<string> {
     throw new Error('Sogou returned too many redirects');
 }
 
-/** 请求搜狗移动端结果页（独立于 PC 端路径：移动端风控宽松，不需要指纹） */
-async function fetchSogouMobileHtml(query: string): Promise<string> {
-    const url = `${SOGOU_MOBILE_URL}?keyword=${encodeURIComponent(query)}`;
+/** 请求搜狗移动端结果页（独立于 PC 端路径：移动端风控宽松，不需要指纹，明文 URL 免跳转） */
+async function fetchSogouMobileHtml(query: string, page: number = 1): Promise<string> {
+    const pageParam = page > 1 ? `&p=${page}` : '';
+    const url = `${SOGOU_MOBILE_URL}?keyword=${encodeURIComponent(query)}${pageParam}`;
     const response = await sogouHttpGet(url, buildAxiosRequestOptions({ engine: 'sogou',
         trustedStaticHost: true,
         headers: {
@@ -391,12 +392,9 @@ const SOGOU_PC_BLOCK_TTL_MS = 10 * 60 * 1000;
 let sogouPcBlockedUntil = 0;
 
 /**
- * 双端策略（实测数据驱动）：
- * - 两端共享同一索引，但 **PC 端更全**（同 query 实测 9 条 vs 移动端 6 条，
- *   移动端基本是 PC 端的子集 + 少量独有结果）；
- * - 因此 **PC 端优先**（含分页补全），仅在 PC 被反爬拦截时用**移动端兜底**
- *   （WAP 集群风控宽松，被标记 IP 下通常是唯一可用路径，且明文链接免跳转解析）；
- * - PC 端被拦后记住 10 分钟，期间跳过 PC 端直接走移动端（省掉每次 ~4s 的失败开销）。
+ * 双端策略（移动端优先 + PC 端兜底）：
+ * - 移动端（WAP 集群）：风控宽松、响应快（~1.5s）、自带明文真实目标 URL（无需跟随 PC 端跳转链消耗 2~3s）。
+ * - 移动端优先抓取并支持分页；仅在移动端结果不足或遇到异常时，才调用 PC 端补充/兜底。
  */
 export async function searchSogou(query: string, limit: number): Promise<SearchResult[]> {
     const allResults: SearchResult[] = [];
@@ -417,45 +415,47 @@ export async function searchSogou(query: string, limit: number): Promise<SearchR
 
     let lastError: unknown;
 
-    // ① PC 端优先（结果更全）
-    if (Date.now() >= sogouPcBlockedUntil) {
-        let pcFailed = false;
-        const pageResults = await paginateSearch({
+    // ① 移动端优先：明文真实链接，无需跳转链解析，响应时间由 ~7s 降至 ~1.5s
+    try {
+        const mobileResults = await paginateSearch({
             limit,
             initialPage: 1,
             pageStep: 1,
             fetchPage: async (page) => {
-                if (pcFailed) return [];
-                try {
-                    return await searchSogouPage(query, page);
-                } catch (error) {
-                    lastError = error;
-                    pcFailed = true;
-                    const message = error instanceof Error ? error.message : String(error);
-                    // 反爬/403 类拦截：进入暂停期，本次转移动端兜底
-                    if (/anti-bot|verification|challenge|403|访问过于频繁|验证码/i.test(message)) {
-                        sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
-                    }
-                    console.warn('Sogou PC endpoint failed, falling back to mobile:', message);
-                    return [];
-                }
+                const html = await fetchSogouMobileHtml(query, page);
+                return parseSogouMobileResults(html);
             },
             dedupKey: (result) => result.url
         });
-        merge(pageResults);
+        if (mobileResults.length > 0) {
+            merge(mobileResults);
+        }
+    } catch (error) {
+        lastError = error;
+        console.warn('Sogou mobile endpoint failed, will attempt PC fallback:', error instanceof Error ? error.message : String(error));
     }
 
-    // ② 移动端兜底（PC 被拦时的主要来源；也用于补足 PC 端未达 limit 的部分）
-    if (allResults.length < limit) {
+    // ② PC 端兜底与补全（仅在移动端结果未满足 limit 且 PC 端未处于拦截暂停期时调用）
+    if (allResults.length < limit && Date.now() >= sogouPcBlockedUntil) {
         try {
-            const mobileResults = await fetchSogouMobileHtml(query).then(parseSogouMobileResults);
-            if (mobileResults.length > 0) {
-                merge(mobileResults);
-                console.error(`✅ Sogou mobile endpoint: ${mobileResults.length} results (fallback)`);
-            }
+            const needed = limit - allResults.length;
+            const pcResults = await paginateSearch({
+                limit: needed,
+                initialPage: 1,
+                pageStep: 1,
+                fetchPage: async (page) => {
+                    return await searchSogouPage(query, page);
+                },
+                dedupKey: (result) => result.url
+            });
+            merge(pcResults);
         } catch (error) {
             lastError = lastError ?? error;
-            console.warn('Sogou mobile endpoint failed:', error instanceof Error ? error.message : String(error));
+            const message = error instanceof Error ? error.message : String(error);
+            if (/anti-bot|verification|challenge|403|访问过于频繁|验证码/i.test(message)) {
+                sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
+            }
+            console.warn('Sogou PC endpoint failed:', message);
         }
     }
 

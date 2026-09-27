@@ -106,10 +106,6 @@ export async function executePrimaryEngines(
             return [];
         }
 
-        if (index > 0) {
-            await sleep(index * 50 + Math.random() * 30);
-        }
-
         let lastError: unknown;
         for (let attempt = 0; attempt < 3; attempt += 1) {
             try {

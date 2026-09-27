@@ -6,7 +6,6 @@ import { parseBingSearchResults } from './parser.js';
 import { prepareStealthPage } from '../../utils/browserStealth.js';
 import { isImpersonateAvailable, searchBingWithImpersonate } from './impersonate.js';
 import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
-import { sleep } from '../../utils/timing.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 // 默认面向大陆部署用 cn.bing.com；可通过 OPEN_WEBSEARCH_BING_HOST 覆盖为 www.bing.com 等获取国际区结果
@@ -541,10 +540,6 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
     let pageNumber = 0;
 
     while (allResults.length < limit) {
-        // 模拟人类搜索间隔（300-1200ms），降低被反爬识别的概率
-        const delay = Math.random() * 900 + 300;
-        await sleep(delay);
-
         const response = await axios.get(buildBingSearchUrl(query, pageNumber), buildBingAxiosRequestOptions());
         const html = String(response.data || '');
         // 每页只 cheerio.load 一次，analyzeBlockedPage 与正式提取共用同一文档实例
