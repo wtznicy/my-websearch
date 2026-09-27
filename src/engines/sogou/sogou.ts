@@ -6,8 +6,10 @@ import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { normalizeText } from '../../utils/text.js';
 import { sleep } from '../../utils/timing.js';
 import { mapWithConcurrencyBudget } from '../../utils/concurrency.js';
-import { createWreqSession, loadWreqModule, WreqSession } from '../bing/impersonate.js';
-import { toAxiosLikeResponse } from '../../utils/wreqRequest.js';
+import { impersonateHttpGet } from '../../utils/impersonateRequest.js';
+import { paginateSearch } from '../../utils/pagination.js';
+import { markNonRetryable } from '../../core/errors.js';
+import { extractMetaOrJsRedirect } from '../../utils/redirectResolver.js';
 
 const SOGOU_SEARCH_URL = 'https://www.sogou.com/web';
 const SOGOU_PAGE_SIZE = 10;
@@ -19,11 +21,13 @@ const SOGOU_LINK_RESOLVE_CONCURRENCY = 4;
 /** 搜狗移动端接口（WAP 集群）：风控规则远宽松于 PC 端——实测同一被标记的代理 IP 上
  *  PC 端 100% 验证码拦截，移动端 200 且返回明文链接（a.resultLink 的 url= 参数），
  *  无需再做跳转链解析（PC 端每条结果一次跳转跟随的 2~3s 开销归零）。 */
+import { DEFAULT_DESKTOP_UA, MOBILE_ANDROID_UA } from '../../utils/userAgents.js';
+
 const SOGOU_MOBILE_URL = 'https://m.sogou.com/web/searchList.jsp';
-const SOGOU_MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+const SOGOU_MOBILE_UA = MOBILE_ANDROID_UA;
 
 const COMMON_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+    'User-Agent': DEFAULT_DESKTOP_UA,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     'Referer': 'https://www.sogou.com/'
@@ -37,47 +41,8 @@ type SogouHttpGet = (url: string, options: AxiosRequestConfig) => Promise<AxiosR
  * （残留的图形验证码是针对代理出口 IP 的风险控制，非请求特征层可解）。
  * Session 懒创建并复用（连接复用，第二次起约 1s/请求）。
  */
-let sogouWreqSessionPromise: Promise<WreqSession | null> | null = null;
-
-async function ensureSogouWreqSession(): Promise<WreqSession | null> {
-    if (!sogouWreqSessionPromise) {
-        sogouWreqSessionPromise = (async () => {
-            const mod = await loadWreqModule();
-            if (!mod) {
-                return null;
-            }
-            try {
-                return await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0], 'sogou');
-            } catch (error) {
-                console.warn('Sogou wreq session creation failed, falling back to axios:', error instanceof Error ? error.message : String(error));
-                return null;
-            }
-        })();
-    }
-    return sogouWreqSessionPromise;
-}
-
-async function sogouHttpGetWithImpersonate(url: string, options: AxiosRequestConfig): Promise<AxiosResponse> {
-    const session = await ensureSogouWreqSession();
-    if (!session) {
-        throw new Error('wreq session unavailable');
-    }
-    // redirect: manual —— 保留 fetchSogouHtml 的手动重定向/ cookie 合并逻辑
-    const response = await session.fetch(url, {
-        timeout: (options.timeout as number) || 20000,
-        redirect: 'manual'
-    });
-    const body = await response.text();
-    return toAxiosLikeResponse(response.status, response.headers, body, options);
-}
-
 const defaultSogouHttpGet: SogouHttpGet = async (url, options) => {
-    try {
-        return await sogouHttpGetWithImpersonate(url, options);
-    } catch (error) {
-        console.warn('Sogou impersonate request failed, falling back to axios:', error instanceof Error ? error.message : String(error));
-        return axios.get(url, options);
-    }
+    return impersonateHttpGet('sogou', url, options, { redirect: 'manual', failOnHttpError: false });
 };
 
 let sogouHttpGet: SogouHttpGet = defaultSogouHttpGet;
@@ -86,16 +51,7 @@ export function __setSogouHttpGetForTests(impl?: SogouHttpGet): void {
     sogouHttpGet = impl ?? defaultSogouHttpGet;
 }
 
-function isSogouChallengePage(html: string): boolean {
-    const normalized = html.toLowerCase();
-    const $ = cheerio.load(html);
-    const title = $('title').first().text().trim();
-
-    return normalized.includes('antispider')
-        || normalized.includes('请输入验证码')
-        || normalized.includes('访问过于频繁')
-        || title.includes('搜狗搜索验证');
-}
+import { isSogouChallengePage } from '../../core/antiBot/antiBotDetection.js';
 
 function resolveResultUrl(rawUrl: string): string {
     const trimmed = rawUrl.trim();
@@ -159,12 +115,8 @@ async function resolveSogouLinkUrl(linkUrl: string): Promise<string> {
             validateStatus: (status) => status >= 200 && status < 400
         }));
         const html = String(response.data || '');
-        // 跳转页格式：<script>window.location.replace("https://real-target")</script>
-        // 或 <noscript><META http-equiv="refresh" content="0;URL='https://real-target'"></noscript>
-        const replaceMatch = html.match(/window\.location\.replace\(\s*["']([^"']+)["']\s*\)/i);
-        const refreshMatch = html.match(/http-equiv=["']refresh["'][^>]*content=["']\d*;\s*URL=['"]?([^'">\s]+)/i);
-        const target = (replaceMatch?.[1] ?? refreshMatch?.[1] ?? '').trim();
-        if (/^https?:\/\//i.test(target)) {
+        const target = extractMetaOrJsRedirect(html);
+        if (target) {
             const targetParsed = new URL(target);
             if (!isAllowedSogouRedirectUrl(targetParsed)) {
                 return target;
@@ -409,7 +361,7 @@ async function searchSogouPage(query: string, page: number): Promise<SearchResul
             // 引擎内已重试过一次：最终失败标记不可重试，避免 searchService 再叠加 3 次重试
             // （否则 3 × ~4.5s 会吃满 10s 上限报 timeout，而不是快速失败交级联补位）
             const finalError = retryError instanceof Error ? retryError : new Error(String(retryError));
-            (finalError as any).retryable = false;
+            markNonRetryable(finalError);
             throw finalError;
         }
     }
@@ -467,27 +419,30 @@ export async function searchSogou(query: string, limit: number): Promise<SearchR
 
     // ① PC 端优先（结果更全）
     if (Date.now() >= sogouPcBlockedUntil) {
-        const maxPage = Math.max(1, Math.ceil(limit / SOGOU_PAGE_SIZE));
-        for (let page = 1; page <= maxPage && allResults.length < limit; page += 1) {
-            let pageResults: SearchResult[];
-            try {
-                pageResults = await searchSogouPage(query, page);
-            } catch (error) {
-                lastError = error;
-                const message = error instanceof Error ? error.message : String(error);
-                // 反爬/403 类拦截：进入暂停期，本次转移动端兜底
-                if (/anti-bot|verification|challenge|403|访问过于频繁|验证码/i.test(message)) {
-                    sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
+        let pcFailed = false;
+        const pageResults = await paginateSearch({
+            limit,
+            initialPage: 1,
+            pageStep: 1,
+            fetchPage: async (page) => {
+                if (pcFailed) return [];
+                try {
+                    return await searchSogouPage(query, page);
+                } catch (error) {
+                    lastError = error;
+                    pcFailed = true;
+                    const message = error instanceof Error ? error.message : String(error);
+                    // 反爬/403 类拦截：进入暂停期，本次转移动端兜底
+                    if (/anti-bot|verification|challenge|403|访问过于频繁|验证码/i.test(message)) {
+                        sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
+                    }
+                    console.warn('Sogou PC endpoint failed, falling back to mobile:', message);
+                    return [];
                 }
-                console.warn('Sogou PC endpoint failed, falling back to mobile:', message);
-                break;
-            }
-
-            const added = merge(pageResults);
-            if (pageResults.length === 0 || added === 0) {
-                break;
-            }
-        }
+            },
+            dedupKey: (result) => result.url
+        });
+        merge(pageResults);
     }
 
     // ② 移动端兜底（PC 被拦时的主要来源；也用于补足 PC 端未达 limit 的部分）

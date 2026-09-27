@@ -4,8 +4,8 @@ import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { paginateSearch } from '../../utils/pagination.js';
-import { createWreqSession, loadWreqModule, WreqSession } from '../bing/impersonate.js';
-import { toAxiosLikeResponse } from '../../utils/wreqRequest.js';
+import { impersonateHttpGet } from '../../utils/impersonateRequest.js';
+import { createDomesticDirectAgent, shouldAttemptDomesticDirectRetry } from '../../utils/domesticDirectNetwork.js';
 
 /** CSDN 搜索结果里的 <em> 高亮标签，剥离后返回纯文本 */
 export function stripHighlightTags(value: string): string {
@@ -53,63 +53,32 @@ const CSDN_SEARCH_API = 'https://so.csdn.net/api/v3/search';
 /** 首屏"合法但为空"时重试前等待（给 WAF 软降级留出恢复窗口） */
 const EMPTY_FIRST_PAGE_RETRY_DELAY_MS = 300;
 
-/**
- * CSDN 的请求层（wreq-js Chrome TLS/HTTP2 指纹 + 会话 cookie 池，axios 兜底）。
- *
- * CSDN 搜索接口位于阿里云 WAF 之后（响应头 `server: WAF`），会对"三无"裸请求做软降级。
- * 会话级复用的两点价值：① TLS/HTTP2 指纹不像 Node 原生 TLS 那样自带爬虫特征；
- * ② wreq 的 Session 自带 cookie 池，首次响应下发的 `https_waf_cookie`
- *    （阿里云 WAF 令牌）会被自动保存并在后续请求带上，而不是每次都当新会话。
- * 真实前端还带 `Referer: https://so.csdn.net/so/search?q=...`，这里补齐；
- * UA 等头交给 wreq 的 browser profile 注入（与指纹保持一致），不手塞第二个 UA。
- */
-let csdnWreqSessionPromise: Promise<WreqSession | null> | null = null;
-
-async function ensureCsdnWreqSession(): Promise<WreqSession | null> {
-    if (!csdnWreqSessionPromise) {
-        csdnWreqSessionPromise = (async () => {
-            const mod = await loadWreqModule();
-            if (!mod) {
-                return null;
-            }
-            try {
-                return await createWreqSession(mod as unknown as Parameters<typeof createWreqSession>[0], 'csdn');
-            } catch (error) {
-                console.warn('CSDN wreq session creation failed, falling back to axios:', error instanceof Error ? error.message : String(error));
-                return null;
-            }
-        })();
-    }
-    return csdnWreqSessionPromise;
-}
-
-/** 指纹优先的 GET：wreq 不可用/网络层失败时回退 axios（HTTP 状态错误直接抛出，不回退） */
-async function csdnHttpGetWithImpersonate(url: string, options: AxiosRequestConfig): Promise<AxiosResponse> {
-    const session = await ensureCsdnWreqSession();
-    if (!session) {
-        throw new Error('wreq session unavailable');
-    }
-    const response = await session.fetch(url, {
-        timeout: (options.timeout as number) || 15000,
-        headers: (options.headers as Record<string, string> | undefined)
-    });
-    if (response.status >= 400) {
-        // 与 axios 一致：非 2xx 抛错，错误上带 response.status（供上层重试/熔断判定）
-        const error = new Error(`Request failed with status code ${response.status}`);
-        (error as { response?: { status: number } }).response = { status: response.status };
-        throw error;
-    }
-    return toAxiosLikeResponse(response.status, response.headers, await response.text(), options);
-}
-
 const defaultCsdnHttpGet = async (url: string, options: AxiosRequestConfig): Promise<AxiosResponse> => {
     try {
-        return await csdnHttpGetWithImpersonate(url, options);
+        return await impersonateHttpGet('csdn', url, options);
     } catch (error) {
         const status = (error as { response?: { status?: number } })?.response?.status;
-        if (typeof status === 'number') {
+        if (typeof status === 'number' && status !== 521 && status !== 522) {
             throw error;
         }
+
+        // 仅在 TLS 握手被 WAF 重置或 521 时触发物理接口补偿兜底
+        try {
+            const hostname = new URL(url).hostname;
+            if (shouldAttemptDomesticDirectRetry(error, hostname)) {
+                const directAgent = await createDomesticDirectAgent(hostname);
+                if (directAgent) {
+                    return await axios.get(url, {
+                        ...options,
+                        httpsAgent: directAgent,
+                        proxy: false
+                    });
+                }
+            }
+        } catch (directError) {
+            console.warn('[csdn] Domestic direct physical retry failed:', directError instanceof Error ? directError.message : String(directError));
+        }
+
         console.warn('CSDN impersonate request failed, falling back to axios:', error instanceof Error ? error.message : String(error));
         return axios.get(url, options);
     }

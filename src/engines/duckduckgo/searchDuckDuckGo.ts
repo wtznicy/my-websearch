@@ -369,7 +369,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
     return await searchDuckDuckGoHtml(query, limit);
   } catch (htmlError) {
     if (preloadError instanceof Error && htmlError instanceof Error) {
-      throw new Error(`${htmlError.message} (preload path: ${preloadError.message})`);
+      throw new Error(`${htmlError.message} (preload path: ${preloadError.message})`, { cause: htmlError });
     }
     throw htmlError;
   }

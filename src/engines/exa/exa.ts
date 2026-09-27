@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from "../../utils/httpRequest.js";
+import { markNonRetryable } from '../../core/errors.js';
 
 interface ExaResult {
     id: string;
@@ -82,11 +83,10 @@ export async function searchExa(query: string, limit: number): Promise<SearchRes
         // 旧版免 key 的网页端内部端点（exa.ai/search/api/search-fast）自 2026-08 起已失效（返回 500）。
         // 无 key 直接报"需配置 key"并给出获取地址；标记不可重试——配置缺失是确定性错误，
         // 多引擎搜索（如 bing+exa）时 exa 立即失败，不影响其他引擎。
-        const error = new Error(
+        const error = markNonRetryable(new Error(
             'Exa engine requires EXA_API_KEY to be configured. Get a free key at https://dashboard.exa.ai/api-keys, ' +
             'or use other engines (bing/baidu/csdn/juejin/sogou/duckduckgo/brave/startpage).'
-        );
-        (error as any).retryable = false;
+        ));
         throw error;
     }
     return searchExaOfficial(query, limit, apiKey);

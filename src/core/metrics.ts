@@ -37,14 +37,34 @@ type EngineMetrics = {
     totalDurationMs: number;
 };
 
+// 滑动窗口样本事件
+export type EngineEventSample = {
+    timestamp: number;
+    durationMs: number;
+    success: boolean;
+};
+
+export type SlidingWindowEngineStats = {
+    total: number;
+    success: number;
+    failure: number;
+    successRate: number; // 0-100 百分比
+    avgDurationMs: number;
+    p95DurationMs: number;
+};
+
 // 缓存指标
 type CacheMetrics = {
     hits: number;
     misses: number;
 };
 
+const DEFAULT_SLIDING_WINDOW_MS = 5 * 60 * 1000; // 5 分钟
+const MAX_SAMPLES_PER_ENGINE = 500;
+
 class MetricsCollector {
     private engineMetrics = new Map<string, EngineMetrics>();
+    private engineSamples = new Map<string, EngineEventSample[]>();
     private cacheMetrics: CacheMetrics = { hits: 0, misses: 0 };
 
     private get logLevel(): LogLevel {
@@ -104,7 +124,7 @@ class MetricsCollector {
 
     // ─── 引擎指标 ────────────────────────────────────────────────────────────
 
-    recordEngineSearch(engine: string, durationMs: number, success: boolean): void {
+    recordEngineSearch(engine: string, durationMs: number, success: boolean, timestamp = Date.now()): void {
         if (!this.metricsEnabled) return;
 
         let metrics = this.engineMetrics.get(engine);
@@ -120,6 +140,16 @@ class MetricsCollector {
             metrics.failure += 1;
         }
         metrics.totalDurationMs += durationMs;
+
+        let samples = this.engineSamples.get(engine);
+        if (!samples) {
+            samples = [];
+            this.engineSamples.set(engine, samples);
+        }
+        samples.push({ timestamp, durationMs, success });
+        if (samples.length > MAX_SAMPLES_PER_ENGINE) {
+            samples.shift();
+        }
     }
 
     recordCacheHit(): void {
@@ -148,9 +178,55 @@ class MetricsCollector {
 
     // ─── 指标导出 ────────────────────────────────────────────────────────────
 
+    getWindowedMetrics(windowMs = DEFAULT_SLIDING_WINDOW_MS, now = Date.now()): Record<string, SlidingWindowEngineStats> {
+        const result: Record<string, SlidingWindowEngineStats> = {};
+        const cutoff = now - windowMs;
+
+        for (const [engine, samples] of this.engineSamples) {
+            // 清理过期样本
+            const valid = samples.filter((s) => s.timestamp >= cutoff);
+            this.engineSamples.set(engine, valid);
+
+            if (valid.length === 0) {
+                result[engine] = {
+                    total: 0,
+                    success: 0,
+                    failure: 0,
+                    successRate: 0,
+                    avgDurationMs: 0,
+                    p95DurationMs: 0
+                };
+                continue;
+            }
+
+            const total = valid.length;
+            const success = valid.filter((s) => s.success).length;
+            const failure = total - success;
+            const successRate = Math.round((success / total) * 100);
+            const totalDuration = valid.reduce((acc, s) => acc + s.durationMs, 0);
+            const avgDurationMs = Math.round(totalDuration / total);
+
+            const sortedDurations = valid.map((s) => s.durationMs).sort((a, b) => a - b);
+            const p95Idx = Math.min(Math.floor(0.95 * total), total - 1);
+            const p95DurationMs = sortedDurations[p95Idx] ?? 0;
+
+            result[engine] = {
+                total,
+                success,
+                failure,
+                successRate,
+                avgDurationMs,
+                p95DurationMs
+            };
+        }
+
+        return result;
+    }
+
     getMetrics(): {
         engines: Record<string, { total: number; success: number; failure: number; avgDurationMs: number }>;
         cache: { hits: number; misses: number; hitRate: number };
+        windowed?: Record<string, SlidingWindowEngineStats>;
     } {
         const engines: Record<string, { total: number; success: number; failure: number; avgDurationMs: number }> = {};
 
@@ -170,12 +246,14 @@ class MetricsCollector {
                 hits: this.cacheMetrics.hits,
                 misses: this.cacheMetrics.misses,
                 hitRate: totalCache > 0 ? Math.round((this.cacheMetrics.hits / totalCache) * 100) : 0
-            }
+            },
+            windowed: this.getWindowedMetrics()
         };
     }
 
     resetMetrics(): void {
         this.engineMetrics.clear();
+        this.engineSamples.clear();
         this.cacheMetrics = { hits: 0, misses: 0 };
     }
 
@@ -202,6 +280,18 @@ class MetricsCollector {
             push(`mywebsearch_engine_searches_total{${label},outcome="total"} ${stats.total}`);
             push(`mywebsearch_engine_search_duration_ms_total{${label}} ${stats.avgDurationMs * stats.total}`);
             push(`mywebsearch_engine_search_duration_ms_avg{${label}} ${stats.avgDurationMs}`);
+        }
+
+        if (snapshot.windowed) {
+            push('# HELP mywebsearch_engine_recent_success_rate_percent Recent engine search success rate in percent');
+            push('# TYPE mywebsearch_engine_recent_success_rate_percent gauge');
+            push('# HELP mywebsearch_engine_recent_duration_p95_ms Recent engine search duration p95 in milliseconds');
+            push('# TYPE mywebsearch_engine_recent_duration_p95_ms gauge');
+            for (const [engine, stats] of Object.entries(snapshot.windowed)) {
+                const label = `engine="${engine.replace(/"/g, '')}"`;
+                push(`mywebsearch_engine_recent_success_rate_percent{${label}} ${stats.successRate}`);
+                push(`mywebsearch_engine_recent_duration_p95_ms{${label}} ${stats.p95DurationMs}`);
+            }
         }
 
         push('# HELP mywebsearch_cache_hits_total Search cache hits');

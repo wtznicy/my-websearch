@@ -150,6 +150,14 @@ function isFlag(value: string): boolean {
     return value.startsWith('--');
 }
 
+export function requireFlagValue(argv: string[], index: number, flagName: string): string {
+    const next = argv[index + 1];
+    if (!next || isFlag(next)) {
+        throw new Error(`Missing value for ${flagName}`);
+    }
+    return next;
+}
+
 function getDefaultDaemonBaseUrl(): string {
     return process.env.OPEN_WEBSEARCH_DAEMON_URL || `http://127.0.0.1:${process.env.OPEN_WEBSEARCH_DAEMON_PORT || '3210'}`;
 }
@@ -189,12 +197,7 @@ function extractDaemonTransportArgs(argv: string[]): DaemonTransportArgs {
         }
 
         if (arg === '--daemon-url') {
-            const next = argv[index + 1];
-            if (!next || isFlag(next)) {
-                throw new Error('Missing value for --daemon-url');
-            }
-
-            daemonUrl = next;
+            daemonUrl = requireFlagValue(argv, index, '--daemon-url');
             daemonUrlExplicit = true;
             index += 1;
             continue;
@@ -231,40 +234,26 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
         }
 
         if (arg === '--limit') {
-            const next = argv[index + 1];
-            if (!next || isFlag(next)) {
-                throw new Error('Missing value for --limit');
-            }
-            limit = Number(next);
+            limit = Number(requireFlagValue(argv, index, '--limit'));
             index += 1;
             continue;
         }
 
         if (arg === '--engine') {
-            const next = argv[index + 1];
-            if (!next || isFlag(next)) {
-                throw new Error('Missing value for --engine');
-            }
-            requestedEngines.push(normalizeEngineName(next));
+            requestedEngines.push(normalizeEngineName(requireFlagValue(argv, index, '--engine')));
             index += 1;
             continue;
         }
 
         if (arg === '--engines') {
-            const next = argv[index + 1];
-            if (!next || isFlag(next)) {
-                throw new Error('Missing value for --engines');
-            }
+            const next = requireFlagValue(argv, index, '--engines');
             requestedEngines.push(...next.split(',').map((value) => normalizeEngineName(value.trim())).filter(Boolean));
             index += 1;
             continue;
         }
 
         if (arg === '--search-mode') {
-            const next = argv[index + 1];
-            if (!next || isFlag(next)) {
-                throw new Error('Missing value for --search-mode');
-            }
+            const next = requireFlagValue(argv, index, '--search-mode');
             if (next !== 'request' && next !== 'auto' && next !== 'playwright') {
                 throw new Error('search mode must be one of: request, auto, playwright');
             }
@@ -274,11 +263,7 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
         }
 
         if (arg === '--min-results') {
-            const next = argv[index + 1];
-            if (!next || isFlag(next)) {
-                throw new Error('Missing value for --min-results');
-            }
-            const parsed = Number(next);
+            const parsed = Number(requireFlagValue(argv, index, '--min-results'));
             if (!Number.isInteger(parsed) || parsed < 0) {
                 throw new Error('--min-results must be a non-negative integer');
             }
@@ -345,11 +330,7 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
         }
 
         if (arg === '--max-chars') {
-            const next = argv[index + 1];
-            if (!next || isFlag(next)) {
-                throw new Error('Missing value for --max-chars');
-            }
-            maxChars = Number(next);
+            maxChars = Number(requireFlagValue(argv, index, '--max-chars'));
             index += 1;
             continue;
         }
@@ -370,11 +351,7 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
         }
 
         if (arg === '--start-index') {
-            const next = argv[index + 1];
-            if (!next || isFlag(next)) {
-                throw new Error('Missing value for --start-index');
-            }
-            startIndex = Number(next);
+            startIndex = Number(requireFlagValue(argv, index, '--start-index'));
             index += 1;
             continue;
         }
@@ -458,11 +435,7 @@ export function parseStatusArgs(argv: string[]): ParsedStatusArgs {
         }
 
         if (arg === '--base-url') {
-            const next = argv[index + 1];
-            if (!next || isFlag(next)) {
-                throw new Error('Missing value for --base-url');
-            }
-            baseUrl = next;
+            baseUrl = requireFlagValue(argv, index, '--base-url');
             index += 1;
             continue;
         }
@@ -493,11 +466,7 @@ export function parseServeArgs(argv: string[]): ParsedServeArgs {
         }
 
         if (arg === '--host') {
-            const next = argv[index + 1];
-            if (!next || isFlag(next)) {
-                throw new Error('Missing value for --host');
-            }
-            host = next;
+            host = requireFlagValue(argv, index, '--host');
             index += 1;
             continue;
         }
@@ -508,11 +477,7 @@ export function parseServeArgs(argv: string[]): ParsedServeArgs {
         }
 
         if (arg === '--port') {
-            const next = argv[index + 1];
-            if (!next || isFlag(next)) {
-                throw new Error('Missing value for --port');
-            }
-            port = Number(next);
+            port = Number(requireFlagValue(argv, index, '--port'));
             index += 1;
             continue;
         }

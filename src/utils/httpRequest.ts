@@ -155,7 +155,8 @@ export function hintProxyConnectionError(error: unknown): Error {
     const message = error instanceof Error ? error.message : String(error);
     if (config.useProxy && /ECONNREFUSED|ECONNRESET|socket hang up|ENETUNREACH/i.test(message)) {
         return new Error(
-            `${message} | Hint: 请求经代理 ${config.proxyUrl} 失败——请确认代理软件已启动、PROXY_URL 端口正确，或临时关闭 USE_PROXY（国内站点可直连）`
+            `${message} | Hint: 请求经代理 ${config.proxyUrl} 失败——请确认代理软件已启动、PROXY_URL 端口正确，或临时关闭 USE_PROXY（国内站点可直连）`,
+            error instanceof Error ? { cause: error } : undefined
         );
     }
     return error instanceof Error ? error : new Error(message);
@@ -316,7 +317,8 @@ export async function requestDirectFirst(
             }
         }
         throw new Error(
-            `${message} | Hint: 直连失败——目标站点可能无法从当前网络直接访问；可开启代理（USE_PROXY=true + PROXY_URL，如 http://127.0.0.1:7890）后重试`
+            `${message} | Hint: 直连失败——目标站点可能无法从当前网络直接访问；可开启代理（USE_PROXY=true + PROXY_URL，如 http://127.0.0.1:7890）后重试`,
+            directError instanceof Error ? { cause: directError } : undefined
         );
     }
 }

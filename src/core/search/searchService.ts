@@ -1,12 +1,25 @@
 import { SearchResult } from '../../types.js';
 import { AppConfig, config } from '../../config.js';
 import { distributeLimit, SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
-import { rankSearchResults, countUsableResults } from './resultRanking.js';
+import { rankSearchResults } from './resultRanking.js';
 import { isEngineCircuitOpen, getEngineCircuitRemainingMs } from './engineCircuitBreaker.js';
 import { quoteModelLikeTerms } from '../../utils/queryPreprocess.js';
-import { sleep } from '../../utils/timing.js';
-import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { metrics } from '../metrics.js';
+import {
+    executePrimaryEngines,
+    isRetryableEngineError,
+    computeRetryBackoff,
+    buildHintedMessage,
+    truncateMetricError
+} from './engineExecutor.js';
+import { executeCascade } from './cascadeExecutor.js';
+
+export {
+    isRetryableEngineError,
+    computeRetryBackoff,
+    buildHintedMessage,
+    truncateMetricError
+};
 
 // ---------------------------------------------------------------------------
 // 简单信号量：限制并发搜索数
@@ -84,12 +97,6 @@ export type SearchExecutionInput = {
     minResults?: number;
 };
 
-/** metrics 的 error 只保留简短原因（完整消息仍在 partialFailures） */
-function truncateMetricError(message: string): string {
-    const normalized = message.replace(/\s+/g, ' ').trim();
-    return normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized;
-}
-
 function resolveSearchModeOverride(searchMode: AppConfig['searchMode'] | undefined): AppConfig['searchMode'] | undefined {
     // Agent 显式传 searchMode=auto 时，应与不传参数一致，优先使用环境变量值。不能优先使用HTTP请求，因为它会导致Bing返回垃圾结果。
     return searchMode === 'auto' ? undefined : searchMode;
@@ -106,19 +113,15 @@ function resolveSearchModeOverride(searchMode: AppConfig['searchMode'] | undefin
 export function normalizeResultUrl(url: string): string {
     try {
         const parsed = new URL(url);
-        // 去掉锚点与常见追踪参数后再比较
         parsed.hash = '';
         for (const key of [...parsed.searchParams.keys()]) {
             if (key.startsWith('utm_') || key === 'fbclid' || key === 'gclid' || key === 'ref' || key === 'spm') {
                 parsed.searchParams.delete(key);
             }
-            // GitHub/Gitee 页面标签参数（?tab=readme-ov-file 等）不改变内容，视为同页
             if ((key === 'tab' || key === 'spm') && (parsed.hostname === 'github.com' || parsed.hostname === 'gitee.com')) {
                 parsed.searchParams.delete(key);
             }
         }
-        // 等价 URL 归一化：统一 https、去 www. 前缀、根路径去掉尾斜杠，
-        // 避免 http/https、www 前缀、尾斜杠差异让同一页被当成两条结果
         if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
             parsed.protocol = 'https:';
             const hostname = parsed.hostname.toLowerCase();
@@ -138,7 +141,7 @@ export function normalizeResultUrl(url: string): string {
  * 且 title 过短（<10 字符）时，对 LLM 没有信息量（如 "YouTube" + "..." 这类卡片占位），
  * 属于噪音，融合后过滤掉。
  */
-function isPlaceholderResult(result: SearchResult): boolean {
+export function isPlaceholderResult(result: SearchResult): boolean {
     const description = (result.description ?? '').trim();
     const hasSubstantiveDescription = description.length > 0 && !/^[\s.…·-]*$/.test(description);
     if (hasSubstantiveDescription) {
@@ -152,12 +155,6 @@ function isPlaceholderResult(result: SearchResult): boolean {
     return title.length < 10;
 }
 
-/**
- * 跨引擎融合：按规范化 URL 去重，并按"被多少个引擎命中"加权排序。
- * - 命中引擎数越多，排名越靠前（多数引擎认为相关 => 更可信）
- * - 同分时保留先到的引擎结果（保持原始顺序稳定）
- * - 去重结果保留先到的引擎（source / engine 字段），不合并多引擎来源
- */
 /**
  * 跨引擎融合：按规范化 URL 去重，并按"被多少个引擎命中"加权排序。
  * - 命中引擎数越多，排名越靠前（多数引擎认为相关 => 更可信）
@@ -191,45 +188,33 @@ export function mergeSearchResults(engineResults: SearchResult[][]): SearchResul
 // TTL 缓存
 // ---------------------------------------------------------------------------
 
-/**
- * limit 档位归一化：limit=5 与 limit=10 的同一查询共享缓存。
- * LLM 客户端常随机传 limit，原始 limit 作键会让缓存几乎永远 miss。
- * >10 不归一化（保留原值），避免缓存不足量的结果（如 limit=50 只拿到 20 条）。
- */
 function normalizeLimitBucket(limit: number): number {
-    if (limit <= 5) {
-        return 5;
-    }
-    if (limit <= 10) {
-        return 10;
-    }
-    return limit;
+    return limit <= 10 ? 10 : limit;
 }
 
-type CacheEntry = {
+export type CacheEntry = {
     value: SearchExecutionResult;
     expiresAt: number;
     /** 写入缓存时的请求 limit，用于判断"缓存是否足以满足当前请求" */
     requestedLimit: number;
 };
 
-/**
- * 简单的内存 TTL 缓存。键为 query+engines+limit+searchMode 的组合。
- * 默认 TTL 5 分钟（context7 官方 best practice 也建议对文档类响应做小时级缓存；
- * 搜索结果的时效性更高，5 分钟是一个平衡点）。
- */
 export class SearchTtlCache {
     private cache = new Map<string, CacheEntry>();
-    private readonly ttlMs: number;
-    private readonly maxEntries: number;
+    private defaultTtlMs: number;
+    private maxEntries: number;
 
-    constructor(ttlMs: number = 5 * 60 * 1000, maxEntries: number = 200) {
-        this.ttlMs = ttlMs;
-        this.maxEntries = maxEntries;
+    constructor(ttlMsOrOptions?: number | { ttlMs?: number; maxEntries?: number }, maxEntries?: number) {
+        if (typeof ttlMsOrOptions === 'number') {
+            this.defaultTtlMs = ttlMsOrOptions;
+            this.maxEntries = maxEntries ?? 200;
+        } else {
+            this.defaultTtlMs = ttlMsOrOptions?.ttlMs ?? 5 * 60 * 1000;
+            this.maxEntries = ttlMsOrOptions?.maxEntries ?? 200;
+        }
     }
 
     private buildKey(input: SearchExecutionInput): string {
-        // searchMode 用规范化后的值（'auto' 等价于 undefined），保证两种写法共享缓存
         const normalizedSearchMode = resolveSearchModeOverride(input.searchMode);
         return JSON.stringify({
             q: input.query.trim().toLowerCase(),
@@ -250,32 +235,27 @@ export class SearchTtlCache {
             this.cache.delete(key);
             return undefined;
         }
-        // 写入时的请求 limit 不足以覆盖当前请求 limit → miss。
-        // 用 requestedLimit 而非 results.length 判断：冷门查询引擎只返回 3 条但 requestedLimit=5，
-        // 说明 3 条就是该查询的完整结果，后续 limit=5 应命中；只有 limit>5 才 miss。
         if (entry.requestedLimit < input.limit) {
             return undefined;
         }
-        // 缓存比请求多时按请求 limit 截断，保持语义
         if (entry.value.results.length > input.limit) {
+            const truncatedResults = entry.value.results.slice(0, input.limit);
             return {
                 ...entry.value,
-                totalResults: input.limit,
-                results: entry.value.results.slice(0, input.limit)
+                totalResults: truncatedResults.length,
+                results: truncatedResults
             };
         }
         return entry.value;
     }
 
-    set(input: SearchExecutionInput, value: SearchExecutionResult, ttlMsOverride?: number): void {
-        // 淘汰过期条目
+    set(input: SearchExecutionInput, value: SearchExecutionResult, ttlMs?: number): void {
         const now = Date.now();
         for (const [key, entry] of this.cache) {
             if (now > entry.expiresAt) {
                 this.cache.delete(key);
             }
         }
-        // 超过容量时删除最老的（Map 保持插入序，删第一个即可）
         while (this.cache.size >= this.maxEntries) {
             const oldestKey = this.cache.keys().next().value;
             if (oldestKey === undefined) {
@@ -283,8 +263,11 @@ export class SearchTtlCache {
             }
             this.cache.delete(oldestKey);
         }
-        const ttl = typeof ttlMsOverride === 'number' && ttlMsOverride > 0 ? ttlMsOverride : this.ttlMs;
-        this.cache.set(this.buildKey(input), { value, expiresAt: now + ttl, requestedLimit: input.limit });
+        this.cache.set(this.buildKey(input), {
+            value,
+            expiresAt: now + (ttlMs ?? this.defaultTtlMs),
+            requestedLimit: input.limit
+        });
     }
 
     clear(): void {
@@ -299,52 +282,6 @@ export class SearchTtlCache {
 // ---------------------------------------------------------------------------
 // 服务
 // ---------------------------------------------------------------------------
-
-/** 4xx（除 429 限流）不重试——参数/请求本身有问题，重试只会白耗时间；5xx、网络/超时错误重试。
- * 引擎可显式标记 error.retryable = false（如"未配置 API key""海外引擎无代理不可达"等确定性错误），
- * 多引擎搜索时让该引擎立即失败，不占用重试退避时间、不影响其他引擎。 */
-function isRetryableEngineError(error: unknown): boolean {
-    if ((error as any)?.retryable === false) {
-        return false;
-    }
-    const status = (error as any)?.response?.status;
-    if (typeof status === 'number') {
-        return status === 429 || status >= 500;
-    }
-    // 反爬/验证页/挑战页类错误：不会在 1~2 秒内恢复，重试只会把引擎耗时翻倍
-    // （实测 sogou 命中反爬时每次尝试 4~5s，三层重试叠加后吃满 10s 上限报 timeout，
-    //  而快速失败只需 4~5s 就能让级联立刻补位）
-    const message = error instanceof Error ? error.message : String(error);
-    if (/anti-bot|verification page|challenge page|captcha|验证码|人机验证/i.test(message)) {
-        return false;
-    }
-    return true;
-}
-
-/** 429 用更长退避并尊重 Retry-After；其他错误用短退避；都带少量 jitter 避免并发重试再碰撞 */
-function computeRetryBackoff(error: unknown, attempt: number): number {
-    const status = (error as any)?.response?.status;
-    if (status === 429) {
-        const retryAfter = Number((error as any)?.response?.headers?.['retry-after']);
-        if (Number.isFinite(retryAfter) && retryAfter > 0) {
-            return retryAfter * 1000;
-        }
-        return 1000 * (2 ** attempt) + Math.random() * 250;
-    }
-    return 300 * (2 ** attempt) + Math.random() * 100;
-}
-
-/**
- * 给引擎失败消息附加可执行的 Hint，帮助 LLM/用户决定下一步
- * （换引擎、稍后重试等），而不是看到裸错误就放弃。
- */
-function buildHintedMessage(engine: string, message: string): string {
-    const hint = '可换用其他引擎（engines 参数）或稍后重试';
-    if (message.includes('Hint:')) {
-        return message;
-    }
-    return `${message} | Hint: 引擎 ${engine} 暂不可用，${hint}`;
-}
 
 // 搜索级总时间预算：超过后未完成的引擎按超时处理，避免单个慢引擎（含重试）拖垮整次搜索
 export const SEARCH_DEADLINE_MS = config.searchDeadlineMs;
@@ -368,11 +305,8 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 throw new Error(`Query string too long (${cleanQuery.length} characters, max ${MAX_QUERY_LENGTH})`);
             }
 
-            // 型号/版本类查询（如 GLM-4.6V-Flash）自动加引号做精确匹配，降低拆词导致的泛化结果；
-            // 缓存键与引擎调用用处理后的查询，返回给调用方的 query 保持原始输入。
             const searchQuery = quoteModelLikeTerms(cleanQuery);
 
-            // 缓存命中直接返回
             const cached = ttlCache.get({ query: searchQuery, engines, limit, searchMode, minResults });
             if (cached) {
                 metrics.recordCacheHit();
@@ -380,351 +314,102 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             }
             metrics.recordCacheMiss();
 
-            // 全局并发限制：等待信号量
             if (globalSemaphore) {
                 await globalSemaphore.acquire();
             }
 
             try {
-            // 熔断中的引擎（近期 429 限流）跳过调用，配额平移给其余引擎——0ms 无感避障，
-            // 不必等它报错再走级联；全部熔断时保持原列表（仍尝试，避免无引擎可用）
-            const circuitOpenEngines = engines.filter((engine) => isEngineCircuitOpen(engine));
-            const executableEngines = circuitOpenEngines.length > 0 && circuitOpenEngines.length < engines.length
-                ? engines.filter((engine) => !isEngineCircuitOpen(engine))
-                : engines;
+                const circuitOpenEngines = engines.filter((engine) => isEngineCircuitOpen(engine));
+                const executableEngines = circuitOpenEngines.length > 0 && circuitOpenEngines.length < engines.length
+                    ? engines.filter((engine) => !isEngineCircuitOpen(engine))
+                    : engines;
 
-            const partialFailures: SearchExecutionFailure[] = [];
-            for (const engine of circuitOpenEngines) {
-                if (!executableEngines.includes(engine)) {
-                    partialFailures.push({
-                        engine,
-                        code: 'circuit_open',
-                        message: `Engine circuit open (recent HTTP 429 rate limiting, ~${Math.ceil(getEngineCircuitRemainingMs(engine) / 1000)}s cooldown left) — quota reallocated to other engines`
-                    });
-                }
-            }
-
-            const limits = distributeLimit(limit, executableEngines.length);
-            const effectiveSearchMode = resolveSearchModeOverride(searchMode);
-
-            // 搜索级总时间预算：到点后未完成的引擎按超时处理，避免单个慢引擎拖垮整次搜索
-            const deadlineMs = SEARCH_DEADLINE_MS;
-            const deadlineAt = Date.now() + deadlineMs;
-            // 单引擎超时上限：min(总预算 50%, 10s)。此前所有引擎共享总预算，
-            // 单个 hang 住的引擎（如代理链路上的 duckduckgo）会吃光 30s 导致级联完全不跑；
-            // 现在主阶段最多消耗 ~50% 预算，为级联保留剩余时间
-            // 10s：实测国内引擎（baidu/sogou）在真实网络+反爬下的正常耗时带为 5~9s
-            // （搜索请求 2~5s + 中转链接解析最多 3s 预算 + 反爬重试），6s/8s 都会稳定误杀；
-            // 链接解析已有 3s 总预算封顶，不会再出现 N+1 无限膨胀，10s 是"不误杀且不白等太久"的平衡点
-            const PER_ENGINE_TIMEOUT_MS = Math.min(Math.floor(deadlineMs * 0.5), 10000);
-
-            // 每引擎耗时/数量/错误（可观测性：区分超时与被拒/限流）
-            const engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }> = [];
-            const startedAtByIndex: number[] = executableEngines.map(() => Date.now());
-            const tasks = executableEngines.map(async (engine, index) => {
-                const executor = engineMap[engine];
-                const engineLimit = limits[index] ?? 0;
-                const startedAt = startedAtByIndex[index] ?? Date.now();
-                let resultCount = 0;
-                let metricError: string | undefined;
-
-                if (!executor) {
-                    partialFailures.push({
-                        engine,
-                        code: 'unsupported_engine',
-                        message: `Unsupported search engine: ${engine}`
-                    });
-                    return [];
-                }
-
-                // 配额为 0 时跳过调用（引擎未被分配结果配额，直接视为"未调用"，不进 partialFailures）
-                if (engineLimit <= 0) {
-                    return [];
-                }
-
-                // 引擎请求错峰：按索引交错启动，避免多引擎同时突发请求触发限流。
-                // 使用 50ms 基础间隔 + 小量随机 jitter，比 150ms 线性延迟更紧凑但仍有效避峰。
-                if (index > 0) {
-                    await sleep(index * 50 + Math.random() * 30);
-                }
-
-                // 失败指数退避：最多重试 2 次（4xx 除 429 外不重试）
-                let lastError: unknown;
-                for (let attempt = 0; attempt < 3; attempt += 1) {
-                    try {
-                        const results = await executor(searchQuery, engineLimit, { searchMode: effectiveSearchMode });
-                        if (attempt > 0) {
-                            console.error(`✅ Engine ${engine} recovered after ${attempt} retries`);
-                        }
-                        resultCount = results.length;
-                        // 已触发单引擎超时的引擎：迟到完成的结果不会进入结果集（race 已 resolve([])），
-                        // metrics 保持超时口径，避免 16s 的墙钟耗时与"超时 10s"的 partialFailure 自相矛盾
-                        if (!engineMetrics[index]?.timedOut) {
-                            engineMetrics[index] = { engine, ms: Date.now() - startedAt, count: resultCount };
-                        }
-                        return results;
-                    } catch (error) {
-                        lastError = error;
-                        if (attempt < 2 && isRetryableEngineError(error)) {
-                            const backoff = computeRetryBackoff(error, attempt);
-                            console.error(`⚠️ Engine ${engine} failed (attempt ${attempt + 1}/3), retrying in ${backoff}ms:`, error instanceof Error ? error.message : String(error));
-                            await sleep(backoff);
-                        } else {
-                            break;
-                        }
-                    }
-                }
-
-                metricError = lastError instanceof Error ? lastError.message : String(lastError);
-                if (!engineMetrics[index]?.timedOut) {
-                    engineMetrics[index] = { engine, ms: Date.now() - startedAt, count: resultCount, error: truncateMetricError(metricError) };
-                }
-                partialFailures.push({
-                    engine,
-                    code: 'engine_error',
-                    message: buildHintedMessage(engine, metricError)
-                });
-                return [];
-            });
-
-            // 每个引擎任务包一层 deadline：到点未完成按超时处理（记录 partialFailure，不阻塞整体）。
-            // 注意：task 提前完成时必须 clearTimeout，否则 30s 的 ref'd timer 会阻止 Node 进程退出
-            // （CLI 一次性命令会白白多挂近 30 秒），同时也能避免 timer 回调对已 settle 的 race 做无用功。
-            const engineResults = await Promise.all(tasks.map((task, index) => {
-                const engine = executableEngines[index] ?? '';
-                const remaining = deadlineAt - Date.now();
-                const wait = Math.max(0, Math.min(remaining, PER_ENGINE_TIMEOUT_MS));
-                return new Promise<SearchResult[]>((resolve) => {
-                    let done = false;
-                    const timer = setTimeout(() => {
-                        done = true;
-                        engineMetrics[index] = { engine, ms: wait, count: 0, error: `timeout after ${wait}ms`, timedOut: true };
-                        if (engine && !partialFailures.some((failure) => failure.engine === engine)) {
-                            partialFailures.push({
-                                engine,
-                                code: 'engine_error',
-                                // 索引口径必须与上面 engineMetrics/失败项一致：executableEngines 是熔断过滤后的列表，
-                                // 用原始 engines[index] 在熔断发生时会让提示文案指向错误的引擎（测评报告 P1-7）
-                                message: buildHintedMessage(engine, `Engine timeout after ${wait}ms (no response in time)`)
-                            });
-                        }
-                        resolve([]);
-                    }, wait);
-                    task.then((results) => {
-                        if (done) {
-                            return;
-                        }
-                        done = true;
-                        clearTimeout(timer);
-                        resolve(results);
-                    });
-                });
-            }));
-            // 引擎指标埋点（数据仅在本进程收集，导出需 METRICS_ENABLED=true）：
-            // 此前 metrics.ts 定义了 recordEngineSearch/recordCacheHit/Miss 但生产代码零调用，
-            // /metrics 暴露的引擎成功率与缓存命中率永远是 0（测评报告 P2-15）
-            executableEngines.forEach((engine, index) => {
-                const engineResult = engineResults[index] ?? [];
-                metrics.recordEngineSearch(engine, Date.now() - (startedAtByIndex[index] ?? Date.now()), engineResult.length > 0);
-            });
-
-            // 不提前 slice(0, limit)：提前截断会让"噪声占满前 N 位"时把后面的好结果
-            // （含级联补来的）永久丢掉；截断统一放在最终重排之后
-            let merged = mergeSearchResults(engineResults)
-                .filter((result) => !isPlaceholderResult(result));
-
-            // 注意：重排不在此处——级联补位尚未发生，提前重排会让级联来的好结果
-            // 排在入口页/垃圾结果之后（级联合并后不会再跑）。统一放到所有分支的最后一步。
-
-            // 聚合各引擎返回的直接答案卡片（数组属性，取首个非空）
-            let directAnswer: string | undefined;
-            for (const engineResult of engineResults) {
-                const candidate = (engineResult as { directAnswer?: unknown }).directAnswer;
-                if (typeof candidate === 'string' && candidate.length > 0) {
-                    directAnswer = candidate;
-                    break;
-                }
-            }
-
-            // 配额 >0 但引擎返回 0 条时，记录为可见的部分失败，便于 agent 区分
-            // "该引擎没结果"（no_results，属正常空结果）与 "该引擎没被调用"（配额 0 的情况）。
-            // 注意：不能把正常空结果报成 engine_error——冷门查询所有引擎都 0 条时会刷一墙误导性"故障"。
-            executableEngines.forEach((engine, index) => {
-                const executor = engineMap[engine];
-                const limitForEngine = limits[index] ?? 0;
-                const engineResult = engineResults[index] ?? [];
-                if (executor && limitForEngine > 0 && engineResult.length === 0) {
-                    if (!partialFailures.some((failure) => failure.engine === engine)) {
-                        partialFailures.push({
+                const initialFailures: SearchExecutionFailure[] = [];
+                for (const engine of circuitOpenEngines) {
+                    if (!executableEngines.includes(engine)) {
+                        initialFailures.push({
                             engine,
-                            code: 'no_results',
-                            message: 'Engine returned no results for the allocated quota'
+                            code: 'circuit_open',
+                            message: `Engine circuit open (recent HTTP 429 rate limiting, ~${Math.ceil(getEngineCircuitRemainingMs(engine) / 1000)}s cooldown left) — quota reallocated to other engines`
                         });
                     }
                 }
-            });
 
-            // 级联补位：minResults 已设且结果不足时，用未请求的可用引擎补跑直到凑足。
-            // 候选按批次并行（每批最多 CASCADE_BATCH_SIZE 个），避免逐串行累积延迟。
-            // 每批开始前重算 deadline 余量：剩余预算不足一个批次的最坏成本时停止，
-            // 避免海外引擎 15s 超时把总时长拉成多倍 deadline；全部候选返回但去重后
-            // 0 新增时也立即停止（结果集已收敛，继续尝试没有意义）。
-            // 默认不启用（minResults 为 0）。
-            const cascadedEngines: string[] = [];
-            const CASCADE_BATCH_SIZE = 2;
-            const MIN_CASCADE_BATCH_BUDGET_MS = 3000;
-            // 批次上限：探测缓存为空时（冷启动）级联会一路试遍全部候选，
-            // 实测首次中文查询因此跑到 23s（其中 startpage 必然吃掉 10s 超时）；
-            // 热态只跑 2 批、约 5s。给批次封顶让冷启动的最坏情况可控（复评报告 P1-2）。
-            const MAX_CASCADE_BATCHES = 3;
-            // 级联判据用"可用条数"而非原始条数：入口页噪声与零相关（词义漂移）结果
-            // 不应让级联误判为"结果已够"——噪声占位时仍需补跑其他引擎
-            const usableCount = countUsableResults(merged, cleanQuery);
-            if (minResults && minResults > usableCount) {
-                const usedEngines = new Set(engines);
-                // 已知不可达的境外引擎不进候选：它们的可达性探测要 3s×2 次才失败，
-                // 每一批级联都白等一次（实测英文路由 + 级联被拖到 20.7s，而失败结果本就缓存 1 分钟）。
-                // 只排除"已知"的（探测失败缓存内且未走代理），首次探测行为不变。
-                const candidates = SUPPORTED_SEARCH_ENGINES.filter(
-                    (engine) => !usedEngines.has(engine)
-                        && typeof engineMap[engine] === 'function'
-                        && !isEngineCircuitOpen(engine)
-                        && !isKnownUnreachableOverseasEngine(engine)
-                );
-                let cascadeBatches = 0;
-                for (let cursor = 0; cursor < candidates.length
-                    && countUsableResults(merged, cleanQuery) < minResults
-                    && cascadeBatches < MAX_CASCADE_BATCHES; cursor += CASCADE_BATCH_SIZE) {
-                    const remaining = deadlineAt - Date.now();
-                    if (remaining < MIN_CASCADE_BATCH_BUDGET_MS) {
-                        break;
-                    }
-                    cascadeBatches += 1;
-                    const batch = candidates.slice(cursor, cursor + CASCADE_BATCH_SIZE);
-                    const gap = minResults - countUsableResults(merged, cleanQuery);
-                    // 与引擎 deadline 同理：候选提前完成时必须 clearTimeout，否则泄漏的 30s timer 延迟 Node 进程退出
-                    const runCandidate = (candidate: string): Promise<SearchResult[]> => new Promise((resolve, reject) => {
-                        let done = false;
-                        const cascadeStartedAt = Date.now();
-                        const wait = Math.max(0, Math.min(remaining, PER_ENGINE_TIMEOUT_MS));
-                        let cascadeTimedOut = false;
-                        const timer = setTimeout(() => {
-                            done = true;
-                            cascadeTimedOut = true;
-                            engineMetrics.push({ engine: candidate, ms: wait, count: 0, error: `timeout after ${wait}ms`, timedOut: true });
-                            partialFailures.push({
-                                engine: candidate,
-                                code: 'engine_error',
-                                message: buildHintedMessage(candidate, `Engine timeout after ${wait}ms (no response in time)`)
-                            });
-                            resolve([]);
-                        }, wait);
+                const limits = distributeLimit(limit, executableEngines.length);
+                const effectiveSearchMode = resolveSearchModeOverride(searchMode);
 
-                        (async () => {
-                            const results = await engineMap[candidate]!(searchQuery, gap, { searchMode: effectiveSearchMode });
-                            if (!done) {
-                                done = true;
-                                clearTimeout(timer);
-                                if (!cascadeTimedOut) {
-                                    engineMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: results.length });
-                                    metrics.recordEngineSearch(candidate, Date.now() - cascadeStartedAt, results.length > 0);
-                                }
-                                resolve(results);
-                            }
-                        })().catch((error) => {
-                            if (!done) {
-                                done = true;
-                                clearTimeout(timer);
-                                if (!cascadeTimedOut) {
-                                    engineMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: 0, error: truncateMetricError(error instanceof Error ? error.message : String(error)) });
-                                    metrics.recordEngineSearch(candidate, Date.now() - cascadeStartedAt, false);
-                                }
-                                reject(error);
-                            }
-                        });
-                    });
+                const deadlineMs = SEARCH_DEADLINE_MS;
+                const deadlineAt = Date.now() + deadlineMs;
+                const perEngineTimeoutMs = Math.min(Math.floor(deadlineMs * 0.5), 10000);
 
-                    const batchStartLength = merged.length;
-                    let batchAllReturnedNonEmpty = true;
-                    let batchNewResults = 0;
-                    const settled = await Promise.allSettled(batch.map((candidate) => runCandidate(candidate)));
-                    for (let index = 0; index < settled.length; index += 1) {
-                        const candidate = batch[index];
-                        const outcome = settled[index];
-                        if (!candidate || !outcome) {
-                            continue;
-                        }
-                        if (outcome.status === 'fulfilled') {
-                            if (outcome.value.length > 0) {
-                                const before = merged.length;
-                                cascadedEngines.push(candidate);
-                                engineResults.push(outcome.value);
-                                merged = mergeSearchResults(engineResults)
-                                    .filter((result) => !isPlaceholderResult(result));
-                                batchNewResults += merged.length - before;
-                            } else {
-                                batchAllReturnedNonEmpty = false;
-                                partialFailures.push({
-                                    engine: candidate,
-                                    code: 'no_results',
-                                    message: 'Engine returned no results for the cascaded quota'
-                                });
-                            }
-                        } else {
-                            batchAllReturnedNonEmpty = false;
-                            partialFailures.push({
-                                engine: candidate,
-                                code: 'engine_error',
-                                message: buildHintedMessage(candidate, outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason))
-                            });
-                        }
-                    }
-                    // 所有候选都返回了结果但去重后 0 新增：继续尝试其他引擎只会重复同样的事
-                    if (batchAllReturnedNonEmpty && batchNewResults === 0 && merged.length === batchStartLength) {
-                        break;
-                    }
+                // 管道第 1 阶段：主引擎并发执行器
+                const primary = await executePrimaryEngines({
+                    query: cleanQuery,
+                    searchQuery,
+                    executableEngines,
+                    limits,
+                    effectiveSearchMode,
+                    engineMap,
+                    deadlineAt,
+                    perEngineTimeoutMs
+                });
+
+                const allFailures: SearchExecutionFailure[] = [...initialFailures, ...primary.partialFailures];
+                const allMetrics = [...primary.engineMetrics];
+
+                let merged = mergeSearchResults(primary.engineResults)
+                    .filter((result) => !isPlaceholderResult(result));
+
+                // 管道第 2 阶段：级联补位执行器（结果不足时按批补位）
+                const cascade = await executeCascade({
+                    cleanQuery,
+                    searchQuery,
+                    minResults: minResults ?? 0,
+                    initialMerged: merged,
+                    initialEngineResults: primary.engineResults,
+                    engines,
+                    engineMap,
+                    effectiveSearchMode,
+                    deadlineAt,
+                    perEngineTimeoutMs
+                });
+
+                merged = cascade.merged;
+                allFailures.push(...cascade.cascadeFailures);
+                allMetrics.push(...cascade.cascadeMetrics);
+
+                // 管道第 3 阶段：全局重排与截断
+                merged = rankSearchResults(merged, cleanQuery).slice(0, limit);
+
+                const result: SearchExecutionResult = {
+                    query: cleanQuery,
+                    engines: executableEngines,
+                    totalResults: merged.length,
+                    results: merged,
+                    partialFailures: allFailures,
+                    ...(cascade.cascadedEngines.length > 0 ? { cascadedEngines: cascade.cascadedEngines } : {}),
+                    ...(primary.directAnswer ? { directAnswer: primary.directAnswer } : {}),
+                    ...(allMetrics.some(Boolean) ? { engineMetrics: allMetrics.filter(Boolean) } : {})
+                };
+
+                // 管道第 4 阶段：TTL 缓存写入
+                if (merged.length > 0) {
+                    const degraded = allFailures.length > 0;
+                    ttlCache.set(
+                        { query: searchQuery, engines, limit, searchMode, minResults },
+                        result,
+                        degraded ? DEGRADED_CACHE_TTL_MS : undefined
+                    );
                 }
-            }
 
-            // 全局重排：所有分支（主阶段 + 级联补位）合并完之后统一执行一次——
-            // 位置分 + BM25 相关性 + 域名权威度 + 跨引擎共识 + 入口页降权（见 resultRanking.ts）。
-            // 无论级联是否触发，首页/登录页都会沉底、真实内容上浮。
-            merged = rankSearchResults(merged, cleanQuery).slice(0, limit);
-
-            const result: SearchExecutionResult = {
-                query: cleanQuery,
-                engines: executableEngines,
-                totalResults: merged.length,
-                results: merged,
-                partialFailures,
-                ...(cascadedEngines.length > 0 ? { cascadedEngines } : {}),
-                ...(directAnswer ? { directAnswer } : {}),
-                ...(engineMetrics.some(Boolean) ? { engineMetrics: engineMetrics.filter(Boolean) } : {})
-            };
-
-            // 缓存写入：只要拿到结果就写入。partialFailures 是多引擎场景的常态
-            // （no_results / 单引擎限流 / 超时），此前"零失败才缓存"会让重复查询每次
-            // 冷启动（实测缓存几乎 100% 击穿）。降级结果用短 TTL（1 分钟）保持新鲜度，
-            // 零结果仍不缓存（下次应重试）。
-            if (merged.length > 0) {
-                const degraded = partialFailures.length > 0;
-                ttlCache.set(
-                    { query: searchQuery, engines, limit, searchMode, minResults },
-                    result,
-                    degraded ? DEGRADED_CACHE_TTL_MS : undefined
-                );
-            }
-
-            return result;
+                return result;
             } finally {
-                // 释放全局并发信号量
                 if (globalSemaphore) {
                     globalSemaphore.release();
                 }
             }
         },
 
-        /** 清空搜索 TTL 缓存（引擎刚恢复/反爬页面过期时手动强制重查） */
         clearCache(): void {
             ttlCache.clear();
         },

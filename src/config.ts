@@ -62,219 +62,228 @@ export interface AppConfig {
     enableHttpServer: boolean;
 }
 
-function readOptionalEnv(name: string): string | undefined {
-    const value = process.env[name]?.trim();
-    return value ? value : undefined;
-}
-
-// Read from environment variables or use defaults
-export const config: AppConfig = {
-    // Search engine configuration
-    // 默认 'auto'：按查询特征自动路由（中文 → baidu，英文/技术 → bing），
-    // 未配置该变量的客户端此前默认走 bing，中文查询召回质量差（实测）
-    defaultSearchEngine: (process.env.DEFAULT_SEARCH_ENGINE as AppConfig['defaultSearchEngine']) || 'auto',
-    // Parse comma-separated list of allowed search engines
-    allowedSearchEngines: process.env.ALLOWED_SEARCH_ENGINES ?
-        process.env.ALLOWED_SEARCH_ENGINES.split(',').map(e => e.trim()) :
-        [],
-    searchMode: (process.env.SEARCH_MODE as AppConfig['searchMode']) || 'auto',
-    maxConcurrentSearches: Number(process.env.MAX_CONCURRENT_SEARCHES || '0'),
-    bingPlaywrightFallback: process.env.BING_PLAYWRIGHT_FALLBACK !== 'false',
-    impersonateBrowser: readOptionalEnv('IMPERSONATE_BROWSER') || 'chrome_149',
-    impersonateOs: readOptionalEnv('IMPERSONATE_OS') || 'windows',
-    startpagePlaywrightFallback: process.env.STARTPAGE_PLAYWRIGHT_FALLBACK !== 'false',
-    // Proxy configuration
-    proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:7890',
-    useProxy: process.env.USE_PROXY === 'true',
-    proxyEngines: process.env.PROXY_ENGINES ?
-        process.env.PROXY_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
-        [],
-    // 默认放行 198.18.0.0/15：RFC 2544 基准测试保留段，公网不可路由，是 Clash/Mihomo
-    // fake-IP 的标准网段——默认拦截会把 TUN 用户的全部抓取误判为私网访问。
-    // 用户可用 FAKE_IP_CIDRS 追加/覆盖其他代理使用的伪造网段。
-    fakeIpCidrs: process.env.FAKE_IP_CIDRS ?
-        process.env.FAKE_IP_CIDRS.split(',').map(cidr => cidr.trim()).filter(Boolean) :
-        ['198.18.0.0/15'],
-    authorityDomains: process.env.SEARCH_AUTHORITY_DOMAINS ?
-        process.env.SEARCH_AUTHORITY_DOMAINS.split(',').map(domain => domain.trim().toLowerCase()).filter(Boolean) :
-        [],
-    defaultSearchLimit: Number(process.env.DEFAULT_SEARCH_LIMIT || '10'),
-    // 英文默认并列 bing + duckduckgo：实测 bing 对含域名的长尾技术 query 会退化成站点首页，
-    // 单引擎质量风险高；duckduckgo 轻量、无需 key，可交叉提升召回（无代理时快速失败不拖累）
-    autoRouteEnEngines: process.env.AUTO_ROUTE_EN_ENGINES ?
-        process.env.AUTO_ROUTE_EN_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
-        ['bing', 'duckduckgo'],
-    autoRouteZhEngines: process.env.AUTO_ROUTE_ZH_ENGINES ?
-        process.env.AUTO_ROUTE_ZH_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
-        ['baidu'],
-    defaultMinResults: Number(process.env.DEFAULT_MIN_RESULTS || '5'),
-    searchDeadlineMs: Number(process.env.SEARCH_DEADLINE_MS || '30000'),
-    fetchWebAllowInsecureTls: process.env.FETCH_WEB_INSECURE_TLS === 'true',
-    playwrightPackage: (process.env.PLAYWRIGHT_PACKAGE as AppConfig['playwrightPackage']) || 'auto',
-    playwrightModulePath: readOptionalEnv('PLAYWRIGHT_MODULE_PATH'),
-    playwrightExecutablePath: readOptionalEnv('PLAYWRIGHT_EXECUTABLE_PATH'),
-    playwrightWsEndpoint: readOptionalEnv('PLAYWRIGHT_WS_ENDPOINT'),
-    playwrightCdpEndpoint: readOptionalEnv('PLAYWRIGHT_CDP_ENDPOINT'),
-    playwrightHeadless: process.env.PLAYWRIGHT_HEADLESS !== 'false',
-    playwrightNavigationTimeoutMs: Number(process.env.PLAYWRIGHT_NAVIGATION_TIMEOUT_MS || 20000),
-    // CORS configuration
-    enableCors: process.env.ENABLE_CORS === 'true',
-    corsOrigin: process.env.CORS_ORIGIN || '*',
-    // Server configuration - determined by MODE environment variable
-    // Modes: 'both' (default), 'http', 'stdio'
-    enableHttpServer: process.env.MODE ? ['both', 'http'].includes(process.env.MODE) : true
-};
-
-// Valid search engines list（'auto' 为查询感知路由的默认引擎哨兵值，不是真实引擎）
 const validSearchEngines = ['auto', 'bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'juejin', 'startpage', 'sogou'];
 const validSearchModes = ['request', 'auto', 'playwright'];
 const validPlaywrightPackages = ['auto', 'playwright', 'playwright-core'];
-const quietStartupLogs = process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true'
-    || (process.env.LOG_LEVEL ?? '').toLowerCase() === 'quiet';
 
-// Validate default search engine
-if (!validSearchEngines.includes(config.defaultSearchEngine)) {
-    console.warn(`Invalid DEFAULT_SEARCH_ENGINE: "${config.defaultSearchEngine}", falling back to "bing"`);
-    config.defaultSearchEngine = 'bing';
+export interface CreateConfigOptions {
+    quiet?: boolean;
 }
 
-if (!validSearchModes.includes(config.searchMode)) {
-    console.warn(`Invalid SEARCH_MODE: "${config.searchMode}", falling back to "auto"`);
-    config.searchMode = 'auto';
-}
+/**
+ * 工厂函数：基于给定的环境变量字典创建独立的 AppConfig 实例（默认 process.env）。
+ * 解锁测试隔离与多实例支持。
+ */
+export function createConfig(
+    env: NodeJS.ProcessEnv = process.env,
+    options: CreateConfigOptions = {}
+): AppConfig {
+    const readOptionalEnv = (name: string): string | undefined => {
+        const value = env[name]?.trim();
+        return value ? value : undefined;
+    };
 
-if (!validPlaywrightPackages.includes(config.playwrightPackage)) {
-    console.warn(`Invalid PLAYWRIGHT_PACKAGE: "${config.playwrightPackage}", falling back to "auto"`);
-    config.playwrightPackage = 'auto';
-}
+    const cfg: AppConfig = {
+        defaultSearchEngine: (env.DEFAULT_SEARCH_ENGINE as AppConfig['defaultSearchEngine']) || 'auto',
+        allowedSearchEngines: env.ALLOWED_SEARCH_ENGINES ?
+            env.ALLOWED_SEARCH_ENGINES.split(',').map(e => e.trim()) :
+            [],
+        searchMode: (env.SEARCH_MODE as AppConfig['searchMode']) || 'auto',
+        maxConcurrentSearches: Number(env.MAX_CONCURRENT_SEARCHES || '0'),
+        bingPlaywrightFallback: env.BING_PLAYWRIGHT_FALLBACK !== 'false',
+        impersonateBrowser: readOptionalEnv('IMPERSONATE_BROWSER') || 'chrome_149',
+        impersonateOs: readOptionalEnv('IMPERSONATE_OS') || 'windows',
+        startpagePlaywrightFallback: env.STARTPAGE_PLAYWRIGHT_FALLBACK !== 'false',
+        proxyUrl: env.PROXY_URL || 'http://127.0.0.1:7890',
+        useProxy: env.USE_PROXY === 'true',
+        proxyEngines: env.PROXY_ENGINES ?
+            env.PROXY_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
+            [],
+        fakeIpCidrs: env.FAKE_IP_CIDRS ?
+            env.FAKE_IP_CIDRS.split(',').map(cidr => cidr.trim()).filter(Boolean) :
+            ['198.18.0.0/15'],
+        authorityDomains: env.SEARCH_AUTHORITY_DOMAINS ?
+            env.SEARCH_AUTHORITY_DOMAINS.split(',').map(domain => domain.trim().toLowerCase()).filter(Boolean) :
+            [],
+        defaultSearchLimit: Number(env.DEFAULT_SEARCH_LIMIT || '10'),
+        autoRouteEnEngines: env.AUTO_ROUTE_EN_ENGINES ?
+            env.AUTO_ROUTE_EN_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
+            ['bing', 'duckduckgo'],
+        autoRouteZhEngines: env.AUTO_ROUTE_ZH_ENGINES ?
+            env.AUTO_ROUTE_ZH_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
+            ['baidu'],
+        defaultMinResults: Number(env.DEFAULT_MIN_RESULTS || '5'),
+        searchDeadlineMs: Number(env.SEARCH_DEADLINE_MS || '30000'),
+        fetchWebAllowInsecureTls: env.FETCH_WEB_INSECURE_TLS === 'true',
+        playwrightPackage: (env.PLAYWRIGHT_PACKAGE as AppConfig['playwrightPackage']) || 'auto',
+        playwrightModulePath: readOptionalEnv('PLAYWRIGHT_MODULE_PATH'),
+        playwrightExecutablePath: readOptionalEnv('PLAYWRIGHT_EXECUTABLE_PATH'),
+        playwrightWsEndpoint: readOptionalEnv('PLAYWRIGHT_WS_ENDPOINT'),
+        playwrightCdpEndpoint: readOptionalEnv('PLAYWRIGHT_CDP_ENDPOINT'),
+        playwrightHeadless: env.PLAYWRIGHT_HEADLESS !== 'false',
+        playwrightNavigationTimeoutMs: Number(env.PLAYWRIGHT_NAVIGATION_TIMEOUT_MS || 20000),
+        enableCors: env.ENABLE_CORS === 'true',
+        corsOrigin: env.CORS_ORIGIN || '*',
+        enableHttpServer: env.MODE ? ['both', 'http'].includes(env.MODE) : true
+    };
 
-if (config.fakeIpCidrs.length > 0) {
-    const invalidFakeIpCidrs = config.fakeIpCidrs.filter((cidr) => {
-        try {
-            ipaddr.parseCIDR(cidr);
-            return false;
-        } catch {
-            return true;
+    if (!validSearchEngines.includes(cfg.defaultSearchEngine)) {
+        if (!options.quiet) {
+            console.warn(`Invalid DEFAULT_SEARCH_ENGINE: "${cfg.defaultSearchEngine}", falling back to "bing"`);
         }
-    });
-    if (invalidFakeIpCidrs.length > 0) {
-        console.warn(`Invalid FAKE_IP_CIDRS entries will be ignored: ${invalidFakeIpCidrs.join(', ')}`);
+        cfg.defaultSearchEngine = 'bing';
     }
-    config.fakeIpCidrs = config.fakeIpCidrs.filter((cidr) => {
-        try {
-            ipaddr.parseCIDR(cidr);
-            return true;
-        } catch {
-            return false;
+
+    if (!validSearchModes.includes(cfg.searchMode)) {
+        if (!options.quiet) {
+            console.warn(`Invalid SEARCH_MODE: "${cfg.searchMode}", falling back to "auto"`);
         }
-    });
-}
-
-if (!Number.isFinite(config.playwrightNavigationTimeoutMs) || config.playwrightNavigationTimeoutMs <= 0) {
-    console.warn(`Invalid PLAYWRIGHT_NAVIGATION_TIMEOUT_MS: "${process.env.PLAYWRIGHT_NAVIGATION_TIMEOUT_MS}", falling back to 20000`);
-    config.playwrightNavigationTimeoutMs = 20000;
-}
-
-if (config.playwrightWsEndpoint && config.playwrightCdpEndpoint) {
-    console.warn('Both PLAYWRIGHT_WS_ENDPOINT and PLAYWRIGHT_CDP_ENDPOINT are set, PLAYWRIGHT_WS_ENDPOINT will take precedence');
-}
-
-if ((config.playwrightWsEndpoint || config.playwrightCdpEndpoint) && config.playwrightExecutablePath) {
-    console.warn('PLAYWRIGHT_EXECUTABLE_PATH is ignored when connecting to a remote browser endpoint');
-}
-
-// Validate allowed search engines
-if (config.allowedSearchEngines.length > 0) {
-    // Filter out invalid engines
-    const invalidEngines = config.allowedSearchEngines.filter(engine => !validSearchEngines.includes(engine));
-    if (invalidEngines.length > 0) {
-        console.warn(`Invalid search engines detected and will be ignored: ${invalidEngines.join(', ')}`);
-    }
-    config.allowedSearchEngines = config.allowedSearchEngines.filter(engine => validSearchEngines.includes(engine));
-
-    // If all engines were invalid, don't restrict (allow all engines)
-    if (config.allowedSearchEngines.length === 0) {
-        console.warn(`No valid search engines specified in the allowed list, all engines will be available`);
-    }
-    // Check if default engine is in the allowed list
-    else if (!config.allowedSearchEngines.includes(config.defaultSearchEngine)) {
-        console.warn(`Default search engine "${config.defaultSearchEngine}" is not in the allowed engines list`);
-        // Update the default engine to the first allowed engine
-        config.defaultSearchEngine = config.allowedSearchEngines[0] as AppConfig['defaultSearchEngine'];
-        console.error(`Default search engine updated to "${config.defaultSearchEngine}"`);
-    }
-}
-
-if (!quietStartupLogs) {
-    // Log configuration
-    console.error(`🔍 Default search engine: ${config.defaultSearchEngine}`);
-    if (config.allowedSearchEngines.length > 0) {
-        console.error(`🔍 Allowed search engines: ${config.allowedSearchEngines.join(', ')}`);
-    } else {
-        console.error(`🔍 No search engine restrictions, all available engines can be used`);
-    }
-    console.error(`🔍 Search mode: ${config.searchMode.toUpperCase()} (currently only affects Bing)`);
-    if (!config.bingPlaywrightFallback) {
-        console.error(`🔍 Bing Playwright fallback disabled (BING_PLAYWRIGHT_FALLBACK=false): anti-bot blocks surface as errors so lighter engines can cascade in`);
+        cfg.searchMode = 'auto';
     }
 
-    if (config.useProxy) {
-        console.error(`🌐 Using proxy: ${config.proxyUrl}`);
-    } else {
-        console.error(`🌐 No proxy configured (set USE_PROXY=true to enable)`);
-    }
-    if (config.fakeIpCidrs.length > 0) {
-        console.error(`🌐 Fake IP CIDRs: ${config.fakeIpCidrs.join(', ')}`);
-    }
-    if (config.fetchWebAllowInsecureTls) {
-        console.error('⚠️ fetchWebContent TLS verification is disabled (FETCH_WEB_INSECURE_TLS=true)');
-    } else {
-        console.error('🔐 fetchWebContent TLS verification is enabled');
+    if (!validPlaywrightPackages.includes(cfg.playwrightPackage)) {
+        if (!options.quiet) {
+            console.warn(`Invalid PLAYWRIGHT_PACKAGE: "${cfg.playwrightPackage}", falling back to "auto"`);
+        }
+        cfg.playwrightPackage = 'auto';
     }
 
-    console.error(`🧭 Playwright client source: ${config.playwrightPackage}`);
-    if (config.playwrightModulePath) {
-        console.error(`🧭 Playwright module path override: ${config.playwrightModulePath}`);
+    if (cfg.fakeIpCidrs.length > 0) {
+        const invalidFakeIpCidrs = cfg.fakeIpCidrs.filter((cidr) => {
+            try {
+                ipaddr.parseCIDR(cidr);
+                return false;
+            } catch {
+                return true;
+            }
+        });
+        if (invalidFakeIpCidrs.length > 0 && !options.quiet) {
+            console.warn(`Invalid FAKE_IP_CIDRS entries will be ignored: ${invalidFakeIpCidrs.join(', ')}`);
+        }
+        cfg.fakeIpCidrs = cfg.fakeIpCidrs.filter((cidr) => {
+            try {
+                ipaddr.parseCIDR(cidr);
+                return true;
+            } catch {
+                return false;
+            }
+        });
     }
-    if (config.playwrightWsEndpoint) {
-        console.error(`🧭 Playwright remote endpoint (ws): ${config.playwrightWsEndpoint}`);
-    } else if (config.playwrightCdpEndpoint) {
-        console.error(`🧭 Playwright remote endpoint (cdp): ${config.playwrightCdpEndpoint}`);
-    } else if (config.playwrightExecutablePath) {
-        console.error(`🧭 Playwright executable path: ${config.playwrightExecutablePath}`);
+
+    if (!Number.isFinite(cfg.playwrightNavigationTimeoutMs) || cfg.playwrightNavigationTimeoutMs <= 0) {
+        if (!options.quiet) {
+            console.warn(`Invalid PLAYWRIGHT_NAVIGATION_TIMEOUT_MS: "${env.PLAYWRIGHT_NAVIGATION_TIMEOUT_MS}", falling back to 20000`);
+        }
+        cfg.playwrightNavigationTimeoutMs = 20000;
     }
-    console.error(`🧭 Playwright headless: ${config.playwrightHeadless}`);
-    console.error(`🧭 Playwright navigation timeout: ${config.playwrightNavigationTimeoutMs}ms`);
 
-    // Determine server mode from config
-    const mode = process.env.MODE || (config.enableHttpServer ? 'both' : 'stdio');
-    console.error(`🖥️ Server mode: ${mode.toUpperCase()}`);
+    if (cfg.playwrightWsEndpoint && cfg.playwrightCdpEndpoint && !options.quiet) {
+        console.warn('Both PLAYWRIGHT_WS_ENDPOINT and PLAYWRIGHT_CDP_ENDPOINT are set, PLAYWRIGHT_WS_ENDPOINT will take precedence');
+    }
 
-    if (config.enableHttpServer) {
-        if (config.enableCors) {
-            console.error(`🔒 CORS enabled with origin: ${config.corsOrigin}`);
+    if ((cfg.playwrightWsEndpoint || cfg.playwrightCdpEndpoint) && cfg.playwrightExecutablePath && !options.quiet) {
+        console.warn('PLAYWRIGHT_EXECUTABLE_PATH is ignored when connecting to a remote browser endpoint');
+    }
+
+    if (cfg.allowedSearchEngines.length > 0) {
+        const invalidEngines = cfg.allowedSearchEngines.filter(engine => !validSearchEngines.includes(engine));
+        if (invalidEngines.length > 0 && !options.quiet) {
+            console.warn(`Invalid search engines detected and will be ignored: ${invalidEngines.join(', ')}`);
+        }
+        cfg.allowedSearchEngines = cfg.allowedSearchEngines.filter(engine => validSearchEngines.includes(engine));
+
+        if (cfg.allowedSearchEngines.length === 0) {
+            if (!options.quiet) {
+                console.warn(`No valid search engines specified in the allowed list, all engines will be available`);
+            }
+        } else if (!cfg.allowedSearchEngines.includes(cfg.defaultSearchEngine)) {
+            if (!options.quiet) {
+                console.warn(`Default search engine "${cfg.defaultSearchEngine}" is not in the allowed engines list`);
+            }
+            cfg.defaultSearchEngine = cfg.allowedSearchEngines[0] as AppConfig['defaultSearchEngine'];
+            if (!options.quiet) {
+                console.error(`Default search engine updated to "${cfg.defaultSearchEngine}"`);
+            }
+        }
+    }
+
+    const quietStartupLogs = options.quiet
+        || env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true'
+        || (env.LOG_LEVEL ?? '').toLowerCase() === 'quiet';
+
+    if (!quietStartupLogs) {
+        console.error(`🔍 Default search engine: ${cfg.defaultSearchEngine}`);
+        if (cfg.allowedSearchEngines.length > 0) {
+            console.error(`🔍 Allowed search engines: ${cfg.allowedSearchEngines.join(', ')}`);
         } else {
-            console.error(`🔒 CORS disabled (set ENABLE_CORS=true to enable)`);
+            console.error(`🔍 No search engine restrictions, all available engines can be used`);
+        }
+        console.error(`🔍 Search mode: ${cfg.searchMode.toUpperCase()} (currently only affects Bing)`);
+        if (!cfg.bingPlaywrightFallback) {
+            console.error(`🔍 Bing Playwright fallback disabled (BING_PLAYWRIGHT_FALLBACK=false): anti-bot blocks surface as errors so lighter engines can cascade in`);
+        }
+
+        if (cfg.useProxy) {
+            console.error(`🌐 Using proxy: ${cfg.proxyUrl}`);
+        } else {
+            console.error(`🌐 No proxy configured (set USE_PROXY=true to enable)`);
+        }
+        if (cfg.fakeIpCidrs.length > 0) {
+            console.error(`🌐 Fake IP CIDRs: ${cfg.fakeIpCidrs.join(', ')}`);
+        }
+        if (cfg.fetchWebAllowInsecureTls) {
+            console.error('⚠️ fetchWebContent TLS verification is disabled (FETCH_WEB_INSECURE_TLS=true)');
+        } else {
+            console.error('🔐 fetchWebContent TLS verification is enabled');
+        }
+
+        console.error(`🧭 Playwright client source: ${cfg.playwrightPackage}`);
+        if (cfg.playwrightModulePath) {
+            console.error(`🧭 Playwright module path override: ${cfg.playwrightModulePath}`);
+        }
+        if (cfg.playwrightWsEndpoint) {
+            console.error(`🧭 Playwright remote endpoint (ws): ${cfg.playwrightWsEndpoint}`);
+        } else if (cfg.playwrightCdpEndpoint) {
+            console.error(`🧭 Playwright remote endpoint (cdp): ${cfg.playwrightCdpEndpoint}`);
+        } else if (cfg.playwrightExecutablePath) {
+            console.error(`🧭 Playwright executable path: ${cfg.playwrightExecutablePath}`);
+        }
+        console.error(`🧭 Playwright headless: ${cfg.playwrightHeadless}`);
+        console.error(`🧭 Playwright navigation timeout: ${cfg.playwrightNavigationTimeoutMs}ms`);
+
+        const mode = env.MODE || (cfg.enableHttpServer ? 'both' : 'stdio');
+        console.error(`🖥️ Server mode: ${mode.toUpperCase()}`);
+
+        if (cfg.enableHttpServer) {
+            if (cfg.enableCors) {
+                console.error(`🔒 CORS enabled with origin: ${cfg.corsOrigin}`);
+            } else {
+                console.error(`🔒 CORS disabled (set ENABLE_CORS=true to enable)`);
+            }
         }
     }
+
+    return cfg;
 }
 
+// 保持向后兼容的全局单例配置
+export const config: AppConfig = createConfig(process.env);
 
 /**
  * Helper function to get the proxy URL if proxy is enabled
  */
-export function getProxyUrl(): string | undefined {
-    return config.useProxy ? encodeURI(<string>config.proxyUrl) : undefined;
+export function getProxyUrl(cfg: AppConfig = config): string | undefined {
+    return cfg.useProxy ? encodeURI(<string>cfg.proxyUrl) : undefined;
 }
 
 // 判断某个引擎是否应走代理：USE_PROXY=true 时，若 PROXY_ENGINES 白名单为空则全部走代理（兼容旧全局行为），
 // 否则仅白名单内的引擎走代理（国内引擎如 bing/baidu 保持直连，避免绕行国外节点导致超时/重定向）。
-export function engineShouldUseProxy(engine: string): boolean {
-    if (!config.useProxy) {
+export function engineShouldUseProxy(engine: string, cfg: AppConfig = config): boolean {
+    if (!cfg.useProxy) {
         return false;
     }
-    if (config.proxyEngines.length === 0) {
+    if (cfg.proxyEngines.length === 0) {
         return true;
     }
-    return config.proxyEngines.includes(engine);
+    return cfg.proxyEngines.includes(engine);
 }

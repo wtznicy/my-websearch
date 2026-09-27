@@ -106,11 +106,8 @@ function buildImpersonateSearchUrl(query: string, pageNumber: number): string {
     url.searchParams.set('first', String(1 + pageNumber * 10));
     return url.toString();
 }
-
-function isAntiBotPage(html: string): boolean {
-    const title = (html.match(/<title>(.*?)<\/title>/i) || [])[1]?.toLowerCase() ?? '';
-    return /captcha|verify|access denied|blocked|验证|人机验证/.test(title) && !html.includes('b_algo');
-}
+import { isBingAntiBotPage } from '../../core/antiBot/antiBotDetection.js';
+const isAntiBotPage = isBingAntiBotPage;
 
 /** 供百度 impersonate 层复用（同一原生模块） */
 export async function loadWreqModule(): Promise<WreqModule | null> {

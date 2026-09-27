@@ -13,6 +13,8 @@ function shouldDebug(): boolean {
  */
 export type JuejinArticleOptions = { format?: 'text' | 'markdown' };
 
+import { MOBILE_IOS_UA } from '../../utils/userAgents.js';
+
 export async function fetchJuejinArticle(url: string, options: JuejinArticleOptions = {}): Promise<{ content: string }> {
     try {
         console.error(`🔍 Fetching Juejin article: ${url}`);
@@ -20,7 +22,7 @@ export async function fetchJuejinArticle(url: string, options: JuejinArticleOpti
         // 直连优先、代理兜底：先无代理，网络失败且配置了代理时自动切换
         const response = await requestDirectFirst('GET', url, (forceDirect) => buildAxiosRequestOptions({
             headers: {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                'User-Agent': MOBILE_IOS_UA,
                 'Connection': 'keep-alive',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
                 'Accept-Encoding': 'gzip, deflate, br, zstd',
@@ -110,6 +112,6 @@ export async function fetchJuejinArticle(url: string, options: JuejinArticleOpti
 
     } catch (error) {
         console.error('❌ 获取掘金文章失败:', error instanceof Error ? error.message : String(error));
-        throw new Error(`获取掘金文章失败: ${error instanceof Error ? error.message : '未知错误'}`);
+        throw new Error(`获取掘金文章失败: ${error instanceof Error ? error.message : '未知错误'}`, error instanceof Error ? { cause: error } : undefined);
     }
 }

@@ -111,9 +111,9 @@ describe('renderPrometheus', () => {
         metrics.recordEngineSearch('baidu', 50, true);
         const text = metrics.renderPrometheus();
         expect(text.endsWith('\n')).toBe(true);
-        // 每个非注释行都必须是 "name value" 形式
+        // 每个非注释行都必须是 "name value" 形式（Prometheus 指标名允许包含小写字母、数字和下划线）
         for (const line of text.split('\n').filter((l) => l && !l.startsWith('#'))) {
-            expect(line).toMatch(/^[a-z_]+(\{[^}]*\})? -?\d+(\.\d+)?$/);
+            expect(line).toMatch(/^[a-z0-9_]+(\{[^}]*\})? -?\d+(\.\d+)?$/);
         }
     });
 });

@@ -24,7 +24,8 @@ const ANUBIS_PASS_PATH = '/.within.website/x/cmd/anubis/api/pass-challenge';
 /** PoW 迭代上限（difficulty 正常为 4~6；被标记 IP 可能升高，超限时回退浏览器） */
 const POW_MAX_NONCE = 20_000_000;
 
-const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
+const BROWSER_UA = DEFAULT_DESKTOP_UA;
 
 export type AnubisSession = {
     /** 放行后的完整 Cookie 串（spchal-cookie-verification + spchal-auth 等） */

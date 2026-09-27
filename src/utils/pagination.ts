@@ -14,6 +14,8 @@ export type PaginateSearchOptions<T> = {
     maxPages?: number;
     /** 每页之间的随机延迟范围 [min, max] ms；不设则无延迟 */
     pageDelayMs?: [number, number];
+    /** 可选去重键提取函数（如 (res) => res.url），跨页自动过滤重复项 */
+    dedupKey?: (item: T) => string;
 };
 
 export async function paginateSearch<T>(options: PaginateSearchOptions<T>): Promise<T[]> {
@@ -23,10 +25,12 @@ export async function paginateSearch<T>(options: PaginateSearchOptions<T>): Prom
         initialPage = 0,
         pageStep = 1,
         maxPages = 10,
-        pageDelayMs
+        pageDelayMs,
+        dedupKey
     } = options;
 
     const allResults: T[] = [];
+    const seenKeys = new Set<string>();
     // 直接答案卡片（百度汇率/百科卡等）：fetchPage 返回值上的数组属性，
     // concat/slice 会丢失——在循环里捕获，最终挂回返回数组供上层聚合
     let directAnswer: string | undefined;
@@ -38,15 +42,38 @@ export async function paginateSearch<T>(options: PaginateSearchOptions<T>): Prom
             const delay = min + Math.random() * (max - min);
             await new Promise((resolve) => setTimeout(resolve, delay));
         }
+
         const results = await fetchPage(page);
         const pageAnswer = (results as { directAnswer?: unknown })?.directAnswer;
         if (!directAnswer && typeof pageAnswer === 'string' && pageAnswer) {
             directAnswer = pageAnswer;
         }
-        allResults.push(...results);
+
         if (results.length === 0) {
             break;
         }
+
+        let addedThisPage = 0;
+        for (const item of results) {
+            if (dedupKey) {
+                const key = dedupKey(item);
+                if (seenKeys.has(key)) {
+                    continue;
+                }
+                seenKeys.add(key);
+            }
+            allResults.push(item);
+            addedThisPage += 1;
+            if (allResults.length >= limit) {
+                break;
+            }
+        }
+
+        // 若配置了去重键且整页无任何新增结果（如全部重复），提前结束避免空转
+        if (dedupKey && addedThisPage === 0) {
+            break;
+        }
+
         page += pageStep;
     }
 

@@ -4,28 +4,15 @@ import { prepareStealthPage, getStealthUserAgent } from './browserStealth.js';
 import { openPlaywrightBrowser, loadPlaywrightClient } from './playwrightClient.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from './urlSafety.js';
 
+import { DEFAULT_DESKTOP_UA } from './userAgents.js';
+
 const COOKIE_CACHE_TTL_MS = 10 * 60 * 1000;
 const COOKIE_WARMUP_DELAY_MS = 1200;
 const COOKIE_CONTEXT_OPTIONS = {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+    userAgent: DEFAULT_DESKTOP_UA,
     locale: 'zh-CN',
     viewport: { width: 1440, height: 960 }
 };
-const BOT_KEYWORDS = [
-    'captcha',
-    'verification',
-    'verify you are human',
-    'access denied',
-    'blocked',
-    'rate limit',
-    'too many requests',
-    'please enable javascript',
-    'please verify',
-    '请验证',
-    '验证码',
-    '人机验证',
-    '安全验证'
-];
 
 type CookieCacheEntry = {
     cookieHeader: string;
@@ -53,10 +40,8 @@ function serializeCookieHeader(cookies: Array<{ name?: string; value?: string }>
         .join('; ');
 }
 
-export function looksLikeBotChallengePage(html: string): boolean {
-    const normalized = html.toLowerCase();
-    return BOT_KEYWORDS.some((keyword) => normalized.includes(keyword));
-}
+import { looksLikeBotChallengePage } from '../core/antiBot/antiBotDetection.js';
+export { looksLikeBotChallengePage };
 
 // Hostname-level TTL cache used by the subresource guard so a page loading
 // N assets from one CDN costs one DNS lookup, not N. Bounded to keep memory
@@ -302,7 +287,7 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
 
             if (typeof page.waitForLoadState === 'function') {
                 await page.waitForLoadState('networkidle', {
-                    timeout: Math.min(Math.max(config.playwrightNavigationTimeoutMs, 5000), 15000)
+                    timeout: Math.min(config.playwrightNavigationTimeoutMs, 3000)
                 }).catch(() => undefined);
             }
 

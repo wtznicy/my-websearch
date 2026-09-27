@@ -34,6 +34,7 @@ export default tseslint.config(
         // 真正的闸门是 package.json 里的 --max-warnings 178
         files: [
             'src/utils/playwrightClient.ts', // 42 处
+            'src/utils/playwright/*.ts',
             'src/utils/nativeInterop.ts', // 41 处
             'src/engines/bing/bing.ts', // 17 处
             'src/utils/browserStealth.ts', // 13 处

@@ -13,8 +13,9 @@ const STARTPAGE_SC_TTL_MS = 30 * 60 * 1000;
 const ANUBIS_SESSION_TTL_MS = 4 * 60 * 1000;
 const DEFAULT_PAGE_SIZE = 10;
 
+import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 const COMMON_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+    'User-Agent': DEFAULT_DESKTOP_UA,
     'Accept-Language': 'en-US,en;q=0.9'
 };
 
@@ -24,30 +25,8 @@ let cachedScAt = 0;
 /** 当前缓存的会话 TTL（PoW 会话 4 分钟 / Playwright 会话 30 分钟） */
 let currentSessionTtlMs = STARTPAGE_SC_TTL_MS;
 
-function isCaptchaPage(html: string): boolean {
-    const normalized = html.toLowerCase();
-    const $ = cheerio.load(html);
-    const title = $('title').first().text().trim().toLowerCase();
-
-    if (normalized.includes('/sp/captcha')) {
-        return true;
-    }
-
-    const hasCaptchaUi = $([
-        'form[action*="/sp/captcha"]',
-        'iframe[src*="captcha"]',
-        '[id*="captcha"]',
-        '[class*="captcha"]'
-    ].join(',')).length > 0;
-
-    const hasVerificationText = [
-        'verify you are human',
-        'human verification',
-        'security check'
-    ].some((keyword) => normalized.includes(keyword) || title.includes(keyword));
-
-    return hasCaptchaUi || hasVerificationText;
-}
+import { isStartpageCaptchaPage } from '../../core/antiBot/antiBotDetection.js';
+const isCaptchaPage = isStartpageCaptchaPage;
 
 function extractScCode(html: string): string | undefined {
     const $ = cheerio.load(html);
@@ -271,27 +250,17 @@ async function searchStartpagePage(query: string, page: number): Promise<SearchR
     return extractResultsFromHtml(html);
 }
 
+import { paginateSearch } from '../../utils/pagination.js';
+
 export async function searchStartpage(query: string, limit: number): Promise<SearchResult[]> {
     // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂超时拖累整次搜索
     await assertOverseasEngineUsable('startpage');
-    const allResults: SearchResult[] = [];
-    const seenUrls = new Set<string>();
-    const maxPage = Math.max(1, Math.ceil(limit / DEFAULT_PAGE_SIZE));
 
-    for (let page = 1; page <= maxPage && allResults.length < limit; page += 1) {
-        const pageResults = await searchStartpagePage(query, page);
-        for (const result of pageResults) {
-            if (seenUrls.has(result.url)) {
-                continue;
-            }
-            seenUrls.add(result.url);
-            allResults.push(result);
-        }
-
-        if (pageResults.length === 0) {
-            break;
-        }
-    }
-
-    return allResults.slice(0, limit);
+    return paginateSearch({
+        limit,
+        initialPage: 1,
+        pageStep: 1,
+        fetchPage: (page) => searchStartpagePage(query, page),
+        dedupKey: (result) => result.url
+    });
 }

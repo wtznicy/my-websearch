@@ -1,6 +1,8 @@
 import * as cheerio from 'cheerio';
+import axios from 'axios';
 import { fetchPageHtmlWithBrowser, getBrowserCookieHeader, looksLikeBotChallengePage } from '../../utils/browserCookies.js';
-import { buildAxiosRequestOptions, hintProxyConnectionError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { buildAxiosRequestOptions, hintProxyConnectionError, isNetworkLayerError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { createDomesticDirectAgent, isDomesticHostname, isTlsOrWafResetError, shouldAttemptDomesticDirectRetry } from '../../utils/domesticDirectNetwork.js';
 
 function normalizeExtractedText(text: string): string {
     return text
@@ -47,12 +49,15 @@ function stripPromotionSections(text: string): string {
     return kept.join('\n\n').trim();
 }
 
+import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
+
 function buildRequestOptions(cookieHeader?: string, forceDirect = false): any {
     const headers: Record<string, string> = {
-        'Accept': '*/*',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Host': 'blog.csdn.net',
+        'Referer': 'https://blog.csdn.net/',
         'Connection': 'keep-alive',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
+        'User-Agent': DEFAULT_DESKTOP_UA
     };
     // CSDN 是国内站点，强制直连：不因全局 USE_PROXY 走代理（代理挂掉时 CSDN 抓取不受影响）
     const requestOptions = buildAxiosRequestOptions({ headers, forceDirect });
@@ -118,7 +123,7 @@ export const __csdnArticleInternals = { extractArticleContent, isPromotionParagr
  * 每次导航上限 20s，累积到 **64s 才失败**——远超 MCP 客户端 30s 预算，调用方只会看到超时。
  * 因此给整条兜底链一个总预算，超时即失败并保留上游真实原因（如 521）。
  */
-const CSDN_BROWSER_FALLBACK_BUDGET_MS = 20000;
+const CSDN_BROWSER_FALLBACK_BUDGET_MS = 25000;
 
 function createBrowserBudget(label: string) {
     const deadline = Date.now() + CSDN_BROWSER_FALLBACK_BUDGET_MS;
@@ -157,30 +162,64 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
         content = extractArticleContent(html);
     } catch (error: any) {
         firstError = error;
+
+        // 若因 TUN / Fake-IP 导致 TLS 握手被 WAF 重置或返回 521，优先使用物理网卡直连补偿兜底
+        try {
+            const hostname = new URL(url).hostname;
+            if (shouldAttemptDomesticDirectRetry(error, hostname)) {
+                const directAgent = await createDomesticDirectAgent(hostname);
+                if (directAgent) {
+                    const directRes = await axios.get(url, {
+                        ...buildRequestOptions(undefined, true),
+                        httpsAgent: directAgent,
+                        proxy: false,
+                        timeout: 10000
+                    });
+                    const directHtml = String(directRes.data || '');
+                    const directContent = extractArticleContent(directHtml);
+                    if (directContent && !shouldRetryWithBrowser(directHtml, directContent)) {
+                        return { content: directContent };
+                    }
+                }
+            }
+        } catch {
+            // 物理网卡补偿失败时平滑进入下方的浏览器兜底
+        }
+
         const status = error?.response?.status;
-        // 浏览器 Cookie 兜底触发条件：认证/限流（401/403/429）与 5xx 服务端临时故障
-        // （500/502/503 及 Cloudflare WAF 的 521/522）——这些状态下换浏览器会话/带 Cookie
-        // 往往能拿到内容，直接抛错会浪费兜底路径
-        if (![401, 403, 429, 500, 502, 503, 521, 522].includes(status)) {
+        const message = error instanceof Error ? error.message : String(error);
+        const isNetworkOrTlsError = isNetworkLayerError(message) || isTlsOrWafResetError(error);
+
+        // 浏览器 Cookie 兜底触发条件：认证/限流（401/403/429）、5xx 服务端临时故障
+        // （500/502/503 及 Cloudflare/WAF 的 521/522）、以及 TLS/连接层被 WAF 切断
+        if (![401, 403, 429, 500, 502, 503, 521, 522].includes(status) && !isNetworkOrTlsError) {
             throw hintProxyConnectionError(error);
         }
 
         try {
-            const cookieHeader = await withinBrowserBudget(getBrowserCookieHeader(url), 'cookie warm-up');
-            if (cookieHeader) {
-                try {
-                    response = await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader));
-                    html = String(response.data || '');
-                    content = extractArticleContent(html);
-                } catch {
+            // 521/522 或网络/TLS 层重置时，单纯的 Node HTTP 即使带 Cookie 也会被 WAF 切断（JA3/TLS 指纹检查），
+            // 直接走浏览器完整渲染，避免在 cookie 预热 + axios 重试上空耗预算
+            if (status === 521 || status === 522 || isNetworkOrTlsError) {
+                const browserPage = await withinBrowserBudget(fetchPageHtmlWithBrowser(url), 'browser render');
+                html = browserPage.html;
+                content = extractArticleContent(html);
+            } else {
+                const cookieHeader = await withinBrowserBudget(getBrowserCookieHeader(url), 'cookie warm-up');
+                if (cookieHeader) {
+                    try {
+                        response = await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader));
+                        html = String(response.data || '');
+                        content = extractArticleContent(html);
+                    } catch {
+                        const browserPage = await withinBrowserBudget(fetchPageHtmlWithBrowser(url), 'browser render');
+                        html = browserPage.html;
+                        content = extractArticleContent(html);
+                    }
+                } else {
                     const browserPage = await withinBrowserBudget(fetchPageHtmlWithBrowser(url), 'browser render');
                     html = browserPage.html;
                     content = extractArticleContent(html);
                 }
-            } else {
-                const browserPage = await withinBrowserBudget(fetchPageHtmlWithBrowser(url), 'browser render');
-                html = browserPage.html;
-                content = extractArticleContent(html);
             }
         } catch (fallbackError) {
             // 兜底链失败（含预算耗尽）：把上游真实原因（如 521）一并带到错误信息里

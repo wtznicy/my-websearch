@@ -29,22 +29,10 @@ function hostnameOf(url: string): string {
     }
 }
 
-/**
- * 反爬/异常页面检测：百度对无 cookie 或可疑请求返回 <meta refresh> 跳转页
- * （跳安全验证或首页），此时页面没有 #content_left 结果容器；安全验证页另有
- * wappass 跳转或"安全验证"文案特征。检测到反爬时由调用方显式抛错，
- * 避免"看似正常返回、实际解析不到任何结果"的静默失败。
- */
-export function isBaiduAntiBotPage(html: string): boolean {
-    const lower = html.toLowerCase();
-    const hasMetaRefresh = /<meta[^>]*http-equiv=["']?\s*refresh/i.test(lower);
-    const hasResultsContainer = /id=["']?content_left/i.test(lower);
-    const securitySignals = lower.includes('wappass.baidu.com')
-        || lower.includes('百度安全验证')
-        || lower.includes('安全验证')
-        || lower.includes('verify you are human');
-    return (hasMetaRefresh && !hasResultsContainer) || securitySignals;
-}
+import { isBaiduAntiBotPage } from '../../core/antiBot/antiBotDetection.js';
+export { isBaiduAntiBotPage };
+
+import { resolveHttpRedirectUrl, resolveBatchRedirects } from '../../utils/redirectResolver.js';
 
 /**
  * 解析百度搜索结果里的中转跳转链接（http://www.baidu.com/link?url=...）。
@@ -56,31 +44,12 @@ async function resolveBaiduRedirectUrl(linkUrl: string): Promise<string> {
         return linkUrl;
     }
 
-    try {
-        const response = await axios.head(linkUrl, buildAxiosRequestOptions({ engine: 'baidu',
-            trustedStaticHost: true,
-            headers: {
-                'User-Agent': BAIDU_USER_AGENT
-            },
-            maxRedirects: 3,
-            timeout: 8000,
-            validateStatus: (status: number) => status >= 200 && status < 400
-        }));
-
-        const finalUrl = response.request?.res?.responseUrl
-            ?? (typeof response.request?.res?.headers?.location === 'string'
-                ? response.request.res.headers.location
-                : undefined);
-
-        if (typeof finalUrl === 'string' && finalUrl.startsWith('http')) {
-            return finalUrl;
-        }
-
-        return linkUrl;
-    } catch (error) {
-        console.error('⚠️ Failed to resolve Baidu redirect link:', error instanceof Error ? error.message : String(error));
-        return linkUrl;
-    }
+    return resolveHttpRedirectUrl(linkUrl, {
+        engine: 'baidu',
+        userAgent: BAIDU_USER_AGENT,
+        maxRedirects: 3,
+        timeoutMs: 8000
+    });
 }
 
 /** 链接解析总预算：预算耗尽后剩余结果保留原中转链接（用户/LLM 仍可用），
@@ -91,12 +60,13 @@ const REDIRECT_RESOLVE_CONCURRENCY = 6;
 
 /** 带预算并发解析一批跳转链接：超预算的保留原链接 */
 async function resolveBaiduRedirectUrls(hrefs: string[]): Promise<string[]> {
-    return mapWithConcurrencyBudget(
+    return resolveBatchRedirects(
         hrefs,
-        REDIRECT_RESOLVE_CONCURRENCY,
         (href) => resolveBaiduRedirectUrl(href),
-        REDIRECT_RESOLVE_BUDGET_MS,
-        (href) => href
+        {
+            budgetMs: REDIRECT_RESOLVE_BUDGET_MS,
+            concurrency: REDIRECT_RESOLVE_CONCURRENCY
+        }
     );
 }
 

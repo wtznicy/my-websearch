@@ -7,7 +7,7 @@ import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } f
 import { pickDefaultEnginesForQuery } from '../../core/search/queryEngineRouting.js';
 import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
-import { ErrorCode } from '../../core/errors.js';
+import { ErrorCode, extractErrorCode, extractErrorStatus } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
 
 export type LocalDaemonOptions = {
@@ -208,8 +208,8 @@ type FetchErrorClassification = {
  */
 function classifyFetchError(error: unknown): FetchErrorClassification {
     const message = error instanceof Error ? error.message : String(error);
-    const code = (error as any)?.code;
-    const status = (error as any)?.status;
+    const code = extractErrorCode(error);
+    const status = extractErrorStatus(error);
 
     // SSRF 防护拒绝（私网/本地地址/非法协议）→ 400 客户端错误，不可重试
     if (message === 'Invalid public HTTP(S) URL'

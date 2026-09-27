@@ -29,3 +29,62 @@ export const ErrorCode = {
 } as const;
 
 export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode];
+
+import axios from 'axios';
+
+export type RetryableError = Error & {
+    retryable?: boolean;
+    code?: string;
+    status?: number;
+};
+
+/**
+ * 将 Error 实例标记为不可重试（retryable = false），供多引擎协调与重试机制识别
+ */
+export function markNonRetryable<T extends Error>(error: T): T & { retryable: false } {
+    return Object.assign(error, { retryable: false as const });
+}
+
+/**
+ * 检查错误是否被显式标记为不可重试
+ */
+export function isExplicitNonRetryable(error: unknown): boolean {
+    if (typeof error === 'object' && error !== null && 'retryable' in error) {
+        return (error as { retryable: unknown }).retryable === false;
+    }
+    return false;
+}
+
+/**
+ * 类型安全地提取 HTTP 状态码（支持 AxiosError、带 status 字段的对象等）
+ */
+export function extractErrorStatus(error: unknown): number | undefined {
+    if (axios.isAxiosError(error)) {
+        return error.response?.status;
+    }
+    if (typeof error === 'object' && error !== null) {
+        if ('status' in error && typeof (error as { status: unknown }).status === 'number') {
+            return (error as { status: number }).status;
+        }
+        if ('response' in error) {
+            const resp = (error as { response: unknown }).response;
+            if (typeof resp === 'object' && resp !== null && 'status' in resp && typeof (resp as { status: unknown }).status === 'number') {
+                return (resp as { status: number }).status;
+            }
+        }
+    }
+    return undefined;
+}
+
+/**
+ * 类型安全地提取错误代码（如 ERR_NETWORK、ECONNRESET 等）
+ */
+export function extractErrorCode(error: unknown): string | undefined {
+    if (axios.isAxiosError(error)) {
+        return error.code;
+    }
+    if (typeof error === 'object' && error !== null && 'code' in error && typeof (error as { code: unknown }).code === 'string') {
+        return (error as { code: string }).code;
+    }
+    return undefined;
+}

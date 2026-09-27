@@ -12,7 +12,8 @@ import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../.
 // 默认面向大陆部署用 cn.bing.com；可通过 OPEN_WEBSEARCH_BING_HOST 覆盖为 www.bing.com 等获取国际区结果
 const BING_BASE_URL = (process.env.OPEN_WEBSEARCH_BING_HOST || 'https://cn.bing.com/search').replace(/\/$/, '');
 const BING_HOME_URL = 'https://www.bing.com/?mkt=zh-CN';
-const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+import { DEFAULT_DESKTOP_UA, DESKTOP_UA_POOL } from '../../utils/userAgents.js';
+const BROWSER_USER_AGENT = DEFAULT_DESKTOP_UA;
 const SEARCH_INPUT_SELECTORS = [
     'input[name="q"]',
     'input[type="search"]',
@@ -35,12 +36,7 @@ const SEARCH_SUBMIT_SELECTORS = [
 ];
 // 更接近真实浏览器的请求头集合（EnhancedBing 同款反爬对抗）：
 // 随机 UA/语言、全套 Sec-Fetch 头、随机 MUID cookie，降低被 Bing 反爬拦截的概率。
-const BROWSER_USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0'
-];
+const BROWSER_USER_AGENTS = DESKTOP_UA_POOL;
 const ACCEPT_LANGUAGES = [
     'zh-CN,zh;q=0.9,en;q=0.8',
     'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -138,44 +134,14 @@ function buildBingSearchUrl(query: string, pageNumber: number): string {
     return url.toString();
 }
 
+import { analyzeBingBlockedPage } from '../../core/antiBot/antiBotDetection.js';
+
 /**
  * 判断 Bing 页面是否被反爬拦截。复用调用方已 load 的 cheerio 文档实例，
  * 避免与正式提取重复解析同一页 HTML（原实现每页 load 3 次）。
  */
-function analyzeBlockedPage($: any, html: string): { blocked: boolean; hasResults: boolean; detectedKeywords: string[]; title: string } {
-    const normalized = html.toLowerCase();
-    const title = $('title').first().text().trim().toLowerCase();
-    const detectedKeywords = BOT_DETECTION_KEYWORDS.filter((keyword) => normalized.includes(keyword));
-    // 轻量级选择器检查：覆盖结构化结果和回退链接两种提取路径，避免调用完整的 parseBingSearchResults（每页只需检查一次是否有结果）
-    const resultSelector = '#b_results .b_algo, #b_results li.b_algo, .b_algo, .b_ans';
-    const fallbackLinkSelector = '#b_results a[href], #b_topw a[href], .b_algo a[href], .b_ans a[href]';
-    const hasResults = $(resultSelector).length > 0 || $(fallbackLinkSelector).length > 0;
-    const hasCaptchaUi = $([
-        'iframe[src*="captcha"]',
-        '[id*="captcha"]',
-        '[class*="captcha"]',
-        'form[action*="validate"]',
-        'input[name*="captcha"]',
-        '#b_captcha',
-        '.b_captcha'
-    ].join(',')).length > 0;
-    const hasStrongTitleSignal = [
-        'captcha',
-        'verify you are human',
-        'access denied',
-        'too many requests',
-        '验证码',
-        '人机验证',
-        '请验证'
-    ].some((keyword) => title.includes(keyword));
-    const blocked = !hasResults && (hasCaptchaUi || hasStrongTitleSignal || detectedKeywords.length >= 2);
-
-    return {
-        blocked,
-        hasResults,
-        detectedKeywords,
-        title
-    };
+function analyzeBlockedPage($: cheerio.CheerioAPI, html: string): { blocked: boolean; hasResults: boolean; detectedKeywords: string[]; title: string } {
+    return analyzeBingBlockedPage($, html);
 }
 
 function buildBingAxiosRequestOptions(): any {
@@ -696,7 +662,7 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
             return finalResults;
         } catch (error) {
             if (shouldSuggestRemovingSiteOperator(query, error)) {
-                throw new Error('Bing Playwright mode did not return results for a site:-restricted query. Retry without the site: prefix.');
+                throw new Error('Bing Playwright mode did not return results for a site:-restricted query. Retry without the site: prefix.', { cause: error });
             }
             throw error;
         } finally {
