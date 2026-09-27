@@ -118,7 +118,7 @@ USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brav
 
 #### 🔹 Claude Desktop / Cursor / Windsurf / Cline (`mcpServers` 标准配置)
 
-在配置文件中添加（中国大陆用户强烈建议保留下方 `env` 中的分流代理配置）：
+在配置文件中添加：
 
 ```json
 {
