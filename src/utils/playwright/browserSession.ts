@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 
@@ -21,6 +21,7 @@ import {
     LocalBrowserSessionMetadataFile,
     LocalBrowserSessionMode,
     OpenPlaywrightBrowserOptions,
+    PlaywrightBrowserLike,
     PlaywrightBrowserSession,
     PlaywrightModule
 } from './types.js';
@@ -77,17 +78,18 @@ async function connectOverCdpOnly(
     playwright: PlaywrightModule,
     endpoint: string,
     timeout: number
-): Promise<any> {
+): Promise<PlaywrightBrowserLike> {
     return playwright.chromium.connectOverCDP(endpoint, { timeout });
 }
 
-async function closeConnectedCdpBrowser(browser: any, timeoutMs = 3000): Promise<void> {
-    if (!browser || typeof browser.close !== 'function') {
+async function closeConnectedCdpBrowser(browser: PlaywrightBrowserLike | unknown, timeoutMs = 3000): Promise<void> {
+    const browserCandidate = browser as PlaywrightBrowserLike | null | undefined;
+    if (!browserCandidate || typeof browserCandidate.close !== 'function') {
         return;
     }
 
     await Promise.race([
-        browser.close(),
+        browserCandidate.close(),
         new Promise((resolve) => {
             const timer = setTimeout(resolve, timeoutMs);
             if (typeof timer === 'object' && 'unref' in timer) {
@@ -97,7 +99,7 @@ async function closeConnectedCdpBrowser(browser: any, timeoutMs = 3000): Promise
     ]).catch(() => undefined);
 }
 
-function detachLaunchedChildProcess(child: any): void {
+function detachLaunchedChildProcess(child: ChildProcess): void {
     try {
         child.stdout?.destroy?.();
     } catch {
@@ -145,7 +147,7 @@ async function probeLocalCdpReadiness(
     playwright: PlaywrightModule,
     endpoint: string,
     probeTimeoutMs: number
-): Promise<any> {
+): Promise<PlaywrightBrowserLike> {
     const browser = await connectOverCdpOnly(
         playwright,
         endpoint,
@@ -154,7 +156,7 @@ async function probeLocalCdpReadiness(
 
     try {
         await withOperationTimeout(
-            browser.version(),
+            Promise.resolve(browser.version ? browser.version() : ''),
             probeTimeoutMs,
             `Timed out while probing local browser CDP readiness after ${probeTimeoutMs}ms`
         );
@@ -168,7 +170,7 @@ async function probeLocalCdpReadiness(
 async function connectOverCdpWhenReady(
     playwright: PlaywrightModule,
     endpoint: string
-): Promise<any> {
+): Promise<PlaywrightBrowserLike> {
     const startedAt = Date.now();
     let lastError: unknown;
     let probeTimeoutMs = PLAYWRIGHT_LOCAL_CDP_READINESS_INITIAL_PROBE_TIMEOUT_MS;
@@ -198,7 +200,7 @@ async function connectOverCdpWhenReady(
     throw new Error(`Timed out while waiting for local browser CDP readiness after ${PLAYWRIGHT_LOCAL_CDP_READINESS_TIMEOUT_MS}ms.${suffix}`);
 }
 
-export async function recoverLocalBrowserSessionBrowser(browser: any): Promise<any | null> {
+export async function recoverLocalBrowserSessionBrowser(browser: PlaywrightBrowserLike | unknown): Promise<PlaywrightBrowserLike | null> {
     if (config.playwrightWsEndpoint || config.playwrightCdpEndpoint) {
         return null;
     }
@@ -339,6 +341,8 @@ function buildLocalBrowserProcessArgs(port: number, tempDir: string, launchArgs:
     return args;
 }
 
+const BROWSER_METADATA_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
+
 function normalizeBrowserDomainMetadata(
     parsed: Partial<LocalBrowserSessionMetadataFile>,
     sessionMode: LocalBrowserSessionMode,
@@ -354,6 +358,7 @@ function normalizeBrowserDomainMetadata(
         browserPid: Number.isInteger(parsed.browserPid) ? parsed.browserPid : undefined,
         debugPort: Number.isInteger(parsed.debugPort) ? parsed.debugPort : undefined,
         tempDir: parsed.tempDir,
+        savedAt: typeof parsed.savedAt === 'number' && Number.isFinite(parsed.savedAt) ? parsed.savedAt : undefined,
         clientPids: shouldTrackLocalBrowserSessionClients(sessionMode) && Array.isArray(parsed.clientPids)
             ? parsed.clientPids.filter((pid): pid is number => Number.isInteger(pid) && pid > 0)
             : []
@@ -362,8 +367,18 @@ function normalizeBrowserDomainMetadata(
 
 function readBrowserDomainMetadataFromPath(metadataPath: string, sessionMode: LocalBrowserSessionMode, domainKey?: string): LocalBrowserSessionMetadata | null {
     try {
+        const raw = JSON.parse(readFileSync(metadataPath, 'utf8')) as Partial<LocalBrowserSessionMetadataFile>;
+        if (typeof raw.savedAt === 'number' && Number.isFinite(raw.savedAt) && Date.now() - raw.savedAt > BROWSER_METADATA_MAX_AGE_MS) {
+            // 超龄 metadata（>12h），直接删除并作废，避免僵尸 metadata 永久滞留
+            try {
+                rmSync(metadataPath, { force: true });
+            } catch {
+                // Ignore cleanup errors
+            }
+            return null;
+        }
         return normalizeBrowserDomainMetadata(
-            JSON.parse(readFileSync(metadataPath, 'utf8')) as Partial<LocalBrowserSessionMetadataFile>,
+            raw,
             sessionMode,
             metadataPath,
             domainKey
@@ -385,7 +400,8 @@ function serializeBrowserDomainMetadata(metadata: LocalBrowserSessionMetadata): 
     const serializedMetadata: LocalBrowserSessionMetadataFile = {
         browserPid: metadata.browserPid,
         debugPort: metadata.debugPort,
-        tempDir: metadata.tempDir
+        tempDir: metadata.tempDir,
+        savedAt: metadata.savedAt ?? Date.now()
     };
 
     if (shouldTrackLocalBrowserSessionClients(metadata.sessionMode)) {
@@ -798,13 +814,7 @@ function trackLocalBrowserSessionClientForReuse(metadata: LocalBrowserSessionMet
     return registerLocalBrowserSessionClient(metadata, pid);
 }
 
-async function cleanupStaleLocalBrowserSessions(): Promise<void> {
-    if (staleBrowserCleanupPerformed) {
-        return;
-    }
-
-    staleBrowserCleanupPerformed = true;
-
+async function doCleanupStaleLocalBrowserSessions(): Promise<void> {
     const entries = listBrowserDomainMetadataEntries();
 
     for (const { domainHash, metadataPath, sessionMode } of entries) {
@@ -816,10 +826,21 @@ async function cleanupStaleLocalBrowserSessions(): Promise<void> {
                 continue;
             }
 
+            const activeClients = shouldTrackLocalBrowserSessionClients(metadata.sessionMode)
+                ? normalizeActiveClientPids(metadata.clientPids.filter((pid) => pid !== process.pid))
+                : [];
+
+            // P0-3 快速路径：若客户端 PID 全部已死亡，无需慢速枚举，直接强杀与清理
+            if (shouldTrackLocalBrowserSessionClients(metadata.sessionMode) && activeClients.length === 0 && metadata.clientPids.length > 0) {
+                createForceKill(metadata.browserPid, metadata.tempDir)();
+                clearBrowserDomainMetadataFromPath(metadataPath, metadata.tempDir);
+                continue;
+            }
+
             const normalizedMetadata = shouldTrackLocalBrowserSessionClients(metadata.sessionMode)
                 ? {
                     ...metadata,
-                    clientPids: normalizeActiveClientPids(metadata.clientPids.filter((pid) => pid !== process.pid))
+                    clientPids: activeClients
                 }
                 : metadata;
             if (shouldTrackLocalBrowserSessionClients(normalizedMetadata.sessionMode)
@@ -852,8 +873,32 @@ async function cleanupStaleLocalBrowserSessions(): Promise<void> {
     }
 }
 
+const STALE_BROWSER_CLEANUP_BUDGET_MS = 8000;
+
+async function cleanupStaleLocalBrowserSessions(): Promise<void> {
+    if (staleBrowserCleanupPerformed) {
+        return;
+    }
+
+    try {
+        await Promise.race([
+            doCleanupStaleLocalBrowserSessions(),
+            new Promise<void>((_, reject) => {
+                const timer = setTimeout(() => reject(new Error(`Browser cleanup budget (${STALE_BROWSER_CLEANUP_BUDGET_MS}ms) exceeded`)), STALE_BROWSER_CLEANUP_BUDGET_MS);
+                if (typeof timer === 'object' && 'unref' in timer) {
+                    (timer as NodeJS.Timeout).unref();
+                }
+            })
+        ]);
+        staleBrowserCleanupPerformed = true;
+    } catch (error) {
+        console.warn('[browserSession] cleanupStaleLocalBrowserSessions exceeded budget or failed, proceeding with fresh launch:', error instanceof Error ? error.message : String(error));
+        // 不阻断冷启动：允许下次有机会再重试清理
+    }
+}
+
 async function waitForBrowserReadyViaStdout(
-    source: { type: 'pipe'; readHandle: any } | { type: 'child'; child: any },
+    source: { type: 'pipe'; readHandle: unknown } | { type: 'child'; child: ChildProcess },
     timeoutMs = 30000
 ): Promise<string> {
     let accumulated = '';
@@ -957,7 +1002,7 @@ async function tryReusePersistedLocalBrowserSession(
     const reusableDebugPort = metadata.debugPort ?? reusableBrowserCandidate.debugPort;
 
     const endpoint = `http://127.0.0.1:${reusableDebugPort}`;
-    let browser: any;
+    let browser: PlaywrightBrowserLike;
     try {
         browser = await connectOverCdpWhenReady(playwright, endpoint);
     } catch {
@@ -1066,7 +1111,7 @@ export async function closeLocalBrowserSession(session: LocalBrowserSession): Pr
     }
 }
 
-function createForceKill(browserPid?: number, tempDir?: string, browser?: any, domainKey?: string): () => void {
+function createForceKill(browserPid?: number, tempDir?: string, browser?: PlaywrightBrowserLike, domainKey?: string): () => void {
     return () => {
         try {
             browser?.disconnect?.();
@@ -1081,7 +1126,8 @@ function createForceKill(browserPid?: number, tempDir?: string, browser?: any, d
                     const child = spawn('taskkill', ['/F', '/T', '/PID', String(browserPid)], {
                         windowsHide: true,
                         stdio: 'ignore',
-                        detached: true
+                        detached: true,
+                        timeout: 3000
                     });
                     child.unref();
                 } catch {
@@ -1184,8 +1230,8 @@ async function connectLaunchedLocalBrowserSession(
     tempDir: string,
     debugPort: number,
     context: string
-): Promise<{ browser: any; browserPid: number }> {
-    let browser: any;
+): Promise<{ browser: PlaywrightBrowserLike; browserPid: number }> {
+    let browser: PlaywrightBrowserLike;
     let verifiedBrowserPid: number | undefined;
     try {
         browser = await connectOverCdpWhenReady(playwright, endpoint);
@@ -1232,7 +1278,7 @@ async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionK
     const cmdLine = [quoteWindowsCommandLineArg(browserPath), ...args.map((arg) => quoteWindowsCommandLineArg(arg))].join(' ');
 
     let browserPid: number | undefined;
-    let pipeHandle: any = null;
+    let pipeHandle: unknown = null;
 
     if (process.platform === 'win32') {
         const desktopName = `mcp-search-${Date.now()}`;

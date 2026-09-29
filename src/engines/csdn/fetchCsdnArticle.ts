@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import axios from 'axios';
+import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { fetchPageHtmlWithBrowser, getBrowserCookieHeader, looksLikeBotChallengePage } from '../../utils/browserCookies.js';
 import { buildAxiosRequestOptions, hintProxyConnectionError, isNetworkLayerError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { createDomesticDirectAgent, isDomesticHostname, isTlsOrWafResetError, shouldAttemptDomesticDirectRetry } from '../../utils/domesticDirectNetwork.js';
@@ -51,7 +52,7 @@ function stripPromotionSections(text: string): string {
 
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 
-function buildRequestOptions(cookieHeader?: string, forceDirect = false): any {
+function buildRequestOptions(cookieHeader?: string, forceDirect = false): AxiosRequestConfig {
     const headers: Record<string, string> = {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Host': 'blog.csdn.net',
@@ -148,19 +149,19 @@ function shouldRetryWithBrowser(html: string, content: string): boolean {
 }
 
 export async function fetchCsdnArticle(url: string): Promise<{ content: string }> {
-    let response: any;
+    let response: AxiosResponse | undefined;
     let html = '';
     let content = '';
     // 浏览器兜底总预算（见 createBrowserBudget 注释）+ 首次失败原因（用于最终错误信息）
     const withinBrowserBudget = createBrowserBudget('CSDN');
-    let firstError: any = null;
+    let firstError: unknown = null;
 
     try {
         // 直连优先、代理兜底：CSDN 国内直连最快，网络失败且配置了代理时自动切换
         response = await requestDirectFirst('GET', url, (forceDirect) => buildRequestOptions(undefined, forceDirect));
         html = String(response.data || '');
         content = extractArticleContent(html);
-    } catch (error: any) {
+    } catch (error: unknown) {
         firstError = error;
 
         // 若因 TUN / Fake-IP 导致 TLS 握手被 WAF 重置或返回 521，优先使用物理网卡直连补偿兜底
@@ -186,13 +187,13 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
             // 物理网卡补偿失败时平滑进入下方的浏览器兜底
         }
 
-        const status = error?.response?.status;
+        const status = (error as { response?: { status?: number } })?.response?.status;
         const message = error instanceof Error ? error.message : String(error);
         const isNetworkOrTlsError = isNetworkLayerError(message) || isTlsOrWafResetError(error);
 
         // 浏览器 Cookie 兜底触发条件：认证/限流（401/403/429）、5xx 服务端临时故障
         // （500/502/503 及 Cloudflare/WAF 的 521/522）、以及 TLS/连接层被 WAF 切断
-        if (![401, 403, 429, 500, 502, 503, 521, 522].includes(status) && !isNetworkOrTlsError) {
+        if ((typeof status !== 'number' || ![401, 403, 429, 500, 502, 503, 521, 522].includes(status)) && !isNetworkOrTlsError) {
             throw hintProxyConnectionError(error);
         }
 

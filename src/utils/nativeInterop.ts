@@ -32,10 +32,10 @@ function isKoffiUnavailable(error: unknown): boolean {
 // ===== Windows kernel32/user32 绑定（延迟初始化） =====
 
 interface WinLockBindings {
-    CreateFileW: (...args: any[]) => any;
-    LockFileEx: (...args: any[]) => any;
-    UnlockFileEx: (...args: any[]) => any;
-    CloseHandle: (...args: any[]) => any;
+    CreateFileW: (...args: unknown[]) => unknown;
+    LockFileEx: (...args: unknown[]) => unknown;
+    UnlockFileEx: (...args: unknown[]) => unknown;
+    CloseHandle: (...args: unknown[]) => unknown;
 }
 let _winLock: WinLockBindings | undefined;
 
@@ -71,17 +71,17 @@ function winLock(): WinLockBindings {
 }
 
 interface WinDesktopBindings {
-    CreateDesktopW: (...args: any[]) => any;
-    CloseDesktop: (...args: any[]) => any;
-    CreateProcessW: (...args: any[]) => any;
-    DuplicateHandle: (...args: any[]) => any;
-    GetCurrentProcess: (...args: any[]) => any;
-    OpenProcess: (...args: any[]) => any;
-    CloseHandle: (...args: any[]) => any;
-    CreatePipe: (...args: any[]) => any;
-    SetHandleInformation: (...args: any[]) => any;
-    PeekNamedPipe: (...args: any[]) => any;
-    ReadFile: (...args: any[]) => any;
+    CreateDesktopW: (...args: unknown[]) => unknown;
+    CloseDesktop: (...args: unknown[]) => unknown;
+    CreateProcessW: (...args: unknown[]) => unknown;
+    DuplicateHandle: (...args: unknown[]) => unknown;
+    GetCurrentProcess: (...args: unknown[]) => unknown;
+    OpenProcess: (...args: unknown[]) => unknown;
+    CloseHandle: (...args: unknown[]) => unknown;
+    CreatePipe: (...args: unknown[]) => unknown;
+    SetHandleInformation: (...args: unknown[]) => unknown;
+    PeekNamedPipe: (...args: unknown[]) => unknown;
+    ReadFile: (...args: unknown[]) => unknown;
     STARTUPINFOW: import('koffi').IKoffiCType;
 }
 let _winDesktop: WinDesktopBindings | undefined;
@@ -167,7 +167,7 @@ function winDesktop(): WinDesktopBindings {
 
 // Unix libc 绑定（延迟初始化）
 interface UnixLockBindings {
-    flock: (...args: any[]) => any;
+    flock: (...args: unknown[]) => unknown;
 }
 let _unixLock: UnixLockBindings | undefined;
 
@@ -510,7 +510,7 @@ function tryUnixFileLock(lockFilePath: string): NativeFileLockHandle | null {
 
 export type HiddenDesktopProcessWithPipes = {
     pid: number;
-    readStdoutHandle: any;
+    readStdoutHandle: unknown;
 };
 
 /**
@@ -565,7 +565,7 @@ export function launchProcessOnHiddenDesktopWithPipes(cmdLine: string, desktopNa
         hStdInput: null, hStdOutput: hWrite[0], hStdError: hWrite[0]
     };
 
-    const pi: Record<string, any> = {};
+    const pi: { dwProcessId?: number; hThread?: unknown; hProcess?: unknown } = {};
     if (!w.CreateProcessW(null, cmdLine, null, null, true, 0, null, null, si, pi)) {
         w.CloseHandle(hRead[0]);
         w.CloseHandle(hWrite[0]);
@@ -573,7 +573,7 @@ export function launchProcessOnHiddenDesktopWithPipes(cmdLine: string, desktopNa
         throw new Error(`CreateProcessW failed for command "${cmdLine}"`);
     }
 
-    const browserPid: number = pi.dwProcessId;
+    const browserPid: number = Number(pi.dwProcessId);
 
     // 将桌面句柄复制到子进程
     const hBrowserProc = w.OpenProcess(PROCESS_DUP_HANDLE, false, browserPid);
@@ -599,7 +599,7 @@ export function launchProcessOnHiddenDesktopWithPipes(cmdLine: string, desktopNa
  * 非阻塞检查管道中是否有可读数据。
  * @returns 可用字节数，管道断开时返回 -1。
  */
-export function peekNamedPipe(readHandle: any): number {
+export function peekNamedPipe(readHandle: unknown): number {
     if (process.platform !== 'win32') {
         throw new Error('peekNamedPipe is only supported on Windows');
     }
@@ -615,7 +615,7 @@ export function peekNamedPipe(readHandle: any): number {
  * 从管道读取数据（同步，阻塞当前线程直到有数据可读）。
  * @returns 读取的 Buffer，管道断开时返回 null。
  */
-export function readNamedPipe(readHandle: any, maxBytes: number): Buffer | null {
+export function readNamedPipe(readHandle: unknown, maxBytes: number): Buffer | null {
     if (process.platform !== 'win32') {
         throw new Error('readNamedPipe is only supported on Windows');
     }
@@ -632,7 +632,7 @@ export function readNamedPipe(readHandle: any, maxBytes: number): Buffer | null 
  * 从管道异步读取数据——ReadFile 在 libuv 工作线程阻塞，主线程不轮询。
  * 管道有数据写入时 Promise resolve，管道断开时 resolve null。
  */
-export function readNamedPipeAsync(readHandle: any, maxBytes: number): Promise<Buffer | null> {
+export function readNamedPipeAsync(readHandle: unknown, maxBytes: number): Promise<Buffer | null> {
     if (process.platform !== 'win32') {
         return Promise.reject(new Error('readNamedPipeAsync is only supported on Windows'));
     }
@@ -640,7 +640,7 @@ export function readNamedPipeAsync(readHandle: any, maxBytes: number): Promise<B
     const buf = Buffer.alloc(maxBytes);
     const bytesRead = [0];
     return new Promise<Buffer | null>((resolve) => {
-        (w.ReadFile as any).async(readHandle, buf, maxBytes, bytesRead, null, (err: any, success: boolean) => {
+        (w.ReadFile as unknown as { async: (...args: unknown[]) => void }).async(readHandle, buf, maxBytes, bytesRead, null, (err: unknown, success: boolean) => {
             if (err || !success) {
                 resolve(null);
                 return;
@@ -653,7 +653,7 @@ export function readNamedPipeAsync(readHandle: any, maxBytes: number): Promise<B
 /**
  * 关闭 Win32 句柄。
  */
-export function closeHandle(handle: any): void {
+export function closeHandle(handle: unknown): void {
     if (process.platform !== 'win32') {
         return;
     }
@@ -695,13 +695,13 @@ export function launchProcessOnHiddenDesktop(cmdLine: string, desktopName: strin
         hStdInput: null, hStdOutput: null, hStdError: null
     };
 
-    const pi: Record<string, any> = {};
+    const pi: { hProcess?: unknown; hThread?: unknown; dwProcessId?: number; dwThreadId?: number } = {};
     if (!w.CreateProcessW(null, cmdLine, null, null, false, 0, null, null, si, pi)) {
         w.CloseDesktop(hDesk);
         throw new Error(`CreateProcessW failed for command "${cmdLine}"`);
     }
 
-    const browserPid: number = pi.dwProcessId;
+    const browserPid: number = Number(pi.dwProcessId);
 
     // 将桌面句柄复制到浏览器进程，防止启动者退出后桌面被销毁
     const hBrowserProc = w.OpenProcess(PROCESS_DUP_HANDLE, false, browserPid);

@@ -2,7 +2,9 @@ import {
     searchContext7Libraries,
     fetchContext7Docs,
     Context7Library,
-    Context7DocsResult
+    Context7DocsResult,
+    isContext7QuotaExhaustedError,
+    markContext7QuotaExhausted
 } from '../../engines/context7/context7.js';
 
 export type Context7LibrariesService = {
@@ -69,21 +71,46 @@ export function createContext7Services() {
                 if (cached) {
                     return cached;
                 }
-                const result = await searchContext7Libraries(libraryName, input.query, input.limit ?? 5);
-                cachedSet(cacheKey, result);
-                return result;
+                try {
+                    const result = await searchContext7Libraries(libraryName, input.query, input.limit ?? 5);
+                    cachedSet(cacheKey, result);
+                    return result;
+                } catch (error) {
+                    if (isContext7QuotaExhaustedError(error)) {
+                        markContext7QuotaExhausted();
+                    }
+                    throw error;
+                }
             }
         } satisfies Context7LibrariesService,
         docs: {
             async execute(input: { libraryId: string; query?: string; limit?: number }) {
-                const cacheKey = `docs:${input.libraryId.trim()}:${(input.query ?? '').trim()}:${input.limit ?? 5}`;
+                const queryStr = (input.query ?? '').trim();
+                const limitVal = input.limit ?? 5;
+                const cacheKey = `docs:${input.libraryId.trim()}:${queryStr}:${limitVal}`;
                 const cached = cachedGet<Context7DocsResult>(cacheKey);
                 if (cached) {
                     return cached;
                 }
-                const result = await fetchContext7Docs(input.libraryId, input.query, input.limit ?? 5);
-                cachedSet(cacheKey, result);
-                return result;
+                try {
+                    const result = await fetchContext7Docs(input.libraryId, input.query, limitVal);
+                    cachedSet(cacheKey, result);
+                    // 若发生 301 重定向，同时在原始 ID 与重定向后的目标 ID 两侧建缓存
+                    if (result.redirectedFrom) {
+                        const fromKey = `docs:${result.redirectedFrom}:${queryStr}:${limitVal}`;
+                        cachedSet(fromKey, result);
+                    }
+                    if (result.redirectUrl && result.redirectUrl !== input.libraryId.trim()) {
+                        const toKey = `docs:${result.redirectUrl}:${queryStr}:${limitVal}`;
+                        cachedSet(toKey, result);
+                    }
+                    return result;
+                } catch (error) {
+                    if (isContext7QuotaExhaustedError(error)) {
+                        markContext7QuotaExhausted();
+                    }
+                    throw error;
+                }
             }
         } satisfies Context7DocsService
     };

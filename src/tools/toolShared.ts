@@ -44,6 +44,10 @@ export function buildFetchWebErrorHint(error: unknown): string {
         return '该地址指向内网/本地，或使用了可指向内网的不可信域名，已被安全策略拒绝——这是预期行为，请改用公开可访问的 URL。';
     }
 
+    if (/反爬验证|ERR_BOT_CHALLENGE|bot challenge|荒原/i.test(message)) {
+        return '目标站点触发反爬验证或需要登录——可稍后重试、在浏览器中登录后重试，或改换其他信息来源。';
+    }
+
     if (typeof status === 'number') {
         if (status === 404) {
             return '目标页面不存在（404）——检查 URL 是否正确、页面是否已删除、或站点需要登录后才能访问。';

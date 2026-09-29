@@ -71,7 +71,7 @@ async function warmupStartpageSession(): Promise<void> {
     if (!config.startpagePlaywrightFallback) {
         throw new Error('Startpage requires a Playwright browser session (Anubis anti-bot), but STARTPAGE_PLAYWRIGHT_FALLBACK=false. Enable the fallback, or use another engine (e.g. bing/baidu/sogou).');
     }
-    let session: { browser: any; release(): Promise<void> } | undefined;
+    let session: import('../../utils/playwright/types.js').PlaywrightBrowserSession | undefined;
     let releasePage: (() => Promise<void>) | undefined;
     try {
         const { openPlaywrightBrowser, acquirePooledPlaywrightPage } = await import('../../utils/playwrightClient.js');

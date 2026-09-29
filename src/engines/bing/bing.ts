@@ -1,11 +1,18 @@
-import axios from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 import * as cheerio from 'cheerio';
 import { AppConfig, config } from '../../config.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { prepareStealthPage } from '../../utils/browserStealth.js';
 import { isImpersonateAvailable, searchBingWithImpersonate } from './impersonate.js';
-import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
+import {
+    acquirePooledPlaywrightPage,
+    getPlaywrightModuleSource,
+    loadPlaywrightClient,
+    openPlaywrightBrowser,
+    PlaywrightLocatorLike,
+    PlaywrightPageLike
+} from '../../utils/playwrightClient.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 // 默认面向大陆部署用 cn.bing.com；可通过 OPEN_WEBSEARCH_BING_HOST 覆盖为 www.bing.com 等获取国际区结果
@@ -143,7 +150,7 @@ function analyzeBlockedPage($: cheerio.CheerioAPI, html: string): { blocked: boo
     return analyzeBingBlockedPage($, html);
 }
 
-function buildBingAxiosRequestOptions(): any {
+function buildBingAxiosRequestOptions(): AxiosRequestConfig {
     return buildSharedAxiosRequestOptions({ engine: 'bing',
         trustedStaticHost: true,
         headers: buildBingAntiDetectionHeaders(),
@@ -229,7 +236,7 @@ export function __buildBingBrowserLaunchArgsForTests(hideWindow: boolean, platfo
     return buildBrowserLaunchArgs(hideWindow, platform);
 }
 
-export function __analyzeBlockedPageForTests($: any, html: string): { blocked: boolean; hasResults: boolean; detectedKeywords: string[]; title: string } {
+export function __analyzeBlockedPageForTests($: cheerio.CheerioAPI, html: string): { blocked: boolean; hasResults: boolean; detectedKeywords: string[]; title: string } {
     return analyzeBlockedPage($, html);
 }
 
@@ -237,20 +244,20 @@ function getBingUiTimeoutMs(): number {
     return Math.min(config.playwrightNavigationTimeoutMs, 15000);
 }
 
-async function waitForBingResultsReady(page: any): Promise<void> {
+async function waitForBingResultsReady(page: PlaywrightPageLike): Promise<void> {
     await page.waitForSelector('#b_results, .b_algo, #b_content', {
         timeout: getBingUiTimeoutMs()
     });
 }
 
-async function getBingResultsSignature(page: any): Promise<string> {
-    return page.evaluate(() => {
+async function getBingResultsSignature(page: PlaywrightPageLike): Promise<string> {
+    return page.evaluate<string>(() => {
         const container = document.querySelector('#b_results') || document.querySelector('#b_content');
         return (container?.textContent || '').replace(/\s+/g, ' ').trim();
     }).catch(() => '');
 }
 
-async function waitForBingResultsChanged(page: any, previousSignature: string): Promise<void> {
+async function waitForBingResultsChanged(page: PlaywrightPageLike, previousSignature: string): Promise<void> {
     await page.waitForFunction((previous: string) => {
         const container = document.querySelector('#b_results') || document.querySelector('#b_content');
         const current = (container?.textContent || '').replace(/\s+/g, ' ').trim();
@@ -258,7 +265,7 @@ async function waitForBingResultsChanged(page: any, previousSignature: string): 
     }, previousSignature, { timeout: getBingUiTimeoutMs() });
 }
 
-async function waitForBingSearchInputValue(page: any, expectedValue: string): Promise<void> {
+async function waitForBingSearchInputValue(page: PlaywrightPageLike, expectedValue: string): Promise<void> {
     await page.waitForFunction(({ selectors, value }: { selectors: string[]; value: string }) => {
         const isVisible = (element: Element) => {
             const style = window.getComputedStyle(element);
@@ -329,7 +336,7 @@ function doesBingUrlMatchQuery(url: string, query: string): boolean {
     }
 }
 
-async function waitForBingQueryNavigation(page: any, previousUrl: string, query: string): Promise<boolean> {
+async function waitForBingQueryNavigation(page: PlaywrightPageLike, previousUrl: string, query: string): Promise<boolean> {
     return page.waitForURL((url: URL) => {
         const nextUrl = url.toString();
         return nextUrl !== previousUrl && doesBingUrlMatchQuery(nextUrl, query);
@@ -339,7 +346,7 @@ async function waitForBingQueryNavigation(page: any, previousUrl: string, query:
     }).then(() => true).catch(() => false);
 }
 
-async function waitForBingNextPageNavigation(page: any, previousUrl: string): Promise<void> {
+async function waitForBingNextPageNavigation(page: PlaywrightPageLike, previousUrl: string): Promise<void> {
     await page.waitForURL((url: URL) => {
         const nextUrl = url.toString();
         return nextUrl !== previousUrl
@@ -351,7 +358,7 @@ async function waitForBingNextPageNavigation(page: any, previousUrl: string): Pr
     });
 }
 
-async function submitBingSearchFromCurrentPage(page: any, searchInput: any, previousUrl: string, query: string): Promise<void> {
+async function submitBingSearchFromCurrentPage(page: PlaywrightPageLike, searchInput: PlaywrightLocatorLike, previousUrl: string, query: string): Promise<void> {
     if (doesBingUrlMatchQuery(page.url(), query)) {
         return;
     }
@@ -382,7 +389,7 @@ async function submitBingSearchFromCurrentPage(page: any, searchInput: any, prev
     throw new Error(`Bing search submission did not navigate to the expected query URL: ${query}`);
 }
 
-async function findBingSearchInput(page: any): Promise<any | null> {
+async function findBingSearchInput(page: PlaywrightPageLike): Promise<PlaywrightLocatorLike | null> {
     for (const selector of SEARCH_INPUT_SELECTORS) {
         const candidate = page.locator(selector).first();
         const isVisible = await candidate.isVisible().catch(() => false);
@@ -394,7 +401,7 @@ async function findBingSearchInput(page: any): Promise<any | null> {
     return null;
 }
 
-async function waitForBingSearchInput(page: any): Promise<any | null> {
+async function waitForBingSearchInput(page: PlaywrightPageLike): Promise<PlaywrightLocatorLike | null> {
     await page.waitForSelector(SEARCH_INPUT_SELECTORS.join(', '), {
         state: 'visible',
         timeout: getBingUiTimeoutMs()
@@ -412,7 +419,7 @@ function isBingUrl(url: string): boolean {
     }
 }
 
-async function openBingAndSearch(page: any, query: string): Promise<void> {
+async function openBingAndSearch(page: PlaywrightPageLike, query: string): Promise<void> {
     const canReuseCurrentBingPage = isBingUrl(page.url());
     let searchInput = canReuseCurrentBingPage ? await findBingSearchInput(page) : null;
     const previousUrl = page.url();
@@ -451,7 +458,7 @@ async function openBingAndSearch(page: any, query: string): Promise<void> {
     await waitForBingResultsReady(page);
 }
 
-async function goToNextResultsPage(page: any): Promise<boolean> {
+async function goToNextResultsPage(page: PlaywrightPageLike): Promise<boolean> {
     for (const selector of NEXT_PAGE_SELECTORS) {
         const nextButton = page.locator(selector).first();
         if (!await nextButton.isVisible().catch(() => false)) {

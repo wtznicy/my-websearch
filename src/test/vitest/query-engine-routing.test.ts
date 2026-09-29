@@ -22,7 +22,7 @@ describe('pickDefaultEngineForQuery', () => {
         // 英文不再押注单点：默认并列 bing + duckduckgo
         expect(pickDefaultEnginesForQuery('github-mcp-server v1.12 release notes', 'auto'))
             .toEqual(['bing', 'duckduckgo']);
-        expect(pickDefaultEnginesForQuery('中文查询', 'auto')).toEqual(['baidu']);
+        expect(pickDefaultEnginesForQuery('中文查询', 'auto')).toEqual(['baidu', 'sogou']);
         // 显式默认引擎不受影响
         expect(pickDefaultEnginesForQuery('anything', 'sogou')).toEqual(['sogou']);
         // env 覆盖

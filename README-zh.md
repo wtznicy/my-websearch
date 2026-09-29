@@ -271,7 +271,32 @@ my-websearch cache-clear
 
 ---
 
-## ⚙️ 环境变量完整参考
+## ⚙️ 配置与环境变量参考
+
+### 📁 统一应用级配置文件（`~/.my-websearch/config.json`）
+
+为避免在不同 MCP 客户端（Antigravity、Claude Desktop、Cursor、WorkBuddy）及终端 CLI 之间反复配置 API Key 与代理，项目支持全局统一的应用级配置文件：
+
+* **文件路径**：`~/.my-websearch/config.json`（支持 `MYWEBSEARCH_DATA_DIR` 环境变量覆盖目录）
+* **解析优先级**：`process.env`（最高优先级，绝不覆盖） > 项目本地 `.env` > `~/.my-websearch/config.json` > 默认值。
+
+```json
+{
+  "apiKeys": {
+    "context7": "ctx7sk-...",
+    "exa": "...",
+    "github": "ghp_...",
+    "brave": "..."
+  },
+  "proxy": {
+    "url": "http://127.0.0.1:7897",
+    "useProxy": false,
+    "engines": ["duckduckgo", "exa", "brave", "startpage"]
+  }
+}
+```
+
+### 📋 环境变量完整参考
 
 | 变量名 | 默认值 | 可选值 / 格式 | 详细说明 |
 | :--- | :--- | :--- | :--- |

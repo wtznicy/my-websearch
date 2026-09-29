@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { loadWreqModule, createWreqSession, WreqSession } from '../engines/bing/impersonate.js';
 import { toAxiosLikeResponse } from './wreqRequest.js';
+import { isTlsOrWafResetError } from './domesticDirectNetwork.js';
 
 const engineSessions = new Map<string, Promise<WreqSession | null>>();
 
@@ -46,6 +47,17 @@ export function invalidateWreqSession(engine: string): void {
     }
 }
 
+/**
+ * 供单元测试注入或清理会话
+ */
+export function __setEngineSessionForTests(engine: string, session: WreqSession | null): void {
+    if (session === null) {
+        engineSessions.delete(engine);
+    } else {
+        engineSessions.set(engine, Promise.resolve(session));
+    }
+}
+
 export type ImpersonateHttpOptions = {
     redirect?: 'manual' | 'follow';
     failOnHttpError?: boolean;
@@ -67,12 +79,45 @@ export async function impersonateHttpGet(
         if (session) {
             const timeout = typeof options.timeout === 'number' ? options.timeout : 15000;
             const headers = options.headers as Record<string, string> | undefined;
-
-            const response = await session.fetch(url, {
+            const fetchOptions = {
                 timeout,
                 headers,
                 redirect: impersonateOptions?.redirect
-            });
+            };
+
+            const retryMaxCount = Math.max(0, parseInt(process.env.OPEN_WEBSEARCH_IMPERSONATE_RETRY || '1', 10) || 1);
+            const retryDelayMs = Math.max(0, parseInt(process.env.OPEN_WEBSEARCH_IMPERSONATE_RETRY_DELAY_MS || '100', 10) || 100);
+
+            let response;
+            try {
+                response = await session.fetch(url, fetchOptions);
+            } catch (firstError) {
+                // 首连遭遇 TLS 握手断开、WAF 首连捏断（如 unexpected EOF、ECONNRESET、socket hang up）时，
+                // 底层连接池会丢弃坏连接。原地静默快速重试，避免过早陷入耗时的 axios 失败链与二次回退
+                if (isTlsOrWafResetError(firstError) && retryMaxCount > 0) {
+                    let lastRetryErr: unknown = firstError;
+                    for (let r = 0; r < retryMaxCount; r += 1) {
+                        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+                        try {
+                            response = await session.fetch(url, fetchOptions);
+                            lastRetryErr = null;
+                            break;
+                        } catch (retryError) {
+                            lastRetryErr = retryError;
+                        }
+                    }
+                    if (lastRetryErr) {
+                        invalidateWreqSession(engine);
+                        throw lastRetryErr;
+                    }
+                } else {
+                    throw firstError;
+                }
+            }
+
+            if (!response) {
+                throw new Error(`[${engine}] Failed to obtain response from impersonate session`);
+            }
 
             if (impersonateOptions?.failOnHttpError !== false && response.status >= 400) {
                 const error = new Error(`Request failed with status code ${response.status}`);

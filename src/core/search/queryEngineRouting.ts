@@ -16,7 +16,7 @@
 const MIN_CJK_CHARS = 2;
 
 const DEFAULT_EN_ENGINES = ['bing', 'duckduckgo'];
-const DEFAULT_ZH_ENGINES = ['baidu'];
+const DEFAULT_ZH_ENGINES = ['baidu', 'sogou'];
 
 /** 路由引擎组：auto 模式返回一组引擎（组内并列执行、融合去重） */
 export function pickDefaultEnginesForQuery(

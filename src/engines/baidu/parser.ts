@@ -71,7 +71,7 @@ async function resolveBaiduRedirectUrls(hrefs: string[]): Promise<string[]> {
 }
 
 /** 百度推广容器/链接特征：推广走加密跳转（baidu.php?url=）且常无描述，需在解析层剔除 */
-function isBaiduAdContainer(element: any, $: any): boolean {
+function isBaiduAdContainer(element: Parameters<cheerio.CheerioAPI>[0], $: cheerio.CheerioAPI): boolean {
     const container = $(element);
     const className = String(container.attr('class') || '');
     // 经典广告标记：b_ad 容器、ec_ 前缀推广位 class、data-tuiguang 属性

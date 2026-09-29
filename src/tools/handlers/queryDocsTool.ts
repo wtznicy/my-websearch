@@ -27,6 +27,9 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
             try {
                 logTool(`Context7 fetching docs for: ${libraryId}`);
                 const result = await runtime.services.context7Docs.execute({ libraryId, query, limit });
+                if (result.redirectedFrom) {
+                    logTool(`Context7 library redirected: ${result.redirectedFrom} -> ${result.libraryId}`);
+                }
 
                 return {
                     content: [{

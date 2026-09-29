@@ -269,7 +269,32 @@ my-websearch cache-clear
 
 ---
 
-## ⚙️ Environment Variables Reference
+## ⚙️ Configuration & Environment Variables
+
+### 📁 Unified Application Configuration (`~/.my-websearch/config.json`)
+
+To configure API keys and proxy settings once across all MCP clients (Antigravity, Claude Desktop, Cursor, WorkBuddy) and CLI/terminal commands without re-entering them in each client, you can use the application-level config file:
+
+* **Location**: `~/.my-websearch/config.json` (or `$MYWEBSEARCH_DATA_DIR/config.json`)
+* **Resolution Precedence**: `process.env` (never overridden) > project `.env` > `~/.my-websearch/config.json` > defaults.
+
+```json
+{
+  "apiKeys": {
+    "context7": "ctx7sk-...",
+    "exa": "...",
+    "github": "ghp_...",
+    "brave": "..."
+  },
+  "proxy": {
+    "url": "http://127.0.0.1:7897",
+    "useProxy": false,
+    "engines": ["duckduckgo", "exa", "brave", "startpage"]
+  }
+}
+```
+
+### 📋 Environment Variables Reference
 
 | Variable | Default | Options / Format | Description |
 | :--- | :--- | :--- | :--- |
@@ -286,7 +311,7 @@ my-websearch cache-clear
 | **`BING_PLAYWRIGHT_FALLBACK`** | `true` | `true`, `false` | Set `false` to skip launching Playwright when Bing is challenged (saves ~400MB RAM and lets `minResults` cascade to lighter engines) |
 | **`STARTPAGE_PLAYWRIGHT_FALLBACK`** | `true` | `true`, `false` | Startpage uses the built-in Anubis SHA-256 PoW solver first; set `false` to disable Playwright fallback if PoW fails |
 | **`EXA_API_KEY`** | empty | Exa API Key | **Optional**: only required if you explicitly use the `exa` engine (get a free key at [dashboard.exa.ai](https://dashboard.exa.ai/api-keys)) |
-| **`CONTEXT7_API_KEY`** | empty | Context7 API Key | **Optional**: anonymous usage includes 200 requests/month per egress IP; set a free key ([context7.com/dashboard](https://context7.com/dashboard)) for higher quotas |
+| **`CONTEXT7_API_KEY`** | empty | Context7 API Key | **强烈建议（TUN / 代理用户强烈推荐）**：匿名额度每月仅 200 次（按出口 IP 计，共享代理节点极易被占满触发 429）；配置免费 Key（[context7.com/dashboard](https://context7.com/dashboard)）可获得独立配额与更高速率 |
 | **`GITHUB_TOKEN`** | empty | GitHub Personal Access Token | **Optional**: raises the rate limit for `fetchGithubReadme` (anonymous raw quota returns 403 under frequent re-fetching, failing the fetch entirely) |
 | **`FETCH_WEB_INSECURE_TLS`** | `false` | `true`, `false` | Disable TLS verification for `fetchWebContent` only (use only for legacy sites with broken certificate chains) |
 | **`MODE`** | `both` | `both`, `http`, `stdio` | MCP server transport mode |

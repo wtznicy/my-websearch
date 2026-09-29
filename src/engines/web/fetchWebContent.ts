@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { config } from '../../config.js';
 import { buildAxiosRequestOptions, hintProxyConnectionError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/urlSafety.js';
@@ -124,7 +125,7 @@ const CHROME_NOISE_SELECTOR = [
  */
 function stripChromeNoiseWithGuard(
     $: cheerio.CheerioAPI,
-    element: cheerio.Cheerio<any>,
+    element: ReturnType<cheerio.CheerioAPI>,
     minChars: number
 ): { text: string; html: string } {
     const rawText = normalizeText(element.text());
@@ -263,7 +264,7 @@ function extractMainTextFromHtml(html: string): HtmlExtractionResult {
 
     if (!selectedText) {
         const body = $('body');
-        const target = body.length > 0 ? body : $.root() as any;
+        const target = body.length > 0 ? body : ($.root() as unknown as ReturnType<cheerio.CheerioAPI>);
         const { text: bodyText, html: bodyHtml } = stripChromeNoiseWithGuard($, target, 120);
         if (bodyText) {
             selectedText = bodyText;
@@ -325,7 +326,7 @@ async function extractReadableLinks(html: string, finalUrl: string): Promise<Ext
 
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 
-function buildRequestOptions(cookieHeader?: string, forceDirect = false): any {
+function buildRequestOptions(cookieHeader?: string, forceDirect = false): AxiosRequestConfig {
     const headers: Record<string, string> = {
         'User-Agent': DEFAULT_DESKTOP_UA,
         'Accept': 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -395,7 +396,7 @@ function decodeResponseBuffer(buffer: ArrayBuffer, contentType: string): string 
  * 字符串原样返回；其他类型（JSON 等）转为格式化文本。
  * 主请求与 cookie 重试都必须走这里，否则 Buffer 会被 JSON.stringify 成数字数组。
  */
-function decodeRawResponse(response: any, contentType: string): string {
+function decodeRawResponse(response: AxiosResponse, contentType: string): string {
     return response.data instanceof ArrayBuffer || response.data instanceof Uint8Array
         ? decodeResponseBuffer(response.data, contentType)
         : typeof response.data === 'string'
@@ -454,7 +455,7 @@ export function __setReadabilityParserForTests(parser?: (html: string, finalUrl:
     });
 }
 
-async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: any; usedBrowserCookies: boolean }> {
+async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: AxiosResponse; usedBrowserCookies: boolean }> {
     let cookieHeader: string | undefined;
     try {
         cookieHeader = await getBrowserCookieHeader(url);
@@ -479,6 +480,32 @@ async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: a
     }
 }
 
+/**
+ * 浏览器兜底（cookie 采集 + HTML 渲染）的总预算。
+ * 对齐 fetchCsdnArticle 的成熟模式，防止浏览器兜底过程在异常状态下无限挂死。
+ */
+const FETCH_WEB_BROWSER_BUDGET_MS = 30000;
+
+function createBrowserBudget(label: string, budgetMs = FETCH_WEB_BROWSER_BUDGET_MS) {
+    const deadline = Date.now() + budgetMs;
+    return function withinBudget<T>(promise: Promise<T>, step: string): Promise<T> {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+            return Promise.reject(new Error(`${label} browser fallback budget (${budgetMs}ms) exhausted before ${step}`));
+        }
+        return new Promise<T>((resolve, reject) => {
+            const timer = setTimeout(
+                () => reject(new Error(`${label} browser fallback budget (${budgetMs}ms) exceeded during ${step}`)),
+                remaining
+            );
+            if (typeof timer === 'object' && typeof timer.unref === 'function') {
+                timer.unref();
+            }
+            promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+        });
+    };
+}
+
 export async function fetchWebContent(
     url: string,
     maxChars: number = DEFAULT_MAX_CHARS,
@@ -487,6 +514,7 @@ export async function fetchWebContent(
     const parsedUrl = new URL(url);
     await assertPublicHttpUrlResolved(parsedUrl, 'Request URL');
 
+    const withinBrowserBudget = createBrowserBudget('fetchWebContent');
     const startIndex = Math.max(0, Math.floor(options.startIndex ?? 0));
     const targetMaxChars = clampMaxChars(maxChars);
 
@@ -506,11 +534,11 @@ export async function fetchWebContent(
             const headLength = Number(headResponse.headers['content-length']);
             if (Number.isFinite(headLength) && headLength > MAX_DOWNLOAD_BYTES) {
                 const tooLargeError = new Error(`Response body too large (${headLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
-                (tooLargeError as any).code = 'ERR_RESPONSE_TOO_LARGE';
+                Object.assign(tooLargeError, { code: 'ERR_RESPONSE_TOO_LARGE' });
                 throw tooLargeError;
             }
-        } catch (error: any) {
-            if (error?.code === 'ERR_RESPONSE_TOO_LARGE') {
+        } catch (error: unknown) {
+            if ((error as { code?: string })?.code === 'ERR_RESPONSE_TOO_LARGE') {
                 throw error;
             }
             // HEAD 预检只是"提前发现超大响应"的优化，任何失败都不应否决后续 GET：
@@ -520,7 +548,7 @@ export async function fetchWebContent(
         }
     }
 
-    let response: any;
+    let response: AxiosResponse;
     let usedBrowserCookies = false;
     let retrievalMethod: FetchWebContentResult['retrievalMethod'] = 'request';
     // 记录 cookie 重试失败时的原始 HTTP 状态（401/403/429），供最终错误分类使用
@@ -529,13 +557,19 @@ export async function fetchWebContent(
     try {
         // 直连优先、代理兜底：先无代理（国内站点最优），网络失败且配置了代理时自动切换
         response = await requestDirectFirst('GET', parsedUrl.toString(), (forceDirect) => buildRequestOptions(undefined, forceDirect), 'Request URL');
-    } catch (error: any) {
-        const status = error?.response?.status;
-        if (![401, 403, 429].includes(status)) {
+    } catch (error: unknown) {
+        const status = (error as { response?: { status?: number } })?.response?.status;
+        if (typeof status !== 'number' || ![401, 403, 429].includes(status)) {
             throw hintProxyConnectionError(error);
         }
 
-        const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
+        let cookieRetry: { response?: AxiosResponse; usedBrowserCookies: boolean };
+        try {
+            cookieRetry = await withinBrowserBudget(tryRequestWithBrowserCookies(parsedUrl.toString()), 'cookie retry');
+        } catch {
+            cookieRetry = { response: undefined, usedBrowserCookies: false };
+        }
+
         if (cookieRetry.response) {
             response = cookieRetry.response;
             usedBrowserCookies = cookieRetry.usedBrowserCookies;
@@ -546,10 +580,13 @@ export async function fetchWebContent(
             // 避免 401/403/429 被掩盖成笼统的 "No readable content"。
             httpErrorStatus = status;
             response = {
+                status: status || 200,
+                statusText: 'OK',
                 headers: { 'content-type': 'text/html; charset=utf-8' },
+                config: {} as AxiosRequestConfig,
                 data: '',
                 request: { res: { responseUrl: parsedUrl.toString() } }
-            };
+            } as AxiosResponse;
         }
     }
 
@@ -559,7 +596,13 @@ export async function fetchWebContent(
     let raw = decodeRawResponse(response, contentType);
 
     if (!usedBrowserCookies && looksLikeBotChallengePage(raw)) {
-        const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
+        let cookieRetry: { response?: AxiosResponse; usedBrowserCookies: boolean };
+        try {
+            cookieRetry = await withinBrowserBudget(tryRequestWithBrowserCookies(parsedUrl.toString()), 'challenge cookie retry');
+        } catch {
+            cookieRetry = { response: undefined, usedBrowserCookies: false };
+        }
+
         if (cookieRetry.response) {
             response = cookieRetry.response;
             usedBrowserCookies = true;
@@ -607,7 +650,12 @@ export async function fetchWebContent(
         }
 
         if (shouldTryBrowserHtmlFallback(contentType, raw, htmlExtraction)) {
-            const browserResult = await fetchHtmlViaBrowser(parsedUrl.toString());
+            let browserResult: Awaited<ReturnType<typeof fetchHtmlViaBrowser>> = undefined;
+            try {
+                browserResult = await withinBrowserBudget(fetchHtmlViaBrowser(parsedUrl.toString()), 'browser html fallback');
+            } catch (browserError) {
+                console.warn('[fetchWebContent] Browser fallback failed or budget exhausted:', browserError instanceof Error ? browserError.message : String(browserError));
+            }
             if (browserResult) {
                 contentType = browserResult.contentType;
                 finalUrl = browserResult.finalUrl;
@@ -616,6 +664,14 @@ export async function fetchWebContent(
                 htmlExtraction = extractMainTextFromHtml(raw);
                 title = htmlExtraction.title || browserResult.title;
                 extractedContent = htmlExtraction.text;
+
+                // P0-5: 渲染后反爬拦截页二次判定（知乎荒原页等）
+                const botDetected = looksLikeBotChallengePage(raw) || looksLikeBotChallengePage(extractedContent);
+                if (botDetected && extractedContent.length < 350) {
+                    const botError = new Error('目标站点触发反爬验证或需要登录（浏览器渲染后仍命中反爬拦截特征），未能获取有效正文内容。');
+                    Object.assign(botError, { code: 'ERR_BOT_CHALLENGE', status: httpErrorStatus || 403 });
+                    throw botError;
+                }
             }
         }
 
@@ -680,7 +736,7 @@ export async function fetchWebContent(
             const httpError = new Error(
                 `Request failed with HTTP ${httpErrorStatus} and no readable content was extracted (${parsedUrl.toString()})`
             );
-            (httpError as any).status = httpErrorStatus;
+            Object.assign(httpError, { status: httpErrorStatus });
             throw httpError;
         }
         throw new Error('No readable content was extracted from this URL');
@@ -692,7 +748,7 @@ export async function fetchWebContent(
         const outOfRangeError = new Error(
             `startIndex ${startIndex} is beyond content length ${totalLength}; reset to 0 to read from the beginning`
         );
-        (outOfRangeError as any).code = 'ERR_START_INDEX_OUT_OF_RANGE';
+        Object.assign(outOfRangeError, { code: 'ERR_START_INDEX_OUT_OF_RANGE' });
         throw outOfRangeError;
     }
     const pageContent = extractedContent.slice(startIndex, startIndex + targetMaxChars);

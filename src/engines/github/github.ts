@@ -167,9 +167,10 @@ async function fetchReadmeSource(url: string, label: string, timeout: number): P
         }
 
         return { status: 'invalid', message: 'Empty or invalid README content' };
-    } catch (error: any) {
-        const isTimeout = error?.code === 'ECONNABORTED';
-        const status = typeof error?.response?.status === 'number' ? error.response.status : undefined;
+    } catch (error: unknown) {
+        const errObj = error as { code?: string; response?: { status?: number } };
+        const isTimeout = errObj?.code === 'ECONNABORTED';
+        const status = typeof errObj?.response?.status === 'number' ? errObj.response.status : undefined;
         const message = error instanceof Error ? error.message : String(error);
 
         if (isTimeout) {
@@ -260,8 +261,9 @@ async function fetchGiteeReadme(owner: string, repo: string): Promise<ReadmeFetc
             return { status: 'ok', content: Buffer.from(content, 'base64').toString('utf8') };
         }
         return { status: 'error', message: 'Empty or invalid README content from gitee API' };
-    } catch (error: any) {
-        const status = typeof error?.response?.status === 'number' ? error.response.status : undefined;
+    } catch (error: unknown) {
+        const errObj = error as { response?: { status?: number } };
+        const status = typeof errObj?.response?.status === 'number' ? errObj.response.status : undefined;
         const message = error instanceof Error ? error.message : String(error);
         console.error(`Failed to fetch README from gitee API: ${owner}/${repo}${status !== undefined ? ` (HTTP ${status})` : ''}:`, message);
         return { status: 'error', message };

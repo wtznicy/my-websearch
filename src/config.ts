@@ -1,5 +1,6 @@
 // src/config.ts
 import ipaddr from 'ipaddr.js';
+import { loadApplicationConfigEnv } from './configLoader.js';
 
 export interface AppConfig {
     // Search engine configuration
@@ -78,6 +79,9 @@ export function createConfig(
     env: NodeJS.ProcessEnv = process.env,
     options: CreateConfigOptions = {}
 ): AppConfig {
+    // 启动时一次性加载应用级与本地配置（~/.my-websearch/config.json / .env），仅补充缺失的环境变量
+    loadApplicationConfigEnv(env, { quiet: options.quiet });
+
     const readOptionalEnv = (name: string): string | undefined => {
         const value = env[name]?.trim();
         return value ? value : undefined;

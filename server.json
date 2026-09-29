@@ -6,12 +6,12 @@
     "url": "https://github.com/wtznicy/my-websearch",
     "source": "github"
   },
-  "version": "1.0.18",
+  "version": "1.0.19",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "my-websearch",
-      "version": "1.0.18",
+      "version": "1.0.19",
       "transport": {
         "type": "stdio"
       },

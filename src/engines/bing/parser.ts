@@ -4,6 +4,7 @@ import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { normalizeText as normalizeWhitespace } from '../../utils/text.js';
 
 type LoadedDoc = ReturnType<typeof cheerio.load>;
+type CheerioSelection = ReturnType<LoadedDoc>;
 
 const RESULT_SELECTORS = [
     '#b_results > li.b_algo',
@@ -88,7 +89,7 @@ function sanitizeBingUrl(rawUrl?: string): string {
     }
 }
 
-function extractTitle($: any, element: any, fallbackUrl: string, index: number): string {
+function extractTitle($: LoadedDoc, element: CheerioSelection, fallbackUrl: string, index: number): string {
     const candidateTitle = normalizeWhitespace(
         element.find('h2 a').first().text() ||
         element.find('.b_tpcn .tptt').first().text() ||
@@ -112,7 +113,7 @@ function extractTitle($: any, element: any, fallbackUrl: string, index: number):
     return normalizeWhitespace(element.text()).slice(0, 50) || `Result ${index + 1}`;
 }
 
-function extractDescription(element: any, title: string): string {
+function extractDescription(element: CheerioSelection, title: string): string {
     const directSnippet = normalizeWhitespace(
         element.find('.b_caption p').first().text() ||
         element.find('.b_caption').first().text() ||
@@ -127,7 +128,7 @@ function extractDescription(element: any, title: string): string {
     return fallbackText.slice(0, 400);
 }
 
-function extractSource(element: any, url: string): string {
+function extractSource(element: CheerioSelection, url: string): string {
     // 只取 .b_tpcn 内的 .tptt（站点名），不要用整个 .b_tpcn 的 text()：
     // 新版结果页的 .b_tpcn 里除 .tptt 外还含可见的 URL slug 文本节点，
     // cheerio 会把它们无分隔拼成 "zhihu.comhttps://zhuanlan.zhihu.com" 这类脏数据。
@@ -152,10 +153,10 @@ function extractSource(element: any, url: string): string {
     }
 }
 
-function collectFallbackLinks($: any, limit: number, seenUrls: Set<string>, results: SearchResult[]): void {
+function collectFallbackLinks($: LoadedDoc, limit: number, seenUrls: Set<string>, results: SearchResult[]): void {
     const linkContainers = $('#b_results a[href], #b_topw a[href], .b_algo a[href], .b_ans a[href]');
 
-    linkContainers.each((index: number, element: any) => {
+    linkContainers.each((index: number, element) => {
         if (results.length >= limit) {
             return false;
         }

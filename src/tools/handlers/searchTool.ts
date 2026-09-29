@@ -11,6 +11,7 @@ import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { mergeMultiQueryResults, mergeEngineMetricsAcrossQueries } from '../../core/search/multiQuery.js';
 import { rankSearchResults } from '../../core/search/resultRanking.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
+import { isContext7QuotaExhausted, setContext7QuotaListener } from '../../engines/context7/context7.js';
 import {
     getToolName,
     logTool,
@@ -23,11 +24,15 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
     const searchToolName = getToolName('MCP_TOOL_SEARCH_NAME', 'search');
 
     const DOCS_GUIDANCE = ' For OFFICIAL library/framework documentation, prefer resolveLibraryId + queryDocs (more reliable, works without proxy). Use the site: operator for site-specific queries (e.g. "update site:docs.elastic.co").';
+    const getDocsGuidance = () => {
+        return isContext7QuotaExhausted() ? '' : DOCS_GUIDANCE;
+    };
     const getSearchDescription = () => {
         const routingGuidance = ' Engine guidance: for Chinese queries prefer engines=["baidu","sogou","csdn","juejin"] (domestic engines have far better Chinese content coverage); for English/official docs use bing; overseas engines (duckduckgo/brave/startpage/exa) need a proxy. Omit engines to use server-side auto routing. Cite the relevant result URLs as markdown links in your answer.';
         const searchModeDescription = ' searchMode: omit/auto = server SEARCH_MODE; request/playwright force that mode.';
+        const docsGuidance = getDocsGuidance();
         if (runtime.config.allowedSearchEngines.length === 0) {
-            return `Search the web across multiple engines with no API key required.${searchModeDescription}${routingGuidance}${DOCS_GUIDANCE}`;
+            return `Search the web across multiple engines with no API key required.${searchModeDescription}${routingGuidance}${docsGuidance}`;
         } else {
             const enginesText = runtime.config.allowedSearchEngines.map(e => {
                 switch (e) {
@@ -41,7 +46,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }
             }).join(', ');
-            return `Search the web using these engines: ${enginesText} (no API key required).${searchModeDescription}${routingGuidance}${DOCS_GUIDANCE}`;
+            return `Search the web using these engines: ${enginesText} (no API key required).${searchModeDescription}${routingGuidance}${docsGuidance}`;
         }
     };
 
@@ -62,7 +67,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
             .pipe(enginesEnum);
     };
 
-    server.tool(
+    const searchTool = server.tool(
         searchToolName,
         getSearchDescription(),
         {
@@ -182,4 +187,14 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
             }
         }
     );
+
+    setContext7QuotaListener(() => {
+        try {
+            searchTool.update({
+                description: getSearchDescription()
+            });
+        } catch {
+            // best-effort update
+        }
+    });
 }

@@ -14,6 +14,7 @@
  */
 
 import axios from 'axios';
+import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 
 export const CONTEXT7_BASE_URL = 'https://context7.com';
@@ -98,11 +99,50 @@ export type Context7DocsResult = {
     infoSnippets: Context7InfoSnippet[];
     /** 若库 ID 发生 301 重定向，指向新的库 ID */
     redirectUrl?: string;
+    /** 若通过重定向自动解析，记录最初请求的旧 ID */
+    redirectedFrom?: string;
 };
 
 function getApiKey(): string | undefined {
     const key = process.env.CONTEXT7_API_KEY || '';
     return key.trim() || undefined;
+}
+
+let quotaExhaustedUntil: number | null = null;
+let onQuotaExhaustedListener: (() => void) | null = null;
+
+export function isContext7QuotaExhausted(): boolean {
+    if (getApiKey()) {
+        return false;
+    }
+    if (quotaExhaustedUntil !== null && Date.now() < quotaExhaustedUntil) {
+        return true;
+    }
+    return false;
+}
+
+export function markContext7QuotaExhausted(resetEpoch?: number): void {
+    if (resetEpoch && resetEpoch > 0) {
+        quotaExhaustedUntil = resetEpoch * 1000;
+    } else {
+        quotaExhaustedUntil = Date.now() + 60 * 60 * 1000; // 默认标记 1 小时
+    }
+    if (onQuotaExhaustedListener) {
+        try {
+            onQuotaExhaustedListener();
+        } catch {
+            // 忽略监听回调异常
+        }
+    }
+}
+
+export function setContext7QuotaListener(listener: (() => void) | null): void {
+    onQuotaExhaustedListener = listener;
+}
+
+export function resetContext7QuotaExhaustedForTests(): void {
+    quotaExhaustedUntil = null;
+    onQuotaExhaustedListener = null;
 }
 
 function buildHeaders(): Record<string, string> {
@@ -116,12 +156,12 @@ function buildHeaders(): Record<string, string> {
     return headers;
 }
 
-function context7RequestOptions(forceDirect: boolean): any {
+function context7RequestOptions(forceDirect: boolean): AxiosRequestConfig {
     return buildAxiosRequestOptions({
         headers: buildHeaders(),
         timeout: 20000,
         responseType: 'json',
-        validateStatus: (status) => status >= 200 && status < 300,
+        validateStatus: (status) => (status >= 200 && status < 300) || status === 301,
         forceDirect
     });
 }
@@ -199,6 +239,7 @@ export function computeContext7RetryDelayMs(retryAfterSeconds: number | undefine
 function buildQuotaExhaustedError(error: unknown): Error {
     const response = (error as { response?: Context7ErrorResponse } | undefined)?.response;
     const resetEpoch = readHeaderNumber(response?.headers, 'ratelimit-reset');
+    markContext7QuotaExhausted(resetEpoch);
     const resetHint = resetEpoch !== undefined && resetEpoch > 0
         ? ` Quota resets on ${new Date(resetEpoch * 1000).toISOString().slice(0, 10)} (UTC).`
         : '';
@@ -209,9 +250,9 @@ function buildQuotaExhaustedError(error: unknown): Error {
 }
 
 /** 可注入的 GET 实现：生产走 requestDirectFirst，测试用假实现验证重试/退避策略 */
-export type Context7GetImpl = (url: string, params: Record<string, unknown> | undefined) => Promise<any>;
+export type Context7GetImpl = (url: string, params: Record<string, unknown> | undefined) => Promise<AxiosResponse>;
 
-function defaultContext7Get(url: string, params: Record<string, unknown> | undefined): Promise<any> {
+function defaultContext7Get(url: string, params: Record<string, unknown> | undefined): Promise<AxiosResponse> {
     return requestDirectFirst(
         'GET',
         url,
@@ -238,29 +279,33 @@ export async function context7GetWithRetry(
     options: { params?: Record<string, unknown> },
     retries = 3,
     getImpl: Context7GetImpl = defaultContext7Get
-): Promise<any> {
-    let lastError: any;
+): Promise<AxiosResponse> {
+    let lastError: unknown;
     for (let attempt = 0; attempt < retries; attempt += 1) {
         try {
             return await getImpl(url, options.params);
-        } catch (error: any) {
+        } catch (error: unknown) {
             lastError = error;
             if (isContext7QuotaExhaustedError(error)) {
                 throw buildQuotaExhaustedError(error);
             }
-            const status = error?.response?.status;
+            const status = (error as { response?: { status?: number } })?.response?.status;
+            if (status === 301 && (error as { response?: AxiosResponse })?.response) {
+                return (error as { response: AxiosResponse }).response;
+            }
             if (status !== 429 && (status === undefined || status < 500)) {
                 throw error; // 非限流、非上游故障：直接抛
             }
             if (attempt >= retries - 1) {
                 break;
             }
-            const retryAfter = readHeaderNumber(error?.response?.headers, 'retry-after');
+            const retryAfter = readHeaderNumber((error as { response?: { headers?: Record<string, string> } })?.response?.headers, 'retry-after');
             const base = status === 429 ? 1500 : 800;
             await sleep(computeContext7RetryDelayMs(retryAfter, attempt, base));
         }
     }
-    if (lastError?.response?.status === 429) {
+    if ((lastError as { response?: { status?: number } })?.response?.status === 429) {
+        markContext7QuotaExhausted();
         throw new Error('Context7 API rate limit reached (429). Retry later, or set CONTEXT7_API_KEY for higher rate limits.');
     }
     throw lastError;
@@ -299,11 +344,14 @@ export async function searchContext7Libraries(
 /**
  * 获取某个库的文档片段（代码示例 + 说明文本）。
  * libraryId 形如 /vercel/next.js、/packages/express 或带版本 /vercel/next.js@v15.1.8。
+ * 支持处理 Context7 301 应用层重定向（如 /facebook/react -> /react/react），自动跟随一次。
  */
 export async function fetchContext7Docs(
     libraryId: string,
     query: string | undefined,
-    limit: number = 5
+    limit: number = 5,
+    redirectHop = 0,
+    getImpl?: Context7GetImpl
 ): Promise<Context7DocsResult> {
     const cleanLibraryId = libraryId.trim();
     if (!cleanLibraryId) {
@@ -321,13 +369,35 @@ export async function fetchContext7Docs(
             query: cleanQuery || 'overview',
             type: 'json'
         }
-    });
+    }, 3, getImpl);
 
-    const data = response.data as {
+    const data = (response.data || {}) as {
         codeSnippets?: Context7CodeSnippet[];
         infoSnippets?: Context7InfoSnippet[];
         redirectUrl?: string;
+        error?: string;
     };
+
+    const targetId = data.redirectUrl;
+    // 上游返回 301 应用层重定向（如 /facebook/react -> /react/react）
+    if ((response.status === 301 || data.error === 'library_redirected' || targetId) && targetId && targetId !== cleanLibraryId) {
+        if (redirectHop < 1) {
+            try {
+                const redirectedResult = await fetchContext7Docs(targetId, query, limit, redirectHop + 1, getImpl);
+                return {
+                    ...redirectedResult,
+                    redirectUrl: targetId,
+                    redirectedFrom: cleanLibraryId
+                };
+            } catch (redirectError) {
+                throw new Error(`Library ${cleanLibraryId} has migrated to ${targetId}, but failed to fetch from new ID: ${redirectError instanceof Error ? redirectError.message : String(redirectError)}`);
+            }
+        }
+    }
+
+    if (response.status === 301) {
+        throw new Error(`Library ${cleanLibraryId} has migrated to ${targetId || 'a new ID'}. Please re-run with the updated library ID.`);
+    }
 
     return {
         libraryId: cleanLibraryId,

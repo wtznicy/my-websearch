@@ -7,6 +7,9 @@ import {
     AcquirePlaywrightPageOptions,
     BrowserPlaywrightPagePool,
     ExistingContextPageWindowBounds,
+    PlaywrightBrowserLike,
+    PlaywrightContextLike,
+    PlaywrightPageLike,
     PooledPlaywrightPageEntry,
     PooledPlaywrightPageSession
 } from './types.js';
@@ -16,14 +19,15 @@ import {
 } from './browserSession.js';
 
 const CROSS_PROCESS_POOL_LOCK_DIR = path.join(tmpdir(), 'my-websearch-page-pool-locks');
-const browserPlaywrightPagePools = new WeakMap<any, Map<string, BrowserPlaywrightPagePool>>();
+const browserPlaywrightPagePools = new WeakMap<object, Map<string, BrowserPlaywrightPagePool>>();
 
-export async function getPlaywrightPageTargetId(page: any): Promise<string> {
+export async function getPlaywrightPageTargetId(page: PlaywrightPageLike | unknown): Promise<string> {
     try {
-        const context = typeof page?.context === 'function' ? page.context() : null;
+        const pageCandidate = page as PlaywrightPageLike | null | undefined;
+        const context = typeof pageCandidate?.context === 'function' ? pageCandidate.context() : null;
         if (context && typeof context.newCDPSession === 'function') {
-            const session = await context.newCDPSession(page);
-            const info = await session.send('Target.getTargetInfo');
+            const session = await context.newCDPSession(pageCandidate);
+            const info = (await session.send('Target.getTargetInfo')) as { targetInfo?: { targetId?: string } } | undefined;
             const targetId = info?.targetInfo?.targetId;
             if (typeof targetId === 'string' && targetId.length > 0) {
                 return targetId;
@@ -39,7 +43,7 @@ export function getPageLockFilePath(poolKey: string, pageTargetId: string): stri
     return path.join(CROSS_PROCESS_POOL_LOCK_DIR, `page-${keyHash}.lock`);
 }
 
-export function getBrowserPlaywrightPagePool(browser: any, options?: AcquirePlaywrightPageOptions): BrowserPlaywrightPagePool {
+export function getBrowserPlaywrightPagePool(browser: PlaywrightBrowserLike | object, options?: AcquirePlaywrightPageOptions): BrowserPlaywrightPagePool {
     let browserPools = browserPlaywrightPagePools.get(browser);
     if (!browserPools) {
         browserPools = new Map<string, BrowserPlaywrightPagePool>();
@@ -83,24 +87,27 @@ export async function withPoolAcquireLock<T>(pool: BrowserPlaywrightPagePool, op
     }
 }
 
-export function isPageClosed(page: any): boolean {
+export function isPageClosed(page: PlaywrightPageLike | unknown): boolean {
     try {
-        return typeof page?.isClosed === 'function' ? page.isClosed() : false;
+        return typeof (page as PlaywrightPageLike | null | undefined)?.isClosed === 'function'
+            ? Boolean((page as PlaywrightPageLike).isClosed!())
+            : false;
     } catch {
         return true;
     }
 }
 
-export async function getExistingContextPageWindowBounds(page: any): Promise<{ bounds: ExistingContextPageWindowBounds | null; unavailable: boolean }> {
+export async function getExistingContextPageWindowBounds(page: PlaywrightPageLike | unknown): Promise<{ bounds: ExistingContextPageWindowBounds | null; unavailable: boolean }> {
     try {
-        const context = typeof page?.context === 'function' ? page.context() : null;
+        const pageCandidate = page as PlaywrightPageLike | null | undefined;
+        const context = typeof pageCandidate?.context === 'function' ? pageCandidate.context() : null;
         if (!context || typeof context.newCDPSession !== 'function') {
             return { bounds: null, unavailable: false };
         }
 
-        const session = await context.newCDPSession(page);
-        const windowForTarget = await session.send('Browser.getWindowForTarget');
-        const boundsResult = await session.send('Browser.getWindowBounds', { windowId: windowForTarget.windowId });
+        const session = await context.newCDPSession(pageCandidate);
+        const windowForTarget = (await session.send('Browser.getWindowForTarget')) as { windowId?: number } | undefined;
+        const boundsResult = (await session.send('Browser.getWindowBounds', { windowId: windowForTarget?.windowId })) as { bounds?: ExistingContextPageWindowBounds } | undefined;
         return {
             bounds: boundsResult?.bounds ?? null,
             unavailable: false
@@ -114,17 +121,18 @@ export async function getExistingContextPageWindowBounds(page: any): Promise<{ b
     }
 }
 
-export async function isPopupLikePlaywrightPage(page: any): Promise<boolean> {
+export async function isPopupLikePlaywrightPage(page: PlaywrightPageLike | unknown): Promise<boolean> {
     const { unavailable } = await getExistingContextPageWindowBounds(page);
     return unavailable;
 }
 
-export async function syncPoolWithReusableExistingContextPages(pool: BrowserPlaywrightPagePool, context: any): Promise<void> {
-    if (typeof context?.pages !== 'function') {
+export async function syncPoolWithReusableExistingContextPages(pool: BrowserPlaywrightPagePool, context: PlaywrightContextLike | unknown): Promise<void> {
+    const contextCandidate = context as PlaywrightContextLike | null | undefined;
+    if (typeof contextCandidate?.pages !== 'function') {
         return;
     }
 
-    const existingPages = context.pages();
+    const existingPages = contextCandidate.pages();
     if (!Array.isArray(existingPages)) {
         return;
     }
@@ -144,7 +152,7 @@ export async function syncPoolWithReusableExistingContextPages(pool: BrowserPlay
 
         const pageTargetId = await getPlaywrightPageTargetId(page);
         pool.entries.push({
-            context,
+            context: contextCandidate,
             page,
             busy: false,
             prepared: false,
@@ -154,7 +162,7 @@ export async function syncPoolWithReusableExistingContextPages(pool: BrowserPlay
     }
 }
 
-export async function createPooledPlaywrightPageEntry(browser: any, pool: BrowserPlaywrightPagePool): Promise<PooledPlaywrightPageEntry> {
+export async function createPooledPlaywrightPageEntry(browser: PlaywrightBrowserLike, pool: BrowserPlaywrightPagePool): Promise<PooledPlaywrightPageEntry> {
     if (pool.preferExistingContext && typeof browser.contexts === 'function') {
         const contexts = browser.contexts();
         if (Array.isArray(contexts) && contexts.length > 0 && typeof contexts[0].newPage === 'function') {
@@ -214,7 +222,7 @@ export async function createPooledPlaywrightPageEntry(browser: any, pool: Browse
 }
 
 export async function acquirePooledPlaywrightPageOnce(
-    browser: any,
+    browser: PlaywrightBrowserLike,
     options?: AcquirePlaywrightPageOptions
 ): Promise<PooledPlaywrightPageSession> {
     const pool = getBrowserPlaywrightPagePool(browser, options);
@@ -298,7 +306,7 @@ export async function acquirePooledPlaywrightPageOnce(
 }
 
 export async function acquirePooledPlaywrightPage(
-    browser: any,
+    browser: PlaywrightBrowserLike,
     options?: AcquirePlaywrightPageOptions
 ): Promise<PooledPlaywrightPageSession> {
     try {

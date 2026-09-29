@@ -120,16 +120,47 @@ export function __getBrowserSubresourceClassificationForTests(hostname: string):
     return subresourceClassificationCache.get(hostname.toLowerCase())?.allowed;
 }
 
+type CookieRoute = {
+    request(): { url(): string; isNavigationRequest(): boolean };
+    continue(): Promise<void>;
+    abort(): Promise<void>;
+};
+
+type CookiePage = {
+    goto(url: string, options?: Record<string, unknown>): Promise<unknown>;
+    waitForTimeout?(ms: number): Promise<void>;
+    waitForLoadState?(state: string, options?: Record<string, unknown>): Promise<void>;
+    content(): Promise<string>;
+    url(): string;
+    title(): Promise<string>;
+    context?(): { cookies?(urls?: string[]): Promise<Array<{ name: string; value: string }>> };
+    route?(pattern: string, handler: (route: CookieRoute) => Promise<void>): Promise<void>;
+    addInitScript(script: () => void): Promise<void>;
+    setViewportSize?(size: { width: number; height: number }): Promise<void>;
+    setExtraHTTPHeaders(headers: Record<string, string>): Promise<void>;
+};
+
+type BrowserWithContexts = {
+    newContext?(options?: Record<string, unknown>): Promise<{
+        newPage(): Promise<CookiePage>;
+        close(): Promise<void>;
+    }>;
+    contexts?(): Array<{
+        newPage(): Promise<CookiePage>;
+        clearCookies?(): Promise<void>;
+    }>;
+};
+
 // Intercepts every request the page makes (navigation + sub-resources) and
 // aborts ones whose target is private/loopback at either the literal or
 // DNS-resolved level. Navigation hits DNS fresh every time to keep the
 // rebinding window tight; sub-resources go through a hostname TTL cache.
-async function installNavigationGuard(page: any): Promise<void> {
+async function installNavigationGuard(page: CookiePage): Promise<void> {
     if (typeof page.route !== 'function') {
         return;
     }
     try {
-        await page.route('**/*', async (route: any) => {
+        await page.route('**/*', async (route: CookieRoute) => {
             const request = route.request();
             const targetUrl = request.url();
             try {
@@ -149,7 +180,7 @@ async function installNavigationGuard(page: any): Promise<void> {
     }
 }
 
-async function createCookieCollectionPage(browser: any): Promise<{ page: any; close(): Promise<void> }> {
+async function createCookieCollectionPage(browser: unknown): Promise<{ page: CookiePage; close(): Promise<void> }> {
     // 解决 Cookie 采集复用页导致上下文状态串用的问题。
     // 这里显式为每次采集创建独立 context，确保 cookies/storage/open pages 不会跨调用污染。
     // 但 connectOverCDP 返回的浏览器通常只有一个默认持久化 context，不支持 newContext()，
@@ -159,9 +190,11 @@ async function createCookieCollectionPage(browser: any): Promise<{ page: any; cl
         userAgent: getStealthUserAgent()
     };
 
-    if (typeof browser.newContext === 'function') {
+    const b = browser as BrowserWithContexts;
+
+    if (typeof b?.newContext === 'function') {
         try {
-            const context = await browser.newContext(contextOptions);
+            const context = await b.newContext(contextOptions);
             const page = await context.newPage();
             return {
                 page,
@@ -175,15 +208,15 @@ async function createCookieCollectionPage(browser: any): Promise<{ page: any; cl
     }
 
     // CDP 回退：复用默认 context 并在清理时手动重置状态
-    if (typeof browser.contexts === 'function') {
-        const contexts = browser.contexts();
+    if (typeof b?.contexts === 'function') {
+        const contexts = b.contexts();
         if (Array.isArray(contexts) && contexts.length > 0 && typeof contexts[0].newPage === 'function') {
             const context = contexts[0];
             const page = await context.newPage();
             return {
                 page,
                 close: async () => {
-                    await page.close().catch(() => undefined);
+                    await (page as { close?(): Promise<void> }).close?.()?.catch(() => undefined);
                     if (typeof context.clearCookies === 'function') {
                         await context.clearCookies().catch(() => undefined);
                     }
@@ -195,7 +228,7 @@ async function createCookieCollectionPage(browser: any): Promise<{ page: any; cl
     throw new Error('Browser does not support creating a page for cookie collection');
 }
 
-async function readCookiesFromPage(page: any, url: string): Promise<string> {
+async function readCookiesFromPage(page: CookiePage, url: string): Promise<string> {
     if (typeof page.context === 'function') {
         const context = page.context();
         if (context && typeof context.cookies === 'function') {

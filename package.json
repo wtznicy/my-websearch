@@ -1,6 +1,6 @@
 {
   "name": "my-websearch",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "engines": {
     "node": ">=18"
   },
@@ -47,7 +47,8 @@
     "test:both": "node -e \"process.env.MODE='both'; import('./build/index.js')\"",
     "test": "tsc && node build/tools/runCurrentTests.js",
     "test:vitest": "vitest run",
-    "lint": "eslint src --max-warnings 178",
+    "eval:live": "node tools/runLiveEval.mjs",
+    "lint": "eslint src --max-warnings 0",
     "lint:fix": "eslint src --fix",
     "test:list": "tsc && node build/tools/runCurrentTests.js --list",
     "test:bing-parser": "tsc && node build/test/test-bing-parser.js",

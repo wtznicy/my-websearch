@@ -279,7 +279,8 @@ export function parseDuckDuckGoJsonpPayload(jsonpText: string): SearchResult[] {
   try {
     const jsonData = JSON.parse(jsonpMatch[1]);
     const results: SearchResult[] = [];
-    jsonData.forEach((item: any) => {
+    type DdgJsonpItem = { n?: unknown; t?: string; u?: string; a?: string; i?: string; sn?: string };
+    jsonData.forEach((item: DdgJsonpItem) => {
       // Exclude navigation items
       if (item.n) {
         return;

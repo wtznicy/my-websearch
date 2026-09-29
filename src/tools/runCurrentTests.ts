@@ -1,6 +1,9 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { loadApplicationConfigEnv } from '../configLoader.js';
+
+loadApplicationConfigEnv(process.env);
 
 type OutputChunk = {
     stream: 'stdout' | 'stderr';

@@ -13,7 +13,11 @@ export const GENERIC_BOT_KEYWORDS: readonly string[] = [
     '请验证',
     '验证码',
     '人机验证',
-    '安全验证'
+    '安全验证',
+    '你似乎来到了没有知识存在的荒原',
+    '没有知识存在的荒原',
+    '系统检测到异常',
+    '访问受限'
 ];
 
 export const BRAVE_BLOCKED_TITLE_KEYWORDS: readonly string[] = [

@@ -8,6 +8,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import express from 'express';
+import type { Request } from 'express';
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { randomUUID } from "node:crypto";
 import { readFileSync } from 'node:fs';
@@ -145,7 +146,7 @@ async function main() {
     const SESSION_IDLE_TTL_MS = Number(process.env.MCP_SESSION_TTL_MS || 30 * 60 * 1000);
     const MAX_SESSIONS = Number(process.env.MCP_MAX_SESSIONS || 100);
     const SESSION_REAPER_INTERVAL_MS = Number(process.env.MCP_SESSION_REAPER_MS || 5 * 60 * 1000);
-    const touchSession = (req: any) => {
+    const touchSession = (req: Request) => {
       const sessionId = req.headers?.['mcp-session-id'] as string | undefined;
       const session = sessionId ? transports.streamable[sessionId] : undefined;
       if (session) {

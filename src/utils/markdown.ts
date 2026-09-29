@@ -12,9 +12,22 @@ import { gfm } from 'turndown-plugin-gfm';
 
 let service: TurndownService | null = null;
 
+interface DomElementLike {
+    nodeName?: string;
+    nodeType?: number;
+    textContent?: string | null;
+    firstChild?: DomElementLike | null;
+    nextSibling?: DomElementLike | null;
+    nextElementSibling?: DomElementLike | null;
+    previousElementSibling?: DomElementLike | null;
+    parentNode?: DomElementLike | null;
+    childNodes?: ArrayLike<unknown>;
+    getAttribute?(name: string): string | null | undefined;
+}
+
 /** 取 DOM 节点的第一个**元素**子节点（跳过排版产生的空白文本节点） */
-function firstElementChild(node: { firstChild: unknown; nodeType?: number }): any {
-    let child = (node as any).firstChild;
+function firstElementChild(node: DomElementLike): DomElementLike | null {
+    let child = node.firstChild;
     while (child) {
         if (child.nodeType === 1) {
             return child;
@@ -33,7 +46,7 @@ function firstElementChild(node: { firstChild: unknown; nodeType?: number }): an
 const CODE_LANGUAGE_PATTERN = /(?:language|lang|highlight|brush)[-:\s]+([a-z0-9+#]+)/i;
 const BARE_LANGUAGE_PATTERN = /^[a-z0-9+#]+$/i;
 
-function extractCodeLanguage(pre: any, code: any): string {
+function extractCodeLanguage(pre: DomElementLike | null | undefined, code: DomElementLike | null | undefined): string {
     const classValues = [code?.getAttribute?.('class'), pre?.getAttribute?.('class')];
     for (const value of classValues) {
         const match = value ? String(value).match(CODE_LANGUAGE_PATTERN) : null;
@@ -73,7 +86,7 @@ function buildFence(code: string): string {
 }
 
 /** 元素或其祖先（最多 2 层）是否带 `language-x` 类——VitePress/Shiki 把语言类放在外层容器上 */
-function hasLanguageClass(element: any): boolean {
+function hasLanguageClass(element: DomElementLike | null | undefined): boolean {
     const className = element?.getAttribute?.('class');
     return !!className && /(?:^|\s)language-[a-z0-9+#]+/i.test(String(className));
 }
@@ -84,7 +97,7 @@ function hasLanguageClass(element: any): boolean {
  * ② `<p>js</p><pre>…`（Readability 把标签规整成了一个只含语言令牌的段落，
  *    同时把 `language-x` 外层 div 丢掉、只剩 tab 名如 options-api）
  */
-function languageFromAdjacentLabel(pre: any): string {
+function languageFromAdjacentLabel(pre: DomElementLike | null | undefined): string {
     const sibling = pre?.previousElementSibling;
     if (!sibling) {
         return '';
@@ -100,19 +113,19 @@ function languageFromAdjacentLabel(pre: any): string {
 }
 
 /** 该节点是否是"孤立的语言标签"（整段只有语言令牌且紧邻代码块）——用于抑制它，避免漏成正文 */
-function isStrayLanguageLabel(node: any): boolean {
-    if (node.nodeName !== 'P') {
+function isStrayLanguageLabel(node: DomElementLike | null | undefined): boolean {
+    if (node?.nodeName !== 'P') {
         return false;
     }
     const text = String(node.textContent || '').trim().toLowerCase();
     return /^[a-z0-9+#]{1,12}$/.test(text) && node.nextElementSibling?.nodeName === 'PRE';
 }
 
-function languageFromAncestors(node: any): string {
+function languageFromAncestors(node: DomElementLike | null | undefined): string {
     let current = node?.parentNode;
     for (let depth = 0; current && depth < 2; depth += 1) {
         if (hasLanguageClass(current)) {
-            const match = String(current.getAttribute('class')).match(CODE_LANGUAGE_PATTERN);
+            const match = String(current.getAttribute?.('class') || '').match(CODE_LANGUAGE_PATTERN);
             if (match?.[1]) {
                 return match[1].toLowerCase();
             }
@@ -142,7 +155,7 @@ function getService(): TurndownService {
     instance.addRule('fencedCodeWithLanguage', {
         filter: (node) => node.nodeName === 'PRE',
         replacement: (_content, node) => {
-            const pre = node as any;
+            const pre = node as unknown as DomElementLike;
             const child = firstElementChild(pre);
             const codeNode = child && child.nodeName === 'CODE' ? child : null;
             // 语言来源优先级：code/pre 自身属性 → 祖先容器类 → 紧邻的语言标签文本
@@ -164,9 +177,9 @@ function getService(): TurndownService {
     instance.addRule('codeLanguageLabel', {
         filter: (node) => node.nodeName === 'SPAN'
             && /(?:^|\s)lang(?:\s|$)/.test(node.getAttribute?.('class') || '')
-            && (hasLanguageClass(node.parentNode)
-                || hasLanguageClass(node.parentNode?.parentNode)
-                || (node as any).nextElementSibling?.nodeName === 'PRE'),
+            && (hasLanguageClass(node.parentNode as unknown as DomElementLike)
+                || hasLanguageClass((node.parentNode as unknown as DomElementLike)?.parentNode)
+                || (node as unknown as DomElementLike).nextElementSibling?.nodeName === 'PRE'),
         replacement: () => ''
     });
 
@@ -174,14 +187,14 @@ function getService(): TurndownService {
     // 不抑制会连成一串噪声文本（实测 `npmpnpmyarnbun`，同一页面出现多次）
     instance.addRule('codeGroupTabLabel', {
         filter: (node) => node.nodeName === 'LABEL'
-            && /(?:^|\s)tabs(?:\s|$)/.test((node.parentNode as any)?.getAttribute?.('class') || ''),
+            && /(?:^|\s)tabs(?:\s|$)/.test(((node.parentNode as unknown) as DomElementLike | null)?.getAttribute?.('class') || ''),
         replacement: () => ''
     });
 
     // Readability 链路下语言标签会变成"只含语言令牌的段落"（如 `<p>js</p><pre>…`）：
     // 语言已被围栏规则取用，这里把它从正文里删掉（否则漏成孤立的一行）
     instance.addRule('strayCodeLanguageLabel', {
-        filter: (node) => isStrayLanguageLabel(node),
+        filter: (node) => isStrayLanguageLabel(node as unknown as DomElementLike),
         replacement: () => ''
     });
 
@@ -191,8 +204,8 @@ function getService(): TurndownService {
     instance.addRule('tableCell', {
         filter: ['th', 'td'],
         replacement: (content, node) => {
-            const parent = (node as any).parentNode;
-            const index = Array.prototype.indexOf.call(parent ? parent.childNodes : [], node);
+            const parent = (node as unknown as DomElementLike).parentNode;
+            const index = Array.prototype.indexOf.call(parent?.childNodes ?? [], node);
             const prefix = index === 0 ? '| ' : ' ';
             const escaped = content.replace(/(?<!\\)\|/g, '\\|');
             return `${prefix}${escaped} |`;

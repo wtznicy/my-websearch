@@ -10,16 +10,22 @@ const STEALTH_BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15
 
 const STEALTH_VIEWPORT = { width: 1920, height: 1080 };
 
+type StealthPage = {
+    addInitScript(script: () => void): Promise<void>;
+    setViewportSize?(size: { width: number; height: number }): Promise<void>;
+    setExtraHTTPHeaders(headers: Record<string, string>): Promise<void>;
+};
+
 /**
  * 注入浏览器指纹伪装：让自动化浏览器看起来像真实 Chrome。
  * 覆盖 navigator.webdriver / plugins / mimeTypes / chrome / WebGL / permissions 等。
  */
-export async function setupAntiDetection(page: any): Promise<void> {
+export async function setupAntiDetection(page: StealthPage): Promise<void> {
     await page.addInitScript(() => {
         Object.defineProperty(navigator, 'webdriver', {
             get: () => false
         });
-        delete (navigator as any).__proto__.webdriver;
+        delete (navigator as unknown as { __proto__?: { webdriver?: unknown } }).__proto__?.webdriver;
 
         Object.defineProperty(navigator, 'userAgent', {
             get: () => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -34,14 +40,14 @@ export async function setupAntiDetection(page: any): Promise<void> {
             get: () => 8
         });
 
-        if (!(navigator as any).deviceMemory) {
+        if (!('deviceMemory' in navigator)) {
             Object.defineProperty(navigator, 'deviceMemory', {
                 get: () => 8
             });
         }
 
-        const createPlugin = (name: string, filename: string, description: string, mimeTypes: any[]) => {
-            const plugin: any = { name, filename, description, length: mimeTypes.length };
+        const createPlugin = (name: string, filename: string, description: string, mimeTypes: unknown[]) => {
+            const plugin: Record<string | number, unknown> = { name, filename, description, length: mimeTypes.length };
             mimeTypes.forEach((mimeType, index) => {
                 plugin[index] = mimeType;
             });
@@ -67,8 +73,8 @@ export async function setupAntiDetection(page: any): Promise<void> {
 
         Object.defineProperty(navigator, 'mimeTypes', {
             get: () => {
-                const mimeTypes: any[] = [];
-                const plugins = navigator.plugins as any;
+                const mimeTypes: unknown[] = [];
+                const plugins = navigator.plugins as unknown as ArrayLike<{ length: number; [index: number]: unknown }>;
                 for (let pluginIndex = 0; pluginIndex < plugins.length; pluginIndex += 1) {
                     const plugin = plugins[pluginIndex];
                     for (let mimeIndex = 0; mimeIndex < plugin.length; mimeIndex += 1) {
@@ -79,7 +85,7 @@ export async function setupAntiDetection(page: any): Promise<void> {
             }
         });
 
-        (window as any).chrome = {
+        (window as unknown as { chrome?: unknown }).chrome = {
             app: {
                 InstallState: 'installed',
                 RunningState: 'running',
@@ -120,13 +126,16 @@ export async function setupAntiDetection(page: any): Promise<void> {
             }
         };
 
-        const originalQuery = (window.navigator.permissions as any).query;
-        (window.navigator.permissions as any).query = (parameters: any) => {
-            if (parameters.name === 'notifications') {
-                return Promise.resolve({ state: Notification.permission });
-            }
-            return originalQuery ? originalQuery(parameters) : Promise.resolve({ state: 'granted' });
-        };
+        const perms = window.navigator.permissions as unknown as { query?: (parameters: { name: string }) => Promise<{ state: string }> };
+        const originalQuery = perms?.query;
+        if (perms) {
+            perms.query = (parameters: { name: string }) => {
+                if (parameters.name === 'notifications') {
+                    return Promise.resolve({ state: Notification.permission });
+                }
+                return originalQuery ? originalQuery.call(perms, parameters) : Promise.resolve({ state: 'granted' });
+            };
+        }
 
         const webglGetParameter = WebGLRenderingContext.prototype.getParameter;
         WebGLRenderingContext.prototype.getParameter = function (parameter: number) {
@@ -157,7 +166,7 @@ export async function setupAntiDetection(page: any): Promise<void> {
         Object.defineProperty(window, 'outerWidth', { get: () => viewportWidth });
         Object.defineProperty(window, 'outerHeight', { get: () => viewportHeight });
 
-        if (!(navigator as any).connection) {
+        if (!('connection' in navigator)) {
             Object.defineProperty(navigator, 'connection', {
                 get: () => ({
                     effectiveType: '4g',
@@ -187,7 +196,7 @@ export function getStealthViewport(): { width: number; height: number } {
  * 通用页面伪装准备：注入 stealth 脚本 + 视口 + Accept-Language。
  * 供 bing 搜索和通用网页抓取复用。
  */
-export async function prepareStealthPage(page: any): Promise<void> {
+export async function prepareStealthPage(page: StealthPage): Promise<void> {
     await setupAntiDetection(page);
     if (typeof page.setViewportSize === 'function') {
         await page.setViewportSize(STEALTH_VIEWPORT).catch(() => undefined);

@@ -73,11 +73,13 @@ export async function executeCascade(
     }
 
     const usedEngines = new Set(engines);
+    const hasExaKey = Boolean(process.env.EXA_API_KEY?.trim());
     const candidates = SUPPORTED_SEARCH_ENGINES.filter(
         (engine) => !usedEngines.has(engine)
             && typeof engineMap[engine] === 'function'
             && !isEngineCircuitOpen(engine)
             && !isKnownUnreachableOverseasEngine(engine)
+            && (engine !== 'exa' || hasExaKey)
     );
 
     let cascadeBatches = 0;
