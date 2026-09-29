@@ -26,10 +26,13 @@
   - **Chrome TLS/HTTP2 指纹模拟**：基于 `wreq-js` 原生模拟现代 Chrome 握手与会话级 Cookie 持久化，大幅降低上游软降级与拦截率。
   - **内置轻量化挑战求解器**：纯算法毫秒级破解 **Startpage Anubis SHA-256 PoW 算力验证**与 **DuckDuckGo `d.js` (`isJsaChallenge`) HTML5/算术挑战**，无需拉起笨重的浏览器即可稳定穿透 `HTTP 202` / `429` 风控。
   - **深度去广告与真实链接还原**：自动剥离 Brave 赞助商广告、搜狗商业推广，并通过移动端双栈解析与 `uigs_para` 令牌重放直接还原搜狗加密跳转前的真实目标 URL。
+  - **Playwright 进程治理与超时预算**：浏览器会话 metadata 增加 12 小时老化（`savedAt`）、快速死进程探测、8 秒清理硬预算与 3000ms 强杀超时，彻底告别高并发后台进程挂起与僵尸进程泄漏。
+  - **渲染后反爬质询识别**：`fetchWebContent` 增加渲染后反爬页面识别（`ERR_BOT_CHALLENGE`），拒绝把 32 字节反爬荒原页（如知乎安全验证）当作有效正文返回。
 - 📄 **AI 友好的正文提纯与 Markdown 转换**：
   - 内置 `@mozilla/readability` + 容器级智能降噪（`stripChromeNoiseWithGuard`），精准剥离 `<nav>`、`<aside>`、`<footer>`、侧边栏与面包屑噪声，同时**智能挽救 `<article><header><h1>` 文章主标题**。
   - 支持 `format: "markdown"`（基于 `turndown` + GFM 插件），无论走 Readability 还是容器回退路径，均完整保留代码块（` ``` `）、表格与标题层级。
-- 📚 **内置 Context7 官方库文档检索**：原生集成 `resolveLibraryId` 与 `queryDocs`，无需额外部署 Context7 MCP Server 即可按版本检索最新框架/库官方文档与代码示例。
+- 📚 **内置 Context7 官方库文档检索**：原生集成 `resolveLibraryId` 与 `queryDocs`，无需额外部署 Context7 MCP Server 即可按版本检索最新框架/库官方文档与代码示例。支持 **HTTP 301 应用层重定向**（自动跟踪旧 ID 迁移）与**运行时配额感知自适应**。
+- ⚙️ **统一全局配置中心（`~/.my-websearch/config.json`）**：一次配置 API Key 与代理规则，所有 MCP 客户端与终端 CLI 永久通用，首次启动支持从现有 Agent 配置文件自动初始化。
 - 🌏 **为中国大陆网络与 Clash TUN/Fake-IP 深度优化**：
   - 支持 `PROXY_ENGINES` **按引擎白名单分流**（海外引擎走代理、国内引擎直连，告别全局代理导致的百度/CSDN 超时）。
   - 原生支持 `FAKE_IP_CIDRS`（默认放行 `198.18.0.0/15`），完美兼容 Clash TUN / Fake-IP 虚拟网卡环境，同时严守内网 SSRF 安全边界。
@@ -94,8 +97,8 @@ flowchart TB
 | :--- | :--- | :--- |
 | **`search`** | 多引擎联合联网搜索 | 支持单查询 `query` 或并发多查询 `queries: string[]`、`engines`、`limit`、`minResults`（结果不足自动级联补跑） |
 | **`fetchWebContent`** | 通用网页 / Markdown 正文提取 | 支持 `format: "markdown"`（保留代码块与表格）、`readability: true`、`includeLinks`、`startIndex` 分页、GBK/UTF-8 自动解码、导航/侧栏噪声剥离且保留文章 `<h1/h2>` |
-| **`resolveLibraryId`** | 检索库/框架的 Context7 ID | 输入库名（如 `"Next.js"`、`"prisma"`），返回官方库 ID 及信誉/代码片段数量评分 |
-| **`queryDocs`** | 查询库/框架的最新官方文档 | 按 Context7 库 ID（支持钉定版本如 `"/vercel/next.js@v15.1.8"`）获取最新 API 用法与代码示例 |
+| **`resolveLibraryId`** | 检索库/框架的 Context7 ID | 输入库名（如 `"Next.js"`、`"prisma"`），返回官方库 ID 及信誉/代码片段数量评分，原生支持 HTTP 301 迁移库规范化 ID 重定向跟随 |
+| **`queryDocs`** | 查询库/框架的最新官方文档 | 按 Context7 库 ID（支持钉定版本如 `"/vercel/next.js@v15.1.8"`）获取最新 API 用法与代码示例，支持 301 自动重定向与运行时配额自适应兜底 |
 | **`fetchGithubReadme`** | 获取 GitHub / Gitee 仓库 README | 支持 HTTPS / SSH / `.git` URL；**Gitee 自动走官方 API（国内免代理秒开）** |
 | **`fetchCsdnArticle`** | 获取 CSDN 博客文章全文 | 精准提取 `#content_views` 正文并转纯文本/结构化内容，支持浏览器 Cookie 自动续命 |
 | **`fetchJuejinArticle`** | 获取稀土掘金文章全文 | 直调掘金文章接口提取干净正文；传 `format: "markdown"` 可保留代码围栏（含语言）与 GFM 表格 |
@@ -302,18 +305,19 @@ my-websearch cache-clear
 | :--- | :--- | :--- | :--- |
 | **`DEFAULT_SEARCH_ENGINE`** | `auto` | `auto`, `bing`, `baidu`, `csdn`, `juejin`, `sogou`, `duckduckgo`, `brave`, `startpage`, `exa` | 默认搜索引擎。`auto` 会按查询语言自动分流：中文查询走 `AUTO_ROUTE_ZH_ENGINES`，英文/代码查询走 `AUTO_ROUTE_EN_ENGINES` |
 | **`AUTO_ROUTE_EN_ENGINES`** | `bing,duckduckgo` | 逗号分隔的引擎列表 | `auto` 模式下英文/技术查询并发使用的引擎组（双引擎互补，防止单引擎退化） |
-| **`AUTO_ROUTE_ZH_ENGINES`** | `baidu` | 逗号分隔的引擎列表 | `auto` 模式下中文查询默认路由的引擎组（结果不足 `DEFAULT_MIN_RESULTS` 时自动级联 `bing`、`csdn` 等） |
+| **`AUTO_ROUTE_ZH_ENGINES`** | `baidu,sogou` | 逗号分隔的引擎列表 | `auto` 模式下中文查询默认路由的引擎组（双引擎互补；结果不足 `DEFAULT_MIN_RESULTS` 时自动级联 `bing`、`csdn` 等） |
 | **`DEFAULT_MIN_RESULTS`** | `5` | 非负整数 | 搜索结果少于该阈值时，自动级联调用其他可用引擎补齐结果 |
 | **`ALLOWED_SEARCH_ENGINES`** | 空（全部可用） | 逗号分隔的引擎列表 | 限制允许使用的搜索引擎白名单 |
 | **`USE_PROXY`** | `false` | `true`, `false` | 是否显式开启 HTTP/HTTPS 代理（未开启时也会在需要时尝试读取系统代理） |
 | **`PROXY_URL`** | `http://127.0.0.1:7890` | 合法代理 URL | 代理服务器地址（自动透传给 `axios` 与 `wreq-js` 原生会话） |
 | **`PROXY_ENGINES`** | 空（全部走代理） | 逗号分隔的引擎列表 | **强烈推荐配置为 `duckduckgo,exa,brave,startpage`**：仅白名单内海外引擎走代理，国内引擎保持高速直连 |
 | **`FAKE_IP_CIDRS`** | `198.18.0.0/15` | 逗号分隔的 CIDR | **Clash TUN / Fake-IP 用户必看**：将该网段视为代理虚拟 IP 放行，避免被 SSRF 防护误判为内网地址拦截 |
-| **`BING_IMPERSONATE_TARGET`** | `chrome131` | `wreq-js` 浏览器指纹标识 | Bing HTTP 请求使用的 Chrome TLS/H2 指纹目标 |
+| **`IMPERSONATE_BROWSER`** | `chrome_149` | `wreq-js` 浏览器指纹标识 | 浏览器 TLS/H2 指纹目标（如 `chrome_149`、`chrome_133`、`safari_18`） |
+| **`IMPERSONATE_OS`** | `windows` | `wreq-js` 操作系统标识 | 指纹模拟使用的操作系统（`windows`、`macos`、`linux`） |
 | **`BING_PLAYWRIGHT_FALLBACK`** | `true` | `true`, `false` | 设为 `false` 时，Bing 遭遇反爬不拉起 Playwright 浏览器（省 ~400MB 内存），直接快速失败并交给 `minResults` 级联其他引擎 |
 | **`STARTPAGE_PLAYWRIGHT_FALLBACK`** | `true` | `true`, `false` | Startpage 默认优先用内置 Anubis PoW 算力求解器直通；设为 `false` 时若 PoW 失败也不拉起浏览器 |
-| **`EXA_API_KEY`** | 空 | Exa 官方 API Key | **可选**：仅在使用 `exa` 引擎时需要（前往 [dashboard.exa.ai](https://dashboard.exa.ai/api-keys) 免费获取） |
-| **`CONTEXT7_API_KEY`** | 空 | Context7 API Key | **可选**：匿名享有 200 次/月免费配额；配置免费 Key（[context7.com/dashboard](https://context7.com/dashboard)）可大幅提升配额 |
+| **`EXA_API_KEY`** | 空 | Exa 官方 API Key | **可选**：仅在使用 `exa` 引擎时需要（前往 [dashboard.exa.ai](https://dashboard.exa.ai/api-keys) 免费获取）；未配置时自动从级联候选列表中剔除 |
+| **`CONTEXT7_API_KEY`** | 空 | Context7 API Key | **强烈建议配置（TUN / 代理用户强烈推荐）**：匿名额度每月仅 200 次（按出口 IP 计，共享代理节点极易被占满触发 429）；配置免费 Key（[context7.com/dashboard](https://context7.com/dashboard)）可获得独立配额与更高速率，并自动持久化 |
 | **`GITHUB_TOKEN`** | 空 | GitHub Personal Access Token | **可选**：提高 `fetchGithubReadme` 的速率上限（匿名 raw 额度在频繁抓取后会 403，导致抓取整体失败） |
 | **`FETCH_WEB_INSECURE_TLS`** | `false` | `true`, `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（仅在目标旧站点证书链损坏时临时启用） |
 | **`MODE`** | `both` | `both`, `http`, `stdio` | MCP 服务器传输模式 |
@@ -348,7 +352,8 @@ my-websearch cache-clear
 ```bash
 npm install
 npm run build
-npm run test:vitest   # 运行 Vitest 单元测试套件（134+ 用例）
+npm run test:vitest   # 运行 Vitest 单元测试套件（250+ 用例，33 个测试套件）
+npm run eval:live     # 运行 22 用例真实 stdio JSON-RPC live 评测套件
 npm test              # 运行有界并发全量集成测试
 ```
 

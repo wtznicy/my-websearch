@@ -23,13 +23,16 @@
 
 - 🌐 **9-Engine Smart Orchestration**: Combines direct domestic engines (**Bing, Baidu, CSDN, Juejin, Sogou**) and global engines (**DuckDuckGo, Brave, Startpage, Exa**) with language-aware `auto` routing, parallel multi-query execution (`queries: string[]`), cross-engine URL deduplication/ranking, circuit breakers, and `minResults` automatic cascade fallback.
 - 🛡️ **Native Anti-Bot & Challenge Solvers (Zero-Browser Fast Path)**:
-  - **Chrome TLS/HTTP2 Fingerprint Impersonation**: Powered by `wreq-js` with persistent session cookie jars (e.g., automatic Alibaba Cloud `https_waf_cookie` persistence on CSDN and Chrome 131/133 TLS handshakes on Bing/Brave/Startpage).
+  - **Chrome TLS/HTTP2 Fingerprint Impersonation**: Powered by `wreq-js` with persistent session cookie jars (e.g., automatic Alibaba Cloud `https_waf_cookie` persistence on CSDN and modern Chrome TLS handshakes on Bing/Brave/Startpage).
   - **Millisecond Cryptographic & JS Challenge Solvers**: Built-in pure-JS/Rust solvers for **Startpage's Anubis SHA-256 Proof-of-Work (PoW)** and **DuckDuckGo's `d.js` (`isJsaChallenge` / `window.execDeep`) HTML5-parser + arithmetic challenge**—bypassing HTTP 202 / 429 anti-bot walls in milliseconds without spawning a 400MB headless browser.
   - **Deep Ad-Stripping & Real URL Resolution**: Automatically strips sponsored ads on Brave (`data-type="ad"`, `/a/redirect`) and Sogou, and resolves encrypted redirect links (`/link?url=`, `uigs_para` token replay, Baidu `Location` headers, Bing `u=a1...` Base64 links) to clean target URLs.
+  - **Playwright Process Governance & Timeout Bounds**: Session metadata TTL (12h), fast dead client detection, and 8s budget bounds with 3s taskkill limits prevent background browser leaks and MCP request hanging.
+  - **Post-Render Bot Detection**: Catches empty challenge/wasteland pages (`ERR_BOT_CHALLENGE`) to prevent returning 32-byte anti-bot walls (e.g., Zhihu) as valid article content.
 - 📄 **AI-Ready Content Extraction & GFM Markdown**:
   - Combines `@mozilla/readability` with container-level noise stripping (`stripChromeNoiseWithGuard`) to remove `<nav>`, `<aside>`, `<footer>`, sidebars, and breadcrumbs while **preserving `<article><header><h1>` article titles**.
   - Full `format: "markdown"` support (`turndown` + GFM tables/fenced code blocks) across both Readability and container-fallback paths, plus automatic GBK/GB2312 decoding and `startIndex` pagination.
-- 📚 **Built-in Context7 Official Library Docs**: Native `resolveLibraryId` and `queryDocs` tools fetch up-to-date, version-specific documentation and code snippets without running a separate Context7 MCP server.
+- 📚 **Built-in Context7 Official Library Docs**: Native `resolveLibraryId` and `queryDocs` tools fetch up-to-date, version-specific documentation and code snippets without running a separate Context7 MCP server. Features **HTTP 301 application-level redirection** tracking and **dynamic quota awareness**.
+- ⚙️ **Unified Global Configuration (`~/.my-websearch/config.json`)**: Configure API keys and split-horizon proxy rules once for all MCP clients and terminal CLI tools, with automatic first-run bootstrap from existing agent configs.
 - 🌏 **Split-Horizon Proxy (`PROXY_ENGINES`) & Clash Fake-IP Ready**:
   - Route only overseas engines (`duckduckgo,exa,brave,startpage`) through your proxy while keeping domestic engines on fast direct connections.
   - Built-in `FAKE_IP_CIDRS` (`198.18.0.0/15` enabled by default) works seamlessly with Clash TUN / Fake-IP setups while enforcing strict SSRF protection against private-network access.
@@ -94,8 +97,8 @@ flowchart TB
 | :--- | :--- | :--- |
 | **`search`** | Multi-engine federated web search | Supports `query` or parallel `queries: string[]`, `engines`, `limit`, `minResults` (auto-cascades to additional engines when results are insufficient) |
 | **`fetchWebContent`** | Generic web page & Markdown extraction | Supports `format: "markdown"` (preserves code blocks & tables), `readability: true`, `includeLinks`, `startIndex` pagination, GBK/UTF-8 auto-decoding, chrome noise stripping while rescuing `<article><header><h1/h2>` titles |
-| **`resolveLibraryId`** | Resolve package name to Context7 ID | Turns `"Next.js"`, `"prisma"`, etc. into Context7 library IDs with trust & snippet count metadata |
-| **`queryDocs`** | Fetch official versioned library docs | Retrieves code examples and API docs by Context7 ID (supports version pinning like `"/vercel/next.js@v15.1.8"`) |
+| **`resolveLibraryId`** | Resolve package name to Context7 ID | Turns `"Next.js"`, `"prisma"`, etc. into Context7 library IDs with trust & snippet count metadata. Supports HTTP 301 canonical ID redirection |
+| **`queryDocs`** | Fetch official versioned library docs | Retrieves code examples and API docs by Context7 ID (supports version pinning like `"/vercel/next.js@v15.1.8"`, automatic 301 redirection tracking, and quota fallback) |
 | **`fetchGithubReadme`** | Fetch GitHub or Gitee repo README | Supports HTTPS, SSH, `.git` URLs; **Gitee uses official API (reachable in mainland China without proxy)** |
 | **`fetchCsdnArticle`** | Fetch full CSDN blog article | Clean `#content_views` extraction with automatic browser-cookie fallback if blocked |
 | **`fetchJuejinArticle`** | Fetch full Juejin article | Direct API extraction returning clean article body; pass `format: "markdown"` to keep fenced code blocks (with language) and GFM tables |
@@ -300,18 +303,19 @@ To configure API keys and proxy settings once across all MCP clients (Antigravit
 | :--- | :--- | :--- | :--- |
 | **`DEFAULT_SEARCH_ENGINE`** | `auto` | `auto`, `bing`, `baidu`, `csdn`, `juejin`, `sogou`, `duckduckgo`, `brave`, `startpage`, `exa` | Default engine. `auto` routes Chinese queries to `AUTO_ROUTE_ZH_ENGINES` and English/technical queries to `AUTO_ROUTE_EN_ENGINES` |
 | **`AUTO_ROUTE_EN_ENGINES`** | `bing,duckduckgo` | Comma-separated engines | Parallel engine group for English/technical queries under `auto` routing |
-| **`AUTO_ROUTE_ZH_ENGINES`** | `baidu` | Comma-separated engines | Primary engine group for Chinese queries under `auto` routing (auto-cascades via `minResults` when needed) |
+| **`AUTO_ROUTE_ZH_ENGINES`** | `baidu,sogou` | Comma-separated engines | Primary engine group for Chinese queries under `auto` routing (auto-cascades via `minResults` when needed) |
 | **`DEFAULT_MIN_RESULTS`** | `5` | Non-negative integer | Automatically cascades to other engines when initial engines return fewer than `N` results |
 | **`ALLOWED_SEARCH_ENGINES`** | empty (all) | Comma-separated engines | Restrict which search engines can be used |
 | **`USE_PROXY`** | `false` | `true`, `false` | Enable explicit HTTP/HTTPS proxy (if unset, OS system proxy is auto-detected when needed) |
 | **`PROXY_URL`** | `http://127.0.0.1:7890` | Valid proxy URL | Proxy URL (automatically passed to both `axios` and `wreq-js` native TLS sessions) |
 | **`PROXY_ENGINES`** | empty (all) | Comma-separated engines | **Recommended for Mainland China: `duckduckgo,exa,brave,startpage`**. Routes only listed engines via proxy while domestic engines stay direct |
 | **`FAKE_IP_CIDRS`** | `198.18.0.0/15` | Comma-separated CIDRs | **Required for Clash TUN / Fake-IP**: treats DNS answers in these ranges as synthetic proxy IPs instead of blocking them as private IPs |
-| **`BING_IMPERSONATE_TARGET`** | `chrome131` | `wreq-js` browser target | Browser TLS/HTTP2 fingerprint target used for Bing HTTP requests |
+| **`IMPERSONATE_BROWSER`** | `chrome_149` | `wreq-js` browser target | Browser TLS/HTTP2 fingerprint target (e.g. `chrome_149`, `chrome_133`, `safari_18`) |
+| **`IMPERSONATE_OS`** | `windows` | `wreq-js` OS target | OS profile for fingerprint impersonation (`windows`, `macos`, `linux`) |
 | **`BING_PLAYWRIGHT_FALLBACK`** | `true` | `true`, `false` | Set `false` to skip launching Playwright when Bing is challenged (saves ~400MB RAM and lets `minResults` cascade to lighter engines) |
 | **`STARTPAGE_PLAYWRIGHT_FALLBACK`** | `true` | `true`, `false` | Startpage uses the built-in Anubis SHA-256 PoW solver first; set `false` to disable Playwright fallback if PoW fails |
-| **`EXA_API_KEY`** | empty | Exa API Key | **Optional**: only required if you explicitly use the `exa` engine (get a free key at [dashboard.exa.ai](https://dashboard.exa.ai/api-keys)) |
-| **`CONTEXT7_API_KEY`** | empty | Context7 API Key | **强烈建议（TUN / 代理用户强烈推荐）**：匿名额度每月仅 200 次（按出口 IP 计，共享代理节点极易被占满触发 429）；配置免费 Key（[context7.com/dashboard](https://context7.com/dashboard)）可获得独立配额与更高速率 |
+| **`EXA_API_KEY`** | empty | Exa API Key | **Optional**: only required if you explicitly use the `exa` engine (get a free key at [dashboard.exa.ai](https://dashboard.exa.ai/api-keys)). Excluded from cascade candidates if unset |
+| **`CONTEXT7_API_KEY`** | empty | Context7 API Key | **Strongly Recommended (especially for TUN / proxy users)**: Anonymous monthly quota is 200 requests per public egress IP (shared proxy nodes often hit 429). Configuring a free key ([context7.com/dashboard](https://context7.com/dashboard)) provides dedicated quota, higher rate limits, and seamless 301 redirection tracking |
 | **`GITHUB_TOKEN`** | empty | GitHub Personal Access Token | **Optional**: raises the rate limit for `fetchGithubReadme` (anonymous raw quota returns 403 under frequent re-fetching, failing the fetch entirely) |
 | **`FETCH_WEB_INSECURE_TLS`** | `false` | `true`, `false` | Disable TLS verification for `fetchWebContent` only (use only for legacy sites with broken certificate chains) |
 | **`MODE`** | `both` | `both`, `http`, `stdio` | MCP server transport mode |
@@ -333,7 +337,8 @@ Issues and Pull Requests are welcome! To build and run the test suite locally:
 ```bash
 npm install
 npm run build
-npm run test:vitest   # Run 134+ Vitest unit tests
+npm run test:vitest   # Run 250+ Vitest unit tests (33 test suites)
+npm run eval:live     # Run 22-case live MCP evaluation harness (stdio JSON-RPC)
 npm test              # Run bounded-concurrency integration test suite
 ```
 
