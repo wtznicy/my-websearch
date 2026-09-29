@@ -110,18 +110,18 @@ flowchart TB
 ### 1. 一键运行（NPX 免安装）
 
 ```bash
-# 默认启动（兼容 STDIO + HTTP）
+# 开箱即用（全自动感知：自动检测系统代理、中文/英文自动路由分流）
 npx -y my-websearch@latest
 
-# 🇨🇳 中国大陆推荐启动命令（海外引擎走本地代理，国内引擎保持高速直连）
+# （可选）显式指定自定义代理覆盖（仅当想指定非系统默认端口或远程代理时需要）
 USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brave,startpage npx -y my-websearch@latest
 ```
 
 ### 2. 在主流 AI 客户端中配置 MCP
 
-#### 🔹 Claude Desktop / Cursor / Windsurf / Cline (`mcpServers` 标准配置)
+#### 🔹 Claude Desktop / Cursor / Windsurf / Cline (`mcpServers` 极简配置)
 
-在配置文件中添加：
+**无需配置繁琐的代理和引擎参数**，直接使用最简配置即可：
 
 ```json
 {
@@ -130,18 +130,17 @@ USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brav
       "command": "npx",
       "args": ["-y", "my-websearch@latest"],
       "env": {
-        "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "auto",
-        "DEFAULT_MIN_RESULTS": "5",
-        "USE_PROXY": "true",
-        "PROXY_URL": "http://127.0.0.1:7890",
-        "PROXY_ENGINES": "duckduckgo,exa,brave,startpage",
-        "FAKE_IP_CIDRS": "198.18.0.0/15"
+        "MODE": "stdio"
       }
     }
   }
 }
 ```
+
+> 💡 **全自动网络与代理感知说明**：
+> - **系统代理自动检测**：当未配置 `USE_PROXY` 时，服务**自动探测操作系统的系统代理**（Windows 注册表 / macOS scutil / Linux 环境变量）。只要本地开启了 Clash / v2ray / Surge 等代理软件，海外引擎（DuckDuckGo、Brave、Startpage）就会自动走代理通道，国内引擎（Bing、百度、CSDN、掘金、搜狗）自动保持高速直连。
+> - **自动路由与补齐**：`DEFAULT_SEARCH_ENGINE` 默认即为 `auto`，中文查询自动走百度/搜狗，英文走 Bing/DuckDuckGo；`minResults` 默认即为 5 级联补位；`FAKE_IP_CIDRS` 默认已包含 `198.18.0.0/15`。
+> - **可选：显式覆盖代理**：如需强制指定端口，才需额外在 `env` 中声明 `"USE_PROXY": "true", "PROXY_URL": "http://127.0.0.1:7890", "PROXY_ENGINES": "duckduckgo,exa,brave,startpage"`。
 
 > 💡 **Windows 原生命令行兼容写法**（若部分旧客户端找不到 `npx`，可使用 `cmd /c`）：
 > ```json
@@ -152,7 +151,6 @@ USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brav
 >       "args": ["/c", "npx", "-y", "my-websearch@latest"],
 >       "env": {
 >         "MODE": "stdio",
->         "DEFAULT_SEARCH_ENGINE": "auto",
 >         "SYSTEMROOT": "C:/Windows"
 >       }
 >     }
@@ -334,9 +332,10 @@ my-websearch cache-clear
 
 ## 💡 常见问题与最佳实践
 
-1. **中国大陆网络如何配代理最稳、最快？**
-   - 请务必配置 `USE_PROXY=true` + `PROXY_URL=http://127.0.0.1:<你的代理端口>` + `PROXY_ENGINES=duckduckgo,exa,brave,startpage`。
-   - 这样国内引擎（百度、Bing、CSDN、掘金、搜狗）走本地千兆直连，海外引擎（DuckDuckGo、Startpage、Brave）精准走代理（含 `wreq-js` TLS 指纹会话代理透传）。若未开代理直接请求海外引擎，内置的**快速可达性探针（3 秒超时）**会立即报错触发级联，绝不挂起拖慢整次搜索。
+1. **中国大陆网络需要手动配置代理吗？**
+   - **完全不需要！默认全自动检测。** 项目内置系统代理自动嗅探（支持 Windows 注册表 / macOS scutil / Linux 环境变量）。只要您的电脑开启了常规代理软件（Clash、v2ray、Surge 等），海外引擎（DuckDuckGo、Startpage、Brave）会自动走代理通道，国内引擎（百度、Bing、CSDN、掘金、搜狗）自动保持高速直连。
+   - 若未开启代理访问海外引擎，内置的**快速可达性探针（3 秒超时）**会自动拦截并触发 `minResults` 自动级联切到国内引擎，绝不挂起拖慢整体搜索。
+   - 仅当您想强制覆盖系统代理端口（例如使用特定局域网网关或非系统默认端口）时，才需要显式设置 `USE_PROXY=true`、`PROXY_URL` 与 `PROXY_ENGINES`。
 2. **开启 Clash TUN / Fake-IP 模式后报错 `is private IP address` 怎么办？**
    - Clash Fake-IP 会将公网域名解析到 `198.18.0.0/15` 保留网段。请确保环境变量中包含 `FAKE_IP_CIDRS=198.18.0.0/15`（新版本已默认包含该网段）。
 3. **如何避免高并发下 Brave 触发 429 或 Bing 弹验证页？**

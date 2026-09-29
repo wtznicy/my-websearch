@@ -110,16 +110,18 @@ flowchart TB
 ### 1. Run Immediately with NPX
 
 ```bash
-# Basic startup (STDIO + HTTP)
+# Out-of-the-box (Zero Config: Auto-detects OS system proxy, auto language routing)
 npx -y my-websearch@latest
 
-# 🇨🇳 Recommended for Mainland China (Overseas engines via proxy, domestic engines direct)
+# (Optional) Explicit proxy override (only needed for custom/non-default ports or remote proxies)
 USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brave,startpage npx -y my-websearch@latest
 ```
 
 ### 2. Configure in MCP Clients
 
-#### 🔹 Claude Desktop / Cursor / Windsurf / Cline (`mcpServers` Config)
+#### 🔹 Claude Desktop / Cursor / Windsurf / Cline (`mcpServers` Minimal Config)
+
+**Zero configuration required**—simply use the minimal configuration:
 
 ```json
 {
@@ -128,18 +130,17 @@ USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brav
       "command": "npx",
       "args": ["-y", "my-websearch@latest"],
       "env": {
-        "MODE": "stdio",
-        "DEFAULT_SEARCH_ENGINE": "auto",
-        "DEFAULT_MIN_RESULTS": "5",
-        "USE_PROXY": "true",
-        "PROXY_URL": "http://127.0.0.1:7890",
-        "PROXY_ENGINES": "duckduckgo,exa,brave,startpage",
-        "FAKE_IP_CIDRS": "198.18.0.0/15"
+        "MODE": "stdio"
       }
     }
   }
 }
 ```
+
+> 💡 **Automated Network & Proxy Detection**:
+> - **OS System Proxy Auto-Detection**: When `USE_PROXY` is unset, `my-websearch` **automatically discovers your OS system proxy** (Windows Registry / macOS scutil / Linux env vars). Overseas engines (DuckDuckGo, Brave, Startpage) automatically route through your local proxy, while domestic engines (Bing, Baidu, CSDN, Juejin, Sogou) stay direct on fast local connections.
+> - **Smart Auto-Routing**: `DEFAULT_SEARCH_ENGINE` is `auto` by default (Chinese queries route to Baidu/Sogou, English to Bing/DuckDuckGo); `minResults` defaults to 5 for automatic cascading; `FAKE_IP_CIDRS` includes `198.18.0.0/15` out-of-the-box.
+> - **Optional Explicit Override**: If you want to force a custom proxy address/port, simply add `"USE_PROXY": "true", "PROXY_URL": "http://127.0.0.1:7890", "PROXY_ENGINES": "duckduckgo,exa,brave,startpage"`.
 
 > 💡 **Windows CMD Wrapper** (if your client requires `cmd /c` to locate `npx`):
 > ```json
@@ -150,7 +151,6 @@ USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PROXY_ENGINES=duckduckgo,exa,brav
 >       "args": ["/c", "npx", "-y", "my-websearch@latest"],
 >       "env": {
 >         "MODE": "stdio",
->         "DEFAULT_SEARCH_ENGINE": "auto",
 >         "SYSTEMROOT": "C:/Windows"
 >       }
 >     }
