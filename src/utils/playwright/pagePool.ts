@@ -165,8 +165,9 @@ export async function syncPoolWithReusableExistingContextPages(pool: BrowserPlay
 export async function createPooledPlaywrightPageEntry(browser: PlaywrightBrowserLike, pool: BrowserPlaywrightPagePool): Promise<PooledPlaywrightPageEntry> {
     if (pool.preferExistingContext && typeof browser.contexts === 'function') {
         const contexts = browser.contexts();
-        if (Array.isArray(contexts) && contexts.length > 0 && typeof contexts[0].newPage === 'function') {
-            const context = contexts[0];
+        const firstContext = Array.isArray(contexts) ? contexts[0] : undefined;
+        if (firstContext && typeof firstContext.newPage === 'function') {
+            const context = firstContext;
             await syncPoolWithReusableExistingContextPages(pool, context);
 
             const page = await context.newPage();

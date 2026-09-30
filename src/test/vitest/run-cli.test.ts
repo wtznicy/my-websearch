@@ -53,6 +53,33 @@ describe('runCli argument parsing', () => {
             expect(parsed.engines).toEqual(['bing', 'baidu']);
         });
 
+        it('routes engines automatically when defaultSearchEngine is auto and no engines specified', () => {
+            const autoRuntime = {
+                config: {
+                    defaultSearchEngine: 'auto',
+                    allowedSearchEngines: ['bing', 'duckduckgo', 'baidu', 'sogou']
+                }
+            } as unknown as MyWebSearchRuntime;
+
+            const enParsed = parseSearchArgs(['typescript', 'satisfies'], autoRuntime);
+            expect(enParsed.engines).toEqual(['bing', 'duckduckgo']);
+
+            const zhParsed = parseSearchArgs(['中文搜索测试'], autoRuntime);
+            expect(zhParsed.engines).toEqual(['baidu', 'sogou']);
+        });
+
+        it('expands --engine auto to routed engines', () => {
+            const autoRuntime = {
+                config: {
+                    defaultSearchEngine: 'auto',
+                    allowedSearchEngines: ['bing', 'duckduckgo', 'baidu', 'sogou']
+                }
+            } as unknown as MyWebSearchRuntime;
+
+            const parsed = parseSearchArgs(['hello', '--engine', 'auto'], autoRuntime);
+            expect(parsed.engines).toEqual(['bing', 'duckduckgo']);
+        });
+
         it('throws if query is missing', () => {
             expect(() => parseSearchArgs(['--limit', '10'], mockRuntime)).toThrow('Search query is required');
         });

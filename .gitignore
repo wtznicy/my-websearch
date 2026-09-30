@@ -8,3 +8,6 @@ build/
 mcp-publisher*
 .agents/skills/mywebsearch-release/
 .workbuddy/
+.my-websearch*
+MCP_EVALUATION_REPORT.md
+

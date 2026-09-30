@@ -99,9 +99,9 @@ const cases = [
     { id: 'search-multi-query', tool: 'search', args: { queries: ['MCP 协议 中文教程', 'model context protocol docs'], limit: 8 } },
     // —— 正文/文档抓取 ——
     { id: 'fetch-web-zhihu', tool: 'fetchWebContent', args: { url: 'https://zhuanlan.zhihu.com/p/669789440', maxChars: 3000 } },
-    { id: 'fetch-csdn', tool: 'fetchCsdnArticle', args: { url: 'https://blog.csdn.net/weixin_43881394/article/details/132572757', maxChars: 3000 } },
-    { id: 'fetch-juejin', tool: 'fetchJuejinArticle', args: { url: 'https://juejin.cn/post/6844904197280591885', maxChars: 3000 } },
-    { id: 'fetch-github', tool: 'fetchGithubReadme', args: { owner: 'modelcontextprotocol', repo: 'servers', maxChars: 2000 } },
+    { id: 'fetch-csdn', tool: 'fetchCsdnArticle', args: { url: 'https://blog.csdn.net/qq_43061290/article/details/126651783' } },
+    { id: 'fetch-juejin', tool: 'fetchJuejinArticle', args: { url: 'https://juejin.cn/post/7115474775136272392' } },
+    { id: 'fetch-github', tool: 'fetchGithubReadme', args: { url: 'https://github.com/modelcontextprotocol/servers' } },
     { id: 'resolve-lib', tool: 'resolveLibraryId', args: { libraryName: 'react', query: 'hooks' } },
     // —— 安全与错误处理 ——
     { id: 'ssrf-loopback', tool: 'fetchWebContent', args: { url: 'http://127.0.0.1:18080/secret', maxChars: 500 }, expectError: true },
@@ -109,6 +109,7 @@ const cases = [
     { id: 'ssrf-decimal-ip', tool: 'fetchWebContent', args: { url: 'http://2130706433/', maxChars: 500 }, expectError: true },
     { id: 'err-invalid-engine', tool: 'search', args: { query: 'test', engines: ['nonexistent-engine'] }, expectError: true },
     { id: 'err-fetch-404', tool: 'fetchWebContent', args: { url: 'https://httpbin.org/status/404', maxChars: 500 }, expectError: true },
+    { id: 'err-csdn-soft-404', tool: 'fetchCsdnArticle', args: { url: 'https://blog.csdn.net/weixin_43881394/article/details/132572757' }, expectError: true },
 ];
 
 function summarize(tool, result) {

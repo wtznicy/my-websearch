@@ -28,11 +28,12 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
         return isContext7QuotaExhausted() ? '' : DOCS_GUIDANCE;
     };
     const getSearchDescription = () => {
+        const queryRequirement = ' Requires either "query" (single query string) or "queries" (array of 1-4 queries for fan-out).';
         const routingGuidance = ' Engine guidance: for Chinese queries prefer engines=["baidu","sogou","csdn","juejin"] (domestic engines have far better Chinese content coverage); for English/official docs use bing; overseas engines (duckduckgo/brave/startpage/exa) need a proxy. Omit engines to use server-side auto routing. Cite the relevant result URLs as markdown links in your answer.';
         const searchModeDescription = ' searchMode: omit/auto = server SEARCH_MODE; request/playwright force that mode.';
         const docsGuidance = getDocsGuidance();
         if (runtime.config.allowedSearchEngines.length === 0) {
-            return `Search the web across multiple engines with no API key required.${searchModeDescription}${routingGuidance}${docsGuidance}`;
+            return `Search the web across multiple engines with no API key required.${queryRequirement}${searchModeDescription}${routingGuidance}${docsGuidance}`;
         } else {
             const enginesText = runtime.config.allowedSearchEngines.map(e => {
                 switch (e) {
@@ -46,7 +47,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }
             }).join(', ');
-            return `Search the web using these engines: ${enginesText} (no API key required).${searchModeDescription}${routingGuidance}${docsGuidance}`;
+            return `Search the web using these engines: ${enginesText} (no API key required).${queryRequirement}${searchModeDescription}${routingGuidance}${docsGuidance}`;
         }
     };
 
@@ -72,9 +73,9 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
         getSearchDescription(),
         {
             query: z.string().min(1, "Search query must not be empty").max(500, "Search query too long (max 500 characters)").optional()
-                .describe("Single search query (use queries for multi-intent fan-out)"),
+                .describe("Single search query (required if 'queries' is omitted; use 'queries' for multi-intent fan-out)"),
             queries: z.array(z.string().min(1, "Query must not be empty").max(500)).min(1).max(4).optional()
-                .describe("1-4 queries run concurrently and merged (dedup by URL) — for covering multiple intents in one call (e.g. official docs / Chinese community / English)"),
+                .describe("1-4 queries run concurrently and merged (required if 'query' is omitted) — for covering multiple intents in one call (e.g. official docs / Chinese community / English)"),
             limit: z.number().min(1).max(50).optional()
                 .describe("Max results (default: server DEFAULT_SEARCH_LIMIT, usually 10)"),
             searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
@@ -150,6 +151,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
 
                 const failures = executed.flatMap((one) => one.partialFailures);
                 const allEngines = [...new Set(executed.flatMap((one) => one.engines))];
+                const allCascadedEngines = [...new Set(executed.flatMap((one) => one.cascadedEngines ?? []))];
                 const allMetrics = mergeEngineMetricsAcrossQueries(executed.map((one) => one.engineMetrics));
                 return {
                     content: [{
@@ -162,6 +164,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                                 }
                                 : { query: queryList[0] ?? '' }),
                             engines: allEngines,
+                            ...(allCascadedEngines.length > 0 ? { cascadedEngines: allCascadedEngines } : {}),
                             totalResults: mergedResults.length,
                             results: mergedResults,
                             partialFailures: failures,

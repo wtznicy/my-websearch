@@ -1,4 +1,6 @@
 import { SupportedSearchEngine, normalizeEngineName, resolveRequestedEngines } from '../core/search/searchEngines.js';
+import { pickDefaultEnginesForQuery } from '../core/search/queryEngineRouting.js';
+import { isKnownUnreachableOverseasEngine } from '../utils/overseasProbe.js';
 import { MyWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { CliEnvelope, createErrorEnvelope, createSuccessEnvelope } from './protocol.js';
 import { startLocalDaemon } from '../adapters/http/localDaemon.js';
@@ -290,13 +292,31 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
         throw new Error('Limit must be an integer between 1 and 50');
     }
 
+    const resolveDefaultEngines = (queryText: string): SupportedSearchEngine[] => {
+        const picked = pickDefaultEnginesForQuery(queryText, runtime.config.defaultSearchEngine, {
+            en: runtime.config.autoRouteEnEngines,
+            zh: runtime.config.autoRouteZhEngines
+        });
+        const reachable = picked.filter((engine) => !isKnownUnreachableOverseasEngine(engine));
+        const routable = reachable.length > 0 ? reachable : picked;
+        const allowed = runtime.config.allowedSearchEngines;
+        const filtered = allowed && allowed.length > 0 ? routable.filter((engine) => allowed.includes(engine)) : routable;
+        if (filtered.length > 0) {
+            return filtered as SupportedSearchEngine[];
+        }
+        return (allowed && allowed.length > 0 && allowed[0] ? [allowed[0]] : routable) as SupportedSearchEngine[];
+    };
+
+    const defaultEngines = resolveDefaultEngines(query);
+    const fallbackEngine = defaultEngines[0] || 'bing';
+
     const normalizedRequestedEngines = requestedEngines.length > 0
-        ? requestedEngines
-        : [runtime.config.defaultSearchEngine];
+        ? requestedEngines.flatMap((engine) => (engine === 'auto' ? defaultEngines : [engine]))
+        : defaultEngines;
     const resolvedEngines = resolveRequestedEngines(
         normalizedRequestedEngines,
         runtime.config.allowedSearchEngines,
-        runtime.config.defaultSearchEngine
+        fallbackEngine
     ) as SupportedSearchEngine[];
 
     return {
@@ -506,6 +526,10 @@ function formatSearchHumanReadable(result: Awaited<ReturnType<MyWebSearchRuntime
         `Engines: ${result.engines.join(', ')}`,
         `Results: ${result.totalResults}`
     ];
+
+    if (result.cascadedEngines && result.cascadedEngines.length > 0) {
+        lines.push(`Cascaded engines: ${result.cascadedEngines.join(', ')}`);
+    }
 
     if (result.partialFailures.length > 0) {
         lines.push(`Partial failures: ${result.partialFailures.length}`);

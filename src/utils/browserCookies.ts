@@ -210,15 +210,15 @@ async function createCookieCollectionPage(browser: unknown): Promise<{ page: Coo
     // CDP 回退：复用默认 context 并在清理时手动重置状态
     if (typeof b?.contexts === 'function') {
         const contexts = b.contexts();
-        if (Array.isArray(contexts) && contexts.length > 0 && typeof contexts[0].newPage === 'function') {
-            const context = contexts[0];
-            const page = await context.newPage();
+        const defaultContext = Array.isArray(contexts) ? contexts[0] : undefined;
+        if (defaultContext && typeof defaultContext.newPage === 'function') {
+            const page = await defaultContext.newPage();
             return {
                 page,
                 close: async () => {
                     await (page as { close?(): Promise<void> }).close?.()?.catch(() => undefined);
-                    if (typeof context.clearCookies === 'function') {
-                        await context.clearCookies().catch(() => undefined);
+                    if (typeof defaultContext.clearCookies === 'function') {
+                        await defaultContext.clearCookies().catch(() => undefined);
                     }
                 }
             };

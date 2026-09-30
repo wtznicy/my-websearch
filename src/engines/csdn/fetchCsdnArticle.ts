@@ -115,8 +115,26 @@ function extractArticleContent(html: string): string {
     return stripPromotionSections(best);
 }
 
-/** 供单测使用（正文容器兜底 + 推广段判定都是纯函数） */
-export const __csdnArticleInternals = { extractArticleContent, isPromotionParagraph };
+/**
+ * 识别 CSDN 软 404（HTTP 200 但实际为"文章已删除/不存在/审核中"的提示页）。
+ * 避免把站点占位提示文案当作文章正文返回给调用方。
+ */
+export function isCsdnSoft404(html: string, text: string = ''): boolean {
+    const combined = `${html}\n${text}`;
+    if (/你想找的内容离你而去了/i.test(combined)) {
+        return true;
+    }
+    if (/内容不存在/i.test(combined) && /(?:作者删除了内容|内容还在审核中|内容以前存在|内容地址错误)/i.test(combined)) {
+        return true;
+    }
+    if (/(?:文章不存在或已删除|该文章已被(?:作者)?删除|博客不存在或已被删除|博文不存在或已删除)/i.test(combined)) {
+        return true;
+    }
+    return false;
+}
+
+/** 供单测使用（正文容器兜底 + 推广段判定 + 软 404 检测都是纯函数） */
+export const __csdnArticleInternals = { extractArticleContent, isPromotionParagraph, isCsdnSoft404 };
 
 /**
  * 浏览器兜底（cookie 预热 / 渲染抓取）的**总预算**。
@@ -160,8 +178,21 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
         // 直连优先、代理兜底：CSDN 国内直连最快，网络失败且配置了代理时自动切换
         response = await requestDirectFirst('GET', url, (forceDirect) => buildRequestOptions(undefined, forceDirect));
         html = String(response.data || '');
+        if (isCsdnSoft404(html)) {
+            const err = new Error('CSDN article not found: 文章不存在或已被删除 (soft 404)');
+            (err as { status?: number }).status = 404;
+            throw err;
+        }
         content = extractArticleContent(html);
+        if (isCsdnSoft404(html, content)) {
+            const err = new Error('CSDN article not found: 文章不存在或已被删除 (soft 404)');
+            (err as { status?: number }).status = 404;
+            throw err;
+        }
     } catch (error: unknown) {
+        if (error instanceof Error && error.message.includes('CSDN article not found')) {
+            throw error;
+        }
         firstError = error;
 
         // 若因 TUN / Fake-IP 导致 TLS 握手被 WAF 重置或返回 521，优先使用物理网卡直连补偿兜底
@@ -177,13 +208,26 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
                         timeout: 10000
                     });
                     const directHtml = String(directRes.data || '');
+                    if (isCsdnSoft404(directHtml)) {
+                        const err = new Error('CSDN article not found: 文章不存在或已被删除 (soft 404)');
+                        (err as { status?: number }).status = 404;
+                        throw err;
+                    }
                     const directContent = extractArticleContent(directHtml);
+                    if (isCsdnSoft404(directHtml, directContent)) {
+                        const err = new Error('CSDN article not found: 文章不存在或已被删除 (soft 404)');
+                        (err as { status?: number }).status = 404;
+                        throw err;
+                    }
                     if (directContent && !shouldRetryWithBrowser(directHtml, directContent)) {
                         return { content: directContent };
                     }
                 }
             }
-        } catch {
+        } catch (directError) {
+            if (directError instanceof Error && directError.message.includes('CSDN article not found')) {
+                throw directError;
+            }
             // 物理网卡补偿失败时平滑进入下方的浏览器兜底
         }
 
@@ -257,6 +301,12 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
             throw hintProxyConnectionError(firstError);
         }
         throw new Error('Failed to extract readable CSDN article content');
+    }
+
+    if (isCsdnSoft404(html, content)) {
+        const err = new Error('CSDN article not found: 文章不存在或已被删除 (soft 404)');
+        (err as { status?: number }).status = 404;
+        throw err;
     }
 
     return { content };

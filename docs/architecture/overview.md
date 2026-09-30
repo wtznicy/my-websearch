@@ -42,15 +42,13 @@ This document defines the corrected evolution path for `my-websearch` as a combi
 - Skill should prefer the low-friction path later, but MCP remains a first-class standard capability layer.
 
 ## Current code pressure points
-
-- [src/tools/setupTools.ts](/mnt/d/env/webstorm/webstromproject/my-websearch/src/tools/setupTools.ts) currently mixes:
+ 
+- [`src/tools/handlers/`](../../src/tools/handlers) (modularized from the monolithic `setupTools.ts` into individual tool handlers):
   - MCP-specific schema registration
   - argument handling and normalization
   - runtime service invocation
   - MCP-specific result mapping
-- [src/index.ts](/mnt/d/env/webstorm/webstromproject/my-websearch/src/index.ts) currently coordinates both CLI dispatch and MCP bootstrapping, so it is thinner than before but still carries more entrypoint logic than the long-term target shape.
-
-These two files should become thinner adapters after Phase 1.
+- [`src/index.ts`](../../src/index.ts) coordinates both CLI dispatch and MCP bootstrapping as a thin entrypoint.
 
 ## Phase plan
 
@@ -124,8 +122,8 @@ Rule:
 ## Current source-of-truth documents
 
 The following documents should now be treated as the primary contract references for the current CLI/daemon behavior:
-- [cli-json-protocol.md](/mnt/d/env/webstorm/webstromproject/my-websearch/docs/architecture/cli-json-protocol.md)
-- [local-http-adapter.md](/mnt/d/env/webstorm/webstromproject/my-websearch/docs/architecture/local-http-adapter.md)
+- [cli-json-protocol.md](./cli-json-protocol.md)
+- [local-http-adapter.md](./local-http-adapter.md)
 
 ## Risks to validate early
 

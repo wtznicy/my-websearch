@@ -103,10 +103,10 @@ Provide reusable checks for:
 ## Current file mapping
 
 Likely extraction sources:
-- [src/tools/setupTools.ts](/mnt/d/env/webstorm/webstromproject/my-websearch/src/tools/setupTools.ts)
-- [src/config.ts](/mnt/d/env/webstorm/webstromproject/my-websearch/src/config.ts)
-- [src/utils/httpRequest.ts](/mnt/d/env/webstorm/webstromproject/my-websearch/src/utils/httpRequest.ts)
-- [src/utils/playwrightClient.ts](/mnt/d/env/webstorm/webstromproject/my-websearch/src/utils/playwrightClient.ts)
+- [`src/tools/handlers/`](../../src/tools/handlers) (previously `setupTools.ts`)
+- [`src/config.ts`](../../src/config.ts)
+- [`src/utils/httpRequest.ts`](../../src/utils/httpRequest.ts)
+- [`src/utils/playwrightClient.ts`](../../src/utils/playwrightClient.ts)
 
 Likely engine-specific dependencies remain under:
 - `src/engines/*`

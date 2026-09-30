@@ -77,8 +77,12 @@ export async function setupAntiDetection(page: StealthPage): Promise<void> {
                 const plugins = navigator.plugins as unknown as ArrayLike<{ length: number; [index: number]: unknown }>;
                 for (let pluginIndex = 0; pluginIndex < plugins.length; pluginIndex += 1) {
                     const plugin = plugins[pluginIndex];
+                    if (!plugin) continue;
                     for (let mimeIndex = 0; mimeIndex < plugin.length; mimeIndex += 1) {
-                        mimeTypes.push(plugin[mimeIndex]);
+                        const mime = plugin[mimeIndex];
+                        if (mime !== undefined) {
+                            mimeTypes.push(mime);
+                        }
                     }
                 }
                 return mimeTypes;
