@@ -105,6 +105,16 @@ async function main() {
     const app = express();
     app.use(express.json());
 
+    // 容器/平台健康检查探针（Glama / Docker / K8s 等环境探活）：
+    // 必须放在 hostHeaderValidation 之前，避免容器外或集群内的探针因 Host 头不是 localhost 被误拦截。
+    app.get(['/health', '/ping'], (_req, res) => {
+      res.json({
+        status: 'healthy',
+        version: serverVersion,
+        name: 'my-websearch'
+      });
+    });
+
     // DNS rebinding 保护：用 SDK 的 hostHeaderValidation 中间件（port-agnostic，
     // 通过 URL API 解析 Host 头的 hostname 部分，兼容 127.0.0.1:3211 这种带端口的请求）。
     // 默认仅放行本地回环；如需局域网/公网访问，用 OPEN_WEBSEARCH_ALLOWED_HOSTS 显式放行。
@@ -350,8 +360,8 @@ async function main() {
     const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3211;
 
     // 默认只绑定回环地址，避免端口暴露到局域网/公网（配合上面的 DNS rebinding 保护）。
-    // 如需局域网/公网访问，设置 OPEN_WEBSEARCH_HOST=0.0.0.0 显式放开。
-    const HOST = process.env.OPEN_WEBSEARCH_HOST || '127.0.0.1';
+    // 如需局域网/公网或容器访问，设置 OPEN_WEBSEARCH_HOST=0.0.0.0 或 HOST=0.0.0.0 显式放开。
+    const HOST = process.env.OPEN_WEBSEARCH_HOST || process.env.HOST || '127.0.0.1';
 
     const httpServer = app.listen(PORT, HOST, () => {
       console.error(`✅ HTTP server running on ${HOST}:${PORT}`)

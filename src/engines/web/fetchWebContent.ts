@@ -357,8 +357,8 @@ function buildRequestOptions(cookieHeader?: string, forceDirect = false): AxiosR
  * 从 Content-Type 头或 HTML meta 中探测 charset，并用 TextDecoder 解码原始字节。
  * 中文站点常用 GBK/GB2312，axios 的 text 模式固定按 UTF-8 会导致乱码。
  */
-function decodeResponseBuffer(buffer: ArrayBuffer, contentType: string): string {
-    const bytes = new Uint8Array(buffer);
+function decodeResponseBuffer(buffer: ArrayBuffer | Uint8Array, contentType: string): string {
+    const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
 
     // 1) 从 Content-Type 头提取 charset
     let charset = '';

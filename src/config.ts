@@ -93,7 +93,7 @@ export function createConfig(
             env.ALLOWED_SEARCH_ENGINES.split(',').map(e => e.trim()) :
             [],
         searchMode: (env.SEARCH_MODE as AppConfig['searchMode']) || 'auto',
-        maxConcurrentSearches: Number(env.MAX_CONCURRENT_SEARCHES || '0'),
+        maxConcurrentSearches: Number(env.MAX_CONCURRENT_SEARCHES || '20'),
         bingPlaywrightFallback: env.BING_PLAYWRIGHT_FALLBACK !== 'false',
         impersonateBrowser: readOptionalEnv('IMPERSONATE_BROWSER') || 'chrome_149',
         impersonateOs: readOptionalEnv('IMPERSONATE_OS') || 'windows',

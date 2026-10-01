@@ -1,6 +1,6 @@
 {
   "name": "my-websearch",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "engines": {
     "node": ">=18"
   },
@@ -45,7 +45,10 @@
     "test:stdio": "node -e \"process.env.MODE='stdio'; import('./build/index.js')\"",
     "test:http": "node -e \"process.env.MODE='http'; import('./build/index.js')\"",
     "test:both": "node -e \"process.env.MODE='both'; import('./build/index.js')\"",
-    "test": "tsc && node build/tools/runCurrentTests.js",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:live": "tsc && node build/tools/runCurrentTests.js",
+    "test:integration": "tsc && node build/tools/runCurrentTests.js",
     "test:vitest": "vitest run",
     "eval:live": "node tools/runLiveEval.mjs",
     "lint": "eslint src --max-warnings 0",

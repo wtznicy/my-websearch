@@ -185,6 +185,9 @@ export async function searchBingWithImpersonate(query: string, limit: number): P
             allResults = allResults.concat(results);
 
             if (results.length === 0) {
+                if (pageNumber === 0 && allResults.length === 0) {
+                    throw new Error('Bing impersonate mode returned 0 results (possible anti-bot layout change or soft block)');
+                }
                 break;
             }
 

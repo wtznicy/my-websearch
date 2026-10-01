@@ -88,6 +88,9 @@ const networkFailurePatterns = [
     // context7 匿名月度配额耗尽（按出口 IP 计；实测重置日 2026-10-01）：上游配额状态，非代码问题。
     // 修复后该状态快速失败并带上此文案（此前会盲从 Retry-After 挂起数天）
     /Context7 anonymous quota exhausted/i,
+    // Bing 偶发实时 0 结果/软拦截/验证页（受外网环境或上游风控波动影响）：环境性，非代码问题
+    /Bing returned zero results/i,
+    /Bing returned a verification or anti-bot page/i,
     /page\.goto: Timeout \d+ms exceeded[\s\S]*navigating to/i,
     /Timeout \d+ms exceeded[\s\S]*(https?:\/\/|navigating to)/i
 ];
@@ -186,6 +189,7 @@ function runAllTestsInParallel(): Promise<number> {
     let excused = 0;
     let failed = 0;
     let failFastStarted = false;
+    const shouldFailFast = process.env.TEST_FAIL_FAST !== 'false';
     // 有界并发池：此前全部测试子进程在同一毫秒 spawn，瞬时并发风暴会让各引擎在同一秒密集
     // 请求上游（CSDN/搜狗/必应/Brave），本来就是"单跑必过、全量偶发 WAF 限流/超时"的人为来源
     const maxConcurrentTests = Math.max(1, Number(process.env.TEST_CONCURRENCY || '6') || 6);
@@ -283,7 +287,7 @@ function runAllTestsInParallel(): Promise<number> {
             console.error(`===== FAIL ${testName}.js (${runningTest.spawnError?.message || signal || (code ?? 'unknown')}) =====`);
             printCapturedOutput(runningTest);
 
-            if (!failFastStarted) {
+            if (shouldFailFast && !failFastStarted) {
                 failFastStarted = true;
                 // 修复全量测试等待过久的问题：第一个非网络失败出现后立即终止其它并行测试。
                 stopOtherTests(testName);

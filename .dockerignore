@@ -1,0 +1,16 @@
+node_modules
+build
+.git
+.github
+.agents
+.workbuddy
+*.log
+.env
+.env.*
+.my-websearch*
+MCP_EVALUATION_REPORT.md
+*.md
+!README.md
+!README-zh.md
+mcp-publisher.exe
+src/test

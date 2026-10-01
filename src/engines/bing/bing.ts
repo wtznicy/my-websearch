@@ -567,6 +567,9 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
         allResults = allResults.concat(results);
 
         if (results.length === 0) {
+            if (pageNumber === 0 && allResults.length === 0) {
+                throw new Error('Bing HTTP mode returned 0 results (possible anti-bot layout change or verification)');
+            }
             console.error('⚠️ No more Bing results from HTTP mode, ending early.');
             break;
         }
