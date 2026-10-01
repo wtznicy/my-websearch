@@ -323,7 +323,7 @@ my-websearch cache-clear
 | **`MCP_SESSION_TTL_MS`** | `1800000` | 毫秒 | MCP HTTP/SSE 会话空闲多久后被回收（默认 30 分钟） |
 | **`MCP_MAX_SESSIONS`** | `100` | 正整数 | 保留的 MCP HTTP 会话上限，超出时优先回收最久未活跃的会话 |
 | **`MCP_SESSION_REAPER_MS`** | `300000` | 毫秒 | 会话回收器的巡检间隔（默认 5 分钟） |
-| **`MAX_CONCURRENT_SEARCHES`** | `0` | 非负整数 | Daemon 模式下全局最大并发搜索数（`0` 表示不限制） |
+| **`MAX_CONCURRENT_SEARCHES`** | `20` | 非负整数 | Daemon 模式下全局最大并发搜索数（默认 `20`；设为 `0` 表示不限制） |
 | **`METRICS_ENABLED`** | `false` | `true`, `false` | 是否启用 Prometheus 引擎性能与缓存命中率指标采集 |
 | **`SECURITY_AUDIT`** | `false` | `true`, `false` | 是否输出 SSRF 拦截、TLS 白名单等安全审计日志 |
 | **`LOG_LEVEL`** | `info` | `quiet`, `debug`, `info`, `warn`, `error` | 日志输出级别（`quiet` 完全静默） |
@@ -351,9 +351,9 @@ my-websearch cache-clear
 ```bash
 npm install
 npm run build
-npm run test:vitest   # 运行 Vitest 单元测试套件（250+ 用例，33 个测试套件）
+npm test              # 运行 255 个 Vitest 单元测试（33 个套件，秒级快速完成且 100% 确定性）
+npm run test:live     # 运行有界并发多引擎实时集成测试
 npm run eval:live     # 运行 22 用例真实 stdio JSON-RPC live 评测套件
-npm test              # 运行有界并发全量集成测试
 ```
 
 ### 致谢

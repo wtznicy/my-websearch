@@ -323,7 +323,7 @@ To configure API keys and proxy settings once across all MCP clients (Antigravit
 | **`MCP_SESSION_TTL_MS`** | `1800000` | Milliseconds | Idle TTL for MCP HTTP/SSE sessions before the reaper closes them (default 30 min) |
 | **`MCP_MAX_SESSIONS`** | `100` | Positive integer | Max retained MCP HTTP sessions; the least-recently-active ones are closed first |
 | **`MCP_SESSION_REAPER_MS`** | `300000` | Milliseconds | How often the session reaper runs (default 5 min) |
-| **`MAX_CONCURRENT_SEARCHES`** | `0` | Non-negative integer | Max concurrent searches in daemon mode (`0` = unlimited) |
+| **`MAX_CONCURRENT_SEARCHES`** | `20` | Non-negative integer | Max concurrent searches in daemon mode (`20` by default; set `0` for unlimited) |
 | **`METRICS_ENABLED`** | `false` | `true`, `false` | Enable Prometheus metrics collection (`GET /metrics`) |
 | **`SECURITY_AUDIT`** | `false` | `true`, `false` | Enable security audit logging (SSRF blocks, TLS overrides) |
 | **`LOG_LEVEL`** | `info` | `quiet`, `debug`, `info`, `warn`, `error` | Logging verbosity (`quiet` silences startup and runtime logs) |
@@ -337,9 +337,9 @@ Issues and Pull Requests are welcome! To build and run the test suite locally:
 ```bash
 npm install
 npm run build
-npm run test:vitest   # Run 250+ Vitest unit tests (33 test suites)
+npm test              # Run 255 Vitest unit tests (33 test suites, fast & deterministic)
+npm run test:live     # Run live multi-engine integration test suite
 npm run eval:live     # Run 22-case live MCP evaluation harness (stdio JSON-RPC)
-npm test              # Run bounded-concurrency integration test suite
 ```
 
 ### Acknowledgements

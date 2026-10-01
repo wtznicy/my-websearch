@@ -1,7 +1,7 @@
 name: CI
 
 # 只跑确定性检查（编译 + 单元测试），不跑 live 网络测试：
-# live 测试依赖海外引擎可达性/上游反爬状态，必须在本地手动执行（npm test）。
+# live 测试依赖海外引擎可达性/上游反爬状态，必须在本地手动执行（npm run test:live）。
 on:
   push:
     branches: [main]
