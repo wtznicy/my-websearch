@@ -291,7 +291,13 @@ export async function startLocalDaemon(
         res.type('text/plain; version=0.0.4; charset=utf-8').send(notice + metrics.renderPrometheus());
     });
 
-    app.post('/cache/clear', async (_req, res) => {
+    app.post('/cache/clear', async (req, res) => {
+        const remoteIp = req.socket.remoteAddress;
+        const isLoopback = !remoteIp || remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === '::ffff:127.0.0.1';
+        if (!isLoopback) {
+            sendError(res, 403, 'forbidden', 'Cache clearing is only permitted from loopback clients.');
+            return;
+        }
         try {
             runtime.services.search.clearCache();
             res.json(createSuccessEnvelope({

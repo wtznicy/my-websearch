@@ -1,6 +1,6 @@
 {
   "name": "my-websearch",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "engines": {
     "node": ">=18"
   },
@@ -33,6 +33,7 @@
     "!build/test"
   ],
   "scripts": {
+    "check:ci": "npm run typecheck:strict && npm run lint && npm test && npm run build",
     "typecheck:strict": "tsc --project tsconfig.strict.json",
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
     "watch": "tsc --watch",

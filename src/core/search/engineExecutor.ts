@@ -167,6 +167,13 @@ export async function executePrimaryEngines(
                 done = true;
                 clearTimeout(timer);
                 resolve(results);
+            }).catch(() => {
+                if (done) {
+                    return;
+                }
+                done = true;
+                clearTimeout(timer);
+                resolve([]);
             });
         });
     }));

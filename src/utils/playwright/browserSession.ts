@@ -88,15 +88,24 @@ async function closeConnectedCdpBrowser(browser: PlaywrightBrowserLike | unknown
         return;
     }
 
-    await Promise.race([
-        browserCandidate.close(),
-        new Promise((resolve) => {
-            const timer = setTimeout(resolve, timeoutMs);
-            if (typeof timer === 'object' && 'unref' in timer) {
-                (timer as NodeJS.Timeout).unref();
-            }
-        })
-    ]).catch(() => undefined);
+    let timer: NodeJS.Timeout | undefined;
+    try {
+        await Promise.race([
+            browserCandidate.close(),
+            new Promise((resolve) => {
+                timer = setTimeout(resolve, timeoutMs);
+                if (typeof timer === 'object' && 'unref' in timer) {
+                    (timer as NodeJS.Timeout).unref();
+                }
+            })
+        ]);
+    } catch {
+        // ignore
+    } finally {
+        if (timer) {
+            clearTimeout(timer);
+        }
+    }
 }
 
 function detachLaunchedChildProcess(child: ChildProcess): void {
@@ -880,11 +889,12 @@ async function cleanupStaleLocalBrowserSessions(): Promise<void> {
         return;
     }
 
+    let timer: NodeJS.Timeout | undefined;
     try {
         await Promise.race([
             doCleanupStaleLocalBrowserSessions(),
             new Promise<void>((_, reject) => {
-                const timer = setTimeout(() => reject(new Error(`Browser cleanup budget (${STALE_BROWSER_CLEANUP_BUDGET_MS}ms) exceeded`)), STALE_BROWSER_CLEANUP_BUDGET_MS);
+                timer = setTimeout(() => reject(new Error(`Browser cleanup budget (${STALE_BROWSER_CLEANUP_BUDGET_MS}ms) exceeded`)), STALE_BROWSER_CLEANUP_BUDGET_MS);
                 if (typeof timer === 'object' && 'unref' in timer) {
                     (timer as NodeJS.Timeout).unref();
                 }
@@ -894,6 +904,10 @@ async function cleanupStaleLocalBrowserSessions(): Promise<void> {
     } catch (error) {
         console.warn('[browserSession] cleanupStaleLocalBrowserSessions exceeded budget or failed, proceeding with fresh launch:', error instanceof Error ? error.message : String(error));
         // 不阻断冷启动：允许下次有机会再重试清理
+    } finally {
+        if (timer) {
+            clearTimeout(timer);
+        }
     }
 }
 
@@ -915,12 +929,19 @@ async function waitForBrowserReadyViaStdout(
             throw new Error('Pipe closed before browser emitted DevTools ready signal');
         })();
 
+        let timer: NodeJS.Timeout | undefined;
         const timeout = new Promise<never>((_, reject) => {
-            const timer = setTimeout(() => reject(new Error(`Browser did not emit DevTools ready signal within ${timeoutMs}ms`)), timeoutMs);
+            timer = setTimeout(() => reject(new Error(`Browser did not emit DevTools ready signal within ${timeoutMs}ms`)), timeoutMs);
             if (typeof timer === 'object' && 'unref' in timer) (timer as NodeJS.Timeout).unref();
         });
 
-        return Promise.race([readLoop, timeout]);
+        try {
+            return await Promise.race([readLoop, timeout]);
+        } finally {
+            if (timer) {
+                clearTimeout(timer);
+            }
+        }
     } else {
         const child = source.child;
         return new Promise<string>((resolve, reject) => {
@@ -1061,11 +1082,12 @@ export async function closeLocalBrowserSession(session: LocalBrowserSession): Pr
             const hasOtherClients = (updatedMetadata?.clientPids.length ?? 0) > 0;
 
             if (!hasOtherClients) {
+                let timer: NodeJS.Timeout | undefined;
                 try {
                     await Promise.race([
                         session.browser.close(),
                         new Promise((resolve) => {
-                            const timer = setTimeout(resolve, 3000);
+                            timer = setTimeout(resolve, 3000);
                             if (typeof timer === 'object' && 'unref' in timer) {
                                 (timer as NodeJS.Timeout).unref();
                             }
@@ -1073,6 +1095,10 @@ export async function closeLocalBrowserSession(session: LocalBrowserSession): Pr
                     ]);
                 } catch {
                     // Ignore close errors.
+                } finally {
+                    if (timer) {
+                        clearTimeout(timer);
+                    }
                 }
                 session.forceKill();
             } else {
@@ -1088,11 +1114,12 @@ export async function closeLocalBrowserSession(session: LocalBrowserSession): Pr
         return;
     }
 
+    let timer: NodeJS.Timeout | undefined;
     try {
         await Promise.race([
             session.browser.close(),
             new Promise((resolve) => {
-                const timer = setTimeout(resolve, 5000);
+                timer = setTimeout(resolve, 5000);
                 if (typeof timer === 'object' && 'unref' in timer) {
                     (timer as NodeJS.Timeout).unref();
                 }
@@ -1100,6 +1127,10 @@ export async function closeLocalBrowserSession(session: LocalBrowserSession): Pr
         ]);
     } catch {
         session.forceKill();
+    } finally {
+        if (timer) {
+            clearTimeout(timer);
+        }
     }
 
     if (session.tempDir) {

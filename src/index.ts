@@ -153,9 +153,15 @@ async function main() {
     // 因此给每个会话记录最后活跃时间，由 reaper 回收空闲会话，并对总量设上限。
     // 之前这里是无上限、无 TTL 的裸对象（测评报告 P1-11）。
     // 三个参数可用环境变量覆盖（默认 30 分钟空闲 / 上限 100 / 每 5 分钟巡检），便于测试与调优。
-    const SESSION_IDLE_TTL_MS = Number(process.env.MCP_SESSION_TTL_MS || 30 * 60 * 1000);
-    const MAX_SESSIONS = Number(process.env.MCP_MAX_SESSIONS || 100);
-    const SESSION_REAPER_INTERVAL_MS = Number(process.env.MCP_SESSION_REAPER_MS || 5 * 60 * 1000);
+    const parsePositiveNumber = (val: string | undefined, defaultVal: number, minVal: number, maxVal: number): number => {
+      const num = Number(val);
+      if (!Number.isFinite(num) || num <= 0) return defaultVal;
+      return Math.min(Math.max(num, minVal), maxVal);
+    };
+
+    const SESSION_IDLE_TTL_MS = parsePositiveNumber(process.env.MCP_SESSION_TTL_MS, 30 * 60 * 1000, 10_000, 7 * 24 * 3600 * 1000);
+    const MAX_SESSIONS = parsePositiveNumber(process.env.MCP_MAX_SESSIONS, 100, 1, 10_000);
+    const SESSION_REAPER_INTERVAL_MS = parsePositiveNumber(process.env.MCP_SESSION_REAPER_MS, 5 * 60 * 1000, 5_000, 24 * 3600 * 1000);
     const touchSession = (req: Request) => {
       const sessionId = req.headers?.['mcp-session-id'] as string | undefined;
       const session = sessionId ? transports.streamable[sessionId] : undefined;
@@ -220,10 +226,26 @@ async function main() {
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
       let transport: StreamableHTTPServerTransport;
 
-      if (sessionId && transports.streamable[sessionId]) {
+      const existingSession = sessionId ? transports.streamable[sessionId] : undefined;
+
+      if (existingSession) {
         // Reuse existing transport
-        transport = transports.streamable[sessionId].transport;
+        transport = existingSession.transport;
       } else if (!sessionId && isInitializeRequest(req.body)) {
+        // 检查活跃会话数上限，超限时立即返回 429
+        const currentSessionCount = Object.keys(transports.streamable).length + Object.keys(transports.sse).length;
+        if (currentSessionCount >= MAX_SESSIONS) {
+          res.status(429).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32000,
+              message: `Too Many Requests: Maximum concurrent MCP sessions (${MAX_SESSIONS}) exceeded`,
+            },
+            id: null,
+          });
+          return;
+        }
+
         // New initialization request
         const server = createServer(runtime);
         const session = {} as StreamableSession;
@@ -288,13 +310,13 @@ async function main() {
     // Reusable handler for GET and DELETE requests
     const handleSessionRequest = async (req: express.Request, res: express.Response) => {
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
-      if (!sessionId || !transports.streamable[sessionId]) {
+      const session = sessionId ? transports.streamable[sessionId] : undefined;
+      if (!session) {
         res.status(400).send('Invalid or missing session ID');
         return;
       }
 
-      const transport = transports.streamable[sessionId];
-      await transport.transport.handleRequest(req, res);
+      await session.transport.handleRequest(req, res);
     };
 
     // Handle GET requests for server-to-client notifications via SSE

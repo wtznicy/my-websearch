@@ -229,8 +229,18 @@ export function createConfig(
 
         if (cfg.useProxy) {
             console.error(`🌐 Using proxy: ${cfg.proxyUrl}`);
+            if (cfg.proxyEngines.length > 0) {
+                console.error(`🌐 Proxy engines: ${cfg.proxyEngines.join(', ')}`);
+            } else {
+                console.error(`🌐 Proxy engines: all engines (default)`);
+            }
         } else {
-            console.error(`🌐 No proxy configured (set USE_PROXY=true to enable)`);
+            const hasCustomProxyUrl = Boolean(env.PROXY_URL && env.PROXY_URL !== 'http://127.0.0.1:7890');
+            if (hasCustomProxyUrl) {
+                console.error(`⚠️ PROXY_URL is configured (${cfg.proxyUrl}) but USE_PROXY is not 'true'. HTTP proxy is disabled (set USE_PROXY=true to force HTTP proxy; in TUN mode, system TUN adapter routes traffic automatically).`);
+            } else {
+                console.error(`🌐 No explicit HTTP proxy configured (set USE_PROXY=true to enable; in TUN mode, system TUN adapter routes traffic automatically)`);
+            }
         }
         if (cfg.fakeIpCidrs.length > 0) {
             console.error(`🌐 Fake IP CIDRs: ${cfg.fakeIpCidrs.join(', ')}`);

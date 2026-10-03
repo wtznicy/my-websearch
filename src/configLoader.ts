@@ -123,7 +123,6 @@ function tryAutoBootstrapConfig(targetPath: string): MyWebSearchConfigFile | nul
     ];
 
     for (const cand of candidateFiles) {
-        if (!fs.existsSync(cand)) continue;
         try {
             const raw = fs.readFileSync(cand, 'utf8');
             const parsed = JSON.parse(raw);
@@ -151,15 +150,17 @@ function tryAutoBootstrapConfig(targetPath: string): MyWebSearchConfigFile | nul
                     };
 
                     const parentDir = path.dirname(targetPath);
-                    if (!fs.existsSync(parentDir)) {
+                    try {
                         fs.mkdirSync(parentDir, { recursive: true });
+                    } catch {
+                        // ignore directory creation error
                     }
                     fs.writeFileSync(targetPath, JSON.stringify(bootstrapped, null, 2), 'utf8');
                     return bootstrapped;
                 }
             }
         } catch {
-            // 忽略读取错误
+            // 忽略文件不存在或解析错误
         }
     }
 
@@ -182,48 +183,42 @@ export function loadApplicationConfigEnv(
     const cwd = options.cwd || process.cwd();
     const candidateEnv: Record<string, string> = {};
 
-    // 1. 读取项目根目录 .env
+    // 1. 读取项目根目录 .env（直接读取，免去多余的 stat 系统调用）
     const dotEnvPath = path.join(cwd, '.env');
-    if (fs.existsSync(dotEnvPath)) {
-        try {
-            const content = fs.readFileSync(dotEnvPath, 'utf8');
-            const parsed = parseDotEnv(content);
-            Object.assign(candidateEnv, parsed);
-        } catch {
-            // 忽略 .env 读取错误
-        }
+    try {
+        const content = fs.readFileSync(dotEnvPath, 'utf8');
+        const parsed = parseDotEnv(content);
+        Object.assign(candidateEnv, parsed);
+    } catch {
+        // 忽略文件不存在或读取错误
     }
 
     // 2. 读取项目根目录 .my-websearch.json
     const projectJsonPath = path.join(cwd, '.my-websearch.json');
-    if (fs.existsSync(projectJsonPath)) {
-        try {
-            const raw = fs.readFileSync(projectJsonPath, 'utf8');
-            const parsed = JSON.parse(raw);
-            const flat = flattenConfigFileToEnv(parsed);
-            // .env 优先于 .my-websearch.json，仅补缺失
-            for (const [k, v] of Object.entries(flat)) {
-                if (!candidateEnv[k]) candidateEnv[k] = v;
-            }
-        } catch {
-            // 忽略读取错误
+    try {
+        const raw = fs.readFileSync(projectJsonPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        const flat = flattenConfigFileToEnv(parsed);
+        // .env 优先于 .my-websearch.json，仅补缺失
+        for (const [k, v] of Object.entries(flat)) {
+            if (!candidateEnv[k]) candidateEnv[k] = v;
         }
+    } catch {
+        // 忽略文件不存在或读取错误
     }
 
     // 3. 读取用户主目录应用级配置文件 ~/.my-websearch/config.json
     const appConfigPath = getAppConfigFilePath(targetEnv);
     let appConfigData: MyWebSearchConfigFile | null = null;
 
-    if (fs.existsSync(appConfigPath)) {
-        try {
-            const raw = fs.readFileSync(appConfigPath, 'utf8');
-            appConfigData = JSON.parse(raw);
-        } catch {
-            // 忽略损坏配置
+    try {
+        const raw = fs.readFileSync(appConfigPath, 'utf8');
+        appConfigData = JSON.parse(raw);
+    } catch (err: unknown) {
+        // 文件不存在时尝试自动从现有 Agent 配置初始化
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+            appConfigData = tryAutoBootstrapConfig(appConfigPath);
         }
-    } else {
-        // 尝试自动从现有 Agent 配置初始化
-        appConfigData = tryAutoBootstrapConfig(appConfigPath);
     }
 
     if (appConfigData) {

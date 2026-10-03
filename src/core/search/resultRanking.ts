@@ -71,6 +71,18 @@ export function tokenizeForRanking(text: string): string[] {
     return tokens;
 }
 
+/** 结果分词缓存（按 SearchResult 对象引用存储，生命周期跟随请求结果生命周期，自动 GC 无内存泄漏） */
+const docTokensCache = new WeakMap<SearchResult, string[]>();
+
+export function getDocTokens(result: SearchResult): string[] {
+    let tokens = docTokensCache.get(result);
+    if (!tokens) {
+        tokens = tokenizeForRanking(`${result.title} ${result.description}`);
+        docTokensCache.set(result, tokens);
+    }
+    return tokens;
+}
+
 /** BM25 打分（k1=1.2, b=0.75），df/idf 在结果集内统计 */
 function bm25Scores(queryTokens: string[], docs: string[][]): number[] {
     const total = docs.length;
@@ -174,7 +186,7 @@ export function relevanceScores(results: SearchResult[], query: string): number[
     if (queryTokens.length === 0) {
         return results.map(() => 0);
     }
-    const docs = results.map((result) => tokenizeForRanking(`${result.title} ${result.description}`));
+    const docs = results.map(getDocTokens);
     return bm25Scores(queryTokens, docs);
 }
 
@@ -196,7 +208,7 @@ export function countUsableResults(results: SearchResult[], query: string): numb
         return results.length;
     }
 
-    const docs = results.map((result) => tokenizeForRanking(`${result.title} ${result.description}`));
+    const docs = results.map(getDocTokens);
     const total = results.length;
     const documentFrequency = new Map<string, number>();
     for (const doc of docs) {
@@ -256,7 +268,7 @@ export function rankSearchResults(
         return results;
     }
 
-    const docs = results.map((result) => tokenizeForRanking(`${result.title} ${result.description}`));
+    const docs = results.map(getDocTokens);
     const bm25 = bm25Scores(queryTokens, docs);
     const maxBm25 = Math.max(...bm25, 1e-6);
 
