@@ -88,11 +88,16 @@ export function flattenConfigFileToEnv(configData: MyWebSearchConfigFile): Recor
     // 2. proxy 映射
     if (configData.proxy && typeof configData.proxy === 'object') {
         const p = configData.proxy;
-        if (p.url) flat.PROXY_URL = p.url;
-        if (p.useProxy !== undefined) {
-            flat.USE_PROXY = p.useProxy ? 'true' : 'false';
-        } else if (p.enabled !== undefined) {
-            flat.USE_PROXY = p.enabled ? 'true' : 'false';
+        if (p.useProxy === false || p.enabled === false) {
+            flat.PROXY_URL = 'false';
+            flat.USE_PROXY = 'false';
+        } else {
+            if (p.url) flat.PROXY_URL = p.url;
+            if (p.useProxy !== undefined) {
+                flat.USE_PROXY = p.useProxy ? 'true' : 'false';
+            } else if (p.enabled !== undefined) {
+                flat.USE_PROXY = p.enabled ? 'true' : 'false';
+            }
         }
         if (p.engines) {
             flat.PROXY_ENGINES = Array.isArray(p.engines) ? p.engines.join(',') : p.engines;
@@ -232,6 +237,14 @@ export function loadApplicationConfigEnv(
     const injected: Record<string, string> = {};
     for (const [key, value] of Object.entries(candidateEnv)) {
         if (value && targetEnv[key] === undefined) {
+            // 若已显式指定了 PROXY_URL，则配置文件中的旧 USE_PROXY / PROXY_ENGINES 不再补入，避免旧配置干扰合并变量
+            if (targetEnv.PROXY_URL !== undefined && (key === 'USE_PROXY' || key === 'PROXY_ENGINES')) {
+                continue;
+            }
+            // 同理，若已显式指定了旧变量 USE_PROXY，配置文件中合成的 PROXY_URL 也不应反向覆盖显式意图
+            if (targetEnv.USE_PROXY !== undefined && key === 'PROXY_URL') {
+                continue;
+            }
             targetEnv[key] = value;
             injected[key] = value;
         }

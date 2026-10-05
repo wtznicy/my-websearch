@@ -28,11 +28,11 @@
 
 ### ① Bing 搜索返回 0 结果或触发软封禁
 - **机制原理**：当 HTTP 模式（或 `wreq-js` impersonate）由于特定出口 IP 反爬或页面微调解析不到结果时，系统会自动抛出异常：
-  - 若 `BING_PLAYWRIGHT_FALLBACK=true`（默认开启）：自动唤起无头/隐藏浏览器完成真实渲染交互；
-  - 若 Playwright 未就绪：触发下游智能级联，自动调用百度、DuckDuckGo 或 Brave 补齐结果。
+  - 若 `SEARCH_MODE` 允许使用浏览器（默认 `auto` 或包含 `bing`）：自动唤起无头/隐藏浏览器完成真实渲染交互；
+  - 若 `SEARCH_MODE=request`（纯 HTTP）或 Playwright 未就绪：触发下游智能级联，自动调用百度、DuckDuckGo 或 Brave 补齐结果。
 - **排查建议**：
   1. 单独验证 Bing 实时探测：`npm run test:bing:live`；
-  2. 若出口 IP 被 Bing 限制，可开启代理或使用国际版 Host：`OPEN_WEBSEARCH_BING_HOST=https://www.bing.com/search`。
+  2. 若出口 IP 被 Bing 限制，可开启代理或使用国际版 Host：`BING_BASE_URL=https://www.bing.com/search`（兼容旧变量 `OPEN_WEBSEARCH_BING_HOST`）。
 
 ### ② Brave 遇到 HTTP 429 (Rate Limit)
 - **机制原理**：Brave 搜索公开接口对单一 IP 高频调用设有限频。

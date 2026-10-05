@@ -200,22 +200,84 @@ my-websearch cache-clear
 }
 ```
 
-### 核心环境变量速查
+### 📋 环境变量完整全量参考
 
-| 分类 | 变量名 | 默认值 | 作用与说明 |
-| :--- | :--- | :--- | :--- |
-| **路由编排** | `DEFAULT_SEARCH_ENGINE` | `auto` | 默认引擎；`auto` 会按语言将中文分流到百度/搜狗，英文分流到 Bing/DuckDuckGo |
-| | `DEFAULT_MIN_RESULTS` | `5` | 结果不足该阈值时触发跨引擎级联补齐 |
-| | `ALLOWED_SEARCH_ENGINES` | 全部 | 限制启用的引擎白名单（逗号分隔） |
-| **代理与网络** | `USE_PROXY` | `false` | 是否强制开启代理（未配置时自动嗅探系统代理） |
-| | `PROXY_URL` | `http://127.0.0.1:7890` | 代理服务器地址 |
-| | `PROXY_ENGINES` | 全部走代理 | **推荐设为 `duckduckgo,exa,brave,startpage`**（仅海外引擎代理，国内直连） |
-| | `FAKE_IP_CIDRS` | `198.18.0.0/15` | Clash Fake-IP 放行网段，避免误触 SSRF 拦截 |
-| **服务与并发** | `MODE` | `both` | MCP 传输模式：`stdio`、`http` 或 `both` |
-| | `PORT` | `3211` | MCP HTTP 服务监听端口（Daemon 默认使用 `3210`） |
-| | `MAX_CONCURRENT_SEARCHES`| `20` | Daemon 模式下并发搜索保护上限（`0` 表示不限制） |
-| | `MCP_MAX_SESSIONS` | `100` | 保留的最大并发会话数，超限时触发 429 保护与自动回收 |
-| **降级兜底** | `BING_PLAYWRIGHT_FALLBACK` | `true` | Bing 遇阻时是否允许拉起无头浏览器（设为 `false` 可节约内存交由级联补位） |
+支持通过全局配置文件（`~/.my-websearch/config.json`）、本地 `.env` 或系统环境变量设置：
+
+#### 1. 🔍 检索与路由编排
+
+| 变量名 | 默认值 | 可选值 / 说明 |
+| :--- | :--- | :--- |
+| `DEFAULT_SEARCH_ENGINE` | `auto` | 默认搜索引擎。`auto`（智能感知路由：中文走 `baidu,sogou`，英文走 `bing,duckduckgo`）、`bing`、`baidu`、`csdn`、`juejin`、`sogou`、`duckduckgo`、`brave`、`startpage`、`exa` |
+| `ALLOWED_SEARCH_ENGINES` | 全部 | 限制启用的引擎白名单（逗号分隔，如 `bing,baidu,duckduckgo`） |
+| `BING_BASE_URL` | `https://cn.bing.com/search` | Bing 搜索请求基址。海外用户可改为 `https://www.bing.com/search` 或自建反代（兼容旧变量 `OPEN_WEBSEARCH_BING_HOST`） |
+| `DEFAULT_MIN_RESULTS` | `5` | 级联补位阈值：可用结果数不足该值时，自动调度备用引擎补齐 |
+| `DEFAULT_SEARCH_LIMIT` | `10` | 工具调用未显式传 `limit` 时的单次返回上限（最大 50） |
+| `SEARCH_DEADLINE_MS` | `30000` | 搜索任务全局超时硬预算（毫秒） |
+| `SEARCH_AUTHORITY_DOMAINS` | 空 | 结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单） |
+| `SEARCH_MODE` | `auto` | 检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`playwright`（全强走浏览器）<br/>• **一种方式多选引擎**：`playwright:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`playwright:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP） |
+
+#### 2. 🌐 代理与网络安全
+
+| 变量名 | 默认值 | 可选值 / 说明 |
+| `PROXY_URL` | 空（关闭） | 统一上游代理配置（已合并原 `USE_PROXY` 与 `PROXY_ENGINES`，TUN 模式无需配置保持直连）。<br/>• **开启默认代理**：传空值 `PROXY_URL=""` 或 `PROXY_URL=true` 即可启用默认 `http://127.0.0.1:7897`（默认仅海外引擎走代理，国内引擎直连）<br/>• **自定义地址**：`PROXY_URL=http://127.0.0.1:10809`<br/>• **自选引擎**：`PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` 或全部引擎走代理 `PROXY_URL=";all"` |
+| `FAKE_IP_CIDRS` | `198.18.0.0/15` | Clash Fake-IP 虚拟网段白名单，避免误触发 SSRF 本地私网地址拦截 |
+| `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` 模拟的现代浏览器 TLS/H2 指纹（如 `chrome_149`, `safari_18`） |
+| `IMPERSONATE_OS` | `windows` | 指纹模拟使用的操作系统平台（`windows`, `macos`, `linux`） |
+| `FETCH_WEB_INSECURE_TLS`| `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点旧证书链损坏时使用） |
+| `GITHUB_README_CDN_FIRST` | `false` | 为 `true` 时强制跳过 `raw.githubusercontent.com` 直连探测，优先走 jsDelivr CDN 镜像（国内无代理网络加速，免除 3 秒直连探测等待） |
+
+#### 3. 🔐 外部服务凭据与 API Key
+
+| 变量名 | 默认值 | 可选值 / 说明 |
+| :--- | :--- | :--- |
+| `CONTEXT7_API_KEY` | 空 | [Context7 API Key](https://context7.com/dashboard)（强烈推荐 TUN/代理用户配置，免受共享 IP 200次/月限额影响） |
+| `EXA_API_KEY` | 空 | [Exa 官方免费 Key](https://dashboard.exa.ai/api-keys)（仅使用 `exa` 语义搜索时需要） |
+| `GITHUB_TOKEN` | 空 | GitHub Personal Access Token（提高 `fetchGithubReadme` 的速率配额，避免频繁调用 403） |
+
+#### 4. 🖥️ 服务模式、并发与会话治理
+
+| 变量名 | 默认值 | 可选值 / 说明 |
+| :--- | :--- | :--- |
+| `MODE` | `both` | MCP 传输通道：`stdio`（仅标准输入输出）、`http`（仅网络接口）、`both`（同时开启） |
+| `PORT` | `3211` | MCP HTTP/SSE 监听端口（CLI 本地常驻 Daemon 默认使用 `3210`） |
+| `MAX_CONCURRENT_SEARCHES`| `20` | Daemon 模式下的全局最大并发搜索数（`0` 表示不限制） |
+| `MCP_MAX_SESSIONS` | `100` | 保留的最大并发会话上限，超限时返回 HTTP 429 保护服务器内存 |
+| `MCP_SESSION_TTL_MS` | `1800000` | 会话空闲回收时长（默认 30 分钟） |
+| `MCP_SESSION_REAPER_MS` | `300000` | 会话清理器扫描巡检间隔（默认 5 分钟） |
+| `LOG_LEVEL` | `info` | 日志输出级别：`quiet`（完全静默）、`debug`、`info`、`warn`、`error` |
+| `SECURITY_AUDIT` | `false` | 是否开启安全审计日志（输出 SSRF 拦截详情与主机头放行记录） |
+| `OPEN_WEBSEARCH_ALLOWED_HOSTS` | 本地回环 | HTTP 服务允许的 Host 域名白名单（DNS Rebinding 安全防护，逗号分隔） |
+
+#### 5. 🧭 Playwright 浏览器高级控制
+
+> [!NOTE]
+> 原有的 `BING_PLAYWRIGHT_FALLBACK` 与 `STARTPAGE_PLAYWRIGHT_FALLBACK` 已全面合并收敛至 `SEARCH_MODE`（如 `SEARCH_MODE=bing` 或 `SEARCH_MODE=request`），底层已自动保持静默向后兼容。
+
+| 变量名 | 默认值 | 可选值 / 说明 |
+| :--- | :--- | :--- |
+| `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 远程 Chrome/Edge CDP 调试端点（如 `http://127.0.0.1:9222` 或 `ws://...`） |
+| `PLAYWRIGHT_EXECUTABLE_PATH` | 自动探测 | 自定义浏览器二进制可执行文件绝对路径（默认自动探测 Edge/Chrome） |
+| `PLAYWRIGHT_HEADLESS` | `true` | 是否无头运行（Windows 下自动使用隐身独立桌面，绝不弹窗打扰用户） |
+| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`| `20000` | Playwright 页面导航硬超时（毫秒） |
+
+#### 6. 🛠️ 应用目录与工具微调
+
+| 变量名 | 默认值 | 可选值 / 说明 |
+| :--- | :--- | :--- |
+| `MYWEBSEARCH_DATA_DIR` | `~/.my-websearch` | 配置文件与持久化 Cookie 的根存储目录 |
+| `OPEN_WEBSEARCH_RESPONSE_CAP_BYTES`| `60000` | MCP 工具返回给大模型的最大字符上限，防止超长上下文撑爆模型窗口 |
+| `MCP_TOOL_SEARCH_NAME` | `search` | 自定义搜索工具在 MCP 中的注册名称 |
+| `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | 自定义正文抓取工具在 MCP 中的注册名称 |
+| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | 自定义 GitHub README 工具在 MCP 中的注册名称 |
+
+> 💡 **零配置升级说明（已精简移除的冗余变量）**：
+> - **CORS 跨域开关**（`ENABLE_CORS`/`CORS_ORIGIN`）：HTTP 模式现已**内置放行标准安全跨域（`*`）**，无需手动开启。
+> - **Playwright 包选择**（`PLAYWRIGHT_PACKAGE`/`PLAYWRIGHT_MODULE_PATH`）：现已实现**100% 自动探测**系统自带浏览器与已装包。
+> - **远程调试端点**（`PLAYWRIGHT_WS_ENDPOINT`）：统一收敛为标准 `PLAYWRIGHT_CDP_ENDPOINT`。
+> - **Emoji 开关**（`OPEN_WEBSEARCH_NO_EMOJI`）：代码页自动探测（非 UTF-8 自动平滑降级为 ASCII 标签），不再需要开关。
+> - **独立调试变量**（`OPEN_WEBSEARCH_DEBUG`）：全面收敛为标准化 `LOG_LEVEL=debug`。
+> - **Cookie 保鲜期**（`MYWEBSEARCH_COOKIE_TTL_DAYS`）：固化为标准 30 天，到期自动续期。
 
 ---
 

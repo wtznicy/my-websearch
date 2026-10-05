@@ -90,10 +90,13 @@ describe('antiBotDetection', () => {
         it('identifies generic challenge signatures', () => {
             expect(looksLikeBotChallengePage('Please solve the captcha to continue')).toBe(true);
             expect(looksLikeBotChallengePage('系统检测到异常访问，请完成安全验证')).toBe(true);
+            expect(looksLikeBotChallengePage('你似乎来到了没有知识存在的荒原 - 知乎')).toBe(true);
+            expect(looksLikeBotChallengePage('没有知识存在的荒原')).toBe(true);
         });
 
         it('returns false for ordinary technical content', () => {
             expect(looksLikeBotChallengePage('TypeScript tutorial for beginners with examples')).toBe(false);
+            expect(looksLikeBotChallengePage('知识图谱构建与自然语言处理实战')).toBe(false);
         });
     });
 });

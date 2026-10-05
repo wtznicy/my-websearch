@@ -121,19 +121,8 @@ export function getPlaywrightModuleCandidates(): Array<{ label: string; specifie
         candidates.push({ label, specifier });
     };
 
-    if (config.playwrightModulePath) {
-        const resolvedModulePath = path.isAbsolute(config.playwrightModulePath)
-            ? config.playwrightModulePath
-            : path.resolve(process.cwd(), config.playwrightModulePath);
-        pushCandidate(`PLAYWRIGHT_MODULE_PATH (${resolvedModulePath})`, resolvedModulePath);
-    }
-
-    if (config.playwrightPackage === 'auto') {
-        pushCandidate('playwright package', 'playwright');
-        pushCandidate('playwright-core package', 'playwright-core');
-    } else {
-        pushCandidate(`${config.playwrightPackage} package`, config.playwrightPackage);
-    }
+    pushCandidate('playwright package', 'playwright');
+    pushCandidate('playwright-core package', 'playwright-core');
 
     return candidates;
 }

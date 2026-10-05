@@ -25,10 +25,7 @@ function buildCookieCacheKey(url: URL): string {
     return [
         url.origin,
         getProxyUrl() || '-',
-        config.playwrightPackage,
-        config.playwrightModulePath || '-',
         config.playwrightExecutablePath || '-',
-        config.playwrightWsEndpoint || '-',
         config.playwrightCdpEndpoint || '-'
     ].join('|');
 }

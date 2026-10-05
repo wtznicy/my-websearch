@@ -1,6 +1,6 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import * as cheerio from 'cheerio';
-import { AppConfig, config } from '../../config.js';
+import { AppConfig, config, getEngineSearchMode } from '../../config.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { prepareStealthPage } from '../../utils/browserStealth.js';
@@ -15,8 +15,7 @@ import {
 } from '../../utils/playwrightClient.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
 
-// 默认面向大陆部署用 cn.bing.com；可通过 OPEN_WEBSEARCH_BING_HOST 覆盖为 www.bing.com 等获取国际区结果
-const BING_BASE_URL = (process.env.OPEN_WEBSEARCH_BING_HOST || 'https://cn.bing.com/search').replace(/\/$/, '');
+// 默认面向大陆部署用 cn.bing.com；可通过 BING_BASE_URL（兼容 OPEN_WEBSEARCH_BING_HOST）覆盖为 www.bing.com 等获取国际区结果
 const BING_HOME_URL = 'https://www.bing.com/?mkt=zh-CN';
 import { DEFAULT_DESKTOP_UA, DESKTOP_UA_POOL } from '../../utils/userAgents.js';
 const BROWSER_USER_AGENT = DEFAULT_DESKTOP_UA;
@@ -129,10 +128,11 @@ export function shouldSuggestRemovingSiteOperator(query: string, error: unknown)
 }
 
 function buildBingSearchUrl(query: string, pageNumber: number): string {
-    const url = new URL(BING_BASE_URL);
+    const baseUrl = config.bingBaseUrl;
+    const url = new URL(baseUrl);
     url.searchParams.set('q', query);
     // 仅在 cn.bing.com（面向大陆默认）时强制 zh-CN 区域；自定义 host（如 www.bing.com）让 Bing 按访问者自动定位
-    if (BING_BASE_URL.includes('cn.bing.com')) {
+    if (baseUrl.includes('cn.bing.com')) {
         url.searchParams.set('setlang', 'zh-CN');
         url.searchParams.set('ensearch', '0');
     }
@@ -165,7 +165,6 @@ let hasLoggedHiddenHeadedMode = false;
 function shouldUseHiddenHeadedBingBrowser(): boolean {
     return process.platform === 'win32'
         && config.playwrightHeadless
-        && !config.playwrightWsEndpoint
         && !config.playwrightCdpEndpoint;
 }
 
@@ -681,9 +680,9 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
 export async function searchBing(
     query: string,
     limit: number,
-    options?: { searchMode?: AppConfig['searchMode'] }
+    options?: { searchMode?: 'request' | 'auto' | 'playwright' }
 ): Promise<SearchResult[]> {
-    const effectiveSearchMode = options?.searchMode ?? config.searchMode;
+    const effectiveSearchMode = options?.searchMode ?? getEngineSearchMode('bing', config);
 
     if (effectiveSearchMode === 'request') {
         return searchBingWithHttp(query, limit);
@@ -696,9 +695,8 @@ export async function searchBing(
     try {
         return await searchBingWithHttp(query, limit);
     } catch (requestError) {
-        // BING_PLAYWRIGHT_FALLBACK=false：反爬直接抛错，不启动重浏览器。
-        // 错误会进入 searchService 的 partialFailures，配合 minResults 级联
-        // 自动用更稳定的引擎（duckduckgo/brave）补位。
+        // SEARCH_MODE 控制：若 bing 不在 playwright 允许名单中（或显式禁用），
+        // 反爬直接抛错，不启动重型浏览器。错误进入 partialFailures，配合 minResults 级联更轻量引擎补位。
         if (!config.bingPlaywrightFallback) {
             throw requestError;
         }

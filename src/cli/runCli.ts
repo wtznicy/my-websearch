@@ -293,10 +293,7 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
     }
 
     const resolveDefaultEngines = (queryText: string): SupportedSearchEngine[] => {
-        const picked = pickDefaultEnginesForQuery(queryText, runtime.config.defaultSearchEngine, {
-            en: runtime.config.autoRouteEnEngines,
-            zh: runtime.config.autoRouteZhEngines
-        });
+        const picked = pickDefaultEnginesForQuery(queryText, runtime.config.defaultSearchEngine);
         const reachable = picked.filter((engine) => !isKnownUnreachableOverseasEngine(engine));
         const routable = reachable.length > 0 ? reachable : picked;
         const allowed = runtime.config.allowedSearchEngines;

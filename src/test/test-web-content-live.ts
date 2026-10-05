@@ -45,10 +45,7 @@ async function main(): Promise<void> {
         ...args,
         useProxy: process.env.USE_PROXY || 'false',
         proxyUrl: process.env.PROXY_URL || '(default)',
-        playwrightPackage: process.env.PLAYWRIGHT_PACKAGE || '(auto)',
-        playwrightModulePath: process.env.PLAYWRIGHT_MODULE_PATH || '(none)',
         playwrightExecutablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || '(none)',
-        playwrightWsEndpoint: process.env.PLAYWRIGHT_WS_ENDPOINT || '(none)',
         playwrightCdpEndpoint: process.env.PLAYWRIGHT_CDP_ENDPOINT || '(none)'
     });
 

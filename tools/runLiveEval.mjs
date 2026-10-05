@@ -24,8 +24,7 @@ function startServer(env = {}) {
         env: {
             ...process.env,
             MODE: 'stdio',
-            USE_PROXY: process.env.USE_PROXY || 'true',
-            PROXY_URL: process.env.PROXY_URL || 'http://127.0.0.1:7890',
+            PROXY_URL: process.env.PROXY_URL || 'http://127.0.0.1:7897',
             LOG_LEVEL: 'quiet',
             ...env
         },

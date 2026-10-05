@@ -28,12 +28,9 @@ const RAW_GITHUB_BASE = 'https://raw.githubusercontent.com';
 const JSDELIVR_CDN_BASE = 'https://cdn.jsdelivr.net/gh';
 const JSDELIVR_REF_CANDIDATES = ['', '@main', '@master', '@dev', '@develop'];
 
-// Set GITHUB_README_CDN_FIRST=true to skip raw.githubusercontent.com and go
-// straight to the jsDelivr CDN (useful when GitHub is unreachable).
-const cdnFirst = process.env.GITHUB_README_CDN_FIRST === 'true';
-
 // raw.githubusercontent.com 直连可达性探测：3s 超时、失败重试 1 次、结果缓存 5 分钟。
 // 探测结果决定 raw 路径走直连还是走代理/jsDelivr（避免国内无代理环境每次抓取都挂满超时）。
+// 也支持通过 GITHUB_README_CDN_FIRST=true 直接强制优先走 jsDelivr CDN（完全跳过直连探测）。
 const RAW_PROBE_TIMEOUT_MS = 3000;
 const RAW_PROBE_MAX_RETRIES = 1;
 const RAW_PROBE_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -299,6 +296,7 @@ async function fetchReadme(owner: string, repo: string, host: RepoHost): Promise
     }
 
     // github：raw.githubusercontent.com + jsDelivr CDN 双路径
+    const cdnFirst = process.env.GITHUB_README_CDN_FIRST === 'true';
     let rawUnreachable = false;
     let sawFetchFailure = false;
 

@@ -27,7 +27,6 @@ beforeEach(() => {
 
 afterEach(() => {
     delete process.env.MYWEBSEARCH_DATA_DIR;
-    delete process.env.MYWEBSEARCH_COOKIE_TTL_DAYS;
     fs.rmSync(tempDir, { recursive: true, force: true });
 });
 

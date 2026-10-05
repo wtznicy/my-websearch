@@ -48,8 +48,7 @@ function getStorePath(): string {
 }
 
 function getTtlMs(): number {
-    const days = Number(process.env.MYWEBSEARCH_COOKIE_TTL_DAYS || '');
-    return Number.isFinite(days) && days > 0 ? days * 24 * 60 * 60 * 1000 : DEFAULT_TTL_MS;
+    return DEFAULT_TTL_MS;
 }
 
 function readStore(): CookieStoreFile {

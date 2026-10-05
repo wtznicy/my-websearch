@@ -1,6 +1,10 @@
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { config } from '../config.js';
-import { __setBrowserHtmlFetcherForTests, fetchWebContent } from '../engines/web/index.js';
+import {
+    __setBrowserCookieHeaderForTests,
+    __setBrowserHtmlFetcherForTests,
+    fetchWebContent
+} from '../engines/web/index.js';
 import { __setReadabilityParserForTests } from '../engines/web/fetchWebContent.js';
 import { __setAxiosRequestForTests } from '../utils/httpRequest.js';
 import { __setDnsLookupForTests } from '../utils/urlSafety.js';
@@ -141,6 +145,23 @@ function installAxiosMock(): void {
             });
         }
 
+        if (url.endsWith('/zhihu-challenge')) {
+            return makeResponse(config, {
+                status: 200,
+                headers: { 'content-type': 'text/html; charset=utf-8' },
+                data: `
+                <html>
+                  <head><title>你似乎来到了没有知识存在的荒原 - 知乎</title></head>
+                  <body>
+                    <div>你似乎来到了没有知识存在的荒原</div>
+                    <a href="/">去往首页</a>
+                  </body>
+                </html>
+                `,
+                finalUrl: url
+            });
+        }
+
         if (url.endsWith('/blocked-browser-spa')) {
             return makeResponse(config, {
                 status: 403,
@@ -157,6 +178,8 @@ function installAxiosMock(): void {
 function restoreAxiosMock(): void {
     __setAxiosRequestForTests();
     __setBrowserHtmlFetcherForTests();
+    __setBrowserCookieHeaderForTests();
+    __setReadabilityParserForTests();
 }
 
 function assert(condition: unknown, message: string): void {
@@ -165,7 +188,14 @@ function assert(condition: unknown, message: string): void {
     }
 }
 
+function resetCaseMocks(): void {
+    __setBrowserCookieHeaderForTests(async () => undefined);
+    __setBrowserHtmlFetcherForTests();
+    __setReadabilityParserForTests();
+}
+
 async function runCase(testCase: TestCase): Promise<boolean> {
+    resetCaseMocks();
     try {
         await testCase.run();
         console.log(`✅ ${testCase.name}`);
@@ -173,6 +203,8 @@ async function runCase(testCase: TestCase): Promise<boolean> {
     } catch (error) {
         console.error(`❌ ${testCase.name}:`, error);
         return false;
+    } finally {
+        resetCaseMocks();
     }
 }
 
@@ -353,6 +385,7 @@ async function main(): Promise<void> {
         {
             name: 'should fallback to browser html after cookie-assisted retry still fails',
             run: async () => {
+                __setBrowserCookieHeaderForTests(async () => 'mock-browser-cookie=1');
                 __setBrowserHtmlFetcherForTests(async () => ({
                     html: `
                     <html>
@@ -373,6 +406,22 @@ async function main(): Promise<void> {
                 assert(result.retrievalMethod === 'browser-html', 'blocked request should end in browser html fallback');
                 assert((requestAttempts.get('https://example.com/blocked-browser-spa') || 0) >= 1, 'blocked url should attempt request path first');
                 assert(result.content.includes('Recovered after blocked request'), 'browser fallback should recover readable content');
+            }
+        },
+        {
+            name: 'should intercept anti-bot challenge page at unified exit with ERR_BOT_CHALLENGE',
+            run: async () => {
+                __setBrowserHtmlFetcherForTests(async () => {
+                    throw new Error('Browser challenge timeout');
+                });
+                let caughtError: unknown;
+                try {
+                    await fetchWebContent('https://example.com/zhihu-challenge', 5000);
+                } catch (error: unknown) {
+                    caughtError = error;
+                }
+                const caughtCode = (caughtError as { code?: string })?.code;
+                assert(caughtCode === 'ERR_BOT_CHALLENGE', 'challenge page should throw ERR_BOT_CHALLENGE at unified exit');
             }
         },
         {
@@ -425,6 +474,7 @@ async function main(): Promise<void> {
     config.fetchWebAllowInsecureTls = originalFetchWebAllowInsecureTls;
     __setReadabilityParserForTests();
     __setBrowserHtmlFetcherForTests();
+    __setBrowserCookieHeaderForTests();
 
     const total = testCases.length;
     console.log(`\nResult: ${passed}/${total} passed`);

@@ -3,7 +3,7 @@ import { buildAxiosRequestOptions, requestDirectFirst, requestWithSafeRedirects 
 import { htmlToMarkdown } from '../../utils/markdown.js';
 
 function shouldDebug(): boolean {
-    return process.env.OPEN_WEBSEARCH_DEBUG === '1';
+    return (process.env.LOG_LEVEL ?? '').toLowerCase() === 'debug';
 }
 
 /**

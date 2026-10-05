@@ -72,11 +72,8 @@ function sendError(
 }
 
 function parseRequestedEngines(runtime: MyWebSearchRuntime, engines: unknown, query: string): SupportedSearchEngine[] {
-    // DEFAULT_SEARCH_ENGINE=auto 时按查询特征自动路由（返回引擎组：中文 → baidu，英文 → bing+duckduckgo）
-    const routed = pickDefaultEnginesForQuery(query, runtime.config.defaultSearchEngine, {
-        en: runtime.config.autoRouteEnEngines,
-        zh: runtime.config.autoRouteZhEngines
-    });
+    // DEFAULT_SEARCH_ENGINE=auto 时按查询特征自动路由（返回引擎组：中文 → baidu+sogou，英文 → bing+duckduckgo）
+    const routed = pickDefaultEnginesForQuery(query, runtime.config.defaultSearchEngine);
     // 已知不可达的境外引擎（探测失败缓存内且未走代理）从默认路由排除，避免每次查询白等探测；
     // 显式指定 engines 的请求不受影响（下面 engines !== undefined 的分支走原逻辑）
     const reachableRouted = routed.filter((engine) => !isKnownUnreachableOverseasEngine(engine));

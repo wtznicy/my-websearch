@@ -1,6 +1,37 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { readdir as readdirAsync, rm as rmAsync, stat as statAsync } from 'node:fs/promises';
+
+/**
+ * [P0 修复与增强] 异步删除浏览器 profile 临时目录。
+ *
+ * 背景：Chrome profile 目录含 Cache/LevelDB 等数千至数万个小文件，
+ * 同步 rmSync(recursive) 会阻塞 Node 主事件循环——实测单个僵尸会话清理阻塞 52.9 秒
+ * （空目录同期仅 78ms），期间整个 MCP server 冻结，所有并发请求连坐超时，且 JS 层预算定时器失效。
+ *
+ * 增强防御：
+ * 1. 采用 fs/promises.rm 异步删除，避免主线程事件循环冻结。
+ * 2. Windows 下进程 taskkill 后可能在毫秒级内仍持有文件句柄（如 LOCK/Cookies），
+ *    立即删除容易触发 EBUSY/EPERM 导致删除失败残留（导致 %TEMP% 积累上 GB 孤儿目录）。
+ *    因此配置 maxRetries: 5, retryDelay: 300，并在延时后执行，确保锁释放并成功清理。
+ */
+export function removeTempDirInBackground(tempDir: string | undefined, delayMs = 300): void {
+    if (!tempDir) {
+        return;
+    }
+    const execute = () => {
+        void rmAsync(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }).catch(() => undefined);
+    };
+    if (delayMs > 0) {
+        const timer = setTimeout(execute, delayMs);
+        if (typeof timer === 'object' && 'unref' in timer) {
+            timer.unref();
+        }
+    } else {
+        execute();
+    }
+}
 
 const execFileAsync = promisify(execFile);
 import { createHash } from 'node:crypto';
@@ -210,7 +241,7 @@ async function connectOverCdpWhenReady(
 }
 
 export async function recoverLocalBrowserSessionBrowser(browser: PlaywrightBrowserLike | unknown): Promise<PlaywrightBrowserLike | null> {
-    if (config.playwrightWsEndpoint || config.playwrightCdpEndpoint) {
+    if (config.playwrightCdpEndpoint) {
         return null;
     }
 
@@ -378,7 +409,10 @@ function readBrowserDomainMetadataFromPath(metadataPath: string, sessionMode: Lo
     try {
         const raw = JSON.parse(readFileSync(metadataPath, 'utf8')) as Partial<LocalBrowserSessionMetadataFile>;
         if (typeof raw.savedAt === 'number' && Number.isFinite(raw.savedAt) && Date.now() - raw.savedAt > BROWSER_METADATA_MAX_AGE_MS) {
-            // 超龄 metadata（>12h），直接删除并作废，避免僵尸 metadata 永久滞留
+            // 超龄 metadata（>12h），直接删除并作废，避免僵尸 metadata 永久滞留；同时异步清理关联的临时目录
+            if (raw.tempDir) {
+                removeTempDirInBackground(raw.tempDir, 0);
+            }
             try {
                 rmSync(metadataPath, { force: true });
             } catch {
@@ -884,6 +918,51 @@ async function doCleanupStaleLocalBrowserSessions(): Promise<void> {
 
 const STALE_BROWSER_CLEANUP_BUDGET_MS = 8000;
 
+/**
+ * 后台扫描并清理因历史进程崩溃、断电或异常终止遗留的孤儿浏览器临时目录（mcp-search-*）。
+ * 异步执行，不占用主事件循环，不计入启动/清理预算。
+ */
+export async function cleanOrphanTempProfilesInBackground(maxAgeMs = 60 * 60 * 1000): Promise<void> {
+    try {
+        const tempRoot = tmpdir();
+        const entries = await readdirAsync(tempRoot, { withFileTypes: true }).catch(() => []);
+        const now = Date.now();
+
+        // 收集当前活跃或复用中的 metadata tempDir，避免误删正在使用的目录
+        const activeTempDirs = new Set(
+            listBrowserDomainMetadataEntries()
+                .map((e) => readBrowserDomainMetadataTempDirFromPath(e.metadataPath))
+                .filter((d): d is string => typeof d === 'string' && d.length > 0)
+        );
+        if (cachedLocalBrowserSession?.tempDir) {
+            activeTempDirs.add(cachedLocalBrowserSession.tempDir);
+        }
+
+        for (const entry of entries) {
+            if (entry.isDirectory() && entry.name.startsWith('mcp-search-')) {
+                const fullPath = path.join(tempRoot, entry.name);
+                if (activeTempDirs.has(fullPath)) {
+                    continue;
+                }
+                try {
+                    const stats = await statAsync(fullPath).catch(() => null);
+                    const isStale = stats && (
+                        (now - stats.birthtimeMs > maxAgeMs) ||
+                        (now - stats.mtimeMs > maxAgeMs)
+                    );
+                    if (isStale) {
+                        await rmAsync(fullPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => undefined);
+                    }
+                } catch {
+                    // 忽略单个目录检查异常
+                }
+            }
+        }
+    } catch {
+        // 忽略后台扫描异常
+    }
+}
+
 async function cleanupStaleLocalBrowserSessions(): Promise<void> {
     if (staleBrowserCleanupPerformed) {
         return;
@@ -901,6 +980,7 @@ async function cleanupStaleLocalBrowserSessions(): Promise<void> {
             })
         ]);
         staleBrowserCleanupPerformed = true;
+        void cleanOrphanTempProfilesInBackground().catch(() => undefined);
     } catch (error) {
         console.warn('[browserSession] cleanupStaleLocalBrowserSessions exceeded budget or failed, proceeding with fresh launch:', error instanceof Error ? error.message : String(error));
         // 不阻断冷启动：允许下次有机会再重试清理
@@ -1015,7 +1095,7 @@ async function tryReusePersistedLocalBrowserSession(
     const reusableBrowserCandidate = await resolveLocalBrowserCandidate(metadata.browserPid, metadata.tempDir, metadata.debugPort);
     if (!reusableBrowserCandidate) {
         clearBrowserDomainMetadata(domainKey, metadata.tempDir);
-        try { rmSync(metadata.tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
+        removeTempDirInBackground(metadata.tempDir);
         return null;
     }
 
@@ -1134,15 +1214,12 @@ export async function closeLocalBrowserSession(session: LocalBrowserSession): Pr
     }
 
     if (session.tempDir) {
-        try {
-            rmSync(session.tempDir, { recursive: true, force: true });
-        } catch {
-            // Ignore cleanup errors.
-        }
+        // [P0 修复] 异步删除，避免 rmSync 递归删除 profile 冻结事件循环（实测最长 52.9s）
+        removeTempDirInBackground(session.tempDir);
     }
 }
 
-function createForceKill(browserPid?: number, tempDir?: string, browser?: PlaywrightBrowserLike, domainKey?: string): () => void {
+export function createForceKill(browserPid?: number, tempDir?: string, browser?: PlaywrightBrowserLike, domainKey?: string): () => void {
     return () => {
         try {
             browser?.disconnect?.();
@@ -1184,7 +1261,9 @@ function createForceKill(browserPid?: number, tempDir?: string, browser?: Playwr
                 if (domainKey) {
                     clearBrowserDomainMetadata(domainKey, tempDir);
                 }
-                rmSync(tempDir, { recursive: true, force: true });
+                // [P0 修复] 异步删除，避免 rmSync 递归删除 Chrome profile 冻结主事件循环
+                // （实测僵尸 profile 目录同步删除阻塞 52.9s，连带冻结所有并发请求与预算定时器）
+                removeTempDirInBackground(tempDir);
             } catch {
                 // Ignore cleanup errors.
             }
@@ -1638,21 +1717,7 @@ export async function openPlaywrightBrowser(
 ): Promise<PlaywrightBrowserSession> {
     const playwright = await loadPlaywrightClient();
     if (!playwright) {
-        throw new Error('Playwright client is not available. Install `playwright`/`playwright-core` manually or configure PLAYWRIGHT_MODULE_PATH.');
-    }
-
-    if (config.playwrightWsEndpoint) {
-        const browser = await playwright.chromium.connect({
-            wsEndpoint: config.playwrightWsEndpoint,
-            timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
-        });
-        const release = async () => {
-            await browser.close().catch(() => undefined);
-        };
-        return {
-            browser,
-            release
-        };
+        throw new Error('Playwright client is not available. Install `playwright` or `playwright-core`, or configure PLAYWRIGHT_EXECUTABLE_PATH / PLAYWRIGHT_CDP_ENDPOINT.');
     }
 
     if (config.playwrightCdpEndpoint) {

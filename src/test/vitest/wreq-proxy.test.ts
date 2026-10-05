@@ -56,13 +56,39 @@ describe('resolveWreqProxyUrl', () => {
         expect(resolveWreqProxyUrl('baidu')).toBe('http://127.0.0.1:34567');
     });
 
-    it('未设 USE_PROXY 时不带代理（海外引擎的系统代理由 axios 回退路径处理）', async () => {
+    it('合并变量：单变量 PROXY_URL="http://127.0.0.1:34567;brave" 即可生效', async () => {
         delete process.env.USE_PROXY;
-        process.env.PROXY_URL = 'http://127.0.0.1:34567';
-        process.env.PROXY_ENGINES = 'brave';
+        delete process.env.PROXY_ENGINES;
+        process.env.PROXY_URL = 'http://127.0.0.1:34567;brave';
+
+        const { resolveWreqProxyUrl } = await loadResolver();
+
+        expect(resolveWreqProxyUrl('brave')).toBe('http://127.0.0.1:34567');
+        expect(resolveWreqProxyUrl('baidu')).toBeUndefined();
+    });
+
+    it('合并变量：传空 PROXY_URL="" 代表默认值 7897 并启用默认海外引擎', async () => {
+        delete process.env.USE_PROXY;
+        delete process.env.PROXY_ENGINES;
+        process.env.PROXY_URL = '';
+
+        const { resolveWreqProxyUrl } = await loadResolver();
+
+        expect(resolveWreqProxyUrl('duckduckgo')).toBe('http://127.0.0.1:7897');
+        expect(resolveWreqProxyUrl('baidu')).toBeUndefined();
+    });
+
+    it('未设任何代理变量或 PROXY_URL=false 时不带代理', async () => {
+        delete process.env.USE_PROXY;
+        delete process.env.PROXY_URL;
+        delete process.env.PROXY_ENGINES;
 
         const { resolveWreqProxyUrl } = await loadResolver();
 
         expect(resolveWreqProxyUrl('brave')).toBeUndefined();
+
+        process.env.PROXY_URL = 'false';
+        const { resolveWreqProxyUrl: resolveDisabled } = await loadResolver();
+        expect(resolveDisabled('brave')).toBeUndefined();
     });
 });

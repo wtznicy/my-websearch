@@ -26,7 +26,7 @@ if (isQuietInvocation) {
  * 在最早加载的模块里探测代码页，非 UTF-8 时把 console 输出的常见 emoji
  * 替换为 ASCII 标签，保证日志可读。
  */
-if (process.platform === 'win32' && process.env.OPEN_WEBSEARCH_NO_EMOJI !== 'true') {
+if (process.platform === 'win32') {
     let isGbkConsole = false;
     try {
         // 延迟 require 避免引入额外依赖；chcp 无参数时输出 "活动代码页: 936"

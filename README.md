@@ -200,22 +200,84 @@ To share settings across all MCP clients without duplicate configuration:
 }
 ```
 
-### Core Environment Variables
+### 📋 Exhaustive Environment Variables Reference
 
-| Category | Variable | Default | Description |
-| :--- | :--- | :--- | :--- |
-| **Routing** | `DEFAULT_SEARCH_ENGINE` | `auto` | Default engine; `auto` routes Chinese queries to Baidu/Sogou and English to Bing/DuckDuckGo |
-| | `DEFAULT_MIN_RESULTS` | `5` | Threshold that triggers automatic cascading fallback across engines |
-| | `ALLOWED_SEARCH_ENGINES` | all | Comma-separated whitelist of allowed search engines |
-| **Network & Proxy** | `USE_PROXY` | `false` | Force proxy usage (auto-detects system proxy when unset) |
-| | `PROXY_URL` | `http://127.0.0.1:7890` | Upstream HTTP/HTTPS proxy URL |
-| | `PROXY_ENGINES` | all proxy | **Recommended: `duckduckgo,exa,brave,startpage`** (only proxy overseas engines) |
-| | `FAKE_IP_CIDRS` | `198.18.0.0/15` | Whitelisted CIDRs for Clash Fake-IP mode |
-| **Server & Concurrency** | `MODE` | `both` | MCP transport mode: `stdio`, `http`, or `both` |
-| | `PORT` | `3211` | MCP HTTP port (daemon uses `3210` by default) |
-| | `MAX_CONCURRENT_SEARCHES`| `20` | Max concurrent searches in daemon mode (`0` for unlimited) |
-| | `MCP_MAX_SESSIONS` | `100` | Max retained MCP HTTP sessions before returning 429 and reaping old sessions |
-| **Fallbacks** | `BING_PLAYWRIGHT_FALLBACK` | `true` | Launch stealth browser when Bing encounters challenges (disable to save RAM and cascade) |
+Can be set via the global configuration file (`~/.my-websearch/config.json`), local `.env`, or system environment variables:
+
+#### 1. 🔍 Search & Routing Orchestration
+
+| Variable | Default | Allowed Values / Description |
+| :--- | :--- | :--- |
+| `DEFAULT_SEARCH_ENGINE` | `auto` | Default engine: `auto` (smart query routing: Chinese `baidu,sogou`, English/foreign `bing,duckduckgo`), `bing`, `baidu`, `csdn`, `juejin`, `sogou`, `duckduckgo`, `brave`, `startpage`, `exa` |
+| `ALLOWED_SEARCH_ENGINES` | all | Comma-separated whitelist of allowed search engines (e.g. `bing,baidu,duckduckgo`) |
+| `BING_BASE_URL` | `https://cn.bing.com/search` | Base URL for Bing queries. Overseas users or reverse proxy nodes can set to `https://www.bing.com/search` (legacy alias `OPEN_WEBSEARCH_BING_HOST` supported) |
+| `DEFAULT_MIN_RESULTS` | `5` | Cascade threshold: triggers fallback engines when usable results are fewer than this value |
+| `DEFAULT_SEARCH_LIMIT` | `10` | Default result limit when not explicitly specified in tool calls (max 50) |
+| `SEARCH_DEADLINE_MS` | `30000` | Global hard deadline for multi-engine search execution (milliseconds) |
+| `SEARCH_AUTHORITY_DOMAINS` | empty | Additional authority domain whitelist for result re-ranking (comma-separated, appended to built-in list) |
+| `SEARCH_MODE` | `auto` | Search mode and browser policy. Supports single mode, multi-engine per mode, and compound multi-mode combinations:<br/>• **Global mode**: `auto` (default fallback), `request`/`none` (pure HTTP), `playwright` (force browser)<br/>• **Single mode, multiple engines**: `playwright:bing,startpage`, `auto:bing,startpage`, `bing,startpage`<br/>• **Compound multiple modes**: `playwright:bing;auto:startpage` (bing forces browser, startpage uses auto fallback), `auto;request:startpage` (global auto but startpage uses pure HTTP) |
+
+#### 2. 🌐 Proxy & Network Security
+
+| Variable | Default | Allowed Values / Description |
+| `PROXY_URL` | empty (off) | Consolidated upstream proxy configuration (merges previous `USE_PROXY` and `PROXY_ENGINES`). Not needed in TUN mode.<br/>• **Default proxy**: passing empty `PROXY_URL=""` or `PROXY_URL=true` activates default `http://127.0.0.1:7897` (overseas engines use proxy, domestic engines stay direct)<br/>• **Custom address**: `PROXY_URL=http://127.0.0.1:10809`<br/>• **Custom engines**: `PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` or all engines `PROXY_URL=";all"` |
+| `FAKE_IP_CIDRS` | `198.18.0.0/15` | Whitelisted CIDRs for Clash Fake-IP mode to avoid SSRF false-positive blocking |
+| `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` browser TLS/H2 fingerprint profile (e.g. `chrome_149`, `safari_18`) |
+| `IMPERSONATE_OS` | `windows` | Operating system platform for fingerprint impersonation (`windows`, `macos`, `linux`) |
+| `FETCH_WEB_INSECURE_TLS`| `false` | Disable TLS certificate verification for `fetchWebContent` only (for broken legacy site certs) |
+| `GITHUB_README_CDN_FIRST` | `false` | When `true`, forces skipping `raw.githubusercontent.com` direct probe and queries jsDelivr CDN first (domestic network acceleration) |
+
+#### 3. 🔐 Credentials & API Keys
+
+| Variable | Default | Allowed Values / Description |
+| :--- | :--- | :--- |
+| `CONTEXT7_API_KEY` | empty | [Context7 API Key](https://context7.com/dashboard) (strongly recommended for proxy/TUN users to bypass shared IP quotas) |
+| `EXA_API_KEY` | empty | [Exa Free API Key](https://dashboard.exa.ai/api-keys) (only required if using the `exa` semantic search engine) |
+| `GITHUB_TOKEN` | empty | GitHub Personal Access Token (raises rate limit for `fetchGithubReadme` to avoid 403s) |
+
+#### 4. 🖥️ Server Modes, Concurrency & Session Reaper
+
+| Variable | Default | Allowed Values / Description |
+| :--- | :--- | :--- |
+| `MODE` | `both` | MCP transport mode: `stdio` (stdin/stdout only), `http` (HTTP/SSE only), `both` (concurrent) |
+| `PORT` | `3211` | MCP HTTP/SSE listen port (local persistent daemon uses `3210` by default) |
+| `MAX_CONCURRENT_SEARCHES`| `20` | Max concurrent searches in daemon mode (`0` for unlimited) |
+| `MCP_MAX_SESSIONS` | `100` | Max retained MCP HTTP sessions before returning HTTP 429 Too Many Requests |
+| `MCP_SESSION_TTL_MS` | `1800000` | Idle session expiration duration before reaping (default 30 min) |
+| `MCP_SESSION_REAPER_MS` | `300000` | Session reaper scan interval (default 5 min) |
+| `LOG_LEVEL` | `info` | Log level: `quiet` (completely silent), `debug`, `info`, `warn`, `error` |
+| `SECURITY_AUDIT` | `false` | Enable SSRF blocking and host header security audit logging |
+| `OPEN_WEBSEARCH_ALLOWED_HOSTS` | loopback | Host header whitelist for HTTP server (DNS Rebinding protection, comma-separated) |
+
+#### 5. 🧭 Playwright Browser & Stealth Controls
+
+> [!NOTE]
+> `BING_PLAYWRIGHT_FALLBACK` and `STARTPAGE_PLAYWRIGHT_FALLBACK` have been consolidated into `SEARCH_MODE` (e.g. `SEARCH_MODE=bing` or `SEARCH_MODE=request`). Backward compatibility is automatically preserved.
+
+| Variable | Default | Allowed Values / Description |
+| :--- | :--- | :--- |
+| `PLAYWRIGHT_CDP_ENDPOINT` | empty | Remote Chrome/Edge CDP endpoint URL (e.g. `http://127.0.0.1:9222` or `ws://...`) |
+| `PLAYWRIGHT_EXECUTABLE_PATH` | auto | Absolute path to browser executable (auto-detects system Edge/Chrome by default) |
+| `PLAYWRIGHT_HEADLESS` | `true` | Run headless (on Windows, automatically utilizes an isolated hidden desktop window) |
+| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`| `20000` | Hard page navigation timeout for Playwright (milliseconds) |
+
+#### 6. 🛠️ Application Directory & Tool Customization
+
+| Variable | Default | Allowed Values / Description |
+| :--- | :--- | :--- |
+| `MYWEBSEARCH_DATA_DIR` | `~/.my-websearch` | Root directory for configuration and persistent cookie files |
+| `OPEN_WEBSEARCH_RESPONSE_CAP_BYTES`| `60000` | Maximum character limit returned to LLMs to prevent prompt context explosion |
+| `MCP_TOOL_SEARCH_NAME` | `search` | Custom registration name for the search tool in MCP |
+| `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | Custom registration name for the content extraction tool |
+| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | Custom registration name for the GitHub README tool |
+
+> 💡 **Zero-Config Upgrades (Redundant Variables Removed)**:
+> - **CORS Switches** (`ENABLE_CORS`/`CORS_ORIGIN`): HTTP mode now has **safe CORS (`*`) built-in by default**.
+> - **Playwright Package Selection** (`PLAYWRIGHT_PACKAGE`/`PLAYWRIGHT_MODULE_PATH`): Now **100% automated** via intelligent client and system binary discovery.
+> - **Remote Browser Endpoint** (`PLAYWRIGHT_WS_ENDPOINT`): Unified into standard `PLAYWRIGHT_CDP_ENDPOINT`.
+> - **Emoji Switch** (`OPEN_WEBSEARCH_NO_EMOJI`): Automatic console code page detection smoothly falls back to ASCII tags on legacy terminals.
+> - **Fragmented Debug Flag** (`OPEN_WEBSEARCH_DEBUG`): Unified into standard `LOG_LEVEL=debug`.
+> - **Cookie Persistence TTL** (`MYWEBSEARCH_COOKIE_TTL_DAYS`): Solidified to 30 days with automated sliding renewal.
 
 ---
 

@@ -2,6 +2,16 @@
 import ipaddr from 'ipaddr.js';
 import { loadApplicationConfigEnv } from './configLoader.js';
 
+export const KNOWN_PLAYWRIGHT_ENGINES = ['bing', 'startpage'] as const;
+export type KnownPlaywrightEngine = typeof KNOWN_PLAYWRIGHT_ENGINES[number];
+export type SearchEngineMode = 'request' | 'auto' | 'playwright';
+
+export interface ParsedSearchMode {
+    searchMode: SearchEngineMode;
+    engineSearchModes: Record<string, SearchEngineMode>;
+    playwrightEngines: string[];
+}
+
 export interface AppConfig {
     // Search engine configuration
     // 'auto'：按查询特征（中英文/技术词）自动选择默认引擎，见 queryEngineRouting.ts
@@ -9,24 +19,22 @@ export interface AppConfig {
     // List of allowed search engines (if empty, all engines are available)
     allowedSearchEngines: string[];
     // Search mode: request only, auto request then fallback, or force Playwright
-    // Currently only affects Bing.
-    searchMode: 'request' | 'auto' | 'playwright';
+    searchMode: SearchEngineMode;
+    // 单个引擎的检索模式精准覆盖（支持多启动方式混合配置）
+    engineSearchModes?: Record<string, SearchEngineMode>;
+    // 允许启用/回退至 Playwright 浏览器的引擎列表（如 ['bing', 'startpage']）
+    playwrightEngines: string[];
     // 全局并发搜索限制：同时进行的搜索请求数上限（0 = 不限制）。
     // CLI 一次性调用不受此限制，仅 daemon 模式下多客户端并发时生效。
     maxConcurrentSearches: number;
-    // When searchMode=auto and Bing's request mode hits an anti-bot page, should we
-    // fall back to launching a Playwright browser (slow, ~400MB, hidden window)?
-    // Set BING_PLAYWRIGHT_FALLBACK=false to instead surface the error so the search
-    // service can cascade to lighter engines (duckduckgo/brave) via minResults.
+    // 向后兼容保留的独立兜底开关属性（由 SEARCH_MODE 自动推导）
     bingPlaywrightFallback: boolean;
-    // Bing HTTP 模式使用的浏览器指纹目标（wreq-js 的 impersonate profile，
-    // 见下方 impersonateBrowser；Chrome 指纹保鲜期以年计，
-    // 被反爬标记时才需要切到更新的目标）。
+    /** Bing 搜索请求基础 URL（默认 https://cn.bing.com/search，面向国内免翻；支持配置为 www.bing.com 或自建反代） */
+    bingBaseUrl: string;
     /** 指纹请求（wreq-js）的浏览器 profile 与平台，如 chrome_149 / windows */
     impersonateBrowser: string;
     impersonateOs: string;
-    // startpage 的 Playwright 兜底开关（hidden-headed 预热 Anubis 挑战）。
-    // false 时不启动浏览器，HTTP 被反爬直接报错（可配合 minResults 级联换引擎）。
+    // 向后兼容保留的独立兜底开关属性（由 SEARCH_MODE 自动推导）
     startpagePlaywrightFallback: boolean;
     // Proxy configuration
     proxyUrl?: string;
@@ -43,32 +51,282 @@ export interface AppConfig {
     defaultMinResults: number;
     /** 搜索级总时间预算（ms）：到点后未完成的引擎按超时处理 */
     searchDeadlineMs: number;
-    /** DEFAULT_SEARCH_ENGINE=auto 时的路由引擎组：英文（默认 bing+duckduckgo 并列，避免押注单点） */
-    autoRouteEnEngines: string[];
-    /** DEFAULT_SEARCH_ENGINE=auto 时的路由引擎组：中文（默认 baidu） */
-    autoRouteZhEngines: string[];
     fetchWebAllowInsecureTls: boolean;
-    // Playwright configuration
-    playwrightPackage: 'auto' | 'playwright' | 'playwright-core';
-    playwrightModulePath?: string;
+    // Playwright configuration (auto-detects local system Edge/Chrome or connects via CDP)
     playwrightExecutablePath?: string;
-    playwrightWsEndpoint?: string;
     playwrightCdpEndpoint?: string;
     playwrightHeadless: boolean;
     playwrightNavigationTimeoutMs: number;
-    // CORS configuration
-    enableCors: boolean;
-    corsOrigin: string;
     // Server configuration (determined by MODE env var: 'both', 'http', or 'stdio')
     enableHttpServer: boolean;
 }
 
 const validSearchEngines = ['auto', 'bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'juejin', 'startpage', 'sogou'];
-const validSearchModes = ['request', 'auto', 'playwright'];
-const validPlaywrightPackages = ['auto', 'playwright', 'playwright-core'];
 
 export interface CreateConfigOptions {
     quiet?: boolean;
+}
+
+function normalizeModeToken(token: string): SearchEngineMode | undefined {
+    const t = token.trim().toLowerCase();
+    if (t === 'auto') return 'auto';
+    if (t === 'request' || t === 'none' || t === 'false') return 'request';
+    if (t === 'playwright' || t === 'all') return 'playwright';
+    return undefined;
+}
+
+function splitModeSegments(raw: string): string[] {
+    // 优先按分号 ; 或换行符分割
+    if (raw.includes(';') || raw.includes('\n')) {
+        return raw.split(/[;\n]+/).map(s => s.trim()).filter(Boolean);
+    }
+    // 若没有分号，但包含逗号，检查是否有多个 mode: 前缀（例如 "playwright:bing,auto:startpage"）
+    if (raw.includes(',') && raw.includes(':')) {
+        const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+        const segments: string[] = [];
+        let currentSegment = '';
+        for (const part of parts) {
+            if (part.includes(':')) {
+                if (currentSegment) {
+                    segments.push(currentSegment);
+                }
+                currentSegment = part;
+            } else {
+                if (currentSegment) {
+                    currentSegment += ',' + part;
+                } else {
+                    currentSegment = part;
+                }
+            }
+        }
+        if (currentSegment) {
+            segments.push(currentSegment);
+        }
+        return segments;
+    }
+    return [raw.trim()];
+}
+
+/**
+ * 解析 SEARCH_MODE 配置（支持运行模式声明、单一模式多选引擎、以及多启动方式组合）：
+ * 1. 单一全局模式：`auto` / `request` / `playwright` / `none` / `all`
+ * 2. 一种模式多选引擎：`playwright:bing,startpage` 或 `auto:bing,startpage`
+ * 3. 多种启动方式组合：`playwright:bing;auto:startpage` 或 `auto;request:startpage`
+ * 4. 纯引擎简写白名单：`bing,startpage`（自动进入 auto，未列出引擎纯 HTTP）
+ * 同时静默向后兼容历史环境变量 BING_PLAYWRIGHT_FALLBACK 与 STARTPAGE_PLAYWRIGHT_FALLBACK。
+ */
+export function parseSearchModeConfig(
+    rawMode?: string,
+    legacyBingFallback?: string,
+    legacyStartpageFallback?: string
+): ParsedSearchMode {
+    const raw = (rawMode || '').trim();
+    if (!raw) {
+        return applyLegacyOverrides(
+            {
+                searchMode: 'auto',
+                engineSearchModes: {},
+                playwrightEngines: [...KNOWN_PLAYWRIGHT_ENGINES]
+            },
+            legacyBingFallback,
+            legacyStartpageFallback
+        );
+    }
+
+    const segments = splitModeSegments(raw);
+    let defaultMode: SearchEngineMode = 'auto';
+    const engineSearchModes: Record<string, SearchEngineMode> = {};
+    let hasExplicitDefault = false;
+    let hasEngineLists = false;
+
+    for (const segment of segments) {
+        const pureMode = normalizeModeToken(segment);
+        if (pureMode !== undefined) {
+            defaultMode = pureMode;
+            hasExplicitDefault = true;
+            continue;
+        }
+
+        if (segment.includes(':')) {
+            const [modePart = '', enginesPart = ''] = segment.split(':', 2);
+            const mode = normalizeModeToken(modePart) ?? 'auto';
+            const engines = enginesPart.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+            if (engines.length === 0 || engines.includes('all') || engines.includes('*')) {
+                defaultMode = mode;
+                hasExplicitDefault = true;
+            } else {
+                for (const eng of engines) {
+                    engineSearchModes[eng] = mode;
+                }
+                hasEngineLists = true;
+            }
+        } else {
+            // 没有冒号的纯引擎列表，如 "bing,startpage"
+            const engines = segment.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+            const matched = engines.filter(e => (KNOWN_PLAYWRIGHT_ENGINES as readonly string[]).includes(e));
+            if (matched.length > 0) {
+                for (const eng of matched) {
+                    engineSearchModes[eng] = 'auto';
+                }
+                hasEngineLists = true;
+            }
+        }
+    }
+
+    // 若用户仅指定了特定引擎（如 SEARCH_MODE=bing 或 SEARCH_MODE=playwright:bing）且未显式指定全局默认，
+    // 则未列出的引擎默认进入 request 模式（纯 HTTP，不启动浏览器）
+    if (hasEngineLists && !hasExplicitDefault) {
+        defaultMode = 'request';
+    }
+
+    // 计算哪些引擎允许使用 Playwright（mode 为 auto 或 playwright）
+    const playwrightEngines: string[] = [];
+    for (const eng of KNOWN_PLAYWRIGHT_ENGINES) {
+        const effectiveMode = engineSearchModes[eng] ?? defaultMode;
+        if (effectiveMode === 'auto' || effectiveMode === 'playwright') {
+            playwrightEngines.push(eng);
+        }
+    }
+
+    return applyLegacyOverrides(
+        {
+            searchMode: defaultMode,
+            engineSearchModes,
+            playwrightEngines
+        },
+        legacyBingFallback,
+        legacyStartpageFallback
+    );
+}
+
+function applyLegacyOverrides(
+    parsed: ParsedSearchMode,
+    legacyBingFallback?: string,
+    legacyStartpageFallback?: string
+): ParsedSearchMode {
+    if (legacyBingFallback === 'false') {
+        parsed.engineSearchModes['bing'] = 'request';
+        parsed.playwrightEngines = parsed.playwrightEngines.filter(e => e !== 'bing');
+    }
+    if (legacyStartpageFallback === 'false') {
+        parsed.engineSearchModes['startpage'] = 'request';
+        parsed.playwrightEngines = parsed.playwrightEngines.filter(e => e !== 'startpage');
+    }
+    return parsed;
+}
+
+export const DEFAULT_PROXY_URL = 'http://127.0.0.1:7897';
+export const DEFAULT_PROXY_ENGINES = ['duckduckgo', 'exa', 'brave', 'startpage'];
+
+export interface ParsedProxyConfig {
+    useProxy: boolean;
+    proxyUrl: string;
+    proxyEngines: string[];
+}
+
+/**
+ * 解析代理配置（统一合并 PROXY_URL、USE_PROXY、PROXY_ENGINES）：
+ * - PROXY_URL 默认值改为 http://127.0.0.1:7897
+ * - 允许传空值（""），传空代表使用默认值并启用代理
+ * - 支持 "true" / "1" 开启默认代理
+ * - 支持 "false" / "none" / "off" / "0" / "direct" / "no" 显式关闭代理
+ * - 支持嵌入引擎清单（如 "http://127.0.0.1:7897;duckduckgo,brave" 或 ";all"）
+ * - 默认代理引擎为海外引擎（duckduckgo, exa, brave, startpage），国内引擎直连
+ * - 100% 向下兼容旧的 USE_PROXY 与 PROXY_ENGINES
+ */
+export function parseProxyConfig(
+    rawProxyUrl?: string,
+    rawUseProxy?: string,
+    rawProxyEngines?: string
+): ParsedProxyConfig {
+    const isUrlProvided = rawProxyUrl !== undefined;
+    const trimmedUrl = rawProxyUrl !== undefined ? rawProxyUrl.trim() : undefined;
+
+    const isExplicitlyDisabled =
+        trimmedUrl !== undefined &&
+        ['false', 'none', 'off', '0', 'direct', 'no'].includes(trimmedUrl.toLowerCase());
+
+    let parsedUrl = DEFAULT_PROXY_URL;
+    let inlineEngines: string[] | undefined = undefined;
+
+    if (trimmedUrl && !isExplicitlyDisabled) {
+        let urlPart = trimmedUrl;
+        let enginesPart = '';
+
+        if (urlPart.includes(';')) {
+            const idx = urlPart.indexOf(';');
+            enginesPart = urlPart.slice(idx + 1).trim();
+            urlPart = urlPart.slice(0, idx).trim();
+        } else if (urlPart.includes('#')) {
+            const idx = urlPart.indexOf('#');
+            enginesPart = urlPart.slice(idx + 1).trim();
+            urlPart = urlPart.slice(0, idx).trim();
+        } else if (urlPart.includes('?engines=')) {
+            const idx = urlPart.indexOf('?engines=');
+            enginesPart = urlPart.slice(idx + 9).trim();
+            urlPart = urlPart.slice(0, idx).trim();
+        }
+
+        // 允许只传引擎清单而省略 URL（如 PROXY_URL="duckduckgo,brave" 或 "all"）
+        if (
+            urlPart &&
+            !urlPart.includes('://') &&
+            !urlPart.includes(':') &&
+            (urlPart.toLowerCase() === 'all' || urlPart.includes(','))
+        ) {
+            enginesPart = urlPart;
+            urlPart = '';
+        }
+
+        if (urlPart === '' || urlPart === 'true' || urlPart === '1' || urlPart === 'default') {
+            parsedUrl = DEFAULT_PROXY_URL;
+        } else if (urlPart) {
+            const withProtocol = urlPart.includes('://') ? urlPart : `http://${urlPart}`;
+            parsedUrl = withProtocol.replace(/\/$/, '');
+        }
+
+        if (enginesPart) {
+            if (enginesPart.toLowerCase() === 'all') {
+                inlineEngines = [];
+            } else {
+                inlineEngines = enginesPart.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+            }
+        }
+    } else if (trimmedUrl === '') {
+        // 允许传空，传空代表默认值
+        parsedUrl = DEFAULT_PROXY_URL;
+    }
+
+    let finalEngines: string[];
+    if (rawProxyEngines !== undefined) {
+        // 兼容旧环境变量 PROXY_ENGINES：空字符串代表全部走代理
+        finalEngines = rawProxyEngines.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+    } else if (inlineEngines !== undefined) {
+        finalEngines = inlineEngines;
+    } else {
+        finalEngines = [...DEFAULT_PROXY_ENGINES];
+    }
+
+    let useProxy = false;
+    if (isUrlProvided) {
+        if (isExplicitlyDisabled) {
+            useProxy = false;
+        } else if (rawUseProxy === 'false' && rawProxyUrl !== '' && rawProxyUrl !== 'true') {
+            useProxy = false;
+        } else {
+            useProxy = true;
+        }
+    } else if (rawUseProxy !== undefined) {
+        useProxy = rawUseProxy === 'true';
+    } else {
+        useProxy = false;
+    }
+
+    return {
+        useProxy,
+        proxyUrl: parsedUrl,
+        proxyEngines: finalEngines
+    };
 }
 
 /**
@@ -87,22 +345,35 @@ export function createConfig(
         return value ? value : undefined;
     };
 
+    const parsedSearchMode = parseSearchModeConfig(
+        env.SEARCH_MODE,
+        env.BING_PLAYWRIGHT_FALLBACK,
+        env.STARTPAGE_PLAYWRIGHT_FALLBACK
+    );
+
+    const parsedProxy = parseProxyConfig(
+        env.PROXY_URL,
+        env.USE_PROXY,
+        env.PROXY_ENGINES
+    );
+
     const cfg: AppConfig = {
         defaultSearchEngine: (env.DEFAULT_SEARCH_ENGINE as AppConfig['defaultSearchEngine']) || 'auto',
         allowedSearchEngines: env.ALLOWED_SEARCH_ENGINES ?
             env.ALLOWED_SEARCH_ENGINES.split(',').map(e => e.trim()) :
             [],
-        searchMode: (env.SEARCH_MODE as AppConfig['searchMode']) || 'auto',
+        searchMode: parsedSearchMode.searchMode,
+        engineSearchModes: parsedSearchMode.engineSearchModes,
+        playwrightEngines: parsedSearchMode.playwrightEngines,
+        bingPlaywrightFallback: parsedSearchMode.playwrightEngines.includes('bing') && (parsedSearchMode.engineSearchModes['bing'] ?? parsedSearchMode.searchMode) !== 'request',
+        bingBaseUrl: (env.BING_BASE_URL || env.OPEN_WEBSEARCH_BING_HOST || 'https://cn.bing.com/search').trim().replace(/\/$/, ''),
+        startpagePlaywrightFallback: parsedSearchMode.playwrightEngines.includes('startpage') && (parsedSearchMode.engineSearchModes['startpage'] ?? parsedSearchMode.searchMode) !== 'request',
         maxConcurrentSearches: Number(env.MAX_CONCURRENT_SEARCHES || '20'),
-        bingPlaywrightFallback: env.BING_PLAYWRIGHT_FALLBACK !== 'false',
         impersonateBrowser: readOptionalEnv('IMPERSONATE_BROWSER') || 'chrome_149',
         impersonateOs: readOptionalEnv('IMPERSONATE_OS') || 'windows',
-        startpagePlaywrightFallback: env.STARTPAGE_PLAYWRIGHT_FALLBACK !== 'false',
-        proxyUrl: env.PROXY_URL || 'http://127.0.0.1:7890',
-        useProxy: env.USE_PROXY === 'true',
-        proxyEngines: env.PROXY_ENGINES ?
-            env.PROXY_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
-            [],
+        proxyUrl: parsedProxy.proxyUrl,
+        useProxy: parsedProxy.useProxy,
+        proxyEngines: parsedProxy.proxyEngines,
         fakeIpCidrs: env.FAKE_IP_CIDRS ?
             env.FAKE_IP_CIDRS.split(',').map(cidr => cidr.trim()).filter(Boolean) :
             ['198.18.0.0/15'],
@@ -110,24 +381,13 @@ export function createConfig(
             env.SEARCH_AUTHORITY_DOMAINS.split(',').map(domain => domain.trim().toLowerCase()).filter(Boolean) :
             [],
         defaultSearchLimit: Number(env.DEFAULT_SEARCH_LIMIT || '10'),
-        autoRouteEnEngines: env.AUTO_ROUTE_EN_ENGINES ?
-            env.AUTO_ROUTE_EN_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
-            ['bing', 'duckduckgo'],
-        autoRouteZhEngines: env.AUTO_ROUTE_ZH_ENGINES ?
-            env.AUTO_ROUTE_ZH_ENGINES.split(',').map(e => e.trim()).filter(Boolean) :
-            ['baidu'],
         defaultMinResults: Number(env.DEFAULT_MIN_RESULTS || '5'),
         searchDeadlineMs: Number(env.SEARCH_DEADLINE_MS || '30000'),
         fetchWebAllowInsecureTls: env.FETCH_WEB_INSECURE_TLS === 'true',
-        playwrightPackage: (env.PLAYWRIGHT_PACKAGE as AppConfig['playwrightPackage']) || 'auto',
-        playwrightModulePath: readOptionalEnv('PLAYWRIGHT_MODULE_PATH'),
         playwrightExecutablePath: readOptionalEnv('PLAYWRIGHT_EXECUTABLE_PATH'),
-        playwrightWsEndpoint: readOptionalEnv('PLAYWRIGHT_WS_ENDPOINT'),
         playwrightCdpEndpoint: readOptionalEnv('PLAYWRIGHT_CDP_ENDPOINT'),
         playwrightHeadless: env.PLAYWRIGHT_HEADLESS !== 'false',
         playwrightNavigationTimeoutMs: Number(env.PLAYWRIGHT_NAVIGATION_TIMEOUT_MS || 20000),
-        enableCors: env.ENABLE_CORS === 'true',
-        corsOrigin: env.CORS_ORIGIN || '*',
         enableHttpServer: env.MODE ? ['both', 'http'].includes(env.MODE) : true
     };
 
@@ -136,20 +396,6 @@ export function createConfig(
             console.warn(`Invalid DEFAULT_SEARCH_ENGINE: "${cfg.defaultSearchEngine}", falling back to "bing"`);
         }
         cfg.defaultSearchEngine = 'bing';
-    }
-
-    if (!validSearchModes.includes(cfg.searchMode)) {
-        if (!options.quiet) {
-            console.warn(`Invalid SEARCH_MODE: "${cfg.searchMode}", falling back to "auto"`);
-        }
-        cfg.searchMode = 'auto';
-    }
-
-    if (!validPlaywrightPackages.includes(cfg.playwrightPackage)) {
-        if (!options.quiet) {
-            console.warn(`Invalid PLAYWRIGHT_PACKAGE: "${cfg.playwrightPackage}", falling back to "auto"`);
-        }
-        cfg.playwrightPackage = 'auto';
     }
 
     if (cfg.fakeIpCidrs.length > 0) {
@@ -181,11 +427,7 @@ export function createConfig(
         cfg.playwrightNavigationTimeoutMs = 20000;
     }
 
-    if (cfg.playwrightWsEndpoint && cfg.playwrightCdpEndpoint && !options.quiet) {
-        console.warn('Both PLAYWRIGHT_WS_ENDPOINT and PLAYWRIGHT_CDP_ENDPOINT are set, PLAYWRIGHT_WS_ENDPOINT will take precedence');
-    }
-
-    if ((cfg.playwrightWsEndpoint || cfg.playwrightCdpEndpoint) && cfg.playwrightExecutablePath && !options.quiet) {
+    if (cfg.playwrightCdpEndpoint && cfg.playwrightExecutablePath && !options.quiet) {
         console.warn('PLAYWRIGHT_EXECUTABLE_PATH is ignored when connecting to a remote browser endpoint');
     }
 
@@ -222,9 +464,18 @@ export function createConfig(
         } else {
             console.error(`🔍 No search engine restrictions, all available engines can be used`);
         }
-        console.error(`🔍 Search mode: ${cfg.searchMode.toUpperCase()} (currently only affects Bing)`);
-        if (!cfg.bingPlaywrightFallback) {
-            console.error(`🔍 Bing Playwright fallback disabled (BING_PLAYWRIGHT_FALLBACK=false): anti-bot blocks surface as errors so lighter engines can cascade in`);
+        console.error(`🔍 Search mode: ${cfg.searchMode.toUpperCase()}`);
+        const overrides = Object.entries(cfg.engineSearchModes || {});
+        if (overrides.length > 0) {
+            console.error(`🔍 Engine search modes: ${overrides.map(([eng, m]) => `${eng}=${m}`).join(', ')}`);
+        }
+        if (cfg.bingBaseUrl !== 'https://cn.bing.com/search') {
+            console.error(`🔍 Bing base URL: ${cfg.bingBaseUrl}`);
+        }
+        if (cfg.playwrightEngines.length > 0) {
+            console.error(`🔍 Playwright fallback engines: ${cfg.playwrightEngines.join(', ')}`);
+        } else {
+            console.error(`🔍 Playwright fallback: disabled (pure HTTP mode)`);
         }
 
         if (cfg.useProxy) {
@@ -232,15 +483,10 @@ export function createConfig(
             if (cfg.proxyEngines.length > 0) {
                 console.error(`🌐 Proxy engines: ${cfg.proxyEngines.join(', ')}`);
             } else {
-                console.error(`🌐 Proxy engines: all engines (default)`);
+                console.error(`🌐 Proxy engines: all engines`);
             }
         } else {
-            const hasCustomProxyUrl = Boolean(env.PROXY_URL && env.PROXY_URL !== 'http://127.0.0.1:7890');
-            if (hasCustomProxyUrl) {
-                console.error(`⚠️ PROXY_URL is configured (${cfg.proxyUrl}) but USE_PROXY is not 'true'. HTTP proxy is disabled (set USE_PROXY=true to force HTTP proxy; in TUN mode, system TUN adapter routes traffic automatically).`);
-            } else {
-                console.error(`🌐 No explicit HTTP proxy configured (set USE_PROXY=true to enable; in TUN mode, system TUN adapter routes traffic automatically)`);
-            }
+            console.error(`🌐 Proxy: disabled (set PROXY_URL to enable, or using TUN mode)`);
         }
         if (cfg.fakeIpCidrs.length > 0) {
             console.error(`🌐 Fake IP CIDRs: ${cfg.fakeIpCidrs.join(', ')}`);
@@ -251,16 +497,12 @@ export function createConfig(
             console.error('🔐 fetchWebContent TLS verification is enabled');
         }
 
-        console.error(`🧭 Playwright client source: ${cfg.playwrightPackage}`);
-        if (cfg.playwrightModulePath) {
-            console.error(`🧭 Playwright module path override: ${cfg.playwrightModulePath}`);
-        }
-        if (cfg.playwrightWsEndpoint) {
-            console.error(`🧭 Playwright remote endpoint (ws): ${cfg.playwrightWsEndpoint}`);
-        } else if (cfg.playwrightCdpEndpoint) {
-            console.error(`🧭 Playwright remote endpoint (cdp): ${cfg.playwrightCdpEndpoint}`);
+        if (cfg.playwrightCdpEndpoint) {
+            console.error(`🧭 Playwright remote CDP endpoint: ${cfg.playwrightCdpEndpoint}`);
         } else if (cfg.playwrightExecutablePath) {
             console.error(`🧭 Playwright executable path: ${cfg.playwrightExecutablePath}`);
+        } else {
+            console.error('🧭 Playwright client: auto-discovery (system browser or installed package)');
         }
         console.error(`🧭 Playwright headless: ${cfg.playwrightHeadless}`);
         console.error(`🧭 Playwright navigation timeout: ${cfg.playwrightNavigationTimeoutMs}ms`);
@@ -269,11 +511,7 @@ export function createConfig(
         console.error(`🖥️ Server mode: ${mode.toUpperCase()}`);
 
         if (cfg.enableHttpServer) {
-            if (cfg.enableCors) {
-                console.error(`🔒 CORS enabled with origin: ${cfg.corsOrigin}`);
-            } else {
-                console.error(`🔒 CORS disabled (set ENABLE_CORS=true to enable)`);
-            }
+            console.error('🔒 CORS enabled for MCP clients (*)');
         }
     }
 
@@ -301,3 +539,21 @@ export function engineShouldUseProxy(engine: string, cfg: AppConfig = config): b
     }
     return cfg.proxyEngines.includes(engine);
 }
+
+// 获取指定引擎的检索模式（优先使用 engineSearchModes 覆盖，否则回退到全局 searchMode）
+export function getEngineSearchMode(engine: string, cfg: AppConfig = config): SearchEngineMode {
+    const normalized = engine.trim().toLowerCase();
+    const override = cfg.engineSearchModes?.[normalized];
+    if (override) {
+        return override;
+    }
+    return cfg.searchMode;
+}
+
+// 判断某个引擎是否允许回退到 Playwright（模式为 auto 或 playwright）
+export function engineShouldUsePlaywrightFallback(engine: string, cfg: AppConfig = config): boolean {
+    const mode = getEngineSearchMode(engine, cfg);
+    return mode === 'auto' || mode === 'playwright';
+}
+
+

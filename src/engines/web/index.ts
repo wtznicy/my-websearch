@@ -1,1 +1,5 @@
-export { __setBrowserHtmlFetcherForTests, fetchWebContent } from './fetchWebContent.js';
+export {
+    __setBrowserCookieHeaderForTests,
+    __setBrowserHtmlFetcherForTests,
+    fetchWebContent
+} from './fetchWebContent.js';

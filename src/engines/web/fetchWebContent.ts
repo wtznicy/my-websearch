@@ -184,7 +184,7 @@ function isMarkdownPath(url: URL): boolean {
 }
 
 function shouldDebugReadabilityFallback(): boolean {
-    return process.env.OPEN_WEBSEARCH_DEBUG === '1';
+    return (process.env.LOG_LEVEL ?? '').toLowerCase() === 'debug';
 }
 
 function logReadabilityFallback(message: string, error?: unknown): void {
@@ -432,6 +432,12 @@ async function fetchHtmlViaBrowser(url: string): Promise<{ contentType: string; 
     }
 }
 
+let browserCookieHeaderGetter = getBrowserCookieHeader;
+
+export function __setBrowserCookieHeaderForTests(getter?: typeof getBrowserCookieHeader): void {
+    browserCookieHeaderGetter = getter || getBrowserCookieHeader;
+}
+
 export function __setBrowserHtmlFetcherForTests(fetcher?: typeof fetchPageHtmlWithBrowser): void {
     browserHtmlFetcher = fetcher || fetchPageHtmlWithBrowser;
 }
@@ -458,7 +464,7 @@ export function __setReadabilityParserForTests(parser?: (html: string, finalUrl:
 async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: AxiosResponse; usedBrowserCookies: boolean }> {
     let cookieHeader: string | undefined;
     try {
-        cookieHeader = await getBrowserCookieHeader(url);
+        cookieHeader = await browserCookieHeaderGetter(url);
     } catch {
         return { response: undefined, usedBrowserCookies: false };
     }
@@ -481,9 +487,14 @@ async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: A
 }
 
 /**
- * 浏览器兜底（cookie 采集 + HTML 渲染）的总预算。
- * 对齐 fetchCsdnArticle 的成熟模式，防止浏览器兜底过程在异常状态下无限挂死。
+ * 浏览器兜底（cookie 采集 + HTML 渲染）的分段独立预算。
+ *
+ * 架构分工（分段独立预算）：
+ * 1. cookie 采集阶段属于轻量加速通道，设定独立 15s 预算；超时或失败即刻放弃并平滑落入浏览器完整渲染。
+ * 2. 浏览器 HTML 渲染兜底属于重型最终防线，拥有独立的 30s 预算，确保浏览器首次冷启动时，
+ *    充足的生命周期不会被前序 cookie 阶段耗尽，彻底杜绝首访失败、次访成功的行为不一致现象。
  */
+const FETCH_WEB_COOKIE_BUDGET_MS = 15000;
 const FETCH_WEB_BROWSER_BUDGET_MS = 30000;
 
 function createBrowserBudget(label: string, budgetMs = FETCH_WEB_BROWSER_BUDGET_MS) {
@@ -514,7 +525,8 @@ export async function fetchWebContent(
     const parsedUrl = new URL(url);
     await assertPublicHttpUrlResolved(parsedUrl, 'Request URL');
 
-    const withinBrowserBudget = createBrowserBudget('fetchWebContent');
+    const withinCookieBudget = createBrowserBudget('fetchWebContent cookie', FETCH_WEB_COOKIE_BUDGET_MS);
+    const withinBrowserBudget = createBrowserBudget('fetchWebContent render', FETCH_WEB_BROWSER_BUDGET_MS);
     const startIndex = Math.max(0, Math.floor(options.startIndex ?? 0));
     const targetMaxChars = clampMaxChars(maxChars);
 
@@ -565,7 +577,7 @@ export async function fetchWebContent(
 
         let cookieRetry: { response?: AxiosResponse; usedBrowserCookies: boolean };
         try {
-            cookieRetry = await withinBrowserBudget(tryRequestWithBrowserCookies(parsedUrl.toString()), 'cookie retry');
+            cookieRetry = await withinCookieBudget(tryRequestWithBrowserCookies(parsedUrl.toString()), 'cookie retry');
         } catch {
             cookieRetry = { response: undefined, usedBrowserCookies: false };
         }
@@ -598,7 +610,7 @@ export async function fetchWebContent(
     if (!usedBrowserCookies && looksLikeBotChallengePage(raw)) {
         let cookieRetry: { response?: AxiosResponse; usedBrowserCookies: boolean };
         try {
-            cookieRetry = await withinBrowserBudget(tryRequestWithBrowserCookies(parsedUrl.toString()), 'challenge cookie retry');
+            cookieRetry = await withinCookieBudget(tryRequestWithBrowserCookies(parsedUrl.toString()), 'challenge cookie retry');
         } catch {
             cookieRetry = { response: undefined, usedBrowserCookies: false };
         }
@@ -664,14 +676,6 @@ export async function fetchWebContent(
                 htmlExtraction = extractMainTextFromHtml(raw);
                 title = htmlExtraction.title || browserResult.title;
                 extractedContent = htmlExtraction.text;
-
-                // P0-5: 渲染后反爬拦截页二次判定（知乎荒原页等）
-                const botDetected = looksLikeBotChallengePage(raw) || looksLikeBotChallengePage(extractedContent);
-                if (botDetected && extractedContent.length < 350) {
-                    const botError = new Error('目标站点触发反爬验证或需要登录（浏览器渲染后仍命中反爬拦截特征），未能获取有效正文内容。');
-                    Object.assign(botError, { code: 'ERR_BOT_CHALLENGE', status: httpErrorStatus || 403 });
-                    throw botError;
-                }
             }
         }
 
@@ -727,6 +731,19 @@ export async function fetchWebContent(
             } catch (error) {
                 console.warn('Container Markdown conversion failed, falling back to plain text:', error instanceof Error ? error.message : String(error));
             }
+        }
+    }
+
+    if (!options.raw) {
+        // P0-5 统一出口判定：无论通过直接请求、cookie 重试还是浏览器渲染路径返回，
+        // 若最终内容/标题命中反爬拦截特征且未能获得实质长正文，统一抛出 ERR_BOT_CHALLENGE
+        const botDetected = looksLikeBotChallengePage(raw)
+            || looksLikeBotChallengePage(extractedContent)
+            || (Boolean(title) && looksLikeBotChallengePage(title));
+        if (botDetected && extractedContent.length < 350) {
+            const botError = new Error('目标站点触发反爬验证或需要登录（命中反爬拦截特征），未能获取有效正文内容。');
+            Object.assign(botError, { code: 'ERR_BOT_CHALLENGE', status: httpErrorStatus || 403 });
+            throw botError;
         }
     }
 

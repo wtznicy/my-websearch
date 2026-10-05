@@ -124,24 +124,16 @@ async function main() {
     app.use(hostHeaderValidation(allowedHostnames));
 
     const mcpCorsOptions: CorsOptions = {
-      origin: config.corsOrigin || '*',
+      origin: '*',
       methods: ['GET', 'POST', 'DELETE'],
       allowedHeaders: ['Content-Type', 'Mcp-Session-Id'],
       exposedHeaders: ['Mcp-Session-Id'],
     };
 
-    // 是否启用跨域
-    if (config.enableCors) {
-      // CORS 开启但 origin 保持默认 *：与 localhost-only 的主机校验（见上方 hostHeaderValidation）
-      // 的安全意图存在矛盾——任何站点都能通过浏览器发起跨域调用。打警告提示收紧。
-      if (!config.corsOrigin || config.corsOrigin === '*') {
-        console.warn('CORS is enabled with default origin "*" — any website can call this local MCP server from the browser. Consider setting CORS_ORIGIN to a specific origin.');
-      }
-      app.use(cors(mcpCorsOptions));
-      // express 5 中裸 * 不再是通配符（path-to-regexp v8 要求命名通配符），
-      // CORS preflight 需用 /*splat 匹配所有路径的 OPTIONS 请求
-      app.options('/*splat', cors(mcpCorsOptions));
-    }
+    app.use(cors(mcpCorsOptions));
+    // express 5 中裸 * 不再是通配符（path-to-regexp v8 要求命名通配符），
+    // CORS preflight 需用 /*splat 匹配所有路径的 OPTIONS 请求
+    app.options('/*splat', cors(mcpCorsOptions));
 
     // Store transports for each session type
     const transports = {

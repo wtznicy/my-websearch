@@ -50,9 +50,7 @@ async function main(): Promise<void> {
         url: args.url,
         previewChars: args.previewChars,
         useProxy: process.env.USE_PROXY || 'false',
-        proxyUrl: process.env.PROXY_URL || '(default)',
-        playwrightPackage: process.env.PLAYWRIGHT_PACKAGE || '(auto)',
-        playwrightModulePath: process.env.PLAYWRIGHT_MODULE_PATH || '(none)'
+        proxyUrl: process.env.PROXY_URL || '(default)'
     });
 
     const start = Date.now();

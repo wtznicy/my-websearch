@@ -85,8 +85,8 @@ export async function impersonateHttpGet(
                 redirect: impersonateOptions?.redirect
             };
 
-            const retryMaxCount = Math.max(0, parseInt(process.env.OPEN_WEBSEARCH_IMPERSONATE_RETRY || '1', 10) || 1);
-            const retryDelayMs = Math.max(0, parseInt(process.env.OPEN_WEBSEARCH_IMPERSONATE_RETRY_DELAY_MS || '100', 10) || 100);
+            const retryMaxCount = 1;
+            const retryDelayMs = 100;
 
             let response;
             try {
