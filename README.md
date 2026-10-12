@@ -17,6 +17,10 @@
 
 ---
 
+> **One server, four ways to use it:** connect an AI client over MCP, run a one-shot CLI query, keep a local daemon alive, or use the built-in diagnostics before going live.
+
+**Jump to:** [Quick start](#quick-start) · [MCP tools](#mcp-tools) · [CLI](#cli) · [Configuration](#configuration) · [Diagnostics](#diagnostics) · [Development](#development)
+
 ## ✨ Features
 
 `my-websearch` is a full-stack search and technical documentation engine built specifically for AI coding agents (**Claude Desktop, Cursor, Cherry Studio, Windsurf, Cline, ZCode**, etc.). It requires **zero paid API keys**:
@@ -88,6 +92,8 @@ flowchart TB
 
 ---
 
+<a id="mcp-tools"></a>
+
 ## 🛠️ 7 MCP Tools
 
 | Tool Name | Purpose | Key Highlights |
@@ -101,6 +107,8 @@ flowchart TB
 | **`fetchJuejinArticle`** | Extract full Juejin blog article | Direct official API fetch; pass `format: "markdown"` for formatted code blocks and tables |
 
 ---
+
+<a id="quick-start"></a>
 
 ## 🚀 Quick Start
 
@@ -154,9 +162,11 @@ Start the server in your terminal with `npx my-websearch@latest` (default port `
 
 ---
 
+<a id="cli"></a>
+
 ## 💻 CLI & Local Daemon
 
-`my-websearch` can be used directly from your terminal as a standalone CLI tool or persistent daemon:
+`my-websearch` can be used directly from your terminal as a standalone CLI tool or persistent daemon. Use `--json` in automation and keep the daemon on `127.0.0.1` unless you explicitly need remote access:
 
 ```bash
 # Global install
@@ -179,6 +189,27 @@ my-websearch cache-clear
 ```
 
 ---
+
+<a id="diagnostics"></a>
+
+## 🩺 Diagnostics
+
+Use the built-in doctor command before troubleshooting a proxy, browser, or engine:
+
+```bash
+# Local configuration and browser checks
+my-websearch doctor
+
+# Real proxy/engine probes (may contact upstream services)
+my-websearch doctor --network
+
+# Limit network probes to selected engines
+my-websearch doctor --network --engine bing,duckduckgo --json
+```
+
+The report separates configuration, proxy TCP reachability, HTTP reachability, application parsing, browser launch, and anti-bot challenges. Network mode performs real requests and should not be used as a high-frequency health check.
+
+<a id="configuration"></a>
 
 ## ⚙️ Configuration & Environment Variables
 
@@ -272,7 +303,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | Custom registration name for the GitHub README tool |
 
 > 💡 **Zero-Config Upgrades (Redundant Variables Removed)**:
-> - **CORS Switches** (`ENABLE_CORS`/`CORS_ORIGIN`): HTTP mode now has **safe CORS (`*`) built-in by default**.
+> - **CORS Switches** (`ENABLE_CORS`/`CORS_ORIGIN`): CORS is **disabled by default**; enable it explicitly and restrict origins when browser clients need cross-origin access.
 > - **Playwright Package Selection** (`PLAYWRIGHT_PACKAGE`/`PLAYWRIGHT_MODULE_PATH`): Now **100% automated** via intelligent client and system binary discovery.
 > - **Remote Browser Endpoint** (`PLAYWRIGHT_WS_ENDPOINT`): Unified into standard `PLAYWRIGHT_CDP_ENDPOINT`.
 > - **Emoji Switch** (`OPEN_WEBSEARCH_NO_EMOJI`): Automatic console code page detection smoothly falls back to ASCII tags on legacy terminals.
@@ -281,6 +312,8 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 
 ---
 
+<a id="development"></a>
+
 ## 🤝 Contributing & Tests
 
 Pull requests and issues are welcome! To run the test suite locally:
@@ -288,7 +321,7 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run 255 Vitest unit tests (33 test suites, fast & deterministic)
+npm test              # Run the Vitest suite (38 files, 315 tests at the current baseline)
 npm run test:live     # Run bounded-concurrency live integration tests
 npm run eval:live     # Run 22-case live STDIO JSON-RPC evaluation suite
 ```

@@ -17,6 +17,10 @@
 
 ---
 
+> **一套服务，四种用法：** 通过 MCP 接入 AI 客户端、用 CLI 执行一次性检索、启动本地常驻 Daemon，或在上线前使用内置诊断工具检查网络与浏览器。
+
+**快速跳转：** [快速接入](#quick-start) · [MCP 工具](#mcp-tools) · [CLI](#cli) · [配置](#configuration) · [诊断](#diagnostics) · [开发测试](#development)
+
 ## ✨ 核心特性
 
 `my-websearch` 是专为 AI Agent（Claude Desktop、Cursor、Cherry Studio、Windsurf、Cline、ZCode 等）打造的**全栈联网检索与技术文档基础设施**。无需付费 API Key，开箱即用：
@@ -88,6 +92,8 @@ flowchart TB
 
 ---
 
+<a id="mcp-tools"></a>
+
 ## 🛠️ 7 大 MCP 工具
 
 | 工具名称 | 功能定位 | 关键特性 |
@@ -101,6 +107,8 @@ flowchart TB
 | **`fetchJuejinArticle`** | 抓取稀土掘金技术长文 | 直调官方接口，传 `format: "markdown"` 完整保留代码高亮围栏与 GFM 表格 |
 
 ---
+
+<a id="quick-start"></a>
 
 ## 🚀 快速接入
 
@@ -154,9 +162,11 @@ npx -y my-websearch@latest
 
 ---
 
+<a id="cli"></a>
+
 ## 💻 CLI 命令行与常驻 Daemon
 
-`my-websearch` 可直接在终端作为高效的 CLI 工具或系统 Daemon 运行：
+`my-websearch` 可直接在终端作为 CLI 工具或本地常驻 Daemon 运行。自动化场景建议统一使用 `--json`，除非明确需要远程访问，否则请保持服务监听在 `127.0.0.1`：
 
 ```bash
 # 全局安装
@@ -179,6 +189,27 @@ my-websearch cache-clear
 ```
 
 ---
+
+<a id="diagnostics"></a>
+
+## 🩺 诊断与排障
+
+遇到代理、浏览器或引擎问题时，先使用内置 doctor：
+
+```bash
+# 检查本地配置与浏览器
+my-websearch doctor
+
+# 执行真实代理/引擎探测（会访问上游服务）
+my-websearch doctor --network
+
+# 只探测指定引擎，并输出 JSON
+my-websearch doctor --network --engine bing,duckduckgo --json
+```
+
+报告会区分配置状态、代理 TCP 连通性、HTTP 连通性、应用层解析、浏览器启动和反爬挑战。网络模式会发起真实请求，不建议高频执行。
+
+<a id="configuration"></a>
 
 ## ⚙️ 配置中心与环境变量
 
@@ -272,7 +303,7 @@ my-websearch cache-clear
 | `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | 自定义 GitHub README 工具在 MCP 中的注册名称 |
 
 > 💡 **零配置升级说明（已精简移除的冗余变量）**：
-> - **CORS 跨域开关**（`ENABLE_CORS`/`CORS_ORIGIN`）：HTTP 模式现已**内置放行标准安全跨域（`*`）**，无需手动开启。
+> - **CORS 跨域开关**（`ENABLE_CORS`/`CORS_ORIGIN`）：默认**关闭 CORS**；仅在浏览器跨域调用时显式开启，并限制允许来源。
 > - **Playwright 包选择**（`PLAYWRIGHT_PACKAGE`/`PLAYWRIGHT_MODULE_PATH`）：现已实现**100% 自动探测**系统自带浏览器与已装包。
 > - **远程调试端点**（`PLAYWRIGHT_WS_ENDPOINT`）：统一收敛为标准 `PLAYWRIGHT_CDP_ENDPOINT`。
 > - **Emoji 开关**（`OPEN_WEBSEARCH_NO_EMOJI`）：代码页自动探测（非 UTF-8 自动平滑降级为 ASCII 标签），不再需要开关。
@@ -281,6 +312,8 @@ my-websearch cache-clear
 
 ---
 
+<a id="development"></a>
+
 ## 🤝 参与开发与测试
 
 欢迎提交 Issue 与 Pull Request！本地开发与测试命令：
@@ -288,7 +321,7 @@ my-websearch cache-clear
 ```bash
 npm install
 npm run build
-npm test              # 执行 255 个 Vitest 纯单元测试（33 个套件，秒级完成且 100% 确定性）
+npm test              # 执行 Vitest 测试套件（当前基线：38 个文件、315 个测试）
 npm run test:live     # 执行外网有界并发实时集成测试
 npm run eval:live     # 执行 22 用例真实 STDIO JSON-RPC 评测套件
 ```
