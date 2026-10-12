@@ -16,7 +16,29 @@ export type PaginateSearchOptions<T> = {
     pageDelayMs?: [number, number];
     /** 可选去重键提取函数（如 (res) => res.url），跨页自动过滤重复项 */
     dedupKey?: (item: T) => string;
+    /** 可选取消信号：触发时立即停止后续分页请求 */
+    signal?: AbortSignal;
 };
+
+function delayWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+    if (ms <= 0) {
+        return Promise.resolve();
+    }
+    if (signal?.aborted) {
+        return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('Pagination aborted'));
+    }
+    return new Promise<void>((resolve, reject) => {
+        const onAbort = () => {
+            clearTimeout(timer);
+            reject(signal?.reason instanceof Error ? signal.reason : new Error('Pagination aborted'));
+        };
+        const timer = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, ms);
+        signal?.addEventListener('abort', onAbort, { once: true });
+    });
+}
 
 export async function paginateSearch<T>(options: PaginateSearchOptions<T>): Promise<T[]> {
     const {
@@ -26,7 +48,8 @@ export async function paginateSearch<T>(options: PaginateSearchOptions<T>): Prom
         pageStep = 1,
         maxPages = 10,
         pageDelayMs,
-        dedupKey
+        dedupKey,
+        signal
     } = options;
 
     const allResults: T[] = [];
@@ -37,10 +60,13 @@ export async function paginateSearch<T>(options: PaginateSearchOptions<T>): Prom
     let page = initialPage;
 
     for (let pageIndex = 0; pageIndex < maxPages && allResults.length < limit; pageIndex += 1) {
+        if (signal?.aborted) {
+            throw signal.reason instanceof Error ? signal.reason : new Error('Pagination aborted');
+        }
         if (pageDelayMs && pageIndex > 0) {
             const [min, max] = pageDelayMs;
             const delay = min + Math.random() * (max - min);
-            await new Promise((resolve) => setTimeout(resolve, delay));
+            await delayWithSignal(delay, signal);
         }
 
         const results = await fetchPage(page);

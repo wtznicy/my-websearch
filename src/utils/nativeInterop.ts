@@ -1,5 +1,6 @@
 import { closeSync, openSync } from 'fs';
 import { createRequire } from 'module';
+import { AppError } from '../core/errors.js';
 
 const esmRequire = createRequire(import.meta.url);
 
@@ -11,7 +12,11 @@ let _koffi: typeof import('koffi') | undefined;
 let _koffiLoadFailed = false;
 function koffi(): typeof import('koffi') {
     if (_koffiLoadFailed) {
-        throw new Error('koffi native module is unavailable (optional dependency not installed); native file locks disabled');
+        throw new AppError({
+            code: 'missing_optional_dependency',
+            retryable: false,
+            message: 'koffi native module is unavailable (optional dependency not installed); native file locks disabled'
+        });
     }
     if (!_koffi) {
         try {
@@ -19,14 +24,22 @@ function koffi(): typeof import('koffi') {
         } catch (error) {
             _koffiLoadFailed = true;
             console.warn(`koffi native module unavailable (${error instanceof Error ? error.message : String(error)}); native file locks will be no-ops`);
-            throw new Error('koffi native module is unavailable (optional dependency not installed); native file locks disabled');
+            throw new AppError({
+                code: 'missing_optional_dependency',
+                retryable: false,
+                cause: error,
+                message: 'koffi native module is unavailable (optional dependency not installed); native file locks disabled'
+            });
         }
     }
     return _koffi!;
 }
 
 function isKoffiUnavailable(error: unknown): boolean {
-    return error instanceof Error && error.message.includes('koffi native module is unavailable');
+    return error instanceof Error && (
+        (error as { code?: string }).code === 'missing_optional_dependency'
+        || error.message.includes('koffi native module is unavailable')
+    );
 }
 
 // ===== Windows kernel32/user32 绑定（延迟初始化） =====

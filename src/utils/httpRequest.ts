@@ -11,6 +11,7 @@ import { assertPublicHttpUrlResolved, isPrivateOrLocalHostname } from './urlSafe
 import { cachedDnsLookup, peekCachedLookup } from './dnsCache.js';
 import { getSystemProxyFallbackUrl } from './systemProxy.js';
 import { metrics } from '../core/metrics.js';
+import { AppError } from '../core/errors.js';
 
 // 默认请求超时：调用方未显式传 timeout 时使用，避免引擎请求永不超时拖垮整个搜索。
 export const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
@@ -45,6 +46,7 @@ type BuildAxiosRequestOptions = {
     // 强制直连（不走代理）：用于国内站点网页抓取——全局 USE_PROXY 会拖累 .cn 等
     // 国内目标（代理一挂国内抓取全挂），国内站点直连、海外才走代理。
     forceDirect?: boolean;
+    signal?: AbortSignal;
 };
 
 /**
@@ -176,7 +178,8 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         timeout = DEFAULT_REQUEST_TIMEOUT_MS,
         trustedStaticHost = false,
         validateStatus,
-        forceDirect = false
+        forceDirect = false,
+        signal
     } = options;
 
     const requestOptions: AxiosRequestConfig = {
@@ -188,6 +191,9 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
     }
     if (timeout !== undefined) {
         requestOptions.timeout = timeout;
+    }
+    if (signal !== undefined) {
+        requestOptions.signal = signal;
     }
     const effectiveMaxRedirects = trustedStaticHost ? 0 : maxRedirects;
     if (effectiveMaxRedirects !== undefined) {
@@ -218,14 +224,22 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
     requestOptions.beforeRedirect = (opts) => {
         const target = (opts.hostname ?? opts.host) as string | undefined;
         if (target && isPrivateOrLocalHostname(target)) {
-            throw new Error('Redirect target points to a private or local network address');
+            throw new AppError({
+                code: 'redirect_not_allowed',
+                retryable: false,
+                message: 'Redirect target points to a private or local network address'
+            });
         }
         // 若该 hostname 的解析结果已在 DNS 缓存中且解析到私网地址，同步拦截
         // （覆盖"重定向到域名、而该域名此前已解析到私网 IP"的场景，不发起新 DNS 查询）
         if (target) {
             const cachedAddresses = peekCachedLookup(target);
             if (cachedAddresses && cachedAddresses.some((address) => isPrivateOrLocalHostname(address))) {
-                throw new Error(`Redirect target "${target}" resolves to a private or local network address (cached DNS)`);
+                throw new AppError({
+                    code: 'redirect_not_allowed',
+                    retryable: false,
+                    message: `Redirect target "${target}" resolves to a private or local network address (cached DNS)`
+                });
             }
         }
     };
@@ -247,16 +261,28 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
             // 安全断言：该组合会关闭 TLS 证书校验，只允许用于显式声明的固定可信域名，
             // 防止未来某段代码把用户输入的 URL 传入（中间人/降级攻击面）。
             if (!options.requestUrl) {
-                throw new Error('allowInsecureTls + trustedStaticHost requires an explicit requestUrl for the trusted-host whitelist check');
+                throw new AppError({
+                    code: 'invalid_config',
+                    retryable: false,
+                    message: 'allowInsecureTls + trustedStaticHost requires an explicit requestUrl for the trusted-host whitelist check'
+                });
             }
             let host: string;
             try {
                 host = new URL(options.requestUrl).hostname.toLowerCase();
             } catch {
-                throw new Error(`allowInsecureTls + trustedStaticHost: invalid requestUrl "${options.requestUrl}"`);
+                throw new AppError({
+                    code: 'invalid_config',
+                    retryable: false,
+                    message: `allowInsecureTls + trustedStaticHost: invalid requestUrl "${options.requestUrl}"`
+                });
             }
             if (!TRUSTED_INSECURE_HOSTS.has(host)) {
-                throw new Error(`allowInsecureTls + trustedStaticHost is not allowed for host "${host}". Allowed hosts: ${[...TRUSTED_INSECURE_HOSTS].join(', ')}`);
+                throw new AppError({
+                    code: 'invalid_config',
+                    retryable: false,
+                    message: `allowInsecureTls + trustedStaticHost is not allowed for host "${host}". Allowed hosts: ${[...TRUSTED_INSECURE_HOSTS].join(', ')}`
+                });
             }
             // 审计日志：TLS 白名单实际触发时记录，便于安全审计
             metrics.recordSecurityEvent({
@@ -283,6 +309,37 @@ export function __setAxiosRequestForTests(impl?: AxiosRequestFn): void {
     axiosRequestImpl = impl ?? ((config) => axios.request(config));
 }
 
+function createAbortError(signal: AbortSignal): Error {
+    return signal.reason instanceof Error
+        ? signal.reason
+        : new AppError({ code: 'aborted', retryable: false, message: 'Request aborted' });
+}
+
+function requestWithSignal<T>(signal: AbortSignal | undefined, fn: () => Promise<T>): Promise<T> {
+    if (!signal) {
+        return fn();
+    }
+    if (signal.aborted) {
+        return Promise.reject(createAbortError(signal));
+    }
+    return new Promise<T>((resolve, reject) => {
+        const onAbort = () => {
+            reject(createAbortError(signal));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        fn().then(
+            (val) => {
+                signal.removeEventListener('abort', onAbort);
+                resolve(val);
+            },
+            (err) => {
+                signal.removeEventListener('abort', onAbort);
+                reject(err);
+            }
+        );
+    });
+}
+
 /** 网络层错误判定（超时/连接拒绝/重置/不可达/DNS 失败等）；HTTP 状态类错误不算 */
 export function isNetworkLayerError(message: string): boolean {
     return /ECONNREFUSED|ECONNRESET|ETIMEDOUT|ESOCKETTIMEDOUT|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ENOTFOUND|socket hang up|network timeout|network error|fetch failed|ERR_NETWORK|timeout of \d+ms/i.test(message);
@@ -302,9 +359,13 @@ export async function requestDirectFirst(
     buildOptions: (forceDirect: boolean) => AxiosRequestConfig,
     urlLabel: string = 'Request URL'
 ): Promise<AxiosResponse> {
+    const directOptions = buildOptions(true);
     try {
-        return await requestWithSafeRedirects(method, url, buildOptions(true), urlLabel);
+        return await requestWithSafeRedirects(method, url, directOptions, urlLabel);
     } catch (directError) {
+        if (directOptions.signal?.aborted) {
+            throw directError;
+        }
         const message = directError instanceof Error ? directError.message : String(directError);
         if (!isNetworkLayerError(message)) {
             throw directError;
@@ -316,10 +377,12 @@ export async function requestDirectFirst(
                 throw hintProxyConnectionError(proxyError);
             }
         }
-        throw new Error(
-            `${message} | Hint: 直连失败——目标站点可能无法从当前网络直接访问；可开启代理（USE_PROXY=true + PROXY_URL，如 http://127.0.0.1:7890）后重试`,
-            directError instanceof Error ? { cause: directError } : undefined
-        );
+        throw new AppError({
+            code: 'network_error',
+            retryable: true,
+            cause: directError,
+            message: `${message} | Hint: 直连失败——目标站点可能无法从当前网络直接访问；可开启代理（USE_PROXY=true + PROXY_URL，如 http://127.0.0.1:7890）后重试`
+        });
     }
 }
 
@@ -334,12 +397,20 @@ export async function requestWithSafeRedirects(
 ): Promise<AxiosResponse> {
     const maxRedirects = options.maxRedirects ?? 5;
     const validateStatus = options.validateStatus ?? ((s: number) => s >= 200 && s < 300);
+    const signal = options.signal as AbortSignal | undefined;
     let currentUrl = initialUrl;
 
     for (let hops = 0; hops <= maxRedirects; hops++) {
+        if (signal?.aborted) {
+            throw createAbortError(signal);
+        }
         await assertPublicHttpUrlResolved(currentUrl, hops === 0 ? urlLabel : 'Redirect target');
 
-        const response = await axiosRequestImpl({
+        if (signal?.aborted) {
+            throw createAbortError(signal);
+        }
+
+        const response = await requestWithSignal(signal, () => axiosRequestImpl({
             ...options,
             method,
             url: currentUrl,
@@ -347,7 +418,7 @@ export async function requestWithSafeRedirects(
             // Accept 3xx here so we can inspect Location; caller's validateStatus
             // is re-applied to the final non-3xx response below.
             validateStatus: (s) => s >= 200 && s < 400,
-        });
+        }));
 
         const location = response.status >= 300 && response.status < 400
             ? response.headers?.location
@@ -378,5 +449,9 @@ export async function requestWithSafeRedirects(
         return response;
     }
 
-    throw new Error(`Too many redirects (max ${maxRedirects})`);
+    throw new AppError({
+        code: 'redirect_not_allowed',
+        retryable: false,
+        message: `Too many redirects (max ${maxRedirects})`
+    });
 }

@@ -8,7 +8,7 @@ import { sleep } from '../../utils/timing.js';
 import { mapWithConcurrencyBudget } from '../../utils/concurrency.js';
 import { impersonateHttpGet } from '../../utils/impersonateRequest.js';
 import { paginateSearch } from '../../utils/pagination.js';
-import { markNonRetryable } from '../../core/errors.js';
+import { AppError, isAppError, markNonRetryable } from '../../core/errors.js';
 import { extractMetaOrJsRedirect } from '../../utils/redirectResolver.js';
 
 const SOGOU_SEARCH_URL = 'https://www.sogou.com/web';
@@ -166,11 +166,16 @@ function mergeSetCookie(cookieHeader: string, setCookie: string | string[] | und
     return Array.from(cookieMap.values()).join('; ');
 }
 
-async function fetchSogouHtml(initialUrl: string): Promise<string> {
+async function fetchSogouHtml(initialUrl: string, signal?: AbortSignal): Promise<string> {
     let currentUrl = initialUrl;
     let cookieHeader = '';
 
     for (let redirects = 0; redirects <= 5; redirects += 1) {
+        if (signal?.aborted) {
+            throw signal.reason instanceof Error
+                ? signal.reason
+                : new AppError({ code: 'aborted', retryable: false, engine: 'sogou', message: 'Request aborted' });
+        }
         const response = await sogouHttpGet(currentUrl, buildAxiosRequestOptions({ engine: 'sogou',
             trustedStaticHost: true,
             headers: {
@@ -178,6 +183,7 @@ async function fetchSogouHtml(initialUrl: string): Promise<string> {
                 ...(cookieHeader ? { Cookie: cookieHeader } : {})
             },
             timeout: 20000,
+            signal,
             validateStatus: (status) => status >= 200 && status < 400
         }));
 
@@ -186,12 +192,23 @@ async function fetchSogouHtml(initialUrl: string): Promise<string> {
         if (response.status >= 300 && response.status < 400) {
             const location = response.headers?.location;
             if (!location) {
-                throw new Error(`Sogou returned redirect status ${response.status} without a Location header`);
+                throw new AppError({
+                    code: 'upstream_response_invalid',
+                    retryable: true,
+                    status: response.status,
+                    engine: 'sogou',
+                    message: `Sogou returned redirect status ${response.status} without a Location header`
+                });
             }
 
             const redirectUrl = new URL(String(location), currentUrl);
             if (!isAllowedSogouRedirectUrl(redirectUrl)) {
-                throw new Error(`Sogou redirected to an unexpected host: ${redirectUrl.hostname}`);
+                throw new AppError({
+                    code: 'redirect_not_allowed',
+                    retryable: false,
+                    engine: 'sogou',
+                    message: `Sogou redirected to an unexpected host: ${redirectUrl.hostname}`
+                });
             }
             currentUrl = redirectUrl.toString();
             continue;
@@ -200,11 +217,16 @@ async function fetchSogouHtml(initialUrl: string): Promise<string> {
         return String(response.data || '');
     }
 
-    throw new Error('Sogou returned too many redirects');
+    throw new AppError({
+        code: 'redirect_not_allowed',
+        retryable: false,
+        engine: 'sogou',
+        message: 'Sogou returned too many redirects'
+    });
 }
 
 /** 请求搜狗移动端结果页（独立于 PC 端路径：移动端风控宽松，不需要指纹，明文 URL 免跳转） */
-async function fetchSogouMobileHtml(query: string, page: number = 1): Promise<string> {
+async function fetchSogouMobileHtml(query: string, page: number = 1, signal?: AbortSignal): Promise<string> {
     const pageParam = page > 1 ? `&p=${page}` : '';
     const url = `${SOGOU_MOBILE_URL}?keyword=${encodeURIComponent(query)}${pageParam}`;
     const response = await sogouHttpGet(url, buildAxiosRequestOptions({ engine: 'sogou',
@@ -215,6 +237,7 @@ async function fetchSogouMobileHtml(query: string, page: number = 1): Promise<st
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
         },
         timeout: 15000,
+        signal,
         validateStatus: (status) => status >= 200 && status < 400
     }));
     return String(response.data || '');
@@ -227,7 +250,12 @@ async function fetchSogouMobileHtml(query: string, page: number = 1): Promise<st
  */
 export function parseSogouMobileResults(html: string): SearchResult[] {
     if (isSogouChallengePage(html)) {
-        throw new Error('Sogou returned a verification or anti-bot page');
+        throw new AppError({
+            code: 'bot_challenge',
+            retryable: false,
+            engine: 'sogou',
+            message: 'Sogou returned a verification or anti-bot page'
+        });
     }
 
     const $ = cheerio.load(html);
@@ -288,7 +316,12 @@ export function parseSogouMobileResults(html: string): SearchResult[] {
 
 export function parseSogouSearchResults(html: string): SearchResult[] {
     if (isSogouChallengePage(html)) {
-        throw new Error('Sogou returned a verification or anti-bot page');
+        throw new AppError({
+            code: 'bot_challenge',
+            retryable: false,
+            engine: 'sogou',
+            message: 'Sogou returned a verification or anti-bot page'
+        });
     }
 
     const $ = cheerio.load(html);
@@ -337,7 +370,7 @@ export function parseSogouSearchResults(html: string): SearchResult[] {
     return results;
 }
 
-async function searchSogouPage(query: string, page: number): Promise<SearchResult[]> {
+async function searchSogouPage(query: string, page: number, signal?: AbortSignal): Promise<SearchResult[]> {
     const url = new URL(SOGOU_SEARCH_URL);
     url.searchParams.set('query', query);
     url.searchParams.set('page', String(page));
@@ -345,24 +378,31 @@ async function searchSogouPage(query: string, page: number): Promise<SearchResul
 
     let parsed: SearchResult[];
     try {
-        parsed = parseSogouSearchResults(await fetchSogouHtml(url.toString()));
+        parsed = parseSogouSearchResults(await fetchSogouHtml(url.toString(), signal));
     } catch (error) {
+        if (signal?.aborted) {
+            throw error;
+        }
         // 反爬降级：命中验证页时等待 0.5~1 秒重试一次（给服务端一次冷却机会），
         // 仍失败才向上抛（由 searchService 的 partialFailures/级联换引擎接管）
         const message = error instanceof Error ? error.message : String(error);
-        if (!/anti-bot|verification/i.test(message)) {
+        const isChallenge = (isAppError(error) && error.code === 'bot_challenge') || /anti-bot|verification/i.test(message);
+        if (!isChallenge) {
             throw error;
         }
         console.warn('Sogou returned an anti-bot page, retrying once after a short delay');
         // 0.5~1s：重试需重跑多跳 fetch（含 cookie 管理），等待过长会与重试成本叠加
         await sleep(500 + Math.random() * 500);
+        if (signal?.aborted) {
+            throw signal.reason instanceof Error ? signal.reason : new Error('Request aborted');
+        }
         try {
-            parsed = parseSogouSearchResults(await fetchSogouHtml(url.toString()));
+            parsed = parseSogouSearchResults(await fetchSogouHtml(url.toString(), signal));
         } catch (retryError) {
             // 引擎内已重试过一次：最终失败标记不可重试，避免 searchService 再叠加 3 次重试
             // （否则 3 × ~4.5s 会吃满 10s 上限报 timeout，而不是快速失败交级联补位）
             const finalError = retryError instanceof Error ? retryError : new Error(String(retryError));
-            markNonRetryable(finalError);
+            markNonRetryable(finalError, 'bot_challenge');
             throw finalError;
         }
     }
@@ -396,7 +436,8 @@ let sogouPcBlockedUntil = 0;
  * - 移动端（WAP 集群）：风控宽松、响应快（~1.5s）、自带明文真实目标 URL（无需跟随 PC 端跳转链消耗 2~3s）。
  * - 移动端优先抓取并支持分页；仅在移动端结果不足或遇到异常时，才调用 PC 端补充/兜底。
  */
-export async function searchSogou(query: string, limit: number): Promise<SearchResult[]> {
+export async function searchSogou(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
+    const signal = options?.signal;
     const allResults: SearchResult[] = [];
     const seenUrls = new Set<string>();
 
@@ -421,8 +462,9 @@ export async function searchSogou(query: string, limit: number): Promise<SearchR
             limit,
             initialPage: 1,
             pageStep: 1,
+            signal,
             fetchPage: async (page) => {
-                const html = await fetchSogouMobileHtml(query, page);
+                const html = await fetchSogouMobileHtml(query, page, signal);
                 return parseSogouMobileResults(html);
             },
             dedupKey: (result) => result.url
@@ -431,20 +473,24 @@ export async function searchSogou(query: string, limit: number): Promise<SearchR
             merge(mobileResults);
         }
     } catch (error) {
+        if (signal?.aborted) {
+            throw error;
+        }
         lastError = error;
         console.warn('Sogou mobile endpoint failed, will attempt PC fallback:', error instanceof Error ? error.message : String(error));
     }
 
     // ② PC 端兜底与补全（仅在移动端结果未满足 limit 且 PC 端未处于拦截暂停期时调用）
-    if (allResults.length < limit && Date.now() >= sogouPcBlockedUntil) {
+    if (allResults.length < limit && Date.now() >= sogouPcBlockedUntil && !signal?.aborted) {
         try {
             const needed = limit - allResults.length;
             const pcResults = await paginateSearch({
                 limit: needed,
                 initialPage: 1,
                 pageStep: 1,
+                signal,
                 fetchPage: async (page) => {
-                    return await searchSogouPage(query, page);
+                    return await searchSogouPage(query, page, signal);
                 },
                 dedupKey: (result) => result.url
             });

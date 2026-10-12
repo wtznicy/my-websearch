@@ -10,6 +10,7 @@ import { pickDefaultEnginesForQuery } from '../../core/search/queryEngineRouting
 import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { mergeMultiQueryResults, mergeEngineMetricsAcrossQueries } from '../../core/search/multiQuery.js';
 import { rankSearchResults } from '../../core/search/resultRanking.js';
+import { computeSearchOutcome } from '../../core/search/searchService.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { isContext7QuotaExhausted, setContext7QuotaListener } from '../../engines/context7/context7.js';
 import {
@@ -150,6 +151,8 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                 const allEngines = [...new Set(executed.flatMap((one) => one.engines))];
                 const allCascadedEngines = [...new Set(executed.flatMap((one) => one.cascadedEngines ?? []))];
                 const allMetrics = mergeEngineMetricsAcrossQueries(executed.map((one) => one.engineMetrics));
+                const directAnswer = executed.find((one) => one.directAnswer)?.directAnswer;
+                const { outcome, retryable } = computeSearchOutcome(mergedResults.length, failures, directAnswer);
                 return {
                     content: [{
                         type: 'text',
@@ -160,17 +163,18 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                                     queryEngines: queryList.map((q, index) => ({ query: q, engines: executed[index]?.engines ?? [] }))
                                 }
                                 : { query: queryList[0] ?? '' }),
+                            outcome,
+                            retryable,
                             engines: allEngines,
                             ...(allCascadedEngines.length > 0 ? { cascadedEngines: allCascadedEngines } : {}),
                             totalResults: mergedResults.length,
                             results: mergedResults,
                             partialFailures: failures,
-                            ...(executed.find((one) => one.directAnswer)?.directAnswer
-                                ? { directAnswer: executed.find((one) => one.directAnswer)!.directAnswer }
-                                : {}),
+                            ...(directAnswer ? { directAnswer } : {}),
                             ...(allMetrics.length > 0 ? { engineMetrics: allMetrics } : {})
                         })
-                    }]
+                    }],
+                    ...(outcome === 'failed' ? { isError: true } : {})
                 };
             } catch (error) {
                 logSafeError('Search tool execution failed', error);

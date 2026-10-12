@@ -3,6 +3,7 @@ import { config, getProxyUrl } from '../config.js';
 import { prepareStealthPage, getStealthUserAgent } from './browserStealth.js';
 import { openPlaywrightBrowser, loadPlaywrightClient } from './playwrightClient.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from './urlSafety.js';
+import { AppError } from '../core/errors.js';
 
 import { DEFAULT_DESKTOP_UA } from './userAgents.js';
 
@@ -237,7 +238,16 @@ async function readCookiesFromPage(page: CookiePage, url: string): Promise<strin
     return '';
 }
 
-export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boolean = false): Promise<string | undefined> {
+export async function getBrowserCookieHeader(
+    urlInput: string,
+    forceRefresh: boolean = false,
+    signal?: AbortSignal
+): Promise<string | undefined> {
+    if (signal?.aborted) {
+        throw signal.reason instanceof Error
+            ? signal.reason
+            : new AppError({ code: 'aborted', retryable: false, message: 'Browser cookie collection aborted' });
+    }
     const url = new URL(urlInput);
     await assertPublicHttpUrlResolved(url, 'Browser cookie URL');
     const cacheKey = buildCookieCacheKey(url);
@@ -256,13 +266,27 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
 
     try {
         const { page, close } = await createCookieCollectionPage(session.browser);
+        const onAbort = () => {
+            void close().catch(() => undefined);
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
 
         try {
+            if (signal?.aborted) {
+                throw signal.reason instanceof Error
+                    ? signal.reason
+                    : new AppError({ code: 'aborted', retryable: false, message: 'Browser cookie collection aborted' });
+            }
             await installNavigationGuard(page);
             await page.goto(url.toString(), {
                 waitUntil: 'domcontentloaded',
                 timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)
             }).catch(() => undefined);
+            if (signal?.aborted) {
+                throw signal.reason instanceof Error
+                    ? signal.reason
+                    : new AppError({ code: 'aborted', retryable: false, message: 'Browser cookie collection aborted' });
+            }
             if (typeof page.waitForTimeout === 'function') {
                 await page.waitForTimeout(COOKIE_WARMUP_DELAY_MS).catch(() => undefined);
             }
@@ -279,6 +303,7 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
 
             return cookieHeader;
         } finally {
+            signal?.removeEventListener('abort', onAbort);
             await close();
         }
     } finally {
@@ -286,20 +311,41 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
     }
 }
 
-export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html: string; finalUrl: string; title: string }> {
+export async function fetchPageHtmlWithBrowser(
+    urlInput: string,
+    signal?: AbortSignal
+): Promise<{ html: string; finalUrl: string; title: string }> {
+    if (signal?.aborted) {
+        throw signal.reason instanceof Error
+            ? signal.reason
+            : new AppError({ code: 'aborted', retryable: false, message: 'Browser HTML fetch aborted' });
+    }
     await assertPublicHttpUrlResolved(urlInput, 'Browser fetch URL');
 
     const playwright = await loadPlaywrightClient({ silent: true });
     if (!playwright) {
-        throw new Error('Playwright client is not available for browser HTML fetch');
+        throw new AppError({
+            code: 'missing_optional_dependency',
+            retryable: false,
+            message: 'Playwright client is not available for browser HTML fetch'
+        });
     }
 
     const session = await openPlaywrightBrowser(true);
 
     try {
         const { page, close } = await createCookieCollectionPage(session.browser);
+        const onAbort = () => {
+            void close().catch(() => undefined);
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
 
         try {
+            if (signal?.aborted) {
+                throw signal.reason instanceof Error
+                    ? signal.reason
+                    : new AppError({ code: 'aborted', retryable: false, message: 'Browser HTML fetch aborted' });
+            }
             await installNavigationGuard(page);
             // 注入 stealth 指纹伪装，降低被 JS 反爬站点识别的概率
             await prepareStealthPage(page);
@@ -310,19 +356,31 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
                 await page.waitForTimeout(humanDelay).catch(() => undefined);
             }
 
+            if (signal?.aborted) {
+                throw signal.reason instanceof Error
+                    ? signal.reason
+                    : new AppError({ code: 'aborted', retryable: false, message: 'Browser HTML fetch aborted' });
+            }
+
             await page.goto(urlInput, {
                 waitUntil: 'domcontentloaded',
                 timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)
             });
 
-            if (typeof page.waitForLoadState === 'function') {
+            if (typeof page.waitForLoadState === 'function' && !signal?.aborted) {
                 await page.waitForLoadState('networkidle', {
                     timeout: Math.min(config.playwrightNavigationTimeoutMs, 3000)
                 }).catch(() => undefined);
             }
 
-            if (typeof page.waitForTimeout === 'function') {
+            if (typeof page.waitForTimeout === 'function' && !signal?.aborted) {
                 await page.waitForTimeout(COOKIE_WARMUP_DELAY_MS).catch(() => undefined);
+            }
+
+            if (signal?.aborted) {
+                throw signal.reason instanceof Error
+                    ? signal.reason
+                    : new AppError({ code: 'aborted', retryable: false, message: 'Browser HTML fetch aborted' });
             }
 
             const html = typeof page.content === 'function' ? await page.content() : '';
@@ -335,9 +393,11 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
                 title: String(title || '')
             };
         } finally {
+            signal?.removeEventListener('abort', onAbort);
             await close();
         }
     } finally {
         await session.release();
     }
 }
+

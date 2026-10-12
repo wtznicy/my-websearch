@@ -11,6 +11,12 @@
  * - SECURITY_AUDIT=true 启用安全审计日志（默认 false）
  */
 
+import {
+    getErrorClassificationMetrics,
+    resetErrorClassificationMetrics,
+    type ErrorClassificationMetrics
+} from './errors.js';
+
 export type LogLevel = 'quiet' | 'debug' | 'info' | 'warn' | 'error';
 
 export type MetricEvent = {
@@ -227,6 +233,7 @@ class MetricsCollector {
         engines: Record<string, { total: number; success: number; failure: number; avgDurationMs: number }>;
         cache: { hits: number; misses: number; hitRate: number };
         windowed?: Record<string, SlidingWindowEngineStats>;
+        errorClassification: ErrorClassificationMetrics;
     } {
         const engines: Record<string, { total: number; success: number; failure: number; avgDurationMs: number }> = {};
 
@@ -247,7 +254,8 @@ class MetricsCollector {
                 misses: this.cacheMetrics.misses,
                 hitRate: totalCache > 0 ? Math.round((this.cacheMetrics.hits / totalCache) * 100) : 0
             },
-            windowed: this.getWindowedMetrics()
+            windowed: this.getWindowedMetrics(),
+            errorClassification: getErrorClassificationMetrics()
         };
     }
 
@@ -255,6 +263,7 @@ class MetricsCollector {
         this.engineMetrics.clear();
         this.engineSamples.clear();
         this.cacheMetrics = { hits: 0, misses: 0 };
+        resetErrorClassificationMetrics();
     }
 
     /**
@@ -303,6 +312,13 @@ class MetricsCollector {
         push('# HELP mywebsearch_cache_hit_rate_percent Search cache hit rate in percent');
         push('# TYPE mywebsearch_cache_hit_rate_percent gauge');
         push(`mywebsearch_cache_hit_rate_percent ${snapshot.cache.hitRate}`);
+
+        push('# HELP mywebsearch_structured_error_rate Structured AppError classification ratio (0 to 1)');
+        push('# TYPE mywebsearch_structured_error_rate gauge');
+        push(`mywebsearch_structured_error_rate ${snapshot.errorClassification.structured_error_rate}`);
+        push('# HELP mywebsearch_legacy_error_fallback_rate Legacy string-fallback classification ratio (0 to 1)');
+        push('# TYPE mywebsearch_legacy_error_fallback_rate gauge');
+        push(`mywebsearch_legacy_error_fallback_rate ${snapshot.errorClassification.legacy_error_fallback_rate}`);
 
         // 进程基础指标（便于确认进程存活与内存占用）
         const memory = process.memoryUsage();

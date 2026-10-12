@@ -1,4 +1,4 @@
-import { SupportedSearchEngine, normalizeEngineName, resolveRequestedEngines } from '../core/search/searchEngines.js';
+import { SUPPORTED_SEARCH_ENGINES, SupportedSearchEngine, normalizeEngineName, resolveRequestedEngines } from '../core/search/searchEngines.js';
 import { pickDefaultEnginesForQuery } from '../core/search/queryEngineRouting.js';
 import { isKnownUnreachableOverseasEngine } from '../utils/overseasProbe.js';
 import { MyWebSearchRuntime } from '../runtime/runtimeTypes.js';
@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { AppConfig } from '../config.js';
 import { ErrorCode } from '../core/errors.js';
+import { buildDoctorReport, formatDoctorHumanReadable } from './doctor.js';
 
 export type CliIo = {
     stdout: (text: string) => void;
@@ -35,6 +36,7 @@ const COMMANDS_REQUIRING_RUNTIME = new Set([
     'fetch-csdn',
     'fetch-juejin',
     'cache-clear',
+    'doctor',
     'serve'
 ]);
 
@@ -58,11 +60,13 @@ function formatCliHelp(): string {
     return [
         'my-websearch CLI',
         '',
-        'Daemon control:',
+        'Daemon control & diagnostics:',
         '  my-websearch serve [--host HOST] [--port PORT]',
         '    Start the local daemon in the foreground.',
         '  my-websearch status [--base-url URL] [--json]',
         '    Check daemon status. `status` uses --base-url, not --daemon-url.',
+        '  my-websearch doctor [--network] [--browser] [--engine a,b] [--json]',
+        '    Inspect effective configuration, config sources, proxy connectivity, browser availability/launch, and engine status (with secrets masked).',
         '',
         'One-shot action commands:',
         '  my-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--min-results N] [--daemon-url URL] [--spawn] [--json]',
@@ -520,6 +524,7 @@ export function parseServeArgs(argv: string[]): ParsedServeArgs {
 function formatSearchHumanReadable(result: Awaited<ReturnType<MyWebSearchRuntime['services']['search']['execute']>>): string {
     const lines = [
         `Search completed for "${result.query}"`,
+        `Outcome: ${result.outcome ?? 'ok'}`,
         `Engines: ${result.engines.join(', ')}`,
         `Results: ${result.totalResults}`
     ];
@@ -941,6 +946,33 @@ export async function runCli(
                 minResults: parsed.minResults
             });
 
+            if (result.outcome === 'failed') {
+                const failureSummary = result.partialFailures
+                    .map((failure) => `${failure.engine}: ${failure.message}`)
+                    .join('; ') || 'All search engines failed';
+                const hint = 'Retry with a different engine (`--engine` / `engines`), inspect proxy/network status with `my-websearch doctor`, or try again later.';
+                if (parsed.json) {
+                    io.stdout(JSON.stringify(createErrorEnvelope(
+                        ErrorCode.ENGINE_ERROR,
+                        failureSummary,
+                        {
+                            retryable: result.retryable ?? true,
+                            data: result,
+                            details: {
+                                outcome: result.outcome,
+                                engines: result.engines,
+                                partialFailures: result.partialFailures
+                            },
+                            hint
+                        }
+                    ), null, 2));
+                } else {
+                    io.stderr(`Search failed for "${result.query}" (retryable: ${result.retryable ? 'yes' : 'no'}): ${failureSummary}`);
+                    io.stderr(hint);
+                }
+                return 1;
+            }
+
             if (parsed.json) {
                 io.stdout(JSON.stringify(createSuccessEnvelope(result), null, 2));
             } else {
@@ -957,6 +989,85 @@ export async function runCli(
                 ), null, 2));
             } else {
                 io.stderr(`${getDaemonCliErrorLabel(error, 'Search failed')}: ${message}`);
+            }
+            return 1;
+        }
+    }
+
+    if (command === 'doctor') {
+        let json = false;
+        let network = false;
+        let browser = false;
+        const rawEngines: string[] = [];
+        try {
+            for (let index = 0; index < rest.length; index += 1) {
+                const arg = rest[index]!;
+                if (arg === '--json') {
+                    json = true;
+                    continue;
+                }
+                if (arg === '--network') {
+                    network = true;
+                    continue;
+                }
+                if (arg === '--browser') {
+                    browser = true;
+                    continue;
+                }
+                if (arg === '--engine' || arg === '--engines') {
+                    const value = rest[index + 1];
+                    if (!value || isFlag(value)) {
+                        throw new Error(`Missing value for ${arg}`);
+                    }
+                    rawEngines.push(...value.split(',').map((item) => item.trim()).filter(Boolean));
+                    index += 1;
+                    continue;
+                }
+                if (arg.startsWith('--engine=') || arg.startsWith('--engines=')) {
+                    const [, value = ''] = arg.split('=', 2);
+                    const split = value.split(',').map((item) => item.trim()).filter(Boolean);
+                    if (split.length === 0) {
+                        throw new Error(`Missing value for ${arg.split('=', 1)[0]}`);
+                    }
+                    rawEngines.push(...split);
+                    continue;
+                }
+                throw new Error(isFlag(arg) ? `Unknown argument: ${arg}` : `Unexpected positional argument: ${arg}`);
+            }
+
+            const engines = rawEngines.length > 0
+                ? Array.from(new Set(rawEngines.map((rawEngine) => {
+                    const normalized = normalizeEngineName(rawEngine);
+                    if (!SUPPORTED_SEARCH_ENGINES.includes(normalized as SupportedSearchEngine)) {
+                        throw new Error(`Unsupported search engine: ${rawEngine}`);
+                    }
+                    return normalized;
+                })))
+                : undefined;
+
+            const report = await buildDoctorReport(runtime, {
+                version: readServerVersion(),
+                network: network || Boolean(engines && engines.length > 0),
+                browser,
+                ...(engines ? { engines } : {})
+            });
+            if (json) {
+                io.stdout(JSON.stringify(createSuccessEnvelope(report), null, 2));
+            } else {
+                io.stdout(formatDoctorHumanReadable(report));
+            }
+            return 0;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (rest.includes('--json')) {
+                io.stdout(JSON.stringify(createErrorEnvelope(
+                    ErrorCode.INVALID_ARGUMENTS,
+                    message,
+                    { hint: 'Use `my-websearch doctor [--network] [--browser] [--engine bing,baidu] [--json]`.' }
+                ), null, 2));
+            } else {
+                io.stderr(message);
+                io.stderr('Usage: my-websearch doctor [--network] [--browser] [--engine bing,baidu] [--json]');
             }
             return 1;
         }

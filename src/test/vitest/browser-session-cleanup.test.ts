@@ -5,7 +5,9 @@ import os from 'node:os';
 import {
     removeTempDirInBackground,
     createForceKill,
-    cleanOrphanTempProfilesInBackground
+    cleanOrphanTempProfilesInBackground,
+    readBrowserDomainMetadataFromPath,
+    BROWSER_METADATA_MAX_AGE_MS
 } from '../../utils/playwright/browserSession.js';
 
 function createDummyProfileDir(prefix: string, fileCount = 20): string {
@@ -103,4 +105,60 @@ describe('browserSession background cleanup and non-blocking I/O', () => {
         // 新目录应被保留
         expect(fs.existsSync(freshDir)).toBe(true);
     });
+
+    it('readBrowserDomainMetadataFromPath preserves >12h profile when browser and client PIDs are still alive', () => {
+        const profileDir = createDummyProfileDir('mcp-search-active-12h-', 2);
+        cleanupDirs.push(profileDir);
+        const metaDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-search-meta-live-'));
+        cleanupDirs.push(metaDir);
+        const metadataPath = path.join(metaDir, 'browser-session-test.json');
+
+        const expiredSavedAt = Date.now() - BROWSER_METADATA_MAX_AGE_MS - 60_000;
+        fs.writeFileSync(
+            metadataPath,
+            JSON.stringify({
+                endpoint: 'http://127.0.0.1:9222',
+                tempDir: profileDir,
+                browserPid: process.pid,
+                clientPids: [process.pid],
+                savedAt: expiredSavedAt
+            }),
+            'utf8'
+        );
+
+        const loaded = readBrowserDomainMetadataFromPath(metadataPath);
+        expect(loaded).not.toBeNull();
+        expect(loaded?.tempDir).toBe(profileDir);
+        expect(loaded?.savedAt).toBeGreaterThan(expiredSavedAt);
+        expect(fs.existsSync(profileDir)).toBe(true);
+        expect(fs.existsSync(metadataPath)).toBe(true);
+    });
+
+    it('readBrowserDomainMetadataFromPath cleans up >12h profile when browser and client PIDs are dead', async () => {
+        const profileDir = createDummyProfileDir('mcp-search-dead-12h-', 2);
+        cleanupDirs.push(profileDir);
+        const metaDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-search-meta-dead-'));
+        cleanupDirs.push(metaDir);
+        const metadataPath = path.join(metaDir, 'browser-session-dead.json');
+
+        const expiredSavedAt = Date.now() - BROWSER_METADATA_MAX_AGE_MS - 60_000;
+        fs.writeFileSync(
+            metadataPath,
+            JSON.stringify({
+                endpoint: 'http://127.0.0.1:9222',
+                tempDir: profileDir,
+                browserPid: 999999,
+                clientPids: [999998],
+                savedAt: expiredSavedAt
+            }),
+            'utf8'
+        );
+
+        const loaded = readBrowserDomainMetadataFromPath(metadataPath);
+        expect(loaded).toBeNull();
+        expect(fs.existsSync(metadataPath)).toBe(false);
+        const removed = await waitForRemoval(profileDir, 8000);
+        expect(removed).toBe(true);
+    });
 });
+

@@ -21,18 +21,19 @@ export function createSuccessEnvelope<T>(data: T): CliEnvelope<T> {
     };
 }
 
-export function createErrorEnvelope(
+export function createErrorEnvelope<T = null>(
     code: string,
     message: string,
     options: {
         retryable?: boolean;
         details?: Record<string, unknown>;
         hint?: string | null;
+        data?: T | null;
     } = {}
-): CliEnvelope<null> {
+): CliEnvelope<T> {
     return {
         status: 'error',
-        data: null,
+        data: options.data ?? null,
         error: {
             code,
             message,
@@ -42,3 +43,4 @@ export function createErrorEnvelope(
         hint: options.hint ?? null
     };
 }
+

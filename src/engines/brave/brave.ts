@@ -9,7 +9,7 @@ import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 import { tripEngineCircuit } from '../../core/search/engineCircuitBreaker.js';
 import { impersonateHttpGet } from '../../utils/impersonateRequest.js';
 import { isBraveBlockedPage } from '../../core/antiBot/antiBotDetection.js';
-import { extractErrorStatus, markNonRetryable } from '../../core/errors.js';
+import { AppError, extractErrorStatus } from '../../core/errors.js';
 export { isBraveBlockedPage };
 
 const braveHttpGet = (url: string, options: AxiosRequestConfig): Promise<AxiosResponse> =>
@@ -22,10 +22,14 @@ function buildBraveErrorMessage(error: unknown): Error {
         // 实测 429 来自 AWS CloudFront + WAF 的 IP 级限流（响应带 x-cache: Error from cloudfront）：
         // 被标记的出口 IP 在分钟级窗口内必然持续 429——标记不可重试（避免 3 次重试风暴浪费 5~8 秒）
         // 并熔断该引擎 5 分钟，让配额平移给其他引擎（见 engineCircuitBreaker）
-        const err = markNonRetryable(new Error(
-            'Brave rate limited (HTTP 429): the proxy/datacenter IP is throttled by Brave (CloudFront IP-level rate rule). ' +
-            'Circuit opened for 5 minutes; quota reallocated to other engines. Retry later or use duckduckgo/startpage.'
-        ));
+        const err = new AppError({
+            code: 'rate_limited',
+            retryable: false,
+            status: 429,
+            engine: 'brave',
+            message: 'Brave rate limited (HTTP 429): the proxy/datacenter IP is throttled by Brave (CloudFront IP-level rate rule). ' +
+                'Circuit opened for 5 minutes; quota reallocated to other engines. Retry later or use duckduckgo/startpage.'
+        });
         tripEngineCircuit('brave');
         return err;
     }
@@ -102,13 +106,15 @@ export function parseBraveResults(html: string, seenUrls: Set<string>): SearchRe
     return results;
 }
 
-export async function searchBrave(query: string, limit: number): Promise<SearchResult[]> {
+export async function searchBrave(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
+  const signal = options?.signal;
   // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂超时拖累整次搜索
   await assertOverseasEngineUsable('brave');
   const seenUrls = new Set<string>();
     const encodedQuery = encodeURIComponent(query);
     const requestOptions = buildAxiosRequestOptions({ engine: 'brave',
         trustedStaticHost: true,
+        signal,
         headers: {
             "User-Agent": BROWSER_USER_AGENT,
             "Connection": "keep-alive",
@@ -129,6 +135,7 @@ export async function searchBrave(query: string, limit: number): Promise<SearchR
 
     return paginateSearch({
         limit,
+        signal,
         fetchPage: async (pageIndex) => {
             let response;
             try {
@@ -139,7 +146,12 @@ export async function searchBrave(query: string, limit: number): Promise<SearchR
 
             // 反爬/拦截页检测：命中时抛明确错误（不再静默返回 0 条伪装成"没有结果"）
             if (isBraveBlockedPage(String(response.data || ''))) {
-                throw new Error('Brave returned a verification or anti-bot page (access denied / captcha)');
+                throw new AppError({
+                    code: 'bot_challenge',
+                    retryable: false,
+                    engine: 'brave',
+                    message: 'Brave returned a verification or anti-bot page (access denied / captcha)'
+                });
             }
 
             return parseBraveResults(String(response.data || ''), seenUrls);

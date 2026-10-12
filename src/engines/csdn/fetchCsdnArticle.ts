@@ -4,6 +4,7 @@ import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { fetchPageHtmlWithBrowser, getBrowserCookieHeader, looksLikeBotChallengePage } from '../../utils/browserCookies.js';
 import { buildAxiosRequestOptions, hintProxyConnectionError, isNetworkLayerError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { createDomesticDirectAgent, isDomesticHostname, isTlsOrWafResetError, shouldAttemptDomesticDirectRetry } from '../../utils/domesticDirectNetwork.js';
+import { AppError } from '../../core/errors.js';
 
 function normalizeExtractedText(text: string): string {
     return text
@@ -144,20 +145,47 @@ export const __csdnArticleInternals = { extractArticleContent, isPromotionParagr
  */
 const CSDN_BROWSER_FALLBACK_BUDGET_MS = 25000;
 
+function createCsdnNotFoundError(): AppError {
+    return new AppError({
+        code: 'not_found',
+        retryable: false,
+        status: 404,
+        engine: 'csdn',
+        message: 'CSDN article not found: 文章不存在或已被删除 (soft 404)'
+    });
+}
+
 function createBrowserBudget(label: string) {
-    const deadline = Date.now() + CSDN_BROWSER_FALLBACK_BUDGET_MS;
-    return function withinBudget<T>(promise: Promise<T>, step: string): Promise<T> {
+    let deadline: number | null = null;
+    return function withinBudget<T>(task: (signal: AbortSignal) => Promise<T>, step: string): Promise<T> {
+        if (deadline === null) {
+            deadline = Date.now() + CSDN_BROWSER_FALLBACK_BUDGET_MS;
+        }
         const remaining = deadline - Date.now();
         if (remaining <= 0) {
-            return Promise.reject(new Error(`${label} browser fallback budget (${CSDN_BROWSER_FALLBACK_BUDGET_MS}ms) exhausted before ${step}`));
+            return Promise.reject(new AppError({
+                code: 'network_timeout',
+                retryable: true,
+                engine: 'csdn',
+                message: `${label} browser fallback budget (${CSDN_BROWSER_FALLBACK_BUDGET_MS}ms) exhausted before ${step}`
+            }));
         }
+        const controller = new AbortController();
         return new Promise<T>((resolve, reject) => {
-            const timer = setTimeout(
-                () => reject(new Error(`${label} browser fallback budget (${CSDN_BROWSER_FALLBACK_BUDGET_MS}ms) exceeded during ${step}`)),
-                remaining
-            );
+            const timer = setTimeout(() => {
+                const err = new AppError({
+                    code: 'network_timeout',
+                    retryable: true,
+                    engine: 'csdn',
+                    message: `${label} browser fallback budget (${CSDN_BROWSER_FALLBACK_BUDGET_MS}ms) exceeded during ${step}`
+                });
+                controller.abort(err);
+                reject(err);
+            }, remaining);
             if (typeof timer.unref === 'function') timer.unref();
-            promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+            Promise.resolve()
+                .then(() => task(controller.signal))
+                .then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
         });
     };
 }
@@ -179,15 +207,11 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
         response = await requestDirectFirst('GET', url, (forceDirect) => buildRequestOptions(undefined, forceDirect));
         html = String(response.data || '');
         if (isCsdnSoft404(html)) {
-            const err = new Error('CSDN article not found: 文章不存在或已被删除 (soft 404)');
-            (err as { status?: number }).status = 404;
-            throw err;
+            throw createCsdnNotFoundError();
         }
         content = extractArticleContent(html);
         if (isCsdnSoft404(html, content)) {
-            const err = new Error('CSDN article not found: 文章不存在或已被删除 (soft 404)');
-            (err as { status?: number }).status = 404;
-            throw err;
+            throw createCsdnNotFoundError();
         }
     } catch (error: unknown) {
         if (error instanceof Error && error.message.includes('CSDN article not found')) {
@@ -209,15 +233,11 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
                     });
                     const directHtml = String(directRes.data || '');
                     if (isCsdnSoft404(directHtml)) {
-                        const err = new Error('CSDN article not found: 文章不存在或已被删除 (soft 404)');
-                        (err as { status?: number }).status = 404;
-                        throw err;
+                        throw createCsdnNotFoundError();
                     }
                     const directContent = extractArticleContent(directHtml);
                     if (isCsdnSoft404(directHtml, directContent)) {
-                        const err = new Error('CSDN article not found: 文章不存在或已被删除 (soft 404)');
-                        (err as { status?: number }).status = 404;
-                        throw err;
+                        throw createCsdnNotFoundError();
                     }
                     if (directContent && !shouldRetryWithBrowser(directHtml, directContent)) {
                         return { content: directContent };
@@ -245,23 +265,23 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
             // 521/522 或网络/TLS 层重置时，单纯的 Node HTTP 即使带 Cookie 也会被 WAF 切断（JA3/TLS 指纹检查），
             // 直接走浏览器完整渲染，避免在 cookie 预热 + axios 重试上空耗预算
             if (status === 521 || status === 522 || isNetworkOrTlsError) {
-                const browserPage = await withinBrowserBudget(fetchPageHtmlWithBrowser(url), 'browser render');
+                const browserPage = await withinBrowserBudget((sig) => fetchPageHtmlWithBrowser(url, sig), 'browser render');
                 html = browserPage.html;
                 content = extractArticleContent(html);
             } else {
-                const cookieHeader = await withinBrowserBudget(getBrowserCookieHeader(url), 'cookie warm-up');
+                const cookieHeader = await withinBrowserBudget((sig) => getBrowserCookieHeader(url, false, sig), 'cookie warm-up');
                 if (cookieHeader) {
                     try {
                         response = await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader));
                         html = String(response.data || '');
                         content = extractArticleContent(html);
                     } catch {
-                        const browserPage = await withinBrowserBudget(fetchPageHtmlWithBrowser(url), 'browser render');
+                        const browserPage = await withinBrowserBudget((sig) => fetchPageHtmlWithBrowser(url, sig), 'browser render');
                         html = browserPage.html;
                         content = extractArticleContent(html);
                     }
                 } else {
-                    const browserPage = await withinBrowserBudget(fetchPageHtmlWithBrowser(url), 'browser render');
+                    const browserPage = await withinBrowserBudget((sig) => fetchPageHtmlWithBrowser(url, sig), 'browser render');
                     html = browserPage.html;
                     content = extractArticleContent(html);
                 }
@@ -270,26 +290,38 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
             // 兜底链失败（含预算耗尽）：把上游真实原因（如 521）一并带到错误信息里
             const upstream = error instanceof Error ? error.message : String(error);
             const detail = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-            throw new Error(`CSDN article fetch failed: ${upstream} (fallback: ${detail})`);
+            const fallbackCode = (fallbackError as { code?: string })?.code === 'network_timeout'
+                ? 'network_timeout'
+                : status === 429
+                    ? 'rate_limited'
+                    : 'network_error';
+            throw new AppError({
+                code: fallbackCode,
+                retryable: true,
+                status,
+                engine: 'csdn',
+                cause: fallbackError,
+                message: `CSDN article fetch failed: ${upstream} (fallback: ${detail})`
+            });
         }
     }
 
     if (shouldRetryWithBrowser(html, content)) {
-        const cookieHeader = await withinBrowserBudget(getBrowserCookieHeader(url), 'cookie warm-up');
+        const cookieHeader = await withinBrowserBudget((sig) => getBrowserCookieHeader(url, false, sig), 'cookie warm-up');
         if (cookieHeader) {
             try {
                 response = await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader));
                 html = String(response.data || '');
                 content = extractArticleContent(html);
             } catch {
-                const browserPage = await withinBrowserBudget(fetchPageHtmlWithBrowser(url), 'browser render');
+                const browserPage = await withinBrowserBudget((sig) => fetchPageHtmlWithBrowser(url, sig), 'browser render');
                 html = browserPage.html;
                 content = extractArticleContent(html);
             }
         }
 
         if (shouldRetryWithBrowser(html, content)) {
-            const browserPage = await withinBrowserBudget(fetchPageHtmlWithBrowser(url), 'browser render');
+            const browserPage = await withinBrowserBudget((sig) => fetchPageHtmlWithBrowser(url, sig), 'browser render');
             html = browserPage.html;
             content = extractArticleContent(html);
         }
@@ -300,13 +332,16 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
         if (firstError) {
             throw hintProxyConnectionError(firstError);
         }
-        throw new Error('Failed to extract readable CSDN article content');
+        throw new AppError({
+            code: 'empty_content',
+            retryable: false,
+            engine: 'csdn',
+            message: 'Failed to extract readable CSDN article content'
+        });
     }
 
     if (isCsdnSoft404(html, content)) {
-        const err = new Error('CSDN article not found: 文章不存在或已被删除 (soft 404)');
-        (err as { status?: number }).status = 404;
-        throw err;
+        throw createCsdnNotFoundError();
     }
 
     return { content };

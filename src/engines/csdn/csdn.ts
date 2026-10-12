@@ -6,6 +6,7 @@ import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { paginateSearch } from '../../utils/pagination.js';
 import { impersonateHttpGet } from '../../utils/impersonateRequest.js';
 import { createDomesticDirectAgent, shouldAttemptDomesticDirectRetry } from '../../utils/domesticDirectNetwork.js';
+import { AppError } from '../../core/errors.js';
 
 /** CSDN 搜索结果里的 <em> 高亮标签，剥离后返回纯文本 */
 export function stripHighlightTags(value: string): string {
@@ -115,11 +116,12 @@ function buildCsdnSearchUrl(query: string, page: number): string {
     return url.toString();
 }
 
-function buildCsdnRequestOptions(query: string): AxiosRequestConfig {
+function buildCsdnRequestOptions(query: string, signal?: AbortSignal): AxiosRequestConfig {
     return buildAxiosRequestOptions({
         engine: 'csdn',
         trustedStaticHost: true,
         timeout: 15000,
+        signal,
         headers: {
             'Accept': 'application/json, text/plain, */*',
             // 补齐真实前端从搜索页发起该 API 时会带的 Referer（缺失可能被 WAF 视为非浏览器请求；此为防御性补齐，未独立抓包核验）
@@ -147,9 +149,9 @@ function isEmptyButTotalClaimed(payload: unknown): boolean {
     return Array.isArray(result_vos) && result_vos.length === 0 && typeof total === 'number' && total > 0;
 }
 
-async function fetchCsdnPage(query: string, page: number): Promise<unknown> {
+async function fetchCsdnPage(query: string, page: number, signal?: AbortSignal): Promise<unknown> {
     const url = buildCsdnSearchUrl(query, page);
-    const options = buildCsdnRequestOptions(query);
+    const options = buildCsdnRequestOptions(query, signal);
     const first = normalizeCsdnPayload((await csdnHttpGet(url, options)).data);
 
     // 首屏空 → 用同一会话带 cookie 重试一次：既覆盖"WAF 对首个无 cookie 请求软降级"，
@@ -158,6 +160,11 @@ async function fetchCsdnPage(query: string, page: number): Promise<unknown> {
         const { result_vos } = first as { result_vos?: unknown };
         if (Array.isArray(result_vos) && result_vos.length === 0) {
             await new Promise((resolve) => setTimeout(resolve, EMPTY_FIRST_PAGE_RETRY_DELAY_MS));
+            if (signal?.aborted) {
+                throw signal.reason instanceof Error
+                    ? signal.reason
+                    : new AppError({ code: 'aborted', engine: 'csdn', message: 'CSDN search aborted', retryable: false });
+            }
             const retry = normalizeCsdnPayload((await csdnHttpGet(url, options)).data);
             const retryVos = (retry as { result_vos?: unknown })?.result_vos;
             if (Array.isArray(retryVos) && retryVos.length > 0) {
@@ -166,7 +173,12 @@ async function fetchCsdnPage(query: string, page: number): Promise<unknown> {
             // 重试仍是空：total>0 说明上游声称有结果却一条不给（真实异常，显式报错）；
             // total=0 则是该词确实无结果，正常返回空数组
             if (isEmptyButTotalClaimed(retry) || isEmptyButTotalClaimed(first)) {
-                throw new Error('CSDN returned an empty response with total > 0 (likely rate-limited or throttled)');
+                throw new AppError({
+                    code: 'upstream_response_invalid',
+                    retryable: true,
+                    engine: 'csdn',
+                    message: 'CSDN returned an empty response with total > 0 (likely rate-limited or throttled)'
+                });
             }
         }
     }
@@ -174,27 +186,43 @@ async function fetchCsdnPage(query: string, page: number): Promise<unknown> {
     return first;
 }
 
-export async function searchCsdn(query: string, limit: number): Promise<SearchResult[]> {
+export async function searchCsdn(
+    query: string,
+    limit: number,
+    options?: { signal?: AbortSignal }
+): Promise<SearchResult[]> {
     const seenUrls = new Set<string>();
+    const signal = options?.signal;
 
     return paginateSearch({
         limit,
+        signal,
         fetchPage: async (pageIndex) => {
             const pn = pageIndex + 1;
-            const payload = await fetchCsdnPage(query, pn);
+            const payload = await fetchCsdnPage(query, pn, signal);
 
             // 反爬/异常时 CSDN 可能返回 HTML 文本而非 JSON：直接解构会得到 undefined 并静默 break，
             // 首页失败应抛错，让 partialFailures 暴露真实原因（而非伪装成"没有结果"）
             if (typeof payload !== 'object' || payload === null) {
                 if (pn === 1) {
-                    throw new Error('CSDN search returned a non-JSON response (likely blocked or rate-limited)');
+                    throw new AppError({
+                        code: 'upstream_response_invalid',
+                        retryable: false,
+                        engine: 'csdn',
+                        message: 'CSDN search returned a non-JSON response (likely blocked or rate-limited)'
+                    });
                 }
                 return [];
             }
             const { result_vos } = payload as { result_vos?: unknown };
             if (!Array.isArray(result_vos)) {
                 if (pn === 1) {
-                    throw new Error('CSDN search response missing result_vos (likely blocked or rate-limited)');
+                    throw new AppError({
+                        code: 'upstream_response_invalid',
+                        retryable: false,
+                        engine: 'csdn',
+                        message: 'CSDN search response missing result_vos (likely blocked or rate-limited)'
+                    });
                 }
                 return [];
             }
@@ -203,3 +231,4 @@ export async function searchCsdn(query: string, limit: number): Promise<SearchRe
         }
     });
 }
+

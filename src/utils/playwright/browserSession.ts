@@ -37,7 +37,7 @@ const execFileAsync = promisify(execFile);
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { config } from '../../config.js';
+import { AppConfig, config } from '../../config.js';
 import {
     acquireNativeFileLock,
     closeHandle,
@@ -59,6 +59,7 @@ import {
 import {
     buildPlaywrightProxy,
     findFreePort,
+    formatChromiumProxyBypassList,
     getLocalBrowserExecutablePath,
     loadPlaywrightClient
 } from './browserDiscovery.js';
@@ -356,7 +357,13 @@ function listBrowserDomainMetadataEntries(): BrowserDomainMetadataEntry[] {
     }
 }
 
-function buildLocalBrowserProcessArgs(port: number, tempDir: string, launchArgs: string[], headless = false): string[] {
+export function buildLocalBrowserProcessArgs(
+    port: number,
+    tempDir: string,
+    launchArgs: string[],
+    headless = false,
+    cfg: AppConfig = config
+): string[] {
     const args = [
         `--remote-debugging-port=${port}`,
         `--user-data-dir=${tempDir}`,
@@ -369,10 +376,13 @@ function buildLocalBrowserProcessArgs(port: number, tempDir: string, launchArgs:
 
     args.push('--edge-skip-compat-layer-relaunch');
 
-    const proxy = buildPlaywrightProxy();
+    const proxy = buildPlaywrightProxy(cfg);
 
     if (proxy?.server) {
         args.push(`--proxy-server=${proxy.server}`);
+        if (proxy.bypass) {
+            args.push(`--proxy-bypass-list=${formatChromiumProxyBypassList(proxy.bypass)}`);
+        }
         if (proxy.username || proxy.password) {
             console.warn('Playwright local browser process proxy authentication is not applied via command-line flags. Use WS/CDP mode if authenticated proxy support is required.');
         }
@@ -381,7 +391,7 @@ function buildLocalBrowserProcessArgs(port: number, tempDir: string, launchArgs:
     return args;
 }
 
-const BROWSER_METADATA_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
+export const BROWSER_METADATA_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 function normalizeBrowserDomainMetadata(
     parsed: Partial<LocalBrowserSessionMetadataFile>,
@@ -405,27 +415,59 @@ function normalizeBrowserDomainMetadata(
     };
 }
 
-function readBrowserDomainMetadataFromPath(metadataPath: string, sessionMode: LocalBrowserSessionMode, domainKey?: string): LocalBrowserSessionMetadata | null {
+export function readBrowserDomainMetadataFromPath(
+    metadataPath: string,
+    sessionMode: LocalBrowserSessionMode = 'hidden-headed',
+    domainKey?: string
+): LocalBrowserSessionMetadata | null {
     try {
         const raw = JSON.parse(readFileSync(metadataPath, 'utf8')) as Partial<LocalBrowserSessionMetadataFile>;
-        if (typeof raw.savedAt === 'number' && Number.isFinite(raw.savedAt) && Date.now() - raw.savedAt > BROWSER_METADATA_MAX_AGE_MS) {
-            // 超龄 metadata（>12h），直接删除并作废，避免僵尸 metadata 永久滞留；同时异步清理关联的临时目录
-            if (raw.tempDir) {
-                removeTempDirInBackground(raw.tempDir, 0);
-            }
-            try {
-                rmSync(metadataPath, { force: true });
-            } catch {
-                // Ignore cleanup errors
-            }
-            return null;
-        }
-        return normalizeBrowserDomainMetadata(
+        const normalized = normalizeBrowserDomainMetadata(
             raw,
             sessionMode,
             metadataPath,
             domainKey
         );
+        if (!normalized) {
+            return null;
+        }
+
+        if (typeof normalized.savedAt === 'number' && Date.now() - normalized.savedAt > BROWSER_METADATA_MAX_AGE_MS) {
+            // 超龄 metadata（>12h）：必须先检查浏览器与客户端 PID 是否仍存活，区分三类情形：
+            // 1) 长期活跃实例（浏览器存活 + 仍有存活使用者）：保留 profile 目录并刷新 savedAt；
+            // 2) 孤儿浏览器进程（浏览器存活 + 所有客户端已退出）：通过 forceKill 终止孤儿浏览器并异步清理目录与记录；
+            // 3) 过期死记录（浏览器已退出）：确认无存活使用者后异步删除目录并移除记录。
+            const hasLiveBrowser = typeof normalized.browserPid === 'number' && processExists(normalized.browserPid);
+            const trackClients = shouldTrackLocalBrowserSessionClients(sessionMode);
+            const activeClientPids = trackClients ? normalizeActiveClientPids(normalized.clientPids) : [];
+            const hasLiveClients = trackClients ? activeClientPids.length > 0 : hasLiveBrowser;
+
+            if (hasLiveBrowser && hasLiveClients) {
+                const refreshed: LocalBrowserSessionMetadata = {
+                    ...normalized,
+                    savedAt: Date.now(),
+                    clientPids: activeClientPids
+                };
+                writeBrowserDomainMetadata(refreshed);
+                return refreshed;
+            }
+
+            if (hasLiveBrowser && !hasLiveClients) {
+                // 孤儿进程：终止残留浏览器并清理 profile 与 metadata
+                createForceKill(normalized.browserPid, normalized.tempDir, undefined, domainKey)();
+                clearBrowserDomainMetadataFromPath(metadataPath, normalized.tempDir);
+                return null;
+            }
+
+            // 过期记录（浏览器已不存在）：仅在确认无存活客户端占用时清理目录
+            if (!hasLiveClients && normalized.tempDir) {
+                removeTempDirInBackground(normalized.tempDir, 0);
+            }
+            clearBrowserDomainMetadataFromPath(metadataPath, normalized.tempDir);
+            return null;
+        }
+
+        return normalized;
     } catch {
         return null;
     }

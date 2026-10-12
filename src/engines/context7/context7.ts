@@ -16,6 +16,7 @@
 import axios from 'axios';
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
+import { AppError } from '../../core/errors.js';
 
 export const CONTEXT7_BASE_URL = 'https://context7.com';
 export const CONTEXT7_API_VERSION = 'v2';
@@ -236,17 +237,23 @@ export function computeContext7RetryDelayMs(retryAfterSeconds: number | undefine
     return baseMs * (2 ** attempt) + Math.random() * 250;
 }
 
-function buildQuotaExhaustedError(error: unknown): Error {
+function buildQuotaExhaustedError(error: unknown): AppError {
     const response = (error as { response?: Context7ErrorResponse } | undefined)?.response;
     const resetEpoch = readHeaderNumber(response?.headers, 'ratelimit-reset');
     markContext7QuotaExhausted(resetEpoch);
     const resetHint = resetEpoch !== undefined && resetEpoch > 0
         ? ` Quota resets on ${new Date(resetEpoch * 1000).toISOString().slice(0, 10)} (UTC).`
         : '';
-    return new Error(
-        `${CONTEXT7_QUOTA_EXHAUSTED_MARKER} (200 requests/month per egress IP).${resetHint}`
-        + ' Set CONTEXT7_API_KEY for higher limits (free key: https://context7.com/dashboard).'
-    );
+    return new AppError({
+        code: 'rate_limited',
+        retryable: false,
+        status: response?.status ?? 429,
+        engine: 'context7',
+        hint: 'Set CONTEXT7_API_KEY for higher limits (free key: https://context7.com/dashboard).',
+        cause: error,
+        message: `${CONTEXT7_QUOTA_EXHAUSTED_MARKER} (200 requests/month per egress IP).${resetHint}`
+            + ' Set CONTEXT7_API_KEY for higher limits (free key: https://context7.com/dashboard).'
+    });
 }
 
 /** 可注入的 GET 实现：生产走 requestDirectFirst，测试用假实现验证重试/退避策略 */
@@ -306,7 +313,15 @@ export async function context7GetWithRetry(
     }
     if ((lastError as { response?: { status?: number } })?.response?.status === 429) {
         markContext7QuotaExhausted();
-        throw new Error('Context7 API rate limit reached (429). Retry later, or set CONTEXT7_API_KEY for higher rate limits.');
+        throw new AppError({
+            code: 'rate_limited',
+            retryable: true,
+            status: 429,
+            engine: 'context7',
+            hint: 'Retry later, or set CONTEXT7_API_KEY for higher rate limits.',
+            cause: lastError,
+            message: 'Context7 API rate limit reached (429). Retry later, or set CONTEXT7_API_KEY for higher rate limits.'
+        });
     }
     throw lastError;
 }
@@ -321,7 +336,12 @@ export async function searchContext7Libraries(
 ): Promise<Context7SearchResult> {
     const cleanLibraryName = libraryName.trim();
     if (!cleanLibraryName) {
-        throw new Error('Library name cannot be empty');
+        throw new AppError({
+            code: 'invalid_arguments',
+            retryable: false,
+            engine: 'context7',
+            message: 'Library name cannot be empty'
+        });
     }
     const cleanQuery = (query ?? '').trim();
 
@@ -355,10 +375,20 @@ export async function fetchContext7Docs(
 ): Promise<Context7DocsResult> {
     const cleanLibraryId = libraryId.trim();
     if (!cleanLibraryId) {
-        throw new Error('Library ID cannot be empty');
+        throw new AppError({
+            code: 'invalid_arguments',
+            retryable: false,
+            engine: 'context7',
+            message: 'Library ID cannot be empty'
+        });
     }
     if (!cleanLibraryId.startsWith('/')) {
-        throw new Error('Library ID must start with "/" (e.g. /vercel/next.js)');
+        throw new AppError({
+            code: 'invalid_arguments',
+            retryable: false,
+            engine: 'context7',
+            message: 'Library ID must start with "/" (e.g. /vercel/next.js)'
+        });
     }
     const cleanQuery = (query ?? '').trim();
 
@@ -390,13 +420,27 @@ export async function fetchContext7Docs(
                     redirectedFrom: cleanLibraryId
                 };
             } catch (redirectError) {
-                throw new Error(`Library ${cleanLibraryId} has migrated to ${targetId}, but failed to fetch from new ID: ${redirectError instanceof Error ? redirectError.message : String(redirectError)}`);
+                throw new AppError({
+                    code: 'network_error',
+                    retryable: true,
+                    engine: 'context7',
+                    cause: redirectError,
+                    details: { redirectedFrom: cleanLibraryId, redirectUrl: targetId },
+                    message: `Library ${cleanLibraryId} has migrated to ${targetId}, but failed to fetch from new ID: ${redirectError instanceof Error ? redirectError.message : String(redirectError)}`
+                });
             }
         }
     }
 
     if (response.status === 301) {
-        throw new Error(`Library ${cleanLibraryId} has migrated to ${targetId || 'a new ID'}. Please re-run with the updated library ID.`);
+        throw new AppError({
+            code: 'not_found',
+            retryable: false,
+            status: 301,
+            engine: 'context7',
+            details: { redirectedFrom: cleanLibraryId, redirectUrl: targetId },
+            message: `Library ${cleanLibraryId} has migrated to ${targetId || 'a new ID'}. Please re-run with the updated library ID.`
+        });
     }
 
     return {

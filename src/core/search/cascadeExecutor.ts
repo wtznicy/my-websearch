@@ -4,6 +4,7 @@ import { countUsableResults } from './resultRanking.js';
 import { isEngineCircuitOpen } from './engineCircuitBreaker.js';
 import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { metrics } from '../metrics.js';
+import { AppError, extractErrorCode, extractErrorDetails, extractErrorStatus, isAppError } from '../errors.js';
 import { SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
 import {
     SearchEngineExecutorMap,
@@ -13,6 +14,7 @@ import {
 } from './searchService.js';
 import {
     buildHintedMessage,
+    isRetryableEngineError,
     truncateMetricError
 } from './engineExecutor.js';
 
@@ -98,25 +100,37 @@ export async function executeCascade(
         const batch = candidates.slice(cursor, cursor + CASCADE_BATCH_SIZE);
         const gap = minResults - countUsableResults(merged, cleanQuery);
 
-        const runCandidate = (candidate: string): Promise<SearchResult[]> => new Promise((resolve, reject) => {
+        const runCandidate = (candidate: string): Promise<{ results: SearchResult[]; timedOut: boolean }> => new Promise((resolve, reject) => {
             let done = false;
             const cascadeStartedAt = Date.now();
             const wait = Math.max(0, Math.min(remaining, perEngineTimeoutMs));
+            const controller = new AbortController();
             let cascadeTimedOut = false;
             const timer = setTimeout(() => {
                 done = true;
                 cascadeTimedOut = true;
+                controller.abort(new AppError({
+                    code: 'network_timeout',
+                    retryable: true,
+                    engine: candidate,
+                    message: `Engine timeout after ${wait}ms`
+                }));
                 cascadeMetrics.push({ engine: candidate, ms: wait, count: 0, error: `timeout after ${wait}ms`, timedOut: true });
                 cascadeFailures.push({
                     engine: candidate,
                     code: 'engine_error',
+                    errorCode: 'network_timeout',
+                    retryable: true,
                     message: buildHintedMessage(candidate, `Engine timeout after ${wait}ms (no response in time)`)
                 });
-                resolve([]);
+                resolve({ results: [], timedOut: true });
             }, wait);
 
             (async () => {
-                const results = await engineMap[candidate]!(searchQuery, gap, { searchMode: effectiveSearchMode });
+                const results = await engineMap[candidate]!(searchQuery, gap, {
+                    searchMode: effectiveSearchMode,
+                    signal: controller.signal
+                });
                 if (!done) {
                     done = true;
                     clearTimeout(timer);
@@ -124,7 +138,7 @@ export async function executeCascade(
                         cascadeMetrics.push({ engine: candidate, ms: Date.now() - cascadeStartedAt, count: results.length });
                         metrics.recordEngineSearch(candidate, Date.now() - cascadeStartedAt, results.length > 0);
                     }
-                    resolve(results);
+                    resolve({ results, timedOut: false });
                 }
             })().catch((error: unknown) => {
                 if (!done) {
@@ -156,10 +170,14 @@ export async function executeCascade(
                 continue;
             }
             if (outcome.status === 'fulfilled') {
-                if (outcome.value.length > 0) {
+                if (outcome.value.timedOut) {
+                    batchAllReturnedNonEmpty = false;
+                    continue;
+                }
+                if (outcome.value.results.length > 0) {
                     const before = merged.length;
                     cascadedEngines.push(candidate);
-                    engineResults.push(outcome.value);
+                    engineResults.push(outcome.value.results);
                     merged = mergeSearchResults(engineResults)
                         .filter((result) => !isPlaceholderResult(result));
                     batchNewResults += merged.length - before;
@@ -168,15 +186,25 @@ export async function executeCascade(
                     cascadeFailures.push({
                         engine: candidate,
                         code: 'no_results',
+                        retryable: false,
                         message: 'Engine returned no results for the cascaded quota'
                     });
                 }
             } else {
                 batchAllReturnedNonEmpty = false;
+                const errorCode = extractErrorCode(outcome.reason);
+                const status = extractErrorStatus(outcome.reason);
+                const details = extractErrorDetails(outcome.reason);
+                const hint = isAppError(outcome.reason) ? outcome.reason.hint : undefined;
                 cascadeFailures.push({
                     engine: candidate,
                     code: 'engine_error',
-                    message: buildHintedMessage(candidate, outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason))
+                    ...(errorCode ? { errorCode } : {}),
+                    ...(status !== undefined ? { status } : {}),
+                    ...(details ? { details } : {}),
+                    ...(hint ? { hint } : {}),
+                    retryable: isRetryableEngineError(outcome.reason),
+                    message: buildHintedMessage(candidate, outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason), hint)
                 });
             }
         }

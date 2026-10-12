@@ -5,6 +5,7 @@ import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 import { warmupWithAnubisPow } from './anubisSolver.js';
+import { AppError } from '../../core/errors.js';
 
 const STARTPAGE_BASE_URL = 'https://www.startpage.com';
 const STARTPAGE_SEARCH_URL = `${STARTPAGE_BASE_URL}/sp/search`;
@@ -65,15 +66,25 @@ function extractInterstitialPayload(html: string): Record<string, string> | unde
 // 只有 headed/hidden-headed（隐藏有头）模式能完成 Anubis 挑战拿到搜索表单。
 // 方案：用 Playwright hidden-headed 模式打开首页完成 Anubis 挑战，
 // 提取放行 cookie（spchal-auth 等）+ sc token 并缓存复用；cookie 失效时重新预热。
-async function warmupStartpageSession(): Promise<void> {
+async function warmupStartpageSession(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) {
+        throw signal.reason instanceof Error ? signal.reason : new Error('Request aborted');
+    }
     // SEARCH_MODE 控制：若 startpage 不在 playwright 允许名单中（如 SEARCH_MODE=bing 或 request），
     // 不启动重型浏览器预热，HTTP 被反爬直接报错，配合 minResults 级联自动换其他轻量引擎。
     const startpageMode = getEngineSearchMode('startpage', config);
     if (startpageMode === 'request') {
-        throw new Error('Startpage requires a Playwright browser session (Anubis anti-bot), but SEARCH_MODE disables Playwright for startpage. Enable startpage in SEARCH_MODE (e.g. SEARCH_MODE=auto or SEARCH_MODE=startpage), or use another engine (e.g. bing/baidu/sogou).');
+        const { AppError } = await import('../../core/errors.js');
+        throw new AppError({
+            code: 'invalid_config',
+            retryable: false,
+            engine: 'startpage',
+            message: 'Startpage requires a Playwright browser session (Anubis anti-bot), but SEARCH_MODE disables Playwright for startpage. Enable startpage in SEARCH_MODE (e.g. SEARCH_MODE=auto or SEARCH_MODE=startpage), or use another engine (e.g. bing/baidu/sogou).'
+        });
     }
     let session: import('../../utils/playwright/types.js').PlaywrightBrowserSession | undefined;
     let releasePage: (() => Promise<void>) | undefined;
+    let removeAbortListener: (() => void) | undefined;
     try {
         const { openPlaywrightBrowser, acquirePooledPlaywrightPage } = await import('../../utils/playwrightClient.js');
         const { prepareStealthPage } = await import('../../utils/browserStealth.js');
@@ -83,6 +94,11 @@ async function warmupStartpageSession(): Promise<void> {
         // 注意：playwright 1.62+ 已移除 page.setUserAgent，需通过 contextOptions.userAgent 设置。
         // startpage 会屏蔽 headless 浏览器，必须用 hidden-headed（隐藏有头）模式打开。
         session = await openPlaywrightBrowser(false, [], { hideWindow: true });
+        if (signal?.aborted) {
+            throw signal.reason instanceof Error
+                ? signal.reason
+                : new AppError({ code: 'aborted', engine: 'startpage', message: 'Request aborted', retryable: false });
+        }
         const pooled = await acquirePooledPlaywrightPage(session.browser, {
             poolKey: 'startpage-warmup',
             contextOptions: {
@@ -94,6 +110,17 @@ async function warmupStartpageSession(): Promise<void> {
         });
         releasePage = pooled.releasePage;
         const page = pooled.page;
+        if (signal) {
+            const onAbort = () => {
+                if (releasePage) {
+                    const release = releasePage;
+                    releasePage = undefined;
+                    void release().catch(() => undefined);
+                }
+            };
+            signal.addEventListener('abort', onAbort, { once: true });
+            removeAbortListener = () => signal.removeEventListener('abort', onAbort);
+        }
         await page.goto(`${STARTPAGE_BASE_URL}/`, { waitUntil: 'domcontentloaded', timeout: 30000 });
         // 等待 Anubis PoW 完成：搜索表单出现即放行
         await page.waitForSelector('form[action="/sp/search"]', { timeout: 30000 });
@@ -101,17 +128,28 @@ async function warmupStartpageSession(): Promise<void> {
             .getAttribute('value')
             .catch(() => null);
         if (!scCode) {
-            throw new Error('Failed to extract Startpage search token after Anubis challenge');
+            throw new AppError({
+                code: 'engine_parse_error',
+                retryable: true,
+                engine: 'startpage',
+                message: 'Failed to extract Startpage search token after Anubis challenge'
+            });
         }
         const cookies = await page.context().cookies(STARTPAGE_BASE_URL);
         const cookieStr = cookies.map((cookie: { name: string; value: string }) => `${cookie.name}=${cookie.value}`).join('; ');
         if (!cookieStr) {
-            throw new Error('Failed to extract Startpage session cookies after Anubis challenge');
+            throw new AppError({
+                code: 'engine_parse_error',
+                retryable: true,
+                engine: 'startpage',
+                message: 'Failed to extract Startpage session cookies after Anubis challenge'
+            });
         }
         cachedScCode = scCode;
         cachedCookies = cookieStr;
         cachedScAt = Date.now();
     } finally {
+        removeAbortListener?.();
         if (releasePage) {
             await releasePage().catch(() => undefined);
         }
@@ -121,7 +159,12 @@ async function warmupStartpageSession(): Promise<void> {
     }
 }
 
-async function getScCode(): Promise<string> {
+async function getScCode(signal?: AbortSignal): Promise<string> {
+    if (signal?.aborted) {
+        throw signal.reason instanceof Error
+            ? signal.reason
+            : new AppError({ code: 'aborted', engine: 'startpage', message: 'Request aborted', retryable: false });
+    }
     const now = Date.now();
     if (cachedScCode && now - cachedScAt < currentSessionTtlMs) {
         return cachedScCode;
@@ -140,13 +183,21 @@ async function getScCode(): Promise<string> {
         }
         console.warn('Startpage Anubis PoW warmup returned no session, falling back to Playwright');
     } catch (error) {
+        if (signal?.aborted) {
+            throw error;
+        }
         console.warn('Startpage Anubis PoW warmup failed, falling back to Playwright:', error instanceof Error ? error.message : String(error));
     }
 
     // ② Playwright 兜底（hidden-headed 模式，见 warmupStartpageSession）
-    await warmupStartpageSession();
+    await warmupStartpageSession(signal);
     if (!cachedScCode) {
-        throw new Error('Failed to extract Startpage search token');
+        throw new AppError({
+            code: 'engine_parse_error',
+            retryable: true,
+            engine: 'startpage',
+            message: 'Failed to extract Startpage search token'
+        });
     }
     currentSessionTtlMs = STARTPAGE_SC_TTL_MS;
     return cachedScCode;
@@ -154,7 +205,12 @@ async function getScCode(): Promise<string> {
 
 export function extractResultsFromHtml(html: string): SearchResult[] {
     if (isCaptchaPage(html)) {
-        throw new Error('Startpage returned a verification or anti-bot page');
+        throw new AppError({
+            code: 'bot_challenge',
+            retryable: false,
+            engine: 'startpage',
+            message: 'Startpage returned a verification or anti-bot page'
+        });
     }
 
     const $ = cheerio.load(html);
@@ -191,8 +247,8 @@ export function extractResultsFromHtml(html: string): SearchResult[] {
     return results;
 }
 
-async function searchStartpagePage(query: string, page: number): Promise<SearchResult[]> {
-    const scCode = await getScCode();
+async function searchStartpagePage(query: string, page: number, signal?: AbortSignal): Promise<SearchResult[]> {
+    const scCode = await getScCode(signal);
     const formData = new URLSearchParams({
         query,
         cat: 'web',
@@ -213,6 +269,7 @@ async function searchStartpagePage(query: string, page: number): Promise<SearchR
         formData.toString(),
         buildAxiosRequestOptions({ engine: 'startpage',
             trustedStaticHost: true,
+            signal,
             headers: {
                 ...COMMON_HEADERS,
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -233,6 +290,7 @@ async function searchStartpagePage(query: string, page: number): Promise<SearchR
             new URLSearchParams(interstitialPayload).toString(),
             buildAxiosRequestOptions({ engine: 'startpage',
                 trustedStaticHost: true,
+                signal,
                 headers: {
                     ...COMMON_HEADERS,
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -253,7 +311,8 @@ async function searchStartpagePage(query: string, page: number): Promise<SearchR
 
 import { paginateSearch } from '../../utils/pagination.js';
 
-export async function searchStartpage(query: string, limit: number): Promise<SearchResult[]> {
+export async function searchStartpage(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
+    const signal = options?.signal;
     // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂超时拖累整次搜索
     await assertOverseasEngineUsable('startpage');
 
@@ -261,7 +320,8 @@ export async function searchStartpage(query: string, limit: number): Promise<Sea
         limit,
         initialPage: 1,
         pageStep: 1,
-        fetchPage: (page) => searchStartpagePage(query, page),
+        signal,
+        fetchPage: (page) => searchStartpagePage(query, page, signal),
         dedupKey: (result) => result.url
     });
 }

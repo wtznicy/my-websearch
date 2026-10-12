@@ -9,6 +9,7 @@ import {
     getBrowserCookieHeader,
     looksLikeBotChallengePage
 } from '../../utils/browserCookies.js';
+import { AppError } from '../../core/errors.js';
 
 // jsdom 是 optionalDependencies（仅 readability/链接提取使用）：
 // 延迟加载，缺失时相关功能报明确错误，不拖垮整个模块加载。
@@ -72,6 +73,8 @@ export type FetchWebContentOptions = {
      * 转为 Markdown——保留围栏代码块语言与 GFM 表格，更适合技术文档与 LLM。
      */
     format?: 'text' | 'markdown';
+    /** 可选取消信号：触发时中止在途 HTTP 请求与浏览器页面操作 */
+    signal?: AbortSignal;
 };
 
 // 请求超时 10s：快速失败优先——慢页面（如部分海外站点直连）10s 内不响应就报错，
@@ -156,10 +159,20 @@ type ReadabilityArticle = {
     length?: number | null;
 };
 
-class ReadabilityUnavailableError extends Error {}
+class ReadabilityUnavailableError extends AppError {
+    constructor(message: string) {
+        super({ code: 'missing_optional_dependency', message, retryable: false });
+        this.name = 'ReadabilityUnavailableError';
+    }
+}
 
 /** jsdom（optionalDependencies）缺失：readability 与链接提取都不可用，需显式告知调用方而非静默降级 */
-export class JsdomUnavailableError extends Error {}
+export class JsdomUnavailableError extends AppError {
+    constructor(message: string) {
+        super({ code: 'missing_optional_dependency', message, retryable: false });
+        this.name = 'JsdomUnavailableError';
+    }
+}
 
 function normalizeText(text: string): string {
     return text
@@ -326,7 +339,7 @@ async function extractReadableLinks(html: string, finalUrl: string): Promise<Ext
 
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 
-function buildRequestOptions(cookieHeader?: string, forceDirect = false): AxiosRequestConfig {
+function buildRequestOptions(cookieHeader?: string, forceDirect = false, signal?: AbortSignal): AxiosRequestConfig {
     const headers: Record<string, string> = {
         'User-Agent': DEFAULT_DESKTOP_UA,
         'Accept': 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -344,6 +357,7 @@ function buildRequestOptions(cookieHeader?: string, forceDirect = false): AxiosR
         // arraybuffer 以便按页面声明的 charset 解码（axios 的 text 模式固定按 UTF-8，GBK 中文站会乱码）
         responseType: 'arraybuffer',
         timeout: DEFAULT_TIMEOUT_MS,
+        signal
     });
 
     if (cookieHeader) {
@@ -416,9 +430,12 @@ function shouldTryBrowserHtmlFallback(contentType: string, raw: string, extracti
     return false;
 }
 
-async function fetchHtmlViaBrowser(url: string): Promise<{ contentType: string; finalUrl: string; raw: string; title: string } | undefined> {
+async function fetchHtmlViaBrowser(
+    url: string,
+    signal?: AbortSignal
+): Promise<{ contentType: string; finalUrl: string; raw: string; title: string } | undefined> {
     try {
-        const browserPage = await browserHtmlFetcher(url);
+        const browserPage = await browserHtmlFetcher(url, signal);
         assertPublicHttpUrl(browserPage.finalUrl, 'Final URL');
 
         return {
@@ -427,7 +444,10 @@ async function fetchHtmlViaBrowser(url: string): Promise<{ contentType: string; 
             raw: browserPage.html,
             title: browserPage.title
         };
-    } catch {
+    } catch (error) {
+        if (signal?.aborted) {
+            throw error;
+        }
         return undefined;
     }
 }
@@ -461,24 +481,38 @@ export function __setReadabilityParserForTests(parser?: (html: string, finalUrl:
     });
 }
 
-async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: AxiosResponse; usedBrowserCookies: boolean }> {
+async function tryRequestWithBrowserCookies(
+    url: string,
+    signal?: AbortSignal
+): Promise<{ response?: AxiosResponse; usedBrowserCookies: boolean }> {
     let cookieHeader: string | undefined;
     try {
-        cookieHeader = await browserCookieHeaderGetter(url);
-    } catch {
+        cookieHeader = await browserCookieHeaderGetter(url, false, signal);
+    } catch (error) {
+        if (signal?.aborted) {
+            throw error;
+        }
         return { response: undefined, usedBrowserCookies: false };
     }
 
+    if (signal?.aborted) {
+        throw signal.reason instanceof Error
+            ? signal.reason
+            : new AppError({ code: 'aborted', message: 'Request aborted', retryable: false });
+    }
     if (!cookieHeader) {
         return { response: undefined, usedBrowserCookies: false };
     }
 
     try {
         return {
-            response: await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader, false), 'Request URL'),
+            response: await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader, false, signal), 'Request URL'),
             usedBrowserCookies: true
         };
-    } catch {
+    } catch (error) {
+        if (signal?.aborted) {
+            throw error;
+        }
         return {
             response: undefined,
             usedBrowserCookies: true
@@ -487,32 +521,79 @@ async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: A
 }
 
 /**
- * 浏览器兜底（cookie 采集 + HTML 渲染）的分段独立预算。
+ * 浏览器兜底（cookie 采集 + HTML 渲染）的分段独立懒启动预算。
  *
- * 架构分工（分段独立预算）：
- * 1. cookie 采集阶段属于轻量加速通道，设定独立 15s 预算；超时或失败即刻放弃并平滑落入浏览器完整渲染。
- * 2. 浏览器 HTML 渲染兜底属于重型最终防线，拥有独立的 30s 预算，确保浏览器首次冷启动时，
- *    充足的生命周期不会被前序 cookie 阶段耗尽，彻底杜绝首访失败、次访成功的行为不一致现象。
+ * 架构分工（分段独立预算 + 进入阶段时才开始计时）：
+ * 1. 预算计时器在首次进入对应阶段（withinBudget 调用）时才启动，前置的 HEAD / GET 请求耗时不会侵占浏览器阶段预算。
+ * 2. withinBudget 接收惰性任务工厂 `(signal) => Promise<T>`：预算已耗尽时不启动新任务；阶段超时时通过 AbortSignal 主动中止底层请求与页面。
  */
 const FETCH_WEB_COOKIE_BUDGET_MS = 15000;
 const FETCH_WEB_BROWSER_BUDGET_MS = 30000;
 
-function createBrowserBudget(label: string, budgetMs = FETCH_WEB_BROWSER_BUDGET_MS) {
-    const deadline = Date.now() + budgetMs;
-    return function withinBudget<T>(promise: Promise<T>, step: string): Promise<T> {
+export function createBrowserBudget(label: string, budgetMs = FETCH_WEB_BROWSER_BUDGET_MS, parentSignal?: AbortSignal) {
+    let deadline: number | null = null;
+    return function withinBudget<T>(task: (signal: AbortSignal) => Promise<T>, step: string): Promise<T> {
+        if (parentSignal?.aborted) {
+            return Promise.reject(
+                parentSignal.reason instanceof Error
+                    ? parentSignal.reason
+                    : new AppError({
+                        code: 'aborted',
+                        retryable: false,
+                        message: `${label} aborted before ${step}`
+                    })
+            );
+        }
+        if (deadline === null) {
+            deadline = Date.now() + budgetMs;
+        }
         const remaining = deadline - Date.now();
         if (remaining <= 0) {
-            return Promise.reject(new Error(`${label} browser fallback budget (${budgetMs}ms) exhausted before ${step}`));
+            return Promise.reject(new AppError({
+                code: 'network_timeout',
+                retryable: true,
+                message: `${label} browser fallback budget (${budgetMs}ms) exhausted before ${step}`
+            }));
         }
-        return new Promise<T>((resolve, reject) => {
-            const timer = setTimeout(
-                () => reject(new Error(`${label} browser fallback budget (${budgetMs}ms) exceeded during ${step}`)),
-                remaining
+        const controller = new AbortController();
+        const onParentAbort = () => {
+            controller.abort(
+                parentSignal?.reason ?? new AppError({
+                    code: 'aborted',
+                    retryable: false,
+                    message: `${label} aborted during ${step}`
+                })
             );
+        };
+        parentSignal?.addEventListener('abort', onParentAbort, { once: true });
+
+        return new Promise<T>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                const timeoutError = new AppError({
+                    code: 'network_timeout',
+                    retryable: true,
+                    message: `${label} browser fallback budget (${budgetMs}ms) exceeded during ${step}`
+                });
+                controller.abort(timeoutError);
+                reject(timeoutError);
+            }, remaining);
             if (typeof timer === 'object' && typeof timer.unref === 'function') {
                 timer.unref();
             }
-            promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+            Promise.resolve()
+                .then(() => task(controller.signal))
+                .then(
+                    (value) => {
+                        clearTimeout(timer);
+                        parentSignal?.removeEventListener('abort', onParentAbort);
+                        resolve(value);
+                    },
+                    (error) => {
+                        clearTimeout(timer);
+                        parentSignal?.removeEventListener('abort', onParentAbort);
+                        reject(error);
+                    }
+                );
         });
     };
 }
@@ -522,11 +603,18 @@ export async function fetchWebContent(
     maxChars: number = DEFAULT_MAX_CHARS,
     options: FetchWebContentOptions = {}
 ): Promise<FetchWebContentResult> {
+    const { signal } = options;
+    if (signal?.aborted) {
+        throw signal.reason instanceof Error
+            ? signal.reason
+            : new AppError({ code: 'aborted', message: 'fetchWebContent aborted', retryable: false });
+    }
+
     const parsedUrl = new URL(url);
     await assertPublicHttpUrlResolved(parsedUrl, 'Request URL');
 
-    const withinCookieBudget = createBrowserBudget('fetchWebContent cookie', FETCH_WEB_COOKIE_BUDGET_MS);
-    const withinBrowserBudget = createBrowserBudget('fetchWebContent render', FETCH_WEB_BROWSER_BUDGET_MS);
+    const withinCookieBudget = createBrowserBudget('fetchWebContent cookie', FETCH_WEB_COOKIE_BUDGET_MS, signal);
+    const withinBrowserBudget = createBrowserBudget('fetchWebContent render', FETCH_WEB_BROWSER_BUDGET_MS, signal);
     const startIndex = Math.max(0, Math.floor(options.startIndex ?? 0));
     const targetMaxChars = clampMaxChars(maxChars);
 
@@ -539,18 +627,25 @@ export async function fetchWebContent(
             // HEAD 预检与主请求同口径（直连优先、代理兜底）：此前写死 forceDirect=true，
             // 需代理的环境下直连 HEAD 会白等一次超时（且拿不到 Content-Length 预检）
             const headResponse = await requestDirectFirst('HEAD', parsedUrl.toString(), (forceDirect) => ({
-                ...buildRequestOptions(undefined, forceDirect),
+                ...buildRequestOptions(undefined, forceDirect, signal),
                 responseType: 'json',
                 validateStatus: (status: number) => status >= 200 && status < 400
             }), 'Request URL');
             const headLength = Number(headResponse.headers['content-length']);
             if (Number.isFinite(headLength) && headLength > MAX_DOWNLOAD_BYTES) {
-                const tooLargeError = new Error(`Response body too large (${headLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
-                Object.assign(tooLargeError, { code: 'ERR_RESPONSE_TOO_LARGE' });
-                throw tooLargeError;
+                throw new AppError({
+                    code: 'response_too_large',
+                    retryable: false,
+                    details: { legacyCode: 'ERR_RESPONSE_TOO_LARGE' },
+                    message: `Response body too large (${headLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`
+                });
             }
         } catch (error: unknown) {
-            if ((error as { code?: string })?.code === 'ERR_RESPONSE_TOO_LARGE') {
+            if (signal?.aborted) {
+                throw error;
+            }
+            const errCode = (error as { code?: string })?.code;
+            if (errCode === 'ERR_RESPONSE_TOO_LARGE' || errCode === 'response_too_large') {
                 throw error;
             }
             // HEAD 预检只是"提前发现超大响应"的优化，任何失败都不应否决后续 GET：
@@ -568,8 +663,11 @@ export async function fetchWebContent(
 
     try {
         // 直连优先、代理兜底：先无代理（国内站点最优），网络失败且配置了代理时自动切换
-        response = await requestDirectFirst('GET', parsedUrl.toString(), (forceDirect) => buildRequestOptions(undefined, forceDirect), 'Request URL');
+        response = await requestDirectFirst('GET', parsedUrl.toString(), (forceDirect) => buildRequestOptions(undefined, forceDirect, signal), 'Request URL');
     } catch (error: unknown) {
+        if (signal?.aborted) {
+            throw error;
+        }
         const status = (error as { response?: { status?: number } })?.response?.status;
         if (typeof status !== 'number' || ![401, 403, 429].includes(status)) {
             throw hintProxyConnectionError(error);
@@ -577,8 +675,11 @@ export async function fetchWebContent(
 
         let cookieRetry: { response?: AxiosResponse; usedBrowserCookies: boolean };
         try {
-            cookieRetry = await withinCookieBudget(tryRequestWithBrowserCookies(parsedUrl.toString()), 'cookie retry');
-        } catch {
+            cookieRetry = await withinCookieBudget((stageSignal) => tryRequestWithBrowserCookies(parsedUrl.toString(), stageSignal), 'cookie retry');
+        } catch (cookieError) {
+            if (signal?.aborted) {
+                throw cookieError;
+            }
             cookieRetry = { response: undefined, usedBrowserCookies: false };
         }
 
@@ -610,8 +711,11 @@ export async function fetchWebContent(
     if (!usedBrowserCookies && looksLikeBotChallengePage(raw)) {
         let cookieRetry: { response?: AxiosResponse; usedBrowserCookies: boolean };
         try {
-            cookieRetry = await withinCookieBudget(tryRequestWithBrowserCookies(parsedUrl.toString()), 'challenge cookie retry');
-        } catch {
+            cookieRetry = await withinCookieBudget((stageSignal) => tryRequestWithBrowserCookies(parsedUrl.toString(), stageSignal), 'challenge cookie retry');
+        } catch (cookieError) {
+            if (signal?.aborted) {
+                throw cookieError;
+            }
             cookieRetry = { response: undefined, usedBrowserCookies: false };
         }
 
@@ -628,7 +732,12 @@ export async function fetchWebContent(
 
     const contentLength = Number(response.headers['content-length']);
     if (Number.isFinite(contentLength) && contentLength > MAX_DOWNLOAD_BYTES) {
-        throw new Error(`Response body too large (${contentLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
+        throw new AppError({
+            code: 'response_too_large',
+            retryable: false,
+            details: { legacyCode: 'ERR_RESPONSE_TOO_LARGE' },
+            message: `Response body too large (${contentLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`
+        });
     }
 
     let title = '';
@@ -664,8 +773,11 @@ export async function fetchWebContent(
         if (shouldTryBrowserHtmlFallback(contentType, raw, htmlExtraction)) {
             let browserResult: Awaited<ReturnType<typeof fetchHtmlViaBrowser>> = undefined;
             try {
-                browserResult = await withinBrowserBudget(fetchHtmlViaBrowser(parsedUrl.toString()), 'browser html fallback');
+                browserResult = await withinBrowserBudget((stageSignal) => fetchHtmlViaBrowser(parsedUrl.toString(), stageSignal), 'browser html fallback');
             } catch (browserError) {
+                if (signal?.aborted) {
+                    throw browserError;
+                }
                 console.warn('[fetchWebContent] Browser fallback failed or budget exhausted:', browserError instanceof Error ? browserError.message : String(browserError));
             }
             if (browserResult) {
@@ -711,6 +823,9 @@ export async function fetchWebContent(
                     degradedNotices.push('readability: parser returned no article content (fell back to container extraction)');
                 }
             } catch (error) {
+                if (signal?.aborted) {
+                    throw error;
+                }
                 if (error instanceof ReadabilityUnavailableError || error instanceof JsdomUnavailableError) {
                     throw error;
                 }
@@ -736,37 +851,47 @@ export async function fetchWebContent(
 
     if (!options.raw) {
         // P0-5 统一出口判定：无论通过直接请求、cookie 重试还是浏览器渲染路径返回，
-        // 若最终内容/标题命中反爬拦截特征且未能获得实质长正文，统一抛出 ERR_BOT_CHALLENGE
+        // 若最终内容/标题命中反爬拦截特征且未能获得实质长正文，统一抛出 bot_challenge（兼容保留 legacyCode: ERR_BOT_CHALLENGE）
         const botDetected = looksLikeBotChallengePage(raw)
             || looksLikeBotChallengePage(extractedContent)
             || (Boolean(title) && looksLikeBotChallengePage(title));
         if (botDetected && extractedContent.length < 350) {
-            const botError = new Error('目标站点触发反爬验证或需要登录（命中反爬拦截特征），未能获取有效正文内容。');
-            Object.assign(botError, { code: 'ERR_BOT_CHALLENGE', status: httpErrorStatus || 403 });
-            throw botError;
+            throw new AppError({
+                code: 'bot_challenge',
+                retryable: false,
+                status: httpErrorStatus || 403,
+                details: { legacyCode: 'ERR_BOT_CHALLENGE' },
+                message: '目标站点触发反爬验证或需要登录（命中反爬拦截特征），未能获取有效正文内容。'
+            });
         }
     }
 
     if (!extractedContent) {
         // 若此前 cookie 重试曾遇 401/403/429，抛出带状态码的错误，便于上层分类为可重试的 upstream 错误
         if (httpErrorStatus !== undefined) {
-            const httpError = new Error(
-                `Request failed with HTTP ${httpErrorStatus} and no readable content was extracted (${parsedUrl.toString()})`
-            );
-            Object.assign(httpError, { status: httpErrorStatus });
-            throw httpError;
+            throw new AppError({
+                code: httpErrorStatus === 429 ? 'rate_limited' : 'network_error',
+                retryable: true,
+                status: httpErrorStatus,
+                message: `Request failed with HTTP ${httpErrorStatus} and no readable content was extracted (${parsedUrl.toString()})`
+            });
         }
-        throw new Error('No readable content was extracted from this URL');
+        throw new AppError({
+            code: 'empty_content',
+            retryable: false,
+            message: 'No readable content was extracted from this URL'
+        });
     }
 
     const totalLength = extractedContent.length;
     // startIndex 越界时显式报错，避免静默返回空内容
     if (startIndex >= totalLength) {
-        const outOfRangeError = new Error(
-            `startIndex ${startIndex} is beyond content length ${totalLength}; reset to 0 to read from the beginning`
-        );
-        Object.assign(outOfRangeError, { code: 'ERR_START_INDEX_OUT_OF_RANGE' });
-        throw outOfRangeError;
+        throw new AppError({
+            code: 'start_index_out_of_range',
+            retryable: false,
+            details: { legacyCode: 'ERR_START_INDEX_OUT_OF_RANGE' },
+            message: `startIndex ${startIndex} is beyond content length ${totalLength}; reset to 0 to read from the beginning`
+        });
     }
     const pageContent = extractedContent.slice(startIndex, startIndex + targetMaxChars);
     const truncated = startIndex + targetMaxChars < totalLength;

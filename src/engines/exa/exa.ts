@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from "../../utils/httpRequest.js";
-import { markNonRetryable } from '../../core/errors.js';
+import { AppError } from '../../core/errors.js';
 
 interface ExaResult {
     id: string;
@@ -14,9 +14,10 @@ interface ExaResult {
 
 // exa.ai 官方搜索 API（需 EXA_API_KEY）。官方文档: https://docs.exa.ai/reference/search
 // 响应示例: { "results": [{ "id": "...", "url": "...", "title": "...", "publishedDate": "...", "author": "...", "text": "...", "score": 0.99 }] }
-async function searchExaOfficial(query: string, limit: number, apiKey: string): Promise<SearchResult[]> {
+async function searchExaOfficial(query: string, limit: number, apiKey: string, signal?: AbortSignal): Promise<SearchResult[]> {
     const requestOptions = buildAxiosRequestOptions({ engine: 'exa',
         trustedStaticHost: true,
+        signal,
         headers: {
             "x-api-key": apiKey,
             "Content-Type": "application/json"
@@ -77,17 +78,22 @@ export function parseExaResults(apiResults: ExaResult[], limit: number): SearchR
     }));
 }
 
-export async function searchExa(query: string, limit: number): Promise<SearchResult[]> {
+export async function searchExa(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
     const apiKey = process.env.EXA_API_KEY?.trim();
     if (!apiKey) {
         // 旧版免 key 的网页端内部端点（exa.ai/search/api/search-fast）自 2026-08 起已失效（返回 500）。
-        // 无 key 直接报"需配置 key"并给出获取地址；标记不可重试——配置缺失是确定性错误，
+        // 无 key 直接抛出结构化 AppError；标记不可重试——配置缺失是确定性错误，
         // 多引擎搜索（如 bing+exa）时 exa 立即失败，不影响其他引擎。
-        const error = markNonRetryable(new Error(
-            'Exa engine requires EXA_API_KEY to be configured. Get a free key at https://dashboard.exa.ai/api-keys, ' +
-            'or use other engines (bing/baidu/csdn/juejin/sogou/duckduckgo/brave/startpage).'
-        ));
-        throw error;
+        throw new AppError({
+            code: 'missing_api_key',
+            retryable: false,
+            status: 400,
+            engine: 'exa',
+            hint: 'Configure EXA_API_KEY (https://dashboard.exa.ai/api-keys) or use other engines.',
+            message:
+                'Exa engine requires EXA_API_KEY to be configured. Get a free key at https://dashboard.exa.ai/api-keys, ' +
+                'or use other engines (bing/baidu/csdn/juejin/sogou/duckduckgo/brave/startpage).'
+        });
     }
-    return searchExaOfficial(query, limit, apiKey);
+    return searchExaOfficial(query, limit, apiKey, options?.signal);
 }

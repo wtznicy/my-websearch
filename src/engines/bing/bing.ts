@@ -14,6 +14,7 @@ import {
     PlaywrightPageLike
 } from '../../utils/playwrightClient.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
+import { AppError } from '../../core/errors.js';
 
 // 默认面向大陆部署用 cn.bing.com；可通过 BING_BASE_URL（兼容 OPEN_WEBSEARCH_BING_HOST）覆盖为 www.bing.com 等获取国际区结果
 const BING_HOME_URL = 'https://www.bing.com/?mkt=zh-CN';
@@ -150,11 +151,12 @@ function analyzeBlockedPage($: cheerio.CheerioAPI, html: string): { blocked: boo
     return analyzeBingBlockedPage($, html);
 }
 
-function buildBingAxiosRequestOptions(): AxiosRequestConfig {
+function buildBingAxiosRequestOptions(signal?: AbortSignal): AxiosRequestConfig {
     return buildSharedAxiosRequestOptions({ engine: 'bing',
         trustedStaticHost: true,
         headers: buildBingAntiDetectionHeaders(),
-        timeout: config.playwrightNavigationTimeoutMs
+        timeout: config.playwrightNavigationTimeoutMs,
+        signal
     });
 }
 
@@ -385,7 +387,12 @@ async function submitBingSearchFromCurrentPage(page: PlaywrightPageLike, searchI
         return;
     }
 
-    throw new Error(`Bing search submission did not navigate to the expected query URL: ${query}`);
+    throw new AppError({
+        code: 'engine_parse_error',
+        retryable: true,
+        engine: 'bing',
+        message: `Bing search submission did not navigate to the expected query URL: ${query}`
+    });
 }
 
 async function findBingSearchInput(page: PlaywrightPageLike): Promise<PlaywrightLocatorLike | null> {
@@ -436,7 +443,12 @@ async function openBingAndSearch(page: PlaywrightPageLike, query: string): Promi
     }
 
     if (!searchInput) {
-        throw new Error('Could not find Bing search input box');
+        throw new AppError({
+            code: 'engine_parse_error',
+            retryable: true,
+            engine: 'bing',
+            message: 'Could not find Bing search input box'
+        });
     }
 
 
@@ -530,13 +542,21 @@ async function isPlaywrightAvailable(): Promise<boolean> {
     return playwrightAvailabilityPromise;
 }
 
-async function searchBingWithHttp(query: string, limit: number): Promise<SearchResult[]> {
+async function searchBingWithHttp(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
+    if (signal?.aborted) {
+        throw signal.reason instanceof Error
+            ? signal.reason
+            : new AppError({ code: 'aborted', engine: 'bing', message: 'Bing HTTP search aborted', retryable: false });
+    }
     // 首选 wreq-js 指纹请求（Chrome TLS/HTTP2 指纹模拟，规避纯 HTTP 请求被软降级为
     // 无关结果）；原生模块不可用或请求失败时回退到 axios 路径，不影响现有行为。
     if (await isImpersonateAvailable()) {
         try {
-            return await searchBingWithImpersonate(query, limit);
+            return await searchBingWithImpersonate(query, limit, signal);
         } catch (error) {
+            if (signal?.aborted) {
+                throw error;
+            }
             console.warn('Bing impersonate request failed, falling back to axios:', error instanceof Error ? error.message : String(error));
         }
     }
@@ -546,14 +566,24 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
     let pageNumber = 0;
 
     while (allResults.length < limit) {
-        const response = await axios.get(buildBingSearchUrl(query, pageNumber), buildBingAxiosRequestOptions());
+        if (signal?.aborted) {
+            throw signal.reason instanceof Error
+                ? signal.reason
+                : new AppError({ code: 'aborted', engine: 'bing', message: 'Bing HTTP search aborted', retryable: false });
+        }
+        const response = await axios.get(buildBingSearchUrl(query, pageNumber), buildBingAxiosRequestOptions(signal));
         const html = String(response.data || '');
         // 每页只 cheerio.load 一次，analyzeBlockedPage 与正式提取共用同一文档实例
         const $ = cheerio.load(html);
 
         const pageState = analyzeBlockedPage($, html);
         if (pageState.blocked) {
-            throw new Error(`Bing returned a verification or anti-bot page (title: ${pageState.title || 'unknown'}, keywords: ${pageState.detectedKeywords.join(', ') || 'none'})`);
+            throw new AppError({
+                code: 'bot_challenge',
+                retryable: false,
+                engine: 'bing',
+                message: `Bing returned a verification or anti-bot page (title: ${pageState.title || 'unknown'}, keywords: ${pageState.detectedKeywords.join(', ') || 'none'})`
+            });
         }
         if (pageState.hasResults && pageState.detectedKeywords.length > 0) {
             console.warn(`Bing page contains suspicious keywords but also has results, skipping block detection: ${pageState.detectedKeywords.join(', ')}`);
@@ -567,7 +597,12 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
 
         if (results.length === 0) {
             if (pageNumber === 0 && allResults.length === 0) {
-                throw new Error('Bing HTTP mode returned 0 results (possible anti-bot layout change or verification)');
+                throw new AppError({
+                    code: 'bot_challenge',
+                    retryable: false,
+                    engine: 'bing',
+                    message: 'Bing HTTP mode returned 0 results (possible anti-bot layout change or verification)'
+                });
             }
             console.error('⚠️ No more Bing results from HTTP mode, ending early.');
             break;
@@ -583,10 +618,20 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
     return httpResults;
 }
 
-async function searchBingWithPlaywright(query: string, limit: number): Promise<SearchResult[]> {
+async function searchBingWithPlaywright(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
+    if (signal?.aborted) {
+        throw signal.reason instanceof Error
+            ? signal.reason
+            : new AppError({ code: 'aborted', engine: 'bing', message: 'Bing Playwright search aborted', retryable: false });
+    }
     const playwright = await loadPlaywrightClient();
     if (!playwright) {
-        throw new Error('Playwright client is not available. Install `playwright`/`playwright-core` manually or configure PLAYWRIGHT_MODULE_PATH.');
+        throw new AppError({
+            code: 'invalid_config',
+            retryable: false,
+            engine: 'bing',
+            message: 'Playwright client is not available. Install `playwright`/`playwright-core` manually or configure PLAYWRIGHT_MODULE_PATH.'
+        });
     }
 
     const effectiveHeadless = getEffectiveBingPlaywrightHeadless();
@@ -605,6 +650,18 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
             // 说明当前实现仍需要复用 connectOverCDP 暴露出来的现有 context 来保持搜索链路稳定。
             preferExistingContext: true
         });
+        let pageReleased = false;
+        const safeReleasePage = async () => {
+            if (pageReleased) {
+                return;
+            }
+            pageReleased = true;
+            await releasePage().catch(() => undefined);
+        };
+        const onAbort = () => {
+            void safeReleasePage();
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
 
         try {
             const allResults: SearchResult[] = [];
@@ -612,6 +669,11 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
             let directAnswer: string | undefined;
 
             for (let pageNumber = 0; allResults.length < limit; pageNumber += 1) {
+                if (signal?.aborted) {
+                    throw signal.reason instanceof Error
+                        ? signal.reason
+                        : new AppError({ code: 'aborted', engine: 'bing', message: 'Bing Playwright search aborted', retryable: false });
+                }
                 if (pageNumber === 0) {
                     console.error(`🔎 Bing Playwright interactive search: ${query}`);
                     await openBingAndSearch(page, query);
@@ -623,12 +685,23 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
                     }
                 }
 
+                if (signal?.aborted) {
+                    throw signal.reason instanceof Error
+                        ? signal.reason
+                        : new AppError({ code: 'aborted', engine: 'bing', message: 'Bing Playwright search aborted', retryable: false });
+                }
+
                 const html = await page.content();
                 // 每页只 cheerio.load 一次，analyzeBlockedPage 与正式提取共用同一文档实例
                 const $ = cheerio.load(html);
                 const pageState = analyzeBlockedPage($, html);
                 if (pageState.blocked) {
-                    throw new Error(`Bing returned a verification or anti-bot page in Playwright mode (title: ${pageState.title || 'unknown'}, keywords: ${pageState.detectedKeywords.join(', ') || 'none'})`);
+                    throw new AppError({
+                        code: 'bot_challenge',
+                        retryable: false,
+                        engine: 'bing',
+                        message: `Bing returned a verification or anti-bot page in Playwright mode (title: ${pageState.title || 'unknown'}, keywords: ${pageState.detectedKeywords.join(', ') || 'none'})`
+                    });
                 }
                 if (pageState.hasResults && pageState.detectedKeywords.length > 0) {
                     console.warn(`Playwright Bing page contains suspicious keywords but also has results, skipping block detection: ${pageState.detectedKeywords.join(', ')}`);
@@ -660,17 +733,34 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
                 finalResults.directAnswer = directAnswer;
             }
             if (finalResults.length === 0 && hasSiteOperator(query)) {
-                throw new Error('Bing Playwright mode returned no results for a site:-restricted query. Retry without the site: prefix.');
+                throw new AppError({
+                    code: 'engine_parse_error',
+                    retryable: false,
+                    engine: 'bing',
+                    hint: 'Retry without the site: prefix.',
+                    message: 'Bing Playwright mode returned no results for a site:-restricted query. Retry without the site: prefix.'
+                });
             }
 
             return finalResults;
         } catch (error) {
+            if (signal?.aborted) {
+                throw error;
+            }
             if (shouldSuggestRemovingSiteOperator(query, error)) {
-                throw new Error('Bing Playwright mode did not return results for a site:-restricted query. Retry without the site: prefix.', { cause: error });
+                throw new AppError({
+                    code: 'engine_parse_error',
+                    retryable: false,
+                    engine: 'bing',
+                    hint: 'Retry without the site: prefix.',
+                    cause: error,
+                    message: 'Bing Playwright mode did not return results for a site:-restricted query. Retry without the site: prefix.'
+                });
             }
             throw error;
         } finally {
-            await releasePage();
+            signal?.removeEventListener('abort', onAbort);
+            await safeReleasePage();
         }
     } finally {
         await session.release();
@@ -680,21 +770,25 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
 export async function searchBing(
     query: string,
     limit: number,
-    options?: { searchMode?: 'request' | 'auto' | 'playwright' }
+    options?: { searchMode?: 'request' | 'auto' | 'playwright'; signal?: AbortSignal }
 ): Promise<SearchResult[]> {
     const effectiveSearchMode = options?.searchMode ?? getEngineSearchMode('bing', config);
+    const signal = options?.signal;
 
     if (effectiveSearchMode === 'request') {
-        return searchBingWithHttp(query, limit);
+        return searchBingWithHttp(query, limit, signal);
     }
 
     if (effectiveSearchMode === 'playwright') {
-        return searchBingWithPlaywright(query, limit);
+        return searchBingWithPlaywright(query, limit, signal);
     }
 
     try {
-        return await searchBingWithHttp(query, limit);
+        return await searchBingWithHttp(query, limit, signal);
     } catch (requestError) {
+        if (signal?.aborted) {
+            throw requestError;
+        }
         // SEARCH_MODE 控制：若 bing 不在 playwright 允许名单中（或显式禁用），
         // 反爬直接抛错，不启动重型浏览器。错误进入 partialFailures，配合 minResults 级联更轻量引擎补位。
         if (!config.bingPlaywrightFallback) {
@@ -702,11 +796,12 @@ export async function searchBing(
         }
 
         const canUsePlaywright = await isPlaywrightAvailable();
-        if (!canUsePlaywright) {
+        if (!canUsePlaywright || signal?.aborted) {
             throw requestError;
         }
 
         console.warn('Request-based Bing search failed, falling back to Playwright mode:', requestError);
-        return searchBingWithPlaywright(query, limit);
+        return searchBingWithPlaywright(query, limit, signal);
     }
 }
+

@@ -1,6 +1,7 @@
 import { config, engineShouldUseProxy, getProxyUrl } from '../../config.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
+import { AppError } from '../../core/errors.js';
 
 /**
  * Bing HTTP 模式的浏览器指纹请求层（wreq-js，Rust 实现）。
@@ -154,14 +155,57 @@ export function invalidateBingSession(): void {
     }
 }
 
+function createBingAbortError(signal: AbortSignal): Error {
+    return signal.reason instanceof Error
+        ? signal.reason
+        : new AppError({ code: 'aborted', retryable: false, engine: 'bing', message: 'Bing impersonate request aborted' });
+}
+
+function raceWithSignal<T>(signal: AbortSignal | undefined, fn: () => Promise<T>): Promise<T> {
+    if (!signal) {
+        return fn();
+    }
+    if (signal.aborted) {
+        return Promise.reject(createBingAbortError(signal));
+    }
+    return new Promise<T>((resolve, reject) => {
+        const onAbort = () => {
+            reject(createBingAbortError(signal));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        fn().then(
+            (val) => {
+                signal.removeEventListener('abort', onAbort);
+                resolve(val);
+            },
+            (err) => {
+                signal.removeEventListener('abort', onAbort);
+                reject(err);
+            }
+        );
+    });
+}
+
 /**
  * 用 wreq-js（Chrome TLS/HTTP2 指纹）执行 Bing 搜索。
  * 进程级复用会话以复用 TLS 与 HTTP/2 连接，避免重复握手；页面被反爬拦截时抛错，由调用方决定回退。
  */
-export async function searchBingWithImpersonate(query: string, limit: number): Promise<EngineSearchResponse> {
-    const session = await getOrCreateBingSession();
+export async function searchBingWithImpersonate(
+    query: string,
+    limit: number,
+    signal?: AbortSignal
+): Promise<EngineSearchResponse> {
+    if (signal?.aborted) {
+        throw createBingAbortError(signal);
+    }
+    const session = await raceWithSignal(signal, () => getOrCreateBingSession());
     if (!session) {
-        throw new Error('wreq-js is not available');
+        throw new AppError({
+            code: 'missing_optional_dependency',
+            retryable: false,
+            engine: 'bing',
+            message: 'wreq-js is not available'
+        });
     }
 
     try {
@@ -170,12 +214,20 @@ export async function searchBingWithImpersonate(query: string, limit: number): P
         let pageNumber = 0;
 
         while (allResults.length < limit) {
+            if (signal?.aborted) {
+                throw createBingAbortError(signal);
+            }
             const url = buildImpersonateSearchUrl(query, pageNumber);
-            const response = await session.fetch(url, { timeout: 15000 });
-            const html = await response.text();
+            const response = await raceWithSignal(signal, () => session.fetch(url, { timeout: 15000 }));
+            const html = await raceWithSignal(signal, () => response.text());
 
             if (isAntiBotPage(html)) {
-                throw new Error('Bing returned a verification or anti-bot page in impersonate mode');
+                throw new AppError({
+                    code: 'bot_challenge',
+                    retryable: false,
+                    engine: 'bing',
+                    message: 'Bing returned a verification or anti-bot page in impersonate mode'
+                });
             }
 
             const results = parseBingSearchResults(html, limit - allResults.length);
@@ -186,7 +238,13 @@ export async function searchBingWithImpersonate(query: string, limit: number): P
 
             if (results.length === 0) {
                 if (pageNumber === 0 && allResults.length === 0) {
-                    throw new Error('Bing impersonate mode returned 0 results (possible anti-bot layout change or soft block)');
+                    const { AppError } = await import('../../core/errors.js');
+                    throw new AppError({
+                        code: 'bot_challenge',
+                        retryable: false,
+                        engine: 'bing',
+                        message: 'Bing impersonate mode returned 0 results (possible anti-bot layout change or soft block)'
+                    });
                 }
                 break;
             }
@@ -206,3 +264,4 @@ export async function searchBingWithImpersonate(query: string, limit: number): P
         throw error;
     }
 }
+

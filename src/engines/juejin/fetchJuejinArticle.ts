@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import { buildAxiosRequestOptions, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { htmlToMarkdown } from '../../utils/markdown.js';
+import { AppError, extractErrorCode, extractErrorStatus, isAppError, isRetryableError, normalizePublicErrorCode } from '../../core/errors.js';
 
 function shouldDebug(): boolean {
     return (process.env.LOG_LEVEL ?? '').toLowerCase() === 'debug';
@@ -104,7 +105,12 @@ export async function fetchJuejinArticle(url: string, options: JuejinArticleOpti
 
         // 内容仍为空时抛错，而不是静默返回成功——空成功响应会让 LLM 误以为抓到了文章
         if (!content) {
-            throw new Error('No readable Juejin article content was extracted');
+            throw new AppError({
+                code: 'empty_content',
+                retryable: false,
+                engine: 'juejin',
+                message: 'No readable Juejin article content was extracted'
+            });
         }
 
         console.error(`✅ Successfully extracted ${content.length} characters`);
@@ -112,6 +118,13 @@ export async function fetchJuejinArticle(url: string, options: JuejinArticleOpti
 
     } catch (error) {
         console.error('❌ 获取掘金文章失败:', error instanceof Error ? error.message : String(error));
-        throw new Error(`获取掘金文章失败: ${error instanceof Error ? error.message : '未知错误'}`, error instanceof Error ? { cause: error } : undefined);
+        throw new AppError({
+            code: isAppError(error) ? error.code : (normalizePublicErrorCode(extractErrorCode(error)) ?? 'network_error'),
+            retryable: isAppError(error) ? error.retryable : isRetryableError(error),
+            status: extractErrorStatus(error),
+            engine: 'juejin',
+            cause: error,
+            message: `获取掘金文章失败: ${error instanceof Error ? error.message : '未知错误'}`
+        });
     }
 }

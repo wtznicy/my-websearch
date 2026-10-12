@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 import ipaddr from 'ipaddr.js';
 import { config } from '../config.js';
 import { metrics } from '../core/metrics.js';
+import { AppError } from '../core/errors.js';
 import { cachedDnsLookup } from './dnsCache.js';
 
 /** SSRF 拦截审计（需 SECURITY_AUDIT=true）：此前 ssrf_blocked 事件类型零埋点 */
@@ -204,16 +205,29 @@ export function isPublicHttpUrl(url: string): boolean {
 
 export function assertPublicHttpUrl(url: string | URL, label: string = 'URL'): void {
     const parsed = typeof url === 'string' ? new URL(url) : url;
+    const isRedirect = /redirect/i.test(label);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        throw new Error(`${label} must use HTTP or HTTPS`);
+        throw new AppError({
+            code: isRedirect ? 'redirect_not_allowed' : 'invalid_arguments',
+            retryable: false,
+            message: `${label} must use HTTP or HTTPS`
+        });
     }
     if (isRebindingStyleHostname(parsed.hostname)) {
         reportBlocked(parsed, `${label} uses a wildcard DNS service (DNS rebinding)`);
-        throw new Error(`${label} uses a wildcard DNS service that can point at private addresses (DNS rebinding), which is not allowed`);
+        throw new AppError({
+            code: isRedirect ? 'redirect_not_allowed' : 'invalid_arguments',
+            retryable: false,
+            message: `${label} uses a wildcard DNS service that can point at private addresses (DNS rebinding), which is not allowed`
+        });
     }
     if (isPrivateOrLocalHostname(parsed.hostname)) {
         reportBlocked(parsed, `${label} points to a private or local network target`);
-        throw new Error(`${label} points to a private or local network target, which is not allowed`);
+        throw new AppError({
+            code: isRedirect ? 'redirect_not_allowed' : 'invalid_arguments',
+            retryable: false,
+            message: `${label} points to a private or local network target, which is not allowed`
+        });
     }
 }
 
@@ -222,12 +236,17 @@ export function assertPublicHttpUrl(url: string | URL, label: string = 'URL'): v
 export async function assertPublicHttpUrlResolved(url: string | URL, label: string = 'URL'): Promise<void> {
     const parsed = typeof url === 'string' ? new URL(url) : url;
     assertPublicHttpUrl(parsed, label);
+    const isRedirect = /redirect/i.test(label);
 
     const host = stripIpv6Brackets(parsed.hostname);
     if (isIP(host) !== 0) {
         // 字面量 IP 直接做黑/私网检查；若命中黑洞地址给出专属提示
         if (isBlackholeAddress(host)) {
-            throw new Error(`${label} points to 0.0.0.0/8 (blackhole), which is usually caused by local DNS blocking/pollution — check DNS or enable a proxy`);
+            throw new AppError({
+                code: 'network_error',
+                retryable: true,
+                message: `${label} points to 0.0.0.0/8 (blackhole), which is usually caused by local DNS blocking/pollution — check DNS or enable a proxy`
+            });
         }
         return;
     }
@@ -236,7 +255,11 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
     try {
         resolved = await dnsLookupForSafety(host);
     } catch {
-        throw new Error(`${label} could not be resolved`);
+        throw new AppError({
+            code: 'network_error',
+            retryable: true,
+            message: `${label} could not be resolved`
+        });
     }
     const blackholeHit = resolved.find((entry) => isBlackholeAddress(entry.address));
     if (blackholeHit) {
@@ -245,7 +268,11 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
         if (config.useProxy) {
             return;
         }
-        throw new Error(`${label} resolves to ${blackholeHit.address} (0.0.0.0/8 blackhole) — likely local DNS blocking/pollution; check DNS or enable a proxy`);
+        throw new AppError({
+            code: 'network_error',
+            retryable: true,
+            message: `${label} resolves to ${blackholeHit.address} (0.0.0.0/8 blackhole) — likely local DNS blocking/pollution; check DNS or enable a proxy`
+        });
     }
 
     // 代理模式同样做本地解析判定（此前这里直接 return，导致 USE_PROXY=true 时
@@ -255,6 +282,10 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
     const blockedEntry = resolved.find((entry) => isPrivateOrLocalHostname(entry.address) && !isAllowedFakeIp(entry.address));
     if (blockedEntry) {
         reportBlocked(parsed, `${label} resolves to ${blockedEntry.address} (private or local)`);
-        throw new Error(`${label} resolves to a private or local network target, which is not allowed${hintFakeIpBlockedAddress(blockedEntry.address)}`);
+        throw new AppError({
+            code: isRedirect ? 'redirect_not_allowed' : 'invalid_arguments',
+            retryable: false,
+            message: `${label} resolves to a private or local network target, which is not allowed${hintFakeIpBlockedAddress(blockedEntry.address)}`
+        });
     }
 }

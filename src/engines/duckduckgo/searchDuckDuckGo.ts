@@ -4,6 +4,14 @@ import {SearchResult} from "../../types.js";
 import {buildAxiosRequestOptions} from "../../utils/httpRequest.js";
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
+import {
+  AppError,
+  extractErrorCode,
+  extractErrorStatus,
+  isAppError,
+  isRetryableError,
+  normalizePublicErrorCode
+} from '../../core/errors.js';
 
 const CHROME_133_SEC_CH_UA = '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"';
 
@@ -351,26 +359,43 @@ export function parseDuckDuckGoHtmlResults(html: string, maxResults: number, see
  * @param limit Maximum number of results
  * @returns Array of search results
  */
-export async function searchDuckDuckGo(query: string, limit: number): Promise<SearchResult[]> {
+export async function searchDuckDuckGo(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
+  const signal = options?.signal;
   // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂 15s 超时拖累整次搜索
   await assertOverseasEngineUsable('duckduckgo');
   let preloadError: unknown = null;
   // Try using the preloaded URL method
   try {
-    const results = await searchDuckDuckGoPreloadUrl(query, limit);
+    const results = await searchDuckDuckGoPreloadUrl(query, limit, signal);
     if (results.length > 0) {
       return results;
     }
   } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
     preloadError = error;
     console.warn('预加载URL方法失败，尝试HTML方法:', error instanceof Error ? error.message : String(error));
   }
 
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new AppError({ code: 'aborted', retryable: false, engine: 'duckduckgo', message: 'Request aborted' });
+  }
+
   try {
-    return await searchDuckDuckGoHtml(query, limit);
+    return await searchDuckDuckGoHtml(query, limit, signal);
   } catch (htmlError) {
     if (preloadError instanceof Error && htmlError instanceof Error) {
-      throw new Error(`${htmlError.message} (preload path: ${preloadError.message})`, { cause: htmlError });
+      throw new AppError({
+        code: isAppError(htmlError) ? htmlError.code : (normalizePublicErrorCode(extractErrorCode(htmlError)) ?? 'network_error'),
+        retryable: isAppError(htmlError) ? htmlError.retryable : isRetryableError(htmlError),
+        status: extractErrorStatus(htmlError),
+        engine: 'duckduckgo',
+        cause: htmlError,
+        message: `${htmlError.message} (preload path: ${preloadError.message})`
+      });
     }
     throw htmlError;
   }
@@ -379,7 +404,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
   /**
   * Extract preloaded d.js URL from DuckDuckGo search page and use it directly
   */
-  async function searchDuckDuckGoPreloadUrl(query: string, maxResults = 10): Promise<SearchResult[]> {
+  async function searchDuckDuckGoPreloadUrl(query: string, maxResults = 10, signal?: AbortSignal): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
     let offset = 0;
 
@@ -389,6 +414,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
         trustedStaticHost: true,
         // 上界 10s：preload 与 HTML 两条路径各一次请求，避免单引擎累加超时吃光搜索总预算
         timeout: 10000,
+        signal,
         headers: {
           "User-Agent": BROWSER_USER_AGENT,
           "Connection": "keep-alive",
@@ -412,7 +438,13 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
       // 上游反爬升级：DDG 对非浏览器请求返回 202 挑战页（页面无 d.js preload URL）——
       // 显式报错而非静默 0 结果，让 partialFailures 暴露真实原因
       if (response.status === 202) {
-        throw new Error('DuckDuckGo returned a challenge page (HTTP 202) — upstream anti-bot; retry later or use another engine');
+        throw new AppError({
+          code: 'bot_challenge',
+          retryable: false,
+          status: 202,
+          engine: 'duckduckgo',
+          message: 'DuckDuckGo returned a challenge page (HTTP 202) — upstream anti-bot; retry later or use another engine'
+        });
       }
 
       let basePreloadUrl = '';
@@ -473,6 +505,11 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
       };
 
       while (results.length < maxResults && hasMoreResults) {
+        if (signal?.aborted) {
+          throw signal.reason instanceof Error
+            ? signal.reason
+            : new AppError({ code: 'aborted', retryable: false, engine: 'duckduckgo', message: 'Request aborted' });
+        }
         // Update s parameter (offset)
         preloadUrlObj.searchParams.set('s', offset.toString());
 
@@ -506,12 +543,24 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
           } else if (rawScript.includes('isJsaChallenge')) {
             // 静态解析失败（上游改了挑战脚本形状）→ 显式报错，不要静默返回 0 结果。
             // 文案匹配既有豁免模式 "DuckDuckGo returned a challenge page"，且按反爬类不可重试处理
-            throw new Error('DuckDuckGo returned a challenge page (jsa challenge could not be solved statically)');
+            throw new AppError({
+              code: 'bot_challenge',
+              retryable: false,
+              status: 202,
+              engine: 'duckduckgo',
+              message: 'DuckDuckGo returned a challenge page (jsa challenge could not be solved statically)'
+            });
           }
         }
 
         if (rawScript.includes('anomalyDetectionBlock')) {
-          throw new Error('DuckDuckGo d.js returned anomalyDetectionBlock (HTTP 202) — exit IP rate-limited');
+          throw new AppError({
+            code: 'bot_challenge',
+            retryable: false,
+            status: 202,
+            engine: 'duckduckgo',
+            message: 'DuckDuckGo d.js returned anomalyDetectionBlock (HTTP 202) — exit IP rate-limited'
+          });
         }
 
         // Extract JSON data from JSONP response
@@ -549,13 +598,14 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
     }
   }
 
-  async function searchDuckDuckGoHtml(query: string, maxResults = 10): Promise<SearchResult[]> {
+  async function searchDuckDuckGoHtml(query: string, maxResults = 10, signal?: AbortSignal): Promise<SearchResult[]> {
   const requestUrl = 'https://html.duckduckgo.com/html/';
 
     // Configure request options
     const requestOptions = buildAxiosRequestOptions({ engine: 'duckduckgo',
     trustedStaticHost: true,
     timeout: 10000,
+    signal,
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       'User-Agent': BROWSER_USER_AGENT,
@@ -577,13 +627,24 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
     );
 
     if (response.status === 202) {
-      throw new Error('DuckDuckGo returned a challenge page (HTTP 202) — upstream anti-bot; retry later or use another engine');
+      throw new AppError({
+        code: 'bot_challenge',
+        retryable: false,
+        status: 202,
+        engine: 'duckduckgo',
+        message: 'DuckDuckGo returned a challenge page (HTTP 202) — upstream anti-bot; retry later or use another engine'
+      });
     }
 
     let parsedPage = parseDuckDuckGoHtmlResults(String(response.data || ''), maxResults, seenUrls);
     results.push(...parsedPage.results);
 
     while (results.length < maxResults && parsedPage.rawCount > 0 && pageCount < 10) {
+      if (signal?.aborted) {
+        throw signal.reason instanceof Error
+          ? signal.reason
+          : new AppError({ code: 'aborted', retryable: false, engine: 'duckduckgo', message: 'Request aborted' });
+      }
       offset += parsedPage.rawCount;
       pageCount += 1;
 

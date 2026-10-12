@@ -421,7 +421,15 @@ async function main(): Promise<void> {
                     caughtError = error;
                 }
                 const caughtCode = (caughtError as { code?: string })?.code;
-                assert(caughtCode === 'ERR_BOT_CHALLENGE', 'challenge page should throw ERR_BOT_CHALLENGE at unified exit');
+                const rawCode = (caughtError as { details?: { rawCode?: string } })?.details?.rawCode;
+                assert(
+                    caughtCode === 'bot_challenge' || caughtCode === 'ERR_BOT_CHALLENGE',
+                    'challenge page should throw bot_challenge (with rawCode ERR_BOT_CHALLENGE) at unified exit'
+                );
+                assert(
+                    rawCode === 'ERR_BOT_CHALLENGE' || caughtCode === 'ERR_BOT_CHALLENGE',
+                    'challenge page should preserve ERR_BOT_CHALLENGE in details.rawCode'
+                );
             }
         },
         {

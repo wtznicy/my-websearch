@@ -334,6 +334,26 @@ export async function startLocalDaemon(
                 searchMode,
                 minResults
             });
+            if (result.outcome === 'failed') {
+                const failureSummary = result.partialFailures
+                    .map((failure) => `${failure.engine}: ${failure.message}`)
+                    .join('; ') || 'All search engines failed';
+                res.status(502).json(createErrorEnvelope(
+                    ErrorCode.ENGINE_ERROR,
+                    failureSummary,
+                    {
+                        retryable: result.retryable ?? true,
+                        data: result,
+                        details: {
+                            outcome: result.outcome,
+                            engines: result.engines,
+                            partialFailures: result.partialFailures
+                        },
+                        hint: 'Retry with a different engine (`--engine` / `engines`), inspect proxy/network status with `my-websearch doctor`, or try again later.'
+                    }
+                ));
+                return;
+            }
             res.json(createSuccessEnvelope(result));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

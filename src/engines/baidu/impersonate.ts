@@ -5,6 +5,7 @@ import type { WreqSession } from '../bing/impersonate.js';
 export { isImpersonateAvailable } from '../bing/impersonate.js';
 import { isBaiduAntiBotPage, parseBaiduResultsPage } from './parser.js';
 import { loadPersistedBaiduCookies, savePersistedBaiduCookies, WreqCookie } from '../../utils/cookieStore.js';
+import { AppError } from '../../core/errors.js';
 
 /**
  * Baidu HTTP 模式的浏览器指纹请求层（wreq-js，Rust 实现）。
@@ -87,14 +88,57 @@ export function invalidateBaiduSession(): void {
     baiduSessionWarmedUp = false;
 }
 
+function createBaiduAbortError(signal: AbortSignal): Error {
+    return signal.reason instanceof Error
+        ? signal.reason
+        : new AppError({ code: 'aborted', retryable: false, engine: 'baidu', message: 'Baidu impersonate request aborted' });
+}
+
+function raceWithSignal<T>(signal: AbortSignal | undefined, fn: () => Promise<T>): Promise<T> {
+    if (!signal) {
+        return fn();
+    }
+    if (signal.aborted) {
+        return Promise.reject(createBaiduAbortError(signal));
+    }
+    return new Promise<T>((resolve, reject) => {
+        const onAbort = () => {
+            reject(createBaiduAbortError(signal));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        fn().then(
+            (val) => {
+                signal.removeEventListener('abort', onAbort);
+                resolve(val);
+            },
+            (err) => {
+                signal.removeEventListener('abort', onAbort);
+                reject(err);
+            }
+        );
+    });
+}
+
 /**
  * 用 wreq-js（Chrome TLS/HTTP2 指纹 + 会话 cookie）执行百度搜索。
  * 进程级复用会话以复用 TLS 连接与在内存 cookie，避免重复握手与多余首页预热。
  */
-export async function searchBaiduWithImpersonate(query: string, limit: number): Promise<EngineSearchResponse> {
-    const session = await getOrCreateBaiduSession();
+export async function searchBaiduWithImpersonate(
+    query: string,
+    limit: number,
+    signal?: AbortSignal
+): Promise<EngineSearchResponse> {
+    if (signal?.aborted) {
+        throw createBaiduAbortError(signal);
+    }
+    const session = await raceWithSignal(signal, () => getOrCreateBaiduSession());
     if (!session) {
-        throw new Error('wreq-js is not available');
+        throw new AppError({
+            code: 'missing_optional_dependency',
+            retryable: false,
+            engine: 'baidu',
+            message: 'wreq-js is not available'
+        });
     }
 
     try {
@@ -106,9 +150,12 @@ export async function searchBaiduWithImpersonate(query: string, limit: number): 
             }
             if (!hasBaiduSessionCookie(session.getAllCookies())) {
                 try {
-                    await session.fetch(BAIDU_HOME_URL, { timeout: 15000 });
+                    await raceWithSignal(signal, () => session.fetch(BAIDU_HOME_URL, { timeout: 15000 }));
                     await savePersistedBaiduCookies(session.getAllCookies());
                 } catch (error) {
+                    if (signal?.aborted) {
+                        throw error;
+                    }
                     console.warn('Baidu impersonate home page request failed, continuing with search:', error instanceof Error ? error.message : String(error));
                 }
             }
@@ -121,12 +168,20 @@ export async function searchBaiduWithImpersonate(query: string, limit: number): 
         let pageNumber = 0;
 
         while (allResults.length < limit) {
+            if (signal?.aborted) {
+                throw createBaiduAbortError(signal);
+            }
             const url = `${BAIDU_HOME_URL}s?wd=${encodeURIComponent(query)}&pn=${pageNumber * 10}&ie=utf-8&tn=baiduhome_pg`;
-            const response = await session.fetch(url, { timeout: 15000 });
-            const html = await response.text();
+            const response = await raceWithSignal(signal, () => session.fetch(url, { timeout: 15000 }));
+            const html = await raceWithSignal(signal, () => response.text());
 
             if (isBaiduAntiBotPage(html)) {
-                throw new Error('Baidu returned an anti-bot or redirect page in impersonate mode (likely missing cookies or verification)');
+                throw new AppError({
+                    code: 'bot_challenge',
+                    retryable: false,
+                    engine: 'baidu',
+                    message: 'Baidu returned an anti-bot or redirect page in impersonate mode (likely missing cookies or verification)'
+                });
             }
 
             const results = await parseBaiduResultsPage(html, seenUrls);
@@ -157,3 +212,4 @@ export async function searchBaiduWithImpersonate(query: string, limit: number): 
         throw error;
     }
 }
+

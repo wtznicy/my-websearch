@@ -5,6 +5,7 @@ import { rankSearchResults } from './resultRanking.js';
 import { isEngineCircuitOpen, getEngineCircuitRemainingMs } from './engineCircuitBreaker.js';
 import { quoteModelLikeTerms } from '../../utils/queryPreprocess.js';
 import { metrics } from '../metrics.js';
+import { classifyFailureRetryable, AppError } from '../errors.js';
 import {
     executePrimaryEngines,
     isRetryableEngineError,
@@ -22,31 +23,84 @@ export {
 };
 
 // ---------------------------------------------------------------------------
-// 简单信号量：限制并发搜索数
+// 简单信号量：限制并发搜索数（支持队列上限与排队超时）
 // ---------------------------------------------------------------------------
 
-class Semaphore {
-    private permits: number;
-    private waitQueue: Array<() => void> = [];
+type SemaphoreWaiter = {
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timer?: ReturnType<typeof setTimeout>;
+};
 
-    constructor(permits: number) {
+export class Semaphore {
+    private permits: number;
+    private readonly maxQueueSize: number;
+    private waitQueue: SemaphoreWaiter[] = [];
+
+    constructor(permits: number, maxQueueSize = Math.max(16, permits * 4)) {
         this.permits = permits;
+        this.maxQueueSize = maxQueueSize;
     }
 
-    async acquire(): Promise<void> {
+    async acquire(deadlineAt?: number): Promise<void> {
         if (this.permits > 0) {
             this.permits -= 1;
             return;
         }
-        return new Promise<void>((resolve) => {
-            this.waitQueue.push(resolve);
+        if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
+            throw new AppError({
+                code: 'network_timeout',
+                retryable: true,
+                message: 'Search deadline exhausted before acquiring concurrency slot'
+            });
+        }
+        if (this.waitQueue.length >= this.maxQueueSize) {
+            throw new AppError({
+                code: 'queue_full',
+                retryable: true,
+                message: `Search concurrency queue is full (max ${this.maxQueueSize} waiting requests)`
+            });
+        }
+
+        return new Promise<void>((resolve, reject) => {
+            const waiter: SemaphoreWaiter = {
+                resolve: () => {
+                    if (waiter.timer) {
+                        clearTimeout(waiter.timer);
+                    }
+                    resolve();
+                },
+                reject: (err: Error) => {
+                    if (waiter.timer) {
+                        clearTimeout(waiter.timer);
+                    }
+                    reject(err);
+                }
+            };
+
+            if (deadlineAt !== undefined) {
+                const remainingMs = Math.max(0, deadlineAt - Date.now());
+                waiter.timer = setTimeout(() => {
+                    const idx = this.waitQueue.indexOf(waiter);
+                    if (idx !== -1) {
+                        this.waitQueue.splice(idx, 1);
+                    }
+                    waiter.reject(new AppError({
+                        code: 'network_timeout',
+                        retryable: true,
+                        message: `Search timed out after waiting ${remainingMs}ms in concurrency queue`
+                    }));
+                }, remainingMs);
+            }
+
+            this.waitQueue.push(waiter);
         });
     }
 
     release(): void {
         const next = this.waitQueue.shift();
         if (next) {
-            next();
+            next.resolve();
         } else {
             this.permits += 1;
         }
@@ -56,12 +110,13 @@ class Semaphore {
 // 全局并发限制（0 = 不限制）
 let globalSemaphore: Semaphore | null = null;
 
-export function configureGlobalConcurrencyLimit(maxConcurrent: number): void {
-    globalSemaphore = maxConcurrent > 0 ? new Semaphore(maxConcurrent) : null;
+export function configureGlobalConcurrencyLimit(maxConcurrent: number, maxQueueSize?: number): void {
+    globalSemaphore = maxConcurrent > 0 ? new Semaphore(maxConcurrent, maxQueueSize) : null;
 }
 
 export type SearchExecutionContext = {
     searchMode?: AppConfig['searchMode'];
+    signal?: AbortSignal;
 };
 
 export type SearchEngineExecutor = (query: string, limit: number, context?: SearchExecutionContext) => Promise<SearchResult[]>;
@@ -70,8 +125,44 @@ export type SearchEngineExecutorMap = Partial<Record<string, SearchEngineExecuto
 export type SearchExecutionFailure = {
     engine: string;
     code: 'engine_error' | 'unsupported_engine' | 'no_results' | 'circuit_open';
+    errorCode?: string;
+    status?: number;
+    hint?: string;
+    details?: Record<string, unknown>;
     message: string;
+    retryable?: boolean;
 };
+
+export type SearchOutcome = 'ok' | 'degraded' | 'empty' | 'failed';
+
+export function computeSearchOutcome(
+    totalResults: number,
+    partialFailures: SearchExecutionFailure[],
+    directAnswer?: string
+): { outcome: SearchOutcome; retryable: boolean } {
+    const hasUsablePayload = totalResults > 0 || Boolean(directAnswer && directAnswer.trim().length > 0);
+    if (hasUsablePayload) {
+        return {
+            outcome: partialFailures.length > 0 ? 'degraded' : 'ok',
+            retryable: false
+        };
+    }
+
+    const hardFailures = partialFailures.filter((failure) => failure.code !== 'no_results');
+    if (hardFailures.length === 0) {
+        return {
+            outcome: 'empty',
+            retryable: false
+        };
+    }
+
+    const retryable = hardFailures.some((failure) => classifyFailureRetryable(failure));
+
+    return {
+        outcome: 'failed',
+        retryable
+    };
+}
 
 export type SearchExecutionResult = {
     query: string;
@@ -79,6 +170,10 @@ export type SearchExecutionResult = {
     totalResults: number;
     results: SearchResult[];
     partialFailures: SearchExecutionFailure[];
+    /** 搜索结果状态语义：ok（成功无失败）、degraded（有结果但部分引擎失败/无结果）、empty（引擎正常完成但无匹配结果）、failed（所有结果为空且引擎出错） */
+    outcome?: SearchOutcome;
+    /** 当 outcome === 'failed' 时指示是否建议重试 */
+    retryable?: boolean;
     /** 级联补位实际成功的引擎（仅当 minResults 触发时出现） */
     cascadedEngines?: string[];
     /** SERP 首位的直接答案卡片文本（如百度汇率换算/百科摘要卡），LLM 可免抓详情页直接取事实 */
@@ -108,24 +203,31 @@ function resolveSearchModeOverride(searchMode: AppConfig['searchMode'] | undefin
 
 /**
  * 计算结果的规范化 URL 键，用于跨引擎去重。
- * 兼容常见的追踪参数（utm_*、fbclid 等）造成的"同页不同 URL"。
+ * 兼容常见的无歧义追踪参数（utm_*、fbclid、gclid、msclkid 等）造成的"同页不同 URL"。
+ * 注意：不全局剥离 `ref`（可能是 Git 分支/标签或业务路由参数）。
  */
 export function normalizeResultUrl(url: string): string {
     try {
         const parsed = new URL(url);
         parsed.hash = '';
+        const host = parsed.hostname.toLowerCase();
+        const isKnownSpmHost = /(^|\.)(csdn\.net|juejin\.cn|bilibili\.com|aliyun\.com|github\.com|gitee\.com|zhihu\.com)$/i.test(host);
         for (const key of [...parsed.searchParams.keys()]) {
-            if (key.startsWith('utm_') || key === 'fbclid' || key === 'gclid' || key === 'ref' || key === 'spm') {
+            if (key.startsWith('utm_') || key === 'fbclid' || key === 'gclid' || key === 'msclkid') {
                 parsed.searchParams.delete(key);
+                continue;
             }
-            if ((key === 'tab' || key === 'spm') && (parsed.hostname === 'github.com' || parsed.hostname === 'gitee.com')) {
+            if (key === 'spm' && isKnownSpmHost) {
+                parsed.searchParams.delete(key);
+                continue;
+            }
+            if (key === 'tab' && (host === 'github.com' || host === 'gitee.com')) {
                 parsed.searchParams.delete(key);
             }
         }
         if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
             parsed.protocol = 'https:';
-            const hostname = parsed.hostname.toLowerCase();
-            parsed.hostname = hostname.startsWith('www.') ? hostname.slice(4) : hostname;
+            parsed.hostname = host.startsWith('www.') ? host.slice(4) : host;
             if (parsed.pathname === '/') {
                 parsed.pathname = '';
             }
@@ -299,10 +401,18 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
         async execute({ query, engines, limit, searchMode, minResults }: SearchExecutionInput): Promise<SearchExecutionResult> {
             const cleanQuery = query.trim();
             if (!cleanQuery) {
-                throw new Error('Query string cannot be empty');
+                throw new AppError({
+                    code: 'invalid_arguments',
+                    retryable: false,
+                    message: 'Query string cannot be empty'
+                });
             }
             if (cleanQuery.length > MAX_QUERY_LENGTH) {
-                throw new Error(`Query string too long (${cleanQuery.length} characters, max ${MAX_QUERY_LENGTH})`);
+                throw new AppError({
+                    code: 'invalid_arguments',
+                    retryable: false,
+                    message: `Query string too long (${cleanQuery.length} characters, max ${MAX_QUERY_LENGTH})`
+                });
             }
 
             const searchQuery = quoteModelLikeTerms(cleanQuery);
@@ -314,8 +424,11 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             }
             metrics.recordCacheMiss();
 
+            const deadlineMs = SEARCH_DEADLINE_MS;
+            const deadlineAt = Date.now() + deadlineMs;
+
             if (globalSemaphore) {
-                await globalSemaphore.acquire();
+                await globalSemaphore.acquire(deadlineAt);
             }
 
             try {
@@ -330,6 +443,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                         initialFailures.push({
                             engine,
                             code: 'circuit_open',
+                            retryable: true,
                             message: `Engine circuit open (recent HTTP 429 rate limiting, ~${Math.ceil(getEngineCircuitRemainingMs(engine) / 1000)}s cooldown left) — quota reallocated to other engines`
                         });
                     }
@@ -338,8 +452,6 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 const limits = distributeLimit(limit, executableEngines.length);
                 const effectiveSearchMode = resolveSearchModeOverride(searchMode);
 
-                const deadlineMs = SEARCH_DEADLINE_MS;
-                const deadlineAt = Date.now() + deadlineMs;
                 const perEngineTimeoutMs = Math.min(Math.floor(deadlineMs * 0.5), 10000);
 
                 // 管道第 1 阶段：主引擎并发执行器
@@ -381,12 +493,16 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                 // 管道第 3 阶段：全局重排与截断
                 merged = rankSearchResults(merged, cleanQuery).slice(0, limit);
 
+                const { outcome, retryable } = computeSearchOutcome(merged.length, allFailures, primary.directAnswer);
+
                 const result: SearchExecutionResult = {
                     query: cleanQuery,
                     engines: executableEngines,
                     totalResults: merged.length,
                     results: merged,
                     partialFailures: allFailures,
+                    outcome,
+                    retryable,
                     ...(cascade.cascadedEngines.length > 0 ? { cascadedEngines: cascade.cascadedEngines } : {}),
                     ...(primary.directAnswer ? { directAnswer: primary.directAnswer } : {}),
                     ...(allMetrics.some(Boolean) ? { engineMetrics: allMetrics.filter(Boolean) } : {})

@@ -134,5 +134,57 @@ INVALID LINE WITHOUT EQUALS
             expect(fakeTargetEnv.EXA_API_KEY).toBe('exa-from-dot-env');
             expect(fakeTargetEnv.CONTEXT7_API_KEY).toBe('c7-from-dot-env');
         });
+
+        it('preserves proxy.engines from config.json when proxy.url is injected in the same pass', () => {
+            const fakeTargetEnv: NodeJS.ProcessEnv = {
+                MYWEBSEARCH_DATA_DIR: tempDir
+            };
+
+            const appConfigPath = getAppConfigFilePath(fakeTargetEnv);
+            fs.writeFileSync(
+                appConfigPath,
+                JSON.stringify({
+                    proxy: {
+                        url: 'http://127.0.0.1:7897',
+                        useProxy: true,
+                        engines: ['bing']
+                    }
+                }),
+                'utf8'
+            );
+
+            const injected = loadApplicationConfigEnv(fakeTargetEnv, { cwd: tempDir, quiet: true });
+
+            expect(fakeTargetEnv.PROXY_URL).toBe('http://127.0.0.1:7897');
+            expect(fakeTargetEnv.USE_PROXY).toBe('true');
+            expect(fakeTargetEnv.PROXY_ENGINES).toBe('bing');
+            expect(injected.PROXY_ENGINES).toBe('bing');
+        });
+
+        it('skips proxy.engines from config.json when PROXY_URL was explicitly set in initial environment', () => {
+            const fakeTargetEnv: NodeJS.ProcessEnv = {
+                MYWEBSEARCH_DATA_DIR: tempDir,
+                PROXY_URL: 'http://127.0.0.1:9999;duckduckgo'
+            };
+
+            const appConfigPath = getAppConfigFilePath(fakeTargetEnv);
+            fs.writeFileSync(
+                appConfigPath,
+                JSON.stringify({
+                    proxy: {
+                        url: 'http://127.0.0.1:7897',
+                        useProxy: true,
+                        engines: ['bing']
+                    }
+                }),
+                'utf8'
+            );
+
+            loadApplicationConfigEnv(fakeTargetEnv, { cwd: tempDir, quiet: true });
+
+            expect(fakeTargetEnv.PROXY_URL).toBe('http://127.0.0.1:9999;duckduckgo');
+            expect(fakeTargetEnv.PROXY_ENGINES).toBeUndefined();
+        });
     });
 });
+

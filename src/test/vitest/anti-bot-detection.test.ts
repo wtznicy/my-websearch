@@ -94,9 +94,49 @@ describe('antiBotDetection', () => {
             expect(looksLikeBotChallengePage('没有知识存在的荒原')).toBe(true);
         });
 
-        it('returns false for ordinary technical content', () => {
+        it('returns false for ordinary technical content and short technical documentation phrases', () => {
             expect(looksLikeBotChallengePage('TypeScript tutorial for beginners with examples')).toBe(false);
             expect(looksLikeBotChallengePage('知识图谱构建与自然语言处理实战')).toBe(false);
+
+            const negativeDocs = [
+                'Email verification API guide',
+                'How to build a captcha component',
+                'Verification token documentation',
+                'Access denied middleware configuration',
+                'Rate limit handling in SDK documentation'
+            ];
+            for (const doc of negativeDocs) {
+                expect(looksLikeBotChallengePage(doc)).toBe(false);
+                expect(
+                    looksLikeBotChallengePage(
+                        `<html><head><title>${doc}</title></head><body><main><h1>${doc}</h1><p>Configure ${doc.toLowerCase()} in your service.</p></main></body></html>`,
+                        { status: 200 }
+                    )
+                ).toBe(false);
+            }
+        });
+
+        it('detects composite signals (abnormal HTTP status + missing main container + short body or script/meta challenge markers)', () => {
+            // Cloudflare / WAF script challenge marker without obvious body text
+            const cfScriptHtml = `<html><head><title> Example </title><script>window._cf_chl_opt={cvId: '2'};</script></head><body><div>Loading...</div></body></html>`;
+            expect(looksLikeBotChallengePage(cfScriptHtml)).toBe(true);
+
+            // Aliyun WAF / Geetest script challenge marker
+            const wafScriptHtml = `<html><head><script src="https://static.geetest.com/v4/gt4.js"></script></head><body><div>请稍候</div></body></html>`;
+            expect(looksLikeBotChallengePage(wafScriptHtml)).toBe(true);
+
+            // Meta refresh to captcha page
+            const metaRefreshHtml = `<html><head><meta http-equiv="refresh" content="0;url=/captcha/verify"></head><body></body></html>`;
+            expect(looksLikeBotChallengePage(metaRefreshHtml)).toBe(true);
+
+            // Abnormal HTTP 403 + short body + generic WAF/Cloudflare wording without expected article container
+            const status403WafHtml = `<html><head><title>403</title></head><body><p>Request blocked by Cloudflare WAF.</p></body></html>`;
+            expect(looksLikeBotChallengePage(status403WafHtml, { status: 403 })).toBe(true);
+
+            // Long article discussing Cloudflare WAF and captcha with status 200 must NOT be flagged
+            const longArticleHtml = `<html><head><title>Cloudflare WAF and Captcha Guide</title></head><body><article><p>${'In this tutorial we explain how Cloudflare WAF and captcha verification work in production APIs. '.repeat(6)}</p></article></body></html>`;
+            expect(looksLikeBotChallengePage(longArticleHtml, { status: 200 })).toBe(false);
         });
     });
 });
+

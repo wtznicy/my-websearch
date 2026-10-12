@@ -4,6 +4,7 @@ import { Buffer } from 'node:buffer';
 import { config } from '../../config.js';
 import { buildAxiosRequestOptions, isNetworkLayerError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { detectSystemProxy } from '../../utils/systemProxy.js';
+import { AppError } from '../../core/errors.js';
 
 // Avoid the GitHub README API here because anonymous API requests in this
 // environment hit rate limits quickly; raw URLs are more stable for this tool.
@@ -334,9 +335,13 @@ async function fetchReadme(owner: string, repo: string, host: RepoHost): Promise
     if (sawFetchFailure) {
         // 所有候选源都出现非 404 错误（网络不可达/上游错误）：抛明确错误，
         // 避免调用方把"网络不通"误报为"README not found"
-        throw new Error(
-            `Failed to fetch README for ${owner}/${repo}: all sources (raw.githubusercontent.com, proxy, jsDelivr CDN) failed — network unreachable or upstream error. Check network/proxy configuration.`
-        );
+        throw new AppError({
+            code: 'network_error',
+            retryable: true,
+            engine: 'github',
+            hint: 'Check network/proxy configuration.',
+            message: `Failed to fetch README for ${owner}/${repo}: all sources (raw.githubusercontent.com, proxy, jsDelivr CDN) failed — network unreachable or upstream error. Check network/proxy configuration.`
+        });
     }
     console.warn(`README not found for ${owner}/${repo}`);
 

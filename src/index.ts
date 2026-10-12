@@ -14,11 +14,15 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import cors from 'cors';
-import type { CorsOptions } from 'cors';
 import { runCli } from './cli/runCli.js';
 import type { MyWebSearchRuntime } from './runtime/runtimeTypes.js';
 import { shouldCreateFullRuntimeForInvocation } from './runtime/runtimeSelection.js';
 import { shutdownLocalPlaywrightBrowserSessions } from './utils/playwrightClient.js';
+import {
+  buildMcpCorsOptions,
+  createSessionCapacityManager,
+  type SessionSlotReservation
+} from './adapters/http/mcpHttpSecurity.js';
 
 // 从 package.json 注入真实版本号，避免 MCP 客户端看到的 server 版本失真。
 // 注意：此文件编译后位于 build/index.js，package.json 在仓库根目录，需上溯一级。
@@ -123,17 +127,13 @@ async function main() {
       : ['127.0.0.1', 'localhost', '[::1]'];
     app.use(hostHeaderValidation(allowedHostnames));
 
-    const mcpCorsOptions: CorsOptions = {
-      origin: '*',
-      methods: ['GET', 'POST', 'DELETE'],
-      allowedHeaders: ['Content-Type', 'Mcp-Session-Id'],
-      exposedHeaders: ['Mcp-Session-Id'],
-    };
-
-    app.use(cors(mcpCorsOptions));
-    // express 5 中裸 * 不再是通配符（path-to-regexp v8 要求命名通配符），
-    // CORS preflight 需用 /*splat 匹配所有路径的 OPTIONS 请求
-    app.options('/*splat', cors(mcpCorsOptions));
+    const mcpCorsOptions = buildMcpCorsOptions(config);
+    if (mcpCorsOptions) {
+      app.use(cors(mcpCorsOptions));
+      // express 5 中裸 * 不再是通配符（path-to-regexp v8 要求命名通配符），
+      // CORS preflight 需用 /*splat 匹配所有路径的 OPTIONS 请求
+      app.options('/*splat', cors(mcpCorsOptions));
+    }
 
     // Store transports for each session type
     const transports = {
@@ -143,7 +143,6 @@ async function main() {
 
     // 会话卫生：客户端异常断开（未触发 onclose）时条目会永久滞留，
     // 因此给每个会话记录最后活跃时间，由 reaper 回收空闲会话，并对总量设上限。
-    // 之前这里是无上限、无 TTL 的裸对象（测评报告 P1-11）。
     // 三个参数可用环境变量覆盖（默认 30 分钟空闲 / 上限 100 / 每 5 分钟巡检），便于测试与调优。
     const parsePositiveNumber = (val: string | undefined, defaultVal: number, minVal: number, maxVal: number): number => {
       const num = Number(val);
@@ -154,6 +153,10 @@ async function main() {
     const SESSION_IDLE_TTL_MS = parsePositiveNumber(process.env.MCP_SESSION_TTL_MS, 30 * 60 * 1000, 10_000, 7 * 24 * 3600 * 1000);
     const MAX_SESSIONS = parsePositiveNumber(process.env.MCP_MAX_SESSIONS, 100, 1, 10_000);
     const SESSION_REAPER_INTERVAL_MS = parsePositiveNumber(process.env.MCP_SESSION_REAPER_MS, 5 * 60 * 1000, 5_000, 24 * 3600 * 1000);
+    const sessionCapacity = createSessionCapacityManager(
+      MAX_SESSIONS,
+      () => Object.keys(transports.streamable).length + Object.keys(transports.sse).length
+    );
     const touchSession = (req: Request) => {
       const sessionId = req.headers?.['mcp-session-id'] as string | undefined;
       const session = sessionId ? transports.streamable[sessionId] : undefined;
@@ -198,13 +201,24 @@ async function main() {
         }
       }
 
-      // 超量时按最后活跃时间从旧到新回收
-      const streamableIds = Object.keys(transports.streamable);
-      if (streamableIds.length > MAX_SESSIONS) {
-        streamableIds
-          .sort((a, b) => (transports.streamable[a]?.lastActiveAt ?? 0) - (transports.streamable[b]?.lastActiveAt ?? 0))
-          .slice(0, streamableIds.length - MAX_SESSIONS)
-          .forEach((id) => closeSession('streamable', id));
+      // 超量时统一按最后活跃时间从旧到新回收（涵盖 streamable 与 sse 两个入口）
+      const allActive: Array<{ kind: 'streamable' | 'sse'; id: string; lastActiveAt: number }> = [
+        ...Object.entries(transports.streamable).map(([id, s]) => ({
+          kind: 'streamable' as const,
+          id,
+          lastActiveAt: s.lastActiveAt ?? 0
+        })),
+        ...Object.entries(transports.sse).map(([id, s]) => ({
+          kind: 'sse' as const,
+          id,
+          lastActiveAt: s.lastActiveAt ?? 0
+        }))
+      ];
+      if (allActive.length > MAX_SESSIONS) {
+        allActive
+          .sort((a, b) => a.lastActiveAt - b.lastActiveAt)
+          .slice(0, allActive.length - MAX_SESSIONS)
+          .forEach((entry) => closeSession(entry.kind, entry.id));
       }
     }, SESSION_REAPER_INTERVAL_MS);
     // 不让 reaper 拖住进程退出（否则 CLI 一次性命令会挂住）
@@ -217,6 +231,7 @@ async function main() {
       // Check for existing session ID
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
       let transport: StreamableHTTPServerTransport;
+      let reservation: SessionSlotReservation | null = null;
 
       const existingSession = sessionId ? transports.streamable[sessionId] : undefined;
 
@@ -224,9 +239,9 @@ async function main() {
         // Reuse existing transport
         transport = existingSession.transport;
       } else if (!sessionId && isInitializeRequest(req.body)) {
-        // 检查活跃会话数上限，超限时立即返回 429
-        const currentSessionCount = Object.keys(transports.streamable).length + Object.keys(transports.sse).length;
-        if (currentSessionCount >= MAX_SESSIONS) {
+        // 统一计数器预占名额（含初始化中 + 已活跃的 streamable 与 sse 会话），超限时立即返回 429
+        reservation = sessionCapacity.tryReserve();
+        if (!reservation) {
           res.status(429).json({
             jsonrpc: '2.0',
             error: {
@@ -241,12 +256,14 @@ async function main() {
         // New initialization request
         const server = createServer(runtime);
         const session = {} as StreamableSession;
+        const slotReservation = reservation;
 
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
-          onsessioninitialized: (sessionId) => {
-            // Store the transport by session ID
-            transports.streamable[sessionId] = session;
+          onsessioninitialized: (initializedSessionId) => {
+            // Store the transport by session ID and promote reserved slot to active
+            transports.streamable[initializedSessionId] = session;
+            slotReservation.promoteToActive();
           },
         });
 
@@ -258,6 +275,7 @@ async function main() {
 
         // Clean up transport when closed
         transport.onclose = () => {
+          slotReservation.release();
           if (transport.sessionId && transports.streamable[transport.sessionId] === session) {
             delete transports.streamable[transport.sessionId];
           }
@@ -276,6 +294,7 @@ async function main() {
         try {
           await server.connect(transport);
         } catch (error) {
+          slotReservation.release();
           session.closed = true;
           void server.close().catch(closeError => {
             console.error('❌ Failed to close streamable MCP server after connect error:', closeError);
@@ -295,8 +314,12 @@ async function main() {
         return;
       }
 
-      // Handle the request
-      await transport.handleRequest(req, res, req.body);
+      // Handle the request; ensure any unpromoted initializing slot is released on completion/failure
+      try {
+        await transport.handleRequest(req, res, req.body);
+      } finally {
+        reservation?.release();
+      }
     });
 
     // Reusable handler for GET and DELETE requests
@@ -318,7 +341,20 @@ async function main() {
     app.delete('/mcp', handleSessionRequest);
 
     // Legacy SSE endpoint for older clients
-    app.get('/sse', async (req, res) => {
+    app.get('/sse', async (_req, res) => {
+      const reservation = sessionCapacity.tryReserve();
+      if (!reservation) {
+        res.status(429).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32000,
+            message: `Too Many Requests: Maximum concurrent MCP sessions (${MAX_SESSIONS}) exceeded`,
+          },
+          id: null,
+        });
+        return;
+      }
+
       // Create SSE transport for legacy clients
       const transport = new SSEServerTransport('/messages', res);
       const server = createServer(runtime);
@@ -330,8 +366,10 @@ async function main() {
       };
 
       transports.sse[transport.sessionId] = session;
+      reservation.promoteToActive();
 
       transport.onclose = () => {
+        reservation.release();
         if (transports.sse[transport.sessionId] === session) {
           delete transports.sse[transport.sessionId];
         }
@@ -349,6 +387,7 @@ async function main() {
       try {
         await server.connect(transport);
       } catch (error) {
+        reservation.release();
         delete transports.sse[transport.sessionId];
         session.closed = true;
         void server.close().catch(closeError => {
@@ -363,6 +402,7 @@ async function main() {
       const sessionId = req.query.sessionId as string;
       const session = transports.sse[sessionId];
       if (session) {
+        session.lastActiveAt = Date.now();
         await session.transport.handlePostMessage(req, res, req.body);
       } else {
         res.status(400).send('No transport found for sessionId');

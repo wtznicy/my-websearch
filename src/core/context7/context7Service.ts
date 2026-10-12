@@ -6,6 +6,7 @@ import {
     isContext7QuotaExhaustedError,
     markContext7QuotaExhausted
 } from '../../engines/context7/context7.js';
+import { AppError } from '../errors.js';
 
 export type Context7LibrariesService = {
     execute(input: { libraryName: string; query?: string; limit?: number }): Promise<{
@@ -64,7 +65,12 @@ export function createContext7Services() {
             async execute(input: { libraryName: string; query?: string; limit?: number }) {
                 const libraryName = input.libraryName.trim();
                 if (!libraryName) {
-                    throw new Error('Library name cannot be empty');
+                    throw new AppError({
+                        code: 'invalid_arguments',
+                        retryable: false,
+                        engine: 'context7',
+                        message: 'Library name cannot be empty'
+                    });
                 }
                 const cacheKey = `libraries:${libraryName}:${(input.query ?? '').trim()}:${input.limit ?? 5}`;
                 const cached = cachedGet<{ query: string; libraryName: string; results: Context7Library[] }>(cacheKey);

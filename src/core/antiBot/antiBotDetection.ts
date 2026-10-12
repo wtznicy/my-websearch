@@ -166,10 +166,163 @@ export function isStartpageCaptchaPage(html: string): boolean {
     return hasCaptchaUi || hasVerificationText;
 }
 
-/**
- * 通用反爬/机器人拦截页面检测（如 CSDN / Web 内容抓取中的拦截）
- */
-export function looksLikeBotChallengePage(html: string): boolean {
-    const normalized = html.toLowerCase();
-    return GENERIC_BOT_KEYWORDS.some((keyword) => normalized.includes(keyword));
+export const UNAMBIGUOUS_BOT_CHALLENGE_KEYWORDS: readonly string[] = [
+    'verify you are human',
+    'solve the captcha',
+    'complete the captcha',
+    'enter the captcha',
+    'please enable javascript',
+    'enable javascript and cookies',
+    'checking your browser',
+    'just a moment',
+    'attention required',
+    'unusual traffic',
+    'robot or human',
+    'prove that you are not a robot',
+    '请完成验证',
+    '完成安全验证',
+    '请输入验证码',
+    '人机验证',
+    '你似乎来到了没有知识存在的荒原',
+    '没有知识存在的荒原',
+    '系统检测到异常',
+    '访问过于频繁'
+];
+
+export const CONTEXTUAL_BOT_CHALLENGE_KEYWORDS: readonly string[] = [
+    'human verification',
+    'security verification',
+    'security check',
+    'please verify',
+    'access denied',
+    'too many requests',
+    '请验证',
+    '完成验证',
+    '安全验证',
+    '环境异常',
+    '访问受限'
+];
+
+export const STRONG_BOT_CHALLENGE_KEYWORDS: readonly string[] = [
+    ...UNAMBIGUOUS_BOT_CHALLENGE_KEYWORDS,
+    ...CONTEXTUAL_BOT_CHALLENGE_KEYWORDS
+];
+
+const TECHNICAL_DOC_INDICATORS = /\b(?:api|sdk|guide|tutorial|documentation|docs|reference|middleware|component|configuration|config|implementation|example|endpoint|token|oauth|jwt|webhook|handler|controller|router|plugin|library|framework)\b|教程|文档|指南|配置|组件|中间件|接口|实战|开发|源码|实现/i;
+
+export interface BotChallengeDetectOptions {
+    /** HTTP 响应状态码（如 202/403/429/503），用于组合信号判定 */
+    status?: number;
 }
+
+const ABNORMAL_CHALLENGE_STATUS_CODES = new Set<number>([202, 403, 429, 503]);
+
+const SCRIPT_OR_META_CHALLENGE_PATTERNS = /(?:_?cf_chl_opt|cdn-cgi\/challenge-platform|acw_sc__v2|waf_captcha|wappass\.baidu\.com|initGeetest|gt4\.js|sec_waf|aliyun_waf|tcaptcha)/i;
+
+/**
+ * 通用反爬/机器人拦截页面检测（如 CSDN / Web 内容抓取中的拦截）。
+ * 采用多维组合信号判定：
+ * 1. HTTP 状态码异常（202/403/429/503）
+ * 2. 页面不含预期正文容器或正文极短（< 350 字符）
+ * 3. <title> / <meta> / 特定 form 或 script 出现 challenge 特征
+ * 4. 排除含代码块或明确技术文档特征的正常短文，避免误判。
+ */
+export function looksLikeBotChallengePage(
+    htmlOrText: string,
+    options?: BotChallengeDetectOptions
+): boolean {
+    if (!htmlOrText || !htmlOrText.trim()) {
+        return false;
+    }
+
+    const isAbnormalStatus = typeof options?.status === 'number'
+        && ABNORMAL_CHALLENGE_STATUS_CODES.has(options.status);
+
+    const isHtml = /<[a-z!][\s\S]*>/i.test(htmlOrText);
+    if (!isHtml) {
+        const compact = htmlOrText.replace(/\s+/g, ' ').trim();
+        if (compact.length >= 350) {
+            return false;
+        }
+        const lower = compact.toLowerCase();
+        if (UNAMBIGUOUS_BOT_CHALLENGE_KEYWORDS.some((keyword) => lower.includes(keyword))) {
+            return true;
+        }
+        if (TECHNICAL_DOC_INDICATORS.test(compact)) {
+            return false;
+        }
+        if (isAbnormalStatus && compact.length < 200 && /(?:captcha|blocked|forbidden|challenge|rate\s*limit|访问|验证|拦截)/i.test(compact)) {
+            return true;
+        }
+        return CONTEXTUAL_BOT_CHALLENGE_KEYWORDS.some((keyword) => lower.includes(keyword));
+    }
+
+    const $ = cheerio.load(htmlOrText);
+    const title = $('title').first().text().replace(/\s+/g, ' ').trim().toLowerCase();
+    const hasCodeElements = $('pre, code').length > 0;
+
+    // 在移除 script/meta 前提取脚本与 meta 跳转中的反爬挑战信号
+    const metaRefreshContent = $('meta[http-equiv="refresh"], meta[http-equiv="Refresh"]').attr('content') ?? '';
+    const scriptContentSample = $('script')
+        .map((_, el) => $(el).attr('src') || $(el).html() || '')
+        .get()
+        .join('\n')
+        .slice(0, 8000);
+    const hasChallengeScriptOrMeta = SCRIPT_OR_META_CHALLENGE_PATTERNS.test(scriptContentSample)
+        || /(?:captcha|challenge|wappass|verify|validate|antispider)/i.test(metaRefreshContent);
+
+    $('script, style, noscript, template, svg, canvas').remove();
+
+    const mainContainerSelector = 'article, main, [role="main"], .markdown-body, .article-content, .post-content, .entry-content, #content_views';
+    const hasMainContainer = $(mainContainerSelector).length > 0;
+    const mainContainerText = $(mainContainerSelector).text().replace(/\s+/g, ' ').trim();
+    if (mainContainerText.length >= 350) {
+        return false;
+    }
+
+    const bodyText = ($('body').length > 0 ? $('body').text() : $.root().text()).replace(/\s+/g, ' ').trim();
+    if (bodyText.length >= 350) {
+        return false;
+    }
+
+    const hasChallengeDom = $([
+        'iframe[src*="captcha"]',
+        'iframe[src*="challenge"]',
+        'iframe[src*="turnstile"]',
+        '#challenge-running',
+        '#cf-challenge-running',
+        '.cf-turnstile',
+        '.g-recaptcha',
+        '.h-captcha',
+        'form[action*="validate"]',
+        'form[action*="/captcha"]'
+    ].join(',')).length > 0;
+    if (hasChallengeDom || hasChallengeScriptOrMeta) {
+        return true;
+    }
+
+    const combinedLower = `${title}\n${bodyText.toLowerCase()}`;
+    if (UNAMBIGUOUS_BOT_CHALLENGE_KEYWORDS.some((keyword) => combinedLower.includes(keyword))) {
+        return true;
+    }
+
+    if (hasCodeElements || TECHNICAL_DOC_INDICATORS.test(combinedLower)) {
+        return false;
+    }
+
+    if (/^(?:captcha|verification(?:\s+required)?|access\s+denied|security\s+check|blocked|验证码|安全验证)$/i.test(title)) {
+        return true;
+    }
+
+    // 组合信号：HTTP 状态码异常 + 无预期正文容器 + 正文极短 + 出现拦截/挑战词汇
+    if (isAbnormalStatus && !hasMainContainer && bodyText.length < 200) {
+        if (/(?:captcha|blocked|forbidden|challenge|cloudflare|waf|验证|拦截|受限|频繁)/i.test(combinedLower)) {
+            return true;
+        }
+    }
+
+    return CONTEXTUAL_BOT_CHALLENGE_KEYWORDS.some((keyword) => combinedLower.includes(keyword));
+}
+
+
+

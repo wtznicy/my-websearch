@@ -4,6 +4,7 @@ import {
     validateGithubRepositoryUrl,
     validatePublicWebUrl
 } from '../validation/targetValidation.js';
+import { AppError } from '../errors.js';
 
 export type ArticleFetchOptions = { format?: 'text' | 'markdown' };
 export type ArticleFetcher = (url: string, options?: ArticleFetchOptions) => Promise<{ content: string }>;
@@ -17,7 +18,12 @@ export function createArticleFetchService(
     return {
         async execute({ url, format }: { url: string; format?: ArticleFetchOptions['format'] }): Promise<{ content: string }> {
             if (!validateArticleUrl(url, type)) {
-                throw new Error(`Invalid ${type} article URL`);
+                throw new AppError({
+                    code: 'invalid_arguments',
+                    retryable: false,
+                    engine: type,
+                    message: `Invalid ${type} article URL`
+                });
             }
 
             // format 目前仅掘金实现（markdown 保留代码围栏与表格）；CSDN 忽略该参数
@@ -30,7 +36,12 @@ export function createGithubReadmeService(fetcher: GithubReadmeFetcher) {
     return {
         async execute({ url }: { url: string }): Promise<string | null> {
             if (!validateGithubRepositoryUrl(url)) {
-                throw new Error('Invalid GitHub repository URL');
+                throw new AppError({
+                    code: 'invalid_arguments',
+                    retryable: false,
+                    engine: 'github',
+                    message: 'Invalid GitHub repository URL'
+                });
             }
 
             return fetcher(url);
@@ -58,7 +69,11 @@ export function createWebFetchService(fetcher: WebFetcher) {
             format?: 'text' | 'markdown';
         }): Promise<FetchWebContentResult> {
             if (!validatePublicWebUrl(url)) {
-                throw new Error('Invalid public HTTP(S) URL');
+                throw new AppError({
+                    code: 'invalid_arguments',
+                    retryable: false,
+                    message: 'Invalid public HTTP(S) URL'
+                });
             }
 
             return fetcher(url, maxChars, { readability, includeLinks, raw, startIndex, format });

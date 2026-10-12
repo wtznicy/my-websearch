@@ -3,6 +3,7 @@ import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { loadWreqModule, createWreqSession, WreqSession } from '../engines/bing/impersonate.js';
 import { toAxiosLikeResponse } from './wreqRequest.js';
 import { isTlsOrWafResetError } from './domesticDirectNetwork.js';
+import { AppError } from '../core/errors.js';
 
 const engineSessions = new Map<string, Promise<WreqSession | null>>();
 
@@ -63,6 +64,37 @@ export type ImpersonateHttpOptions = {
     failOnHttpError?: boolean;
 };
 
+function createImpersonateAbortError(signal: AbortSignal): Error {
+    return signal.reason instanceof Error
+        ? signal.reason
+        : new AppError({ code: 'aborted', retryable: false, message: 'Impersonate request aborted' });
+}
+
+function raceWithSignal<T>(signal: AbortSignal | undefined, fn: () => Promise<T>): Promise<T> {
+    if (!signal) {
+        return fn();
+    }
+    if (signal.aborted) {
+        return Promise.reject(createImpersonateAbortError(signal));
+    }
+    return new Promise<T>((resolve, reject) => {
+        const onAbort = () => {
+            reject(createImpersonateAbortError(signal));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        fn().then(
+            (value) => {
+                signal.removeEventListener('abort', onAbort);
+                resolve(value);
+            },
+            (err) => {
+                signal.removeEventListener('abort', onAbort);
+                reject(err);
+            }
+        );
+    });
+}
+
 /**
  * 统一的浏览器指纹优先 GET 请求：
  * 优先使用 wreq-js（Rust Chrome TLS/HTTP2 指纹）发起请求；
@@ -74,36 +106,48 @@ export async function impersonateHttpGet(
     options: AxiosRequestConfig,
     impersonateOptions?: ImpersonateHttpOptions
 ): Promise<AxiosResponse> {
+    const signal = options.signal as AbortSignal | undefined;
+    if (signal?.aborted) {
+        throw createImpersonateAbortError(signal);
+    }
+
     try {
-        const session = await getOrCreateWreqSession(engine);
+        const session = await raceWithSignal(signal, () => getOrCreateWreqSession(engine));
         if (session) {
             const timeout = typeof options.timeout === 'number' ? options.timeout : 15000;
             const headers = options.headers as Record<string, string> | undefined;
             const fetchOptions = {
                 timeout,
                 headers,
-                redirect: impersonateOptions?.redirect
+                redirect: impersonateOptions?.redirect,
+                ...(signal ? { signal } : {})
             };
 
             const retryMaxCount = 1;
             const retryDelayMs = 100;
 
-            let response;
+            let response: Awaited<ReturnType<typeof session.fetch>> | undefined;
             try {
-                response = await session.fetch(url, fetchOptions);
+                response = await raceWithSignal(signal, () => session.fetch(url, fetchOptions));
             } catch (firstError) {
+                if (signal?.aborted) {
+                    throw firstError;
+                }
                 // 首连遭遇 TLS 握手断开、WAF 首连捏断（如 unexpected EOF、ECONNRESET、socket hang up）时，
                 // 底层连接池会丢弃坏连接。原地静默快速重试，避免过早陷入耗时的 axios 失败链与二次回退
                 if (isTlsOrWafResetError(firstError) && retryMaxCount > 0) {
                     let lastRetryErr: unknown = firstError;
                     for (let r = 0; r < retryMaxCount; r += 1) {
-                        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+                        await raceWithSignal(signal, () => new Promise((resolve) => setTimeout(resolve, retryDelayMs)));
                         try {
-                            response = await session.fetch(url, fetchOptions);
+                            response = await raceWithSignal(signal, () => session.fetch(url, fetchOptions));
                             lastRetryErr = null;
                             break;
                         } catch (retryError) {
                             lastRetryErr = retryError;
+                            if (signal?.aborted) {
+                                break;
+                            }
                         }
                     }
                     if (lastRetryErr) {
@@ -116,25 +160,36 @@ export async function impersonateHttpGet(
             }
 
             if (!response) {
-                throw new Error(`[${engine}] Failed to obtain response from impersonate session`);
+                throw new AppError({
+                    code: 'upstream_response_invalid',
+                    retryable: true,
+                    engine,
+                    message: `[${engine}] Failed to obtain response from impersonate session`
+                });
             }
 
             if (impersonateOptions?.failOnHttpError !== false && response.status >= 400) {
-                const error = new Error(`Request failed with status code ${response.status}`);
-                Object.assign(error, { response: { status: response.status } });
-                throw error;
+                const status = response.status;
+                throw new AppError({
+                    code: status === 429 ? 'rate_limited' : status === 401 ? 'unauthorized' : status === 403 ? 'forbidden' : status === 404 ? 'not_found' : 'network_error',
+                    retryable: status === 429 || status >= 500,
+                    status,
+                    engine,
+                    message: `Request failed with status code ${status}`
+                });
             }
 
-            const body = await response.text();
-            return toAxiosLikeResponse(response.status, response.headers, body, options);
+            const resolvedResponse = response;
+            const body = await raceWithSignal<string>(signal, () => resolvedResponse.text());
+            return toAxiosLikeResponse(resolvedResponse.status, resolvedResponse.headers, body, options);
         }
     } catch (error) {
+        if (signal?.aborted) {
+            throw error;
+        }
         // HTTP 业务状态错误（例如 429 限流）直接抛出，不进行无意义的 client 回退
-        if (typeof error === 'object' && error !== null && 'response' in error) {
-            const resp = (error as { response: unknown }).response;
-            if (typeof resp === 'object' && resp !== null && 'status' in resp) {
-                throw error;
-            }
+        if (typeof error === 'object' && error !== null && (('response' in error && typeof (error as { response: unknown }).response === 'object' && (error as { response: unknown }).response !== null && 'status' in ((error as { response: Record<string, unknown> }).response)) || ('status' in error && typeof (error as { status: unknown }).status === 'number'))) {
+            throw error;
         }
         console.warn(
             `[${engine}] impersonate request failed, falling back to axios:`,
@@ -142,5 +197,10 @@ export async function impersonateHttpGet(
         );
     }
 
+    if (signal?.aborted) {
+        throw createImpersonateAbortError(signal);
+    }
+
     return axios.get(url, options);
 }
+

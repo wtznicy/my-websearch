@@ -79,16 +79,21 @@ export function parseJuejinResults(data: JuejinSearchResponse['data']): SearchRe
     });
 }
 
-export async function searchJuejin(query: string, limit: number): Promise<SearchResult[]> {
+export async function searchJuejin(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
+    const signal = options?.signal;
     let allResults: SearchResult[] = [];
     let cursor = '0';
 
     try {
         while (allResults.length < limit) {
+            if (signal?.aborted) {
+                throw signal.reason instanceof Error ? signal.reason : new Error('Request aborted');
+            }
             console.error(`🔍 Searching Juejin with query: "${query}", cursor: ${cursor}`);
 
             const response = await axios.get<JuejinSearchResponse>('https://api.juejin.cn/search_api/v1/search', buildAxiosRequestOptions({ engine: 'juejin',
                 trustedStaticHost: true,
+                signal,
                 params: {
                     aid: '2608',
                     // 不再硬编码设备 uuid（所有安装共享同一 ID，易被识别）；让服务端生成

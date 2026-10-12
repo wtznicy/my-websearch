@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { SearchResult } from '../../types.js';
+import { AppError, isAppError } from '../../core/errors.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { BROWSER_USER_AGENT as BAIDU_USER_AGENT } from '../../utils/constants.js';
 import { paginateSearch } from '../../utils/pagination.js';
@@ -9,10 +10,13 @@ import { isBaiduAntiBotPage, parseBaiduResultsPage } from './parser.js';
 const BAIDU_ANTIBOT_MESSAGE = 'Baidu returned an anti-bot or redirect page (likely missing cookies or verification)';
 
 /** 把"反爬/跳转验证"统一成一条可识别的错误：不可重试（秒级重试必然失败，只会白耗搜索预算） */
-function buildBaiduAntiBotError(detail?: string): Error {
-    const error = new Error(detail ? `${BAIDU_ANTIBOT_MESSAGE} [${detail}]` : BAIDU_ANTIBOT_MESSAGE);
-    (error as { retryable?: boolean }).retryable = false;
-    return error;
+function buildBaiduAntiBotError(detail?: string): AppError {
+    return new AppError({
+        code: 'bot_challenge',
+        retryable: false,
+        engine: 'baidu',
+        message: detail ? `${BAIDU_ANTIBOT_MESSAGE} [${detail}]` : BAIDU_ANTIBOT_MESSAGE
+    });
 }
 
 /** 3xx 跳转（百度把无 cookie/被限流的请求 302 到验证页）在这条链路上等价于反爬 */
@@ -20,16 +24,27 @@ function isRedirectStatus(status: unknown): boolean {
     return typeof status === 'number' && status >= 300 && status < 400;
 }
 
-export async function searchBaidu(query: string, limit: number): Promise<SearchResult[]> {
+export async function searchBaidu(
+    query: string,
+    limit: number,
+    options?: { signal?: AbortSignal }
+): Promise<SearchResult[]> {
+    const signal = options?.signal;
+    if (signal?.aborted) {
+        throw signal.reason instanceof Error ? signal.reason : new Error('Baidu search aborted');
+    }
     // 首选 wreq-js 指纹请求（Chrome TLS/HTTP2 指纹 + 会话 cookie），规避纯 HTTP
     // 无 cookie 被重定向到安全验证页的问题；原生模块不可用或请求失败时回退到
     // axios 路径，不影响现有行为。
     if (await isImpersonateAvailable()) {
         try {
-            return await searchBaiduWithImpersonate(query, limit);
+            return await searchBaiduWithImpersonate(query, limit, signal);
         } catch (error) {
+            if (signal?.aborted) {
+                throw error;
+            }
             const message = error instanceof Error ? error.message : String(error);
-            const isAntiBot = /anti-bot|redirect page/i.test(message);
+            const isAntiBot = (isAppError(error) && error.code === 'bot_challenge') || /anti-bot|redirect page/i.test(message);
             if (isAntiBot) {
                 // 指纹请求（Chrome TLS + 会话 Cookie）已被百度判定为反爬时，
                 // 严禁再用 axios（裸 OpenSSL TLS、无 Cookie）兜底发起请求！
@@ -46,11 +61,13 @@ export async function searchBaidu(query: string, limit: number): Promise<SearchR
     try {
         return await paginateSearch({
             limit,
+            signal,
             fetchPage: async (pageIndex) => {
                 let response;
                 try {
                     response = await axios.get('https://www.baidu.com/s', buildAxiosRequestOptions({ engine: 'baidu',
                         trustedStaticHost: true,
+                        signal,
                         params: {
                             wd: query,
                             pn: (pageIndex * 10).toString(),
@@ -86,3 +103,4 @@ export async function searchBaidu(query: string, limit: number): Promise<SearchR
         throw error;
     }
 }
+
