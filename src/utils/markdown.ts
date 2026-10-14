@@ -216,10 +216,22 @@ function getService(): TurndownService {
     return instance;
 }
 
+/**
+ * 剥离技术文档末尾常见的 GitHub 反馈/编辑页脚噪声（如 MDN "Help improve MDN" / "Report a problem with this content on GitHub"）。
+ */
+export function stripTrailingDocFooterNoise(markdown: string): string {
+    if (!markdown) {
+        return '';
+    }
+    return markdown
+        .replace(/(?:\n+#{1,4}\s*(?:Help improve MDN|Found a content problem with this page\?)[^\n]*[\s\S]*|\n+(?:[-*]\s*)?\[?(?:Report a problem with this content on GitHub|Edit this page on GitHub|View the source on GitHub|Suggest changes to this page)\b[\s\S]*)$/i, '')
+        .trim();
+}
+
 /** 把 HTML 片段/文档转换为 Markdown（保留围栏代码块语言与 GFM 表格） */
 export function htmlToMarkdown(html: string): string {
     if (!html || !html.trim()) {
         return '';
     }
-    return getService().turndown(html).trim();
+    return stripTrailingDocFooterNoise(getService().turndown(html).trim());
 }

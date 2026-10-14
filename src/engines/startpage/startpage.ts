@@ -159,6 +159,8 @@ async function warmupStartpageSession(signal?: AbortSignal): Promise<void> {
     }
 }
 
+let inflightScWarmupPromise: Promise<string> | null = null;
+
 async function getScCode(signal?: AbortSignal): Promise<string> {
     if (signal?.aborted) {
         throw signal.reason instanceof Error
@@ -170,37 +172,47 @@ async function getScCode(signal?: AbortSignal): Promise<string> {
         return cachedScCode;
     }
 
-    // ① 纯 HTTP Anubis PoW 求解（无浏览器；实测全流程约 2.6s，PoW 本身约 150ms）
-    try {
-        const session = await warmupWithAnubisPow();
-        if (session) {
-            cachedScCode = session.scCode;
-            cachedCookies = session.cookies;
-            cachedScAt = Date.now();
-            currentSessionTtlMs = ANUBIS_SESSION_TTL_MS;
-            console.error('✅ Startpage warmup via Anubis PoW (no browser needed)');
-            return cachedScCode;
-        }
-        console.warn('Startpage Anubis PoW warmup returned no session, falling back to Playwright');
-    } catch (error) {
-        if (signal?.aborted) {
-            throw error;
-        }
-        console.warn('Startpage Anubis PoW warmup failed, falling back to Playwright:', error instanceof Error ? error.message : String(error));
+    if (inflightScWarmupPromise) {
+        return inflightScWarmupPromise;
     }
 
-    // ② Playwright 兜底（hidden-headed 模式，见 warmupStartpageSession）
-    await warmupStartpageSession(signal);
-    if (!cachedScCode) {
-        throw new AppError({
-            code: 'engine_parse_error',
-            retryable: true,
-            engine: 'startpage',
-            message: 'Failed to extract Startpage search token'
-        });
-    }
-    currentSessionTtlMs = STARTPAGE_SC_TTL_MS;
-    return cachedScCode;
+    inflightScWarmupPromise = (async () => {
+        // ① 纯 HTTP Anubis PoW 求解（Worker 异步无阻塞；difficulty<=5 时全流程约 2.6s）
+        try {
+            const session = await warmupWithAnubisPow(signal);
+            if (session) {
+                cachedScCode = session.scCode;
+                cachedCookies = session.cookies;
+                cachedScAt = Date.now();
+                currentSessionTtlMs = ANUBIS_SESSION_TTL_MS;
+                console.error('✅ Startpage warmup via Anubis PoW (no browser needed)');
+                return cachedScCode;
+            }
+            console.warn('Startpage Anubis PoW warmup returned no session, falling back to Playwright');
+        } catch (error) {
+            if (signal?.aborted) {
+                throw error;
+            }
+            console.warn('Startpage Anubis PoW warmup failed, falling back to Playwright:', error instanceof Error ? error.message : String(error));
+        }
+
+        // ② Playwright 兜底（hidden-headed 模式，见 warmupStartpageSession）
+        await warmupStartpageSession(signal);
+        if (!cachedScCode) {
+            throw new AppError({
+                code: 'engine_parse_error',
+                retryable: true,
+                engine: 'startpage',
+                message: 'Failed to extract Startpage search token'
+            });
+        }
+        currentSessionTtlMs = STARTPAGE_SC_TTL_MS;
+        return cachedScCode;
+    })().finally(() => {
+        inflightScWarmupPromise = null;
+    });
+
+    return inflightScWarmupPromise;
 }
 
 export function extractResultsFromHtml(html: string): SearchResult[] {

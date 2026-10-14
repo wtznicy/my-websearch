@@ -63,7 +63,8 @@ export type AppErrorCode = PublicErrorCode;
 export type LegacyAppErrorCode =
     | 'ERR_BOT_CHALLENGE'
     | 'ERR_RESPONSE_TOO_LARGE'
-    | 'ERR_START_INDEX_OUT_OF_RANGE';
+    | 'ERR_START_INDEX_OUT_OF_RANGE'
+    | 'cascade_aborted';
 
 const RAW_TO_PUBLIC_CODE_MAP: Record<string, PublicErrorCode> = {
     ERR_BOT_CHALLENGE: 'bot_challenge',
@@ -79,7 +80,8 @@ const RAW_TO_PUBLIC_CODE_MAP: Record<string, PublicErrorCode> = {
     ENOTFOUND: 'network_error',
     EPIPE: 'network_error',
     ERR_CANCELED: 'aborted',
-    ABORT_ERR: 'aborted'
+    ABORT_ERR: 'aborted',
+    cascade_aborted: 'aborted'
 };
 
 const PUBLIC_ERROR_CODE_SET = new Set<PublicErrorCode>([
@@ -215,9 +217,48 @@ const NON_RETRYABLE_ERROR_CODES = new Set<string>([
     'not_found',
     'overseas_unreachable',
     'aborted',
+    'cascade_aborted',
     'ERR_CANCELED',
     'ABORT_ERR'
 ]);
+
+/**
+ * 判断错误或信号是否由级联同批达标主动取消（cascade_aborted 哨兵码）触发，
+ * 供底层请求层（wreq/axios/引擎）识别并将取消日志降级为 debug，避免误报"请求失败并回退 axios"。
+ */
+export function isCascadeAbortedError(error: unknown, signal?: AbortSignal): boolean {
+    const candidates = [error, signal?.reason];
+    for (const candidate of candidates) {
+        if (isAppError(candidate)) {
+            if (candidate.details?.rawCode === 'cascade_aborted' || candidate.details?.legacyCode === 'cascade_aborted') {
+                return true;
+            }
+        }
+        if (typeof candidate === 'object' && candidate !== null && (candidate as { code?: unknown }).code === 'cascade_aborted') {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * 判断错误或 AbortSignal 是否属于主动取消（含用户取消、级联同批达标取消、Axios ERR_CANCELED）
+ */
+export function isAbortedError(error: unknown, signal?: AbortSignal): boolean {
+    if (signal?.aborted || isCascadeAbortedError(error, signal)) {
+        return true;
+    }
+    if (isAppError(error) && error.code === 'aborted') {
+        return true;
+    }
+    if (typeof error === 'object' && error !== null) {
+        const rawCode = (error as { code?: unknown }).code;
+        if (rawCode === 'aborted' || rawCode === 'cascade_aborted' || rawCode === 'ERR_CANCELED' || rawCode === 'ABORT_ERR') {
+            return true;
+        }
+    }
+    return false;
+}
 
 const RETRYABLE_ERROR_CODES = new Set<string>([
     'rate_limited',

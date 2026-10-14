@@ -33,6 +33,7 @@ export type Context7Library = {
     trustScore?: number;
     benchmarkScore?: number;
     versions: string[];
+    totalVersions?: number;
 };
 
 export type Context7CodeSnippet = {
@@ -123,12 +124,15 @@ export function isContext7QuotaExhausted(): boolean {
 }
 
 export function markContext7QuotaExhausted(resetEpoch?: number): void {
+    const wasExhausted = isContext7QuotaExhausted();
     if (resetEpoch && resetEpoch > 0) {
         quotaExhaustedUntil = resetEpoch * 1000;
     } else {
         quotaExhaustedUntil = Date.now() + 60 * 60 * 1000; // 默认标记 1 小时
     }
-    if (onQuotaExhaustedListener) {
+    // 仅在状态首次从"未耗尽"翻转为"已耗尽"时通知一次 MCP 工具描述更新（sendToolListChanged）；
+    // 若已处于耗尽状态期间被更长的 resetEpoch 续期，工具描述文本本身无变化（引导文案均已移除），无需重复推送通知。
+    if (!wasExhausted && onQuotaExhaustedListener) {
         try {
             onQuotaExhaustedListener();
         } catch {
@@ -354,10 +358,20 @@ export async function searchContext7Libraries(
     });
 
     const data = response.data as { results?: Context7Library[] };
+    const MAX_VERSIONS_PER_LIBRARY = 5;
     return {
         query: cleanQuery,
         libraryName: cleanLibraryName,
-        results: (data.results ?? []).slice(0, limit)
+        results: (data.results ?? []).slice(0, limit).map((lib) => {
+            if (!Array.isArray(lib.versions)) {
+                return lib;
+            }
+            return {
+                ...lib,
+                totalVersions: lib.versions.length,
+                versions: lib.versions.slice(0, MAX_VERSIONS_PER_LIBRARY)
+            };
+        })
     };
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rankSearchResults, tokenizeForRanking, countUsableResults } from '../../core/search/resultRanking.js';
+import { rankSearchResults, tokenizeForRanking, countUsableResults, hasFirstTokenDrift } from '../../core/search/resultRanking.js';
 import type { SearchResult } from '../../types.js';
 
 function makeResult(overrides: Partial<SearchResult>): SearchResult {
@@ -74,6 +74,66 @@ describe('countUsableResults (rare-term coverage)', () => {
         ];
         // query 两词都出现在两条结果里（df=N，无区分词）→ 回退要求命中 ≥2 个词
         expect(countUsableResults(results, 'react hooks')).toBe(1);
+    });
+
+    it('should count full-page high-relevance results as usable even when core terms exceed rarityCap (df > sqrt(N))', () => {
+        // 复现：baidu 返回 10 条高度相关的 MCP 教程结果，其中 9 条都含 model/context/protocol（df=9 > rarityCap=4），
+        // 仅 2 条含"教程"（df=2 <= 4）。不能因为核心词出现太普遍就把其余 7 条判为不可用而误触发级联。
+        const results = Array.from({ length: 10 }, (_, idx) => makeResult({
+            title: idx < 2
+                ? `Model Context Protocol 教程 第${idx + 1}篇`
+                : idx < 9
+                    ? `Model Context Protocol 实战指南 第${idx + 1}篇`
+                    : '无关词条',
+            url: `https://example.com/article-${idx + 1}`,
+            description: idx < 9 ? '详解 model context protocol 架构与服务端实现' : '其他内容'
+        }));
+        expect(countUsableResults(results, 'Model Context Protocol 教程')).toBe(9);
+    });
+
+    it('should NOT count noise results when "model" has df=4 in 5 results or generic pages only hit 2 of 3-4 tokens', () => {
+        // 负向边界 1：注释中警告的 "model 在 5 条里 df=4"（且 context 同样 df=4 > rarityCap=3，仅 protocol df=1 为区分词）：
+        // 旧版 0.6 阈值（ceil(3*0.6)=2）会把 3 条只含 model+context 的噪声放行（返回 4）；
+        // 收紧为 max(3, ceil(N*0.75))=3 后，只命中 2/3 词且不含区分词 protocol 的噪声被严格拦截（返回 1）。
+        const modelNoiseResults = [
+            makeResult({ title: 'Model Context Protocol 官方规范', url: 'https://modelcontextprotocol.io/spec', description: 'model context protocol' }),
+            makeResult({ title: 'Data Model with Context in Go', url: 'https://a.com/go', description: 'model context usage' }),
+            makeResult({ title: 'Domain Model Context Pattern', url: 'https://a.com/ddd', description: 'model context bounded' }),
+            makeResult({ title: 'View Model Context Binding', url: 'https://a.com/mvvm', description: 'model context mvvm' }),
+            makeResult({ title: '今日天气预报', url: 'https://a.com/weather', description: '晴转多云' })
+        ];
+        expect(countUsableResults(modelNoiseResults, 'model context protocol')).toBe(1);
+
+        // 负向边界 2：query 为 "react hooks 性能优化"（分词：react / hooks / 性能 / 优化 等 ≥4 token），
+        // 只讲 react + hooks 的泛化列表页（仅命中 2 个 token < highCoverageThreshold=3 且零区分词）不得计为可用
+        const reactHooksNoiseResults = [
+            makeResult({ title: 'React Hooks 性能优化完全指南', url: 'https://a.com/perf', description: 'react hooks 性能优化 useMemo useCallback' }),
+            makeResult({ title: 'React Hooks 入门列表', url: 'https://a.com/list-1', description: 'react hooks useState useEffect 基础' }),
+            makeResult({ title: 'React Hooks 常见 API 汇总', url: 'https://a.com/list-2', description: 'react hooks 列表' }),
+            makeResult({ title: 'React Hooks 教程目录', url: 'https://a.com/list-3', description: 'react hooks 概览' }),
+            makeResult({ title: 'Vue3 简介', url: 'https://a.com/vue', description: 'vue composition api' })
+        ];
+        expect(countUsableResults(reactHooksNoiseResults, 'react hooks 性能优化')).toBe(1);
+    });
+
+    it('should detect first-token drift when cn.bing only matches the first word of a multi-word query (P0-2)', () => {
+        // 复现：cn.bing 搜 "model context protocol specification" 返回 10 条结果，
+        // 其中 2 条含 model（df=2 <= sqrt(10)=4，旧逻辑会把 model 当成"稀有区分词"！），
+        // 其余 8 条完全无关，且前 5 条对第 2 个词及之后的词（context/protocol/specification）命中数为 0
+        const driftedResults = [
+            makeResult({ title: 'Model Y 特斯拉中国', url: 'https://www.tesla.cn/modely', description: 'Tesla Model Y 电动 SUV' }),
+            makeResult({ title: 'model（英语单词）_百度百科', url: 'https://baike.baidu.com/item/model', description: 'model 名词 模特 模型' }),
+            makeResult({ title: '今日热搜榜单', url: 'https://example.com/hot-1', description: '新闻资讯' }),
+            makeResult({ title: '天气预报查询', url: 'https://example.com/hot-2', description: '全国天气' }),
+            makeResult({ title: '在线翻译工具', url: 'https://example.com/hot-3', description: '词典翻译' }),
+            makeResult({ title: '股票行情中心', url: 'https://example.com/hot-4', description: '财经资讯' }),
+            makeResult({ title: '旅游攻略大全', url: 'https://example.com/hot-5', description: '景点门票' }),
+            makeResult({ title: '美食菜谱分享', url: 'https://example.com/hot-6', description: '家常菜谱' }),
+            makeResult({ title: '体育赛事直播', url: 'https://example.com/hot-7', description: '足球篮球' }),
+            makeResult({ title: '音乐排行榜', url: 'https://example.com/hot-8', description: '流行歌曲' })
+        ];
+        expect(hasFirstTokenDrift(driftedResults, 'model context protocol specification')).toBe(true);
+        expect(countUsableResults(driftedResults, 'model context protocol specification')).toBe(0);
     });
 });
 

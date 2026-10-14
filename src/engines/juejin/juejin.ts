@@ -3,6 +3,8 @@ import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
+import { isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
+import { metrics } from '../../core/metrics.js';
 
 interface JuejinSearchResponse {
     err_no: number;
@@ -145,6 +147,12 @@ export async function searchJuejin(query: string, limit: number, options?: { sig
         return allResults.slice(0, limit);
 
     } catch (error) {
+        if (isAbortedError(error, signal)) {
+            if (isCascadeAbortedError(error, signal)) {
+                metrics.debug('[juejin] Search cancelled (cascade_aborted): target satisfied by sibling engine');
+            }
+            throw error;
+        }
         console.error('❌ Juejin search failed:', error instanceof Error ? error.message : String(error));
         if (axios.isAxiosError(error)) {
             console.error('Response status:', error.response?.status);

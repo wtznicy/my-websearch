@@ -61,11 +61,26 @@ export function buildFetchWebErrorHint(error: unknown): string {
     }
 
     if (/could not be resolved|ENOTFOUND|EAI_AGAIN/i.test(message)) {
-        return '域名解析失败——检查域名拼写；若本机 DNS 解析不了该站点，可配置代理（USE_PROXY=true + PROXY_URL）后重试。';
+        return '域名解析失败——检查域名拼写；若本机 DNS 解析不了该站点，可配置代理（PROXY_URL，如 http://127.0.0.1:7897）后重试。';
     }
 
     if (/timeout|timed out|ECONN|ETIMEDOUT|socket hang up|network|ENETUNREACH/i.test(message)) {
-        return '网络错误——可稍后重试；若目标站点需代理访问，开启 USE_PROXY=true + PROXY_URL 后重试。';
+        return '网络错误——可稍后重试；若目标站点需代理访问，配置 PROXY_URL（如 http://127.0.0.1:7897）后重试。';
+    }
+
+    const startOutMatch = message.match(/startIndex\s+(\d+)\s+is beyond content length\s+(\d+)/i);
+    if (startOutMatch || /ERR_START_INDEX_OUT_OF_RANGE|start_index_out_of_range/i.test(message)) {
+        const startIdx = startOutMatch?.[1] ?? '?';
+        const totalLen = startOutMatch?.[2] ?? '?';
+        return `startIndex (${startIdx}) 超出正文实际总长度（totalLength=${totalLen}）——无需降低 maxChars，请将 startIndex 设为小于 ${totalLen} 的偏移量，或重置为 0 从头读取。`;
+    }
+
+    if (/application\/pdf|PDF binary files|\.pdf\b/i.test(message)) {
+        return '目标地址为 PDF 二进制文件——fetchWebContent 不支持直接解析 PDF（且降低 maxChars 不会改变 2MB 下载体积上限），请改用对应的 HTML/Markdown 文档地址。';
+    }
+
+    if (/Response body too large|ERR_RESPONSE_TOO_LARGE|response_too_large|maxContentLength|maxBodyLength/i.test(message)) {
+        return '目标响应体超过 2MB 下载硬上限（MAX_DOWNLOAD_BYTES）——降低 maxChars 仅控制提取后的返回字符数，无法绕过 HTTP 下载体积上限；请改抓更具体的子页面或章节地址。';
     }
 
     if (/no readable content|extraction failed/i.test(message)) {

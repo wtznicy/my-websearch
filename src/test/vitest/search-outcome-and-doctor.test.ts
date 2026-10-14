@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { createConfig, formatSanitizedConfigSummary, sanitizeUrlForLog } from '../../config.js';
-import { loadApplicationConfigEnv, shouldEmitConfigStartupLog } from '../../configLoader.js';
+import { flattenConfigFileToEnv, getAppConfigFilePath, loadApplicationConfigEnv, shouldEmitConfigStartupLog } from '../../configLoader.js';
 import { looksLikeBotChallengePage } from '../../core/antiBot/antiBotDetection.js';
-import { executeCascade } from '../../core/search/cascadeExecutor.js';
+import { executeCascade, pickCascadeCandidates } from '../../core/search/cascadeExecutor.js';
 import { executePrimaryEngines } from '../../core/search/engineExecutor.js';
 import {
     createSearchService,
@@ -1019,6 +1019,185 @@ describe('CLI search failed outcome, configLoader priority & doctor command', ()
             }
         });
         expect(baiduCalls).toBe(2);
+    });
+
+    it('reduces degraded outcome noise, sets retryable=true on degraded transient failures, filters cascade by query language, aborts sibling cascade on satisfaction, and isolates test config dir', async () => {
+        // 1. Test process must NOT read real user home directory config (~/.my-websearch/config.json)
+        expect(process.env.MYWEBSEARCH_DATA_DIR).toBeTruthy();
+        expect(getAppConfigFilePath(process.env)).toContain('my-websearch-vitest-config-isolated');
+
+        // 2. flattenConfigFileToEnv warns when proxy.url is set alongside useProxy: false
+        const warnings: string[] = [];
+        const flat = flattenConfigFileToEnv(
+            {
+                proxy: {
+                    url: 'http://127.0.0.1:7897',
+                    useProxy: false
+                }
+            },
+            { onWarning: (msg) => warnings.push(msg) }
+        );
+        expect(flat.PROXY_URL).toBe('false');
+        expect(flat.USE_PROXY).toBe('false');
+        expect(warnings.length).toBe(1);
+        expect(warnings[0]).toContain('proxy.url ("http://127.0.0.1:7897") is configured, but proxy.useProxy is false');
+
+        // 3. computeSearchOutcome: no_results from secondary engine or full requestedLimit reached => outcome='ok'
+        expect(
+            computeSearchOutcome(5, [{ engine: 'sogou', code: 'no_results', message: '0 results' }], undefined, {
+                requestedLimit: 8
+            })
+        ).toEqual({ outcome: 'ok', retryable: false });
+
+        expect(
+            computeSearchOutcome(
+                10,
+                [{ engine: 'sogou', code: 'engine_error', errorCode: 'network_timeout', retryable: true, message: 'timeout' }],
+                undefined,
+                { requestedLimit: 10 }
+            )
+        ).toEqual({ outcome: 'ok', retryable: false });
+
+        // Partial results + retryable hard failure => outcome='degraded', retryable=true
+        expect(
+            computeSearchOutcome(
+                2,
+                [{ engine: 'bing', code: 'engine_error', errorCode: 'network_timeout', retryable: true, message: 'Engine timeout' }],
+                undefined,
+                { requestedLimit: 8, minResults: 5 }
+            )
+        ).toEqual({ outcome: 'degraded', retryable: true });
+
+        // 4. Language-aware cascade candidate selection: English query does not cascade into baidu/csdn/juejin/sogou
+        const fullEngineMap = {
+            bing: async () => [],
+            baidu: async () => [],
+            csdn: async () => [],
+            duckduckgo: async () => [],
+            brave: async () => [],
+            juejin: async () => [],
+            startpage: async () => [],
+            sogou: async () => []
+        };
+        const { metrics } = await import('../../core/metrics.js');
+        metrics.resetMetrics();
+
+        const enCandidates = pickCascadeCandidates('typescript 5 satisfies operator', new Set(['bing', 'duckduckgo']), fullEngineMap, false);
+        expect(enCandidates).toEqual(['brave', 'startpage']);
+        expect(enCandidates).not.toContain('baidu');
+        expect(enCandidates).not.toContain('csdn');
+
+        const zhCandidates = pickCascadeCandidates('大模型 提示词工程 最佳实践', new Set(['baidu', 'sogou']), fullEngineMap, false);
+        expect(zhCandidates.slice(0, 3)).toEqual(['bing', 'juejin', 'csdn']);
+
+        // 4b. Intentional trade-off pinned down: English query + bing already used + overseas unreachable + no EXA_API_KEY -> returns [] (never falls back to Chinese engines)
+        const { __setOverseasReachableForTests } = await import('../../utils/overseasProbe.js');
+        __setOverseasReachableForTests(false);
+        try {
+            const noProxyEnCandidates = pickCascadeCandidates('typescript 5 satisfies operator', new Set(['bing']), fullEngineMap, false);
+            expect(noProxyEnCandidates).toEqual([]);
+        } finally {
+            __setOverseasReachableForTests(null);
+        }
+
+        // 4c. Dynamic health sorting: engines with recent <50% success rate (total >= 2) are demoted behind healthy candidates
+        metrics.resetMetrics();
+        metrics.recordEngineSearch('duckduckgo', 10000, false);
+        metrics.recordEngineSearch('duckduckgo', 10000, false);
+        try {
+            const healthSorted = pickCascadeCandidates('typescript 5 satisfies operator', new Set(['bing']), fullEngineMap, false);
+            expect(healthSorted).toEqual(['brave', 'startpage', 'duckduckgo']);
+        } finally {
+            metrics.resetMetrics();
+        }
+
+        // 4d. Case 2 vs Case 3 in computeSearchOutcome:
+        // Case 2: totalResults >= requestedLimit returns ok even when primary engine had a hard failure
+        expect(computeSearchOutcome(10, [
+            { engine: 'bing', code: 'engine_error', errorCode: 'network_timeout', retryable: true, message: 'timeout' }
+        ], undefined, { requestedLimit: 10, minResults: 5, primaryEngines: ['bing'] })).toEqual({
+            outcome: 'ok',
+            retryable: false
+        });
+        // Case 3: minResults <= totalResults < requestedLimit returns degraded when primary engine had a hard failure,
+        //         but returns ok when only a cascade engine had a hard failure
+        expect(computeSearchOutcome(5, [
+            { engine: 'bing', code: 'engine_error', errorCode: 'network_timeout', retryable: true, message: 'timeout' }
+        ], undefined, { requestedLimit: 10, minResults: 5, primaryEngines: ['bing'] })).toEqual({
+            outcome: 'degraded',
+            retryable: true
+        });
+        expect(computeSearchOutcome(5, [
+            { engine: 'startpage', code: 'engine_error', errorCode: 'network_timeout', retryable: true, message: 'timeout' }
+        ], undefined, { requestedLimit: 10, minResults: 5, primaryEngines: ['bing'] })).toEqual({
+            outcome: 'ok',
+            retryable: false
+        });
+
+        // 5. In-batch early cancellation with cascade_aborted sentinel: when fast candidate in batch satisfies minResults, slow sibling is aborted immediately with cascade_aborted
+        const { isCascadeAbortedError, isAbortedError } = await import('../../core/errors.js');
+        let slowSiblingAborted = false;
+        let slowSiblingAbortReason: unknown;
+        const cascadeStarted = Date.now();
+        const cascadeRes = await executeCascade({
+            cleanQuery: 'typescript 5 satisfies',
+            searchQuery: 'typescript 5 satisfies',
+            minResults: 2,
+            initialMerged: [],
+            initialEngineResults: [],
+            engines: ['bing'],
+            engineMap: {
+                duckduckgo: async () => [
+                    { title: 'TypeScript 5 satisfies operator guide', url: 'https://ts.dev/1', description: 'typescript 5 satisfies', source: 'ts.dev', engine: 'duckduckgo' },
+                    { title: 'TypeScript 5 satisfies deep dive', url: 'https://ts.dev/2', description: 'typescript 5 satisfies examples', source: 'ts.dev', engine: 'duckduckgo' }
+                ],
+                brave: async (_q, _l, ctx) => new Promise((_resolve, reject) => {
+                    ctx?.signal?.addEventListener('abort', () => {
+                        slowSiblingAborted = true;
+                        slowSiblingAbortReason = ctx?.signal?.reason;
+                        reject(ctx?.signal?.reason ?? new Error('aborted'));
+                    }, { once: true });
+                })
+            },
+            deadlineAt: Date.now() + 5000,
+            perEngineTimeoutMs: 3000
+        });
+        expect(Date.now() - cascadeStarted).toBeLessThan(1000);
+        expect(slowSiblingAborted).toBe(true);
+        expect(isCascadeAbortedError(slowSiblingAbortReason)).toBe(true);
+        expect(isAbortedError(slowSiblingAbortReason)).toBe(true);
+        expect(cascadeRes.merged.length).toBe(2);
+        expect(cascadeRes.cascadeFailures).toEqual([]);
+
+        // 6. Per-batch overseas reachability re-filtering: if Batch 1 marks overseas unreachable, Batch 2 skips startpage immediately
+        let startpageCalled = false;
+        __setOverseasReachableForTests(null);
+        try {
+            await executeCascade({
+                cleanQuery: 'typescript 5 satisfies',
+                searchQuery: 'typescript 5 satisfies',
+                minResults: 2,
+                initialMerged: [],
+                initialEngineResults: [],
+                engines: ['bing'],
+                engineMap: {
+                    duckduckgo: async () => {
+                        __setOverseasReachableForTests(false);
+                        return [];
+                    },
+                    brave: async () => [],
+                    startpage: async () => {
+                        startpageCalled = true;
+                        return [];
+                    }
+                },
+                deadlineAt: Date.now() + 5000,
+                perEngineTimeoutMs: 3000
+            });
+            expect(startpageCalled).toBe(false);
+        } finally {
+            __setOverseasReachableForTests(null);
+        }
     });
 });
 

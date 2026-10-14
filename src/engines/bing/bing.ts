@@ -4,7 +4,7 @@ import { AppConfig, config, getEngineSearchMode } from '../../config.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { prepareStealthPage } from '../../utils/browserStealth.js';
-import { isImpersonateAvailable, searchBingWithImpersonate } from './impersonate.js';
+import { isBingImpersonateCircuitOpen, isImpersonateAvailable, searchBingWithImpersonate } from './impersonate.js';
 import {
     acquirePooledPlaywrightPage,
     getPlaywrightModuleSource,
@@ -14,7 +14,9 @@ import {
     PlaywrightPageLike
 } from '../../utils/playwrightClient.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
-import { AppError } from '../../core/errors.js';
+import { AppError, isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
+import { metrics } from '../../core/metrics.js';
+import { hasFirstTokenDrift } from '../../core/search/resultRanking.js';
 
 // 默认面向大陆部署用 cn.bing.com；可通过 BING_BASE_URL（兼容 OPEN_WEBSEARCH_BING_HOST）覆盖为 www.bing.com 等获取国际区结果
 const BING_HOME_URL = 'https://www.bing.com/?mkt=zh-CN';
@@ -117,6 +119,38 @@ const BROWSER_CONTEXT_OPTIONS = {
 
 export function hasSiteOperator(query: string): boolean {
     return /(^|\s)site:[^\s]+/i.test(query);
+}
+
+/**
+ * 提取查询中所有 `site:domain` 限定的规范化域名（小写、剥离协议/路径/端口/前导 www.）。
+ */
+export function extractSiteDomains(query: string): string[] {
+    const domains: string[] = [];
+    for (const match of query.matchAll(/(?:^|\s)site:([^\s]+)/gi)) {
+        const raw = (match[1] ?? '').trim()
+            .replace(/^["']+|["',;.)\]]+$/g, '')
+            .replace(/^https?:\/\//i, '');
+        const hostPart = (raw.split('/')[0] ?? '').split(':')[0]?.toLowerCase().replace(/^\.+|^www\./, '') ?? '';
+        if (hostPart && hostPart.includes('.') && !domains.includes(hostPart)) {
+            domains.push(hostPart);
+        }
+    }
+    return domains;
+}
+
+/**
+ * 校验结果 URL 是否满足 `site:` 域名限定（精确匹配该域名或其子域名）。
+ */
+export function matchesSiteDomains(url: string, siteDomains: string[]): boolean {
+    if (siteDomains.length === 0) {
+        return true;
+    }
+    try {
+        const host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+        return siteDomains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+    } catch {
+        return false;
+    }
 }
 
 export function shouldSuggestRemovingSiteOperator(query: string, error: unknown): boolean {
@@ -542,6 +576,27 @@ async function isPlaywrightAvailable(): Promise<boolean> {
     return playwrightAvailabilityPromise;
 }
 
+function applySiteDomainFilter(results: EngineSearchResponse, query: string): EngineSearchResponse {
+    const siteDomains = extractSiteDomains(query);
+    if (siteDomains.length === 0 || results.length === 0) {
+        return results;
+    }
+    const filtered = results.filter((result) => matchesSiteDomains(result.url, siteDomains)) as EngineSearchResponse;
+    if (results.directAnswer) {
+        filtered.directAnswer = results.directAnswer;
+    }
+    if (filtered.length === 0) {
+        throw new AppError({
+            code: 'engine_parse_error',
+            retryable: false,
+            engine: 'bing',
+            hint: 'Bing HTTP ignored the site: operator; falling back to Playwright or cascade engines.',
+            message: `Bing HTTP results did not match site:${siteDomains.join(',')} (site: operator ignored by cn.bing HTTP)`
+        });
+    }
+    return filtered;
+}
+
 async function searchBingWithHttp(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
     if (signal?.aborted) {
         throw signal.reason instanceof Error
@@ -549,16 +604,23 @@ async function searchBingWithHttp(query: string, limit: number, signal?: AbortSi
             : new AppError({ code: 'aborted', engine: 'bing', message: 'Bing HTTP search aborted', retryable: false });
     }
     // 首选 wreq-js 指纹请求（Chrome TLS/HTTP2 指纹模拟，规避纯 HTTP 请求被软降级为
-    // 无关结果）；原生模块不可用或请求失败时回退到 axios 路径，不影响现有行为。
-    if (await isImpersonateAvailable()) {
+    // 无关结果）；原生模块不可用、连续 0 条已熔断、或请求失败时回退到 axios 路径。
+    let impersonateResults: EngineSearchResponse | undefined;
+    if (!isBingImpersonateCircuitOpen() && await isImpersonateAvailable()) {
         try {
-            return await searchBingWithImpersonate(query, limit, signal);
+            impersonateResults = await searchBingWithImpersonate(query, limit, signal);
         } catch (error) {
-            if (signal?.aborted) {
+            if (signal?.aborted || isAbortedError(error)) {
+                if (isCascadeAbortedError(error)) {
+                    metrics.debug('bing.impersonate.cascade_aborted', { engine: 'bing' });
+                }
                 throw error;
             }
             console.warn('Bing impersonate request failed, falling back to axios:', error instanceof Error ? error.message : String(error));
         }
+    }
+    if (impersonateResults) {
+        return applySiteDomainFilter(impersonateResults, query);
     }
 
     let allResults: SearchResult[] = [];
@@ -615,7 +677,7 @@ async function searchBingWithHttp(query: string, limit: number, signal?: AbortSi
     if (directAnswer) {
         httpResults.directAnswer = directAnswer;
     }
-    return httpResults;
+    return applySiteDomainFilter(httpResults, query);
 }
 
 async function searchBingWithPlaywright(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
@@ -784,7 +846,17 @@ export async function searchBing(
     }
 
     try {
-        return await searchBingWithHttp(query, limit, signal);
+        const httpResults = await searchBingWithHttp(query, limit, signal);
+        // P0-2：cn.bing HTTP 对英文多词 query 常发生"首词漂移"（只按第一个词匹配，后续词全丢），
+        // auto 模式下检测到首词漂移时同样触发 Playwright 交互回退。
+        if (hasFirstTokenDrift(httpResults, query) && config.bingPlaywrightFallback && !signal?.aborted) {
+            const canUsePlaywright = await isPlaywrightAvailable();
+            if (canUsePlaywright && !signal?.aborted) {
+                console.warn('Request-based Bing search returned first-token drift for multi-word query, falling back to Playwright mode');
+                return searchBingWithPlaywright(query, limit, signal);
+            }
+        }
+        return httpResults;
     } catch (requestError) {
         if (signal?.aborted) {
             throw requestError;
@@ -804,4 +876,5 @@ export async function searchBing(
         return searchBingWithPlaywright(query, limit, signal);
     }
 }
+
 

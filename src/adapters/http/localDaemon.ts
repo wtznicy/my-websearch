@@ -1,5 +1,6 @@
 import express from 'express';
 import http from 'node:http';
+import { hostHeaderValidation } from '@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js';
 import { AppConfig } from '../../config.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
@@ -73,7 +74,10 @@ function sendError(
 
 function parseRequestedEngines(runtime: MyWebSearchRuntime, engines: unknown, query: string): SupportedSearchEngine[] {
     // DEFAULT_SEARCH_ENGINE=auto 时按查询特征自动路由（返回引擎组：中文 → baidu+sogou，英文 → bing+duckduckgo）
-    const routed = pickDefaultEnginesForQuery(query, runtime.config.defaultSearchEngine);
+    const routed = pickDefaultEnginesForQuery(query, runtime.config.defaultSearchEngine, {
+        en: runtime.config.autoRouteEnEngines,
+        zh: runtime.config.autoRouteZhEngines
+    });
     // 已知不可达的境外引擎（探测失败缓存内且未走代理）从默认路由排除，避免每次查询白等探测；
     // 显式指定 engines 的请求不受影响（下面 engines !== undefined 的分支走原逻辑）
     const reachableRouted = routed.filter((engine) => !isKnownUnreachableOverseasEngine(engine));
@@ -273,6 +277,17 @@ export async function startLocalDaemon(
             daemon: 'running'
         }));
     });
+
+    // P0-6：DNS rebinding 防护（与 index.ts MCP HTTP server 口径对齐）
+    // 放在 /health 之后，默认仅放行本地回环（127.0.0.1 / localhost / [::1] 及绑定 host），
+    // 支持 OPEN_WEBSEARCH_ALLOWED_HOSTS 环境变量扩展白名单。
+    const allowedHostnames = process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS
+        ? process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS.split(',').map((item) => item.trim()).filter(Boolean)
+        : ['127.0.0.1', 'localhost', '[::1]'];
+    if (host && !allowedHostnames.includes(host)) {
+        allowedHostnames.push(host);
+    }
+    app.use(hostHeaderValidation(allowedHostnames));
 
     app.get('/status', (_req, res) => {
         res.json(createSuccessEnvelope(getStatus()));

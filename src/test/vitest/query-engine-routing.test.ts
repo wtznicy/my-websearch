@@ -1,7 +1,24 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { pickDefaultEngineForQuery, pickDefaultEnginesForQuery } from '../../core/search/queryEngineRouting.js';
+import { metrics } from '../../core/metrics.js';
+import { resetEngineCircuits, tripEngineCircuit } from '../../core/search/engineCircuitBreaker.js';
 
 describe('pickDefaultEngineForQuery', () => {
+    const origEn = process.env.AUTO_ROUTE_EN_ENGINES;
+    const origZh = process.env.AUTO_ROUTE_ZH_ENGINES;
+    const origExa = process.env.EXA_API_KEY;
+
+    afterEach(() => {
+        if (origEn === undefined) delete process.env.AUTO_ROUTE_EN_ENGINES;
+        else process.env.AUTO_ROUTE_EN_ENGINES = origEn;
+        if (origZh === undefined) delete process.env.AUTO_ROUTE_ZH_ENGINES;
+        else process.env.AUTO_ROUTE_ZH_ENGINES = origZh;
+        if (origExa === undefined) delete process.env.EXA_API_KEY;
+        else process.env.EXA_API_KEY = origExa;
+        metrics.resetMetrics();
+        resetEngineCircuits();
+    });
+
     it('should keep the configured engine when not "auto"', () => {
         expect(pickDefaultEngineForQuery('任何查询', 'sogou')).toBe('sogou');
         expect(pickDefaultEngineForQuery('hello world', 'bing')).toBe('bing');
@@ -28,6 +45,25 @@ describe('pickDefaultEngineForQuery', () => {
         // env 覆盖
         expect(pickDefaultEnginesForQuery('english query', 'auto', { en: ['bing', 'startpage'] }))
             .toEqual(['bing', 'startpage']);
+    });
+
+    it('should honor AUTO_ROUTE_EN_ENGINES and AUTO_ROUTE_ZH_ENGINES env overrides (P1-7)', () => {
+        process.env.AUTO_ROUTE_EN_ENGINES = 'bing,exa';
+        process.env.AUTO_ROUTE_ZH_ENGINES = 'baidu,csdn,juejin';
+        expect(pickDefaultEnginesForQuery('model context protocol', 'auto')).toEqual(['bing', 'exa']);
+        expect(pickDefaultEnginesForQuery('中文技术查询', 'auto')).toEqual(['baidu', 'csdn', 'juejin']);
+    });
+
+    it('should filter out unhealthy primary engines and substitute from fallback pool (P1-6)', () => {
+        process.env.EXA_API_KEY = 'test-exa-key';
+        // 模拟 duckduckgo 近期连续 2 次超时失败（successRate = 0 < 50%）
+        metrics.recordEngineSearch('duckduckgo', 10000, false);
+        metrics.recordEngineSearch('duckduckgo', 10000, false);
+        expect(pickDefaultEnginesForQuery('rust tokio select', 'auto')).toEqual(['bing', 'exa']);
+
+        // 中文主引擎 sogou 熔断时，自动替补 csdn
+        tripEngineCircuit('sogou');
+        expect(pickDefaultEnginesForQuery('Rust 异步运行时对比', 'auto')).toEqual(['baidu', 'csdn']);
     });
 
     it('should route CJK-containing queries to baidu regardless of latin technical terms', () => {

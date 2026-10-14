@@ -14,16 +14,18 @@ import {
 export function registerFetchCsdnTool(server: McpServer, runtime: MyWebSearchRuntime): void {
     const fetchCsdnToolName = getToolName('MCP_TOOL_FETCH_CSDN_NAME', 'fetchCsdnArticle');
 
-    server.tool(
+    server.registerTool(
         fetchCsdnToolName,
-        "Fetch full article content from a CSDN article URL (blog.csdn.net /article/details/ only; for other sites use fetchWebContent)",
         {
-            url: z.string().url().refine(
-                (url) => validateArticleUrl(url, 'csdn'),
-                "URL must be from blog.csdn.net contains /article/details/ path"
-            )
+            description: "Fetch full article content from a CSDN article URL (blog.csdn.net /article/details/ only; for other sites use fetchWebContent)",
+            inputSchema: {
+                url: z.string().url().refine(
+                    (url) => validateArticleUrl(url, 'csdn'),
+                    "URL must be from blog.csdn.net contains /article/details/ path"
+                )
+            },
+            annotations: TOOL_ANNOTATION_HINTS
         },
-        TOOL_ANNOTATION_HINTS,
         async ({url}) => {
             try {
                 logTool(`Fetching CSDN article: ${url}`);

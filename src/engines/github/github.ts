@@ -8,26 +8,25 @@ import { AppError } from '../../core/errors.js';
 
 // Avoid the GitHub README API here because anonymous API requests in this
 // environment hit rate limits quickly; raw URLs are more stable for this tool.
-const README_CANDIDATES = [
+export const README_CANDIDATES = [
     'README.md',
+    'readme.md',
+    'README.rst',
     'README.mdx',
     'README.markdown',
     'README',
-    'README.txt',
-    'readme.md',
-    'readme.mdx',
-    'readme.markdown',
-    'readme',
-    'readme.txt'
+    'README.txt'
 ];
 
 const RAW_GITHUB_BASE = 'https://raw.githubusercontent.com';
 // jsDelivr mirrors GitHub repo files on a global CDN that stays reachable in
 // networks where raw.githubusercontent.com DNS is polluted or blocked.
 // URL shape: https://cdn.jsdelivr.net/gh/{owner}/{repo}@{ref}/{file}
-// An empty ref uses the repository's default branch.
+// NOTE (P0-5): An empty ref (`''`) on jsDelivr 301-redirects to the latest semver git tag
+// (e.g. `tokio@0.1.5` from 2018) instead of the default branch! Always try explicit branch
+// refs (`@main`, `@master`) before falling back to `''`.
 const JSDELIVR_CDN_BASE = 'https://cdn.jsdelivr.net/gh';
-const JSDELIVR_REF_CANDIDATES = ['', '@main', '@master', '@dev', '@develop'];
+export const JSDELIVR_REF_CANDIDATES = ['@main', '@master', ''];
 
 // raw.githubusercontent.com 直连可达性探测：3s 超时、失败重试 1 次、结果缓存 5 分钟。
 // 探测结果决定 raw 路径走直连还是走代理/jsDelivr（避免国内无代理环境每次抓取都挂满超时）。
@@ -39,6 +38,11 @@ const RAW_PROBE_TARGET = `${RAW_GITHUB_BASE}/`;
 
 let rawProbeCache: { reachable: boolean; checkedAt: number } | null = null;
 let rawProbePromise: Promise<boolean> | null = null;
+
+export function __resetGithubReadmeCacheForTests(): void {
+    rawProbeCache = null;
+    rawProbePromise = null;
+}
 
 /**
  * 探测 raw.githubusercontent.com 直连是否可达。
@@ -140,14 +144,31 @@ async function fetchReadmeSource(url: string, label: string, timeout: number): P
 
         // raw：先探测直连可达性——
         // 直连可达 → 直连（可信 host，绕过 DNS 私网过滤，避免 100.64.0.0/10 误判为 SSRF）；
-        // 直连不可达但配置了代理 → raw 走代理（代理通常可通 GitHub）；
+        // P1-2：若探测认为直连可达但实际路径抓取超时/网络失败，立即置直连缓存为 false 并尝试走代理重试一次，
+        // 避免直接放弃 raw 掉进 jsDelivr 旧 tag！
+        // 直连不可达且配置了代理 → raw 走代理（代理通常可通 GitHub）；
         // 直连不可达且无代理 → 返回错误，由主循环转 jsDelivr CDN 兜底。
-        // jsDelivr CDN：直连优先、代理兜底（CDN 国内直连可达，代理不可达时不卡死），SSRF 防护保留。
         let response: AxiosResponse;
         if (label === 'raw') {
+            const hasProxyAvailable = async () => Boolean((config.useProxy && config.proxyUrl) || (await detectSystemProxy()));
             if (await isRawDirectlyReachable()) {
-                response = await requestWithSafeRedirects('GET', url, buildReadmeOptions('raw', true, timeout), 'raw.githubusercontent.com');
-            } else if ((config.useProxy && config.proxyUrl) || (await detectSystemProxy())) {
+                try {
+                    response = await requestWithSafeRedirects('GET', url, buildReadmeOptions('raw', true, timeout), 'raw.githubusercontent.com');
+                } catch (directError) {
+                    const directMsg = directError instanceof Error ? directError.message : String(directError);
+                    if (isNetworkLayerError(directMsg)) {
+                        rawProbeCache = { reachable: false, checkedAt: Date.now() };
+                        if (await hasProxyAvailable()) {
+                            console.warn(`Direct raw.githubusercontent.com fetch failed (${directMsg}), retrying via proxy: ${url}`);
+                            response = await requestWithSafeRedirects('GET', url, buildReadmeOptions('raw', false, timeout), 'raw.githubusercontent.com (proxy)');
+                        } else {
+                            throw directError;
+                        }
+                    } else {
+                        throw directError;
+                    }
+                }
+            } else if (await hasProxyAvailable()) {
                 response = await requestWithSafeRedirects('GET', url, buildReadmeOptions('raw', false, timeout), 'raw.githubusercontent.com (proxy)');
             } else {
                 return { status: 'error', message: 'raw.githubusercontent.com is unreachable from the current network without a proxy' };
@@ -299,9 +320,13 @@ async function fetchReadme(owner: string, repo: string, host: RepoHost): Promise
     // github：raw.githubusercontent.com + jsDelivr CDN 双路径
     const cdnFirst = process.env.GITHUB_README_CDN_FIRST === 'true';
     let rawUnreachable = false;
-    let sawFetchFailure = false;
+    let sawRawError = false;
+    let sawCdnError = false;
+    let sawAuthoritativeNotFound = false;
 
-    for (const readmeFile of README_CANDIDATES) {
+    for (let i = 0; i < README_CANDIDATES.length; i += 1) {
+        const readmeFile = README_CANDIDATES[i]!;
+
         // 1) Try raw.githubusercontent.com first, unless CDN-first is forced or
         //    a previous candidate proved the raw host unreachable.
         if (!cdnFirst && !rawUnreachable) {
@@ -311,28 +336,39 @@ async function fetchReadme(owner: string, repo: string, host: RepoHost): Promise
             if (rawResult.status === 'ok') {
                 return rawResult.content;
             }
+            if (rawResult.status === 'notfound') {
+                sawAuthoritativeNotFound = true;
+                // P1-1：raw 的 HEAD 已经指向仓库默认分支；既然 raw 可达且明确返回 404，
+                // 无需再对同一个文件名去 jsDelivr 重复请求多个分支 ref，直接看下一个候选文件名。
+                continue;
+            }
             if (rawResult.status === 'error') {
-                sawFetchFailure = true;
+                sawRawError = true;
                 // Domain-level failure: later candidates should not retry the raw host.
                 rawUnreachable = true;
             }
         }
 
-        // 2) Fall back to the jsDelivr CDN mirror (default branch, then main/master).
-        for (const ref of JSDELIVR_REF_CANDIDATES) {
+        // 2) Fall back to the jsDelivr CDN mirror ONLY when CDN-first is enabled or raw was unreachable/invalid.
+        //    P1-1：仅对首选 README.md 轮询完整分支列表（@main / @master / 默认），
+        //    其余备选文件名（readme.md / README.rst 等）仅用默认 ref（''）探测 1 次，避免 10×5=50 次请求风暴。
+        const refsToTry = i === 0 ? JSDELIVR_REF_CANDIDATES : [''];
+        for (const ref of refsToTry) {
             const cdnUrl = `${JSDELIVR_CDN_BASE}/${ownerEnc}/${repoEnc}${ref}/${readmeFile}`;
             const cdnResult = await fetchReadmeSource(cdnUrl, 'jsDelivr', 10000);
 
             if (cdnResult.status === 'ok') {
                 return cdnResult.content;
             }
-            if (cdnResult.status === 'error') {
-                sawFetchFailure = true;
+            if (cdnResult.status === 'notfound') {
+                sawAuthoritativeNotFound = true;
+            } else if (cdnResult.status === 'error') {
+                sawCdnError = true;
             }
         }
     }
 
-    if (sawFetchFailure) {
+    if ((sawRawError || sawCdnError) && !sawAuthoritativeNotFound) {
         // 所有候选源都出现非 404 错误（网络不可达/上游错误）：抛明确错误，
         // 避免调用方把"网络不通"误报为"README not found"
         throw new AppError({

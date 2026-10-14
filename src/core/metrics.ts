@@ -67,10 +67,12 @@ type CacheMetrics = {
 
 const DEFAULT_SLIDING_WINDOW_MS = 5 * 60 * 1000; // 5 分钟
 const MAX_SAMPLES_PER_ENGINE = 500;
+const MAX_ROUTING_SAMPLES_PER_ENGINE = 32;
 
 class MetricsCollector {
     private engineMetrics = new Map<string, EngineMetrics>();
     private engineSamples = new Map<string, EngineEventSample[]>();
+    private recentRoutingSamples = new Map<string, EngineEventSample[]>();
     private cacheMetrics: CacheMetrics = { hits: 0, misses: 0 };
 
     private get logLevel(): LogLevel {
@@ -83,6 +85,14 @@ class MetricsCollector {
 
     private get securityAuditEnabled(): boolean {
         return process.env.SECURITY_AUDIT === 'true';
+    }
+
+    reset(): void {
+        this.engineMetrics.clear();
+        this.engineSamples.clear();
+        this.recentRoutingSamples.clear();
+        this.cacheMetrics = { hits: 0, misses: 0 };
+        resetErrorClassificationMetrics();
     }
 
     // ─── 日志 ────────────────────────────────────────────────────────────────
@@ -131,6 +141,16 @@ class MetricsCollector {
     // ─── 引擎指标 ────────────────────────────────────────────────────────────
 
     recordEngineSearch(engine: string, durationMs: number, success: boolean, timestamp = Date.now()): void {
+        let routingSamples = this.recentRoutingSamples.get(engine);
+        if (!routingSamples) {
+            routingSamples = [];
+            this.recentRoutingSamples.set(engine, routingSamples);
+        }
+        routingSamples.push({ timestamp, durationMs, success });
+        if (routingSamples.length > MAX_ROUTING_SAMPLES_PER_ENGINE) {
+            routingSamples.shift();
+        }
+
         if (!this.metricsEnabled) return;
 
         let metrics = this.engineMetrics.get(engine);
@@ -259,9 +279,47 @@ class MetricsCollector {
         };
     }
 
+    /**
+     * 获取指定引擎近期滑动窗口的健康统计（供级联候选动态排序使用，始终可用且不受 METRICS_ENABLED 门控）
+     */
+    getRecentEngineHealth(
+        engine: string,
+        windowMs = DEFAULT_SLIDING_WINDOW_MS,
+        now = Date.now()
+    ): SlidingWindowEngineStats | undefined {
+        const samples = this.recentRoutingSamples.get(engine);
+        if (!samples || samples.length === 0) {
+            return undefined;
+        }
+        const cutoff = now - windowMs;
+        const valid = samples.filter((s) => s.timestamp >= cutoff);
+        this.recentRoutingSamples.set(engine, valid);
+        if (valid.length === 0) {
+            return undefined;
+        }
+        const total = valid.length;
+        const success = valid.filter((s) => s.success).length;
+        const failure = total - success;
+        const successRate = Math.round((success / total) * 100);
+        const totalDuration = valid.reduce((acc, s) => acc + s.durationMs, 0);
+        const avgDurationMs = Math.round(totalDuration / total);
+        const sortedDurations = valid.map((s) => s.durationMs).sort((a, b) => a - b);
+        const p95Idx = Math.min(Math.floor(0.95 * total), total - 1);
+        const p95DurationMs = sortedDurations[p95Idx] ?? 0;
+        return {
+            total,
+            success,
+            failure,
+            successRate,
+            avgDurationMs,
+            p95DurationMs
+        };
+    }
+
     resetMetrics(): void {
         this.engineMetrics.clear();
         this.engineSamples.clear();
+        this.recentRoutingSamples.clear();
         this.cacheMetrics = { hits: 0, misses: 0 };
         resetErrorClassificationMetrics();
     }

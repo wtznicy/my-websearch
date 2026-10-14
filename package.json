@@ -1,8 +1,8 @@
 {
   "name": "my-websearch",
-  "version": "1.0.24",
+  "version": "1.0.25",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "mcpName": "io.github.wtznicy/my-websearch",
   "description": "MyWebSearch - multi-engine web search MCP server, CLI and local daemon. No API keys required.",
@@ -35,7 +35,7 @@
   "scripts": {
     "check:ci": "npm run typecheck:strict && npm run lint && npm test && npm run build",
     "typecheck:strict": "tsc --project tsconfig.strict.json",
-    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+    "build": "node -e \"require('fs').rmSync('build', { recursive: true, force: true })\" && tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
     "start": "node build/index.js",

@@ -106,18 +106,29 @@ function getCapturedOutput(test: RunningTest): string {
     return test.outputChunks.map((chunk) => chunk.text).join('');
 }
 
+const EXA_FORGIVABLE_PATTERNS = [
+    /is unreachable from your current network without a proxy/i,
+    /Request failed with status code (429|5\d\d)\b/i,
+    /timeout of \d+ms exceeded/i
+];
+
 function isForgivableNetworkFailure(test: RunningTest): boolean {
     const output = `${test.spawnError?.message || ''}\n${getCapturedOutput(test)}`;
     if (nonNetworkFailurePatterns.some((pattern) => pattern.test(output))) {
         return false;
     }
 
+    if (test.testName === 'test-exa') {
+        return EXA_FORGIVABLE_PATTERNS.some((pattern) => pattern.test(output));
+    }
+
     return networkFailurePatterns.some((pattern) => pattern.test(output));
 }
 
 /** 提取命中的网络豁免模式（用于 EXCUSED 行展示具体原因，便于发版后追溯） */
-function matchedExcusePattern(output: string): string {
-    const hit = networkFailurePatterns.find((pattern) => pattern.test(output));
+function matchedExcusePattern(output: string, testName?: string): string {
+    const patternList = testName === 'test-exa' ? EXA_FORGIVABLE_PATTERNS : networkFailurePatterns;
+    const hit = patternList.find((pattern) => pattern.test(output));
     if (!hit) {
         return 'unknown';
     }
@@ -277,7 +288,7 @@ function runAllTestsInParallel(): Promise<number> {
 
             if (isForgivableNetworkFailure(runningTest)) {
                 excused += 1;
-                console.warn(`===== EXCUSED ${testName}.js: 网络问题，已赦免（匹配: ${matchedExcusePattern(getCapturedOutput(runningTest))}） =====`);
+                console.warn(`===== EXCUSED ${testName}.js: 网络问题，已赦免（匹配: ${matchedExcusePattern(getCapturedOutput(runningTest), testName)}） =====`);
                 printCapturedOutput(runningTest);
                 afterTestSettled();
                 return;

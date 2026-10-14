@@ -14,18 +14,20 @@ import {
 export function registerFetchJuejinTool(server: McpServer, runtime: MyWebSearchRuntime): void {
     const fetchJuejinToolName = getToolName('MCP_TOOL_FETCH_JUEJIN_NAME', 'fetchJuejinArticle');
 
-    server.tool(
+    server.registerTool(
         fetchJuejinToolName,
-        "Fetch full article content from a Juejin(掘金) post URL (juejin.cn or article.juejin.cn /post/ only; for other sites use fetchWebContent)",
         {
-            url: z.string().url().refine(
-                (url) => validateArticleUrl(url, 'juejin'),
-                "URL must be from juejin.cn and contain /post/ path"
-            ),
-            format: z.enum(['text', 'markdown']).optional()
-                .describe("Output format (default: text). 'markdown' keeps fenced code blocks (with language) and GFM tables — recommended for technical posts")
+            description: "Fetch full article content from a Juejin(掘金) post URL (juejin.cn or article.juejin.cn /post/ only; for other sites use fetchWebContent)",
+            inputSchema: {
+                url: z.string().url().refine(
+                    (url) => validateArticleUrl(url, 'juejin'),
+                    "URL must be from juejin.cn and contain /post/ path"
+                ),
+                format: z.enum(['text', 'markdown']).optional()
+                    .describe("Output format (default: text). 'markdown' keeps fenced code blocks (with language) and GFM tables — recommended for technical posts")
+            },
+            annotations: TOOL_ANNOTATION_HINTS
         },
-        TOOL_ANNOTATION_HINTS,
         async ({url, format}) => {
             try {
                 logTool(`Fetching Juejin article: ${url}`);

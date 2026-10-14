@@ -2,11 +2,13 @@ import { describe, it, expect } from 'vitest';
 import * as crypto from 'node:crypto';
 import {
     solveAnubisPow,
+    solveAnubisPowAsync,
+    getMaxAnubisPowDifficulty,
     parseAnubisChallenge,
     extractStartpageScToken
 } from '../../engines/startpage/anubisSolver.js';
 
-describe('solveAnubisPow', () => {
+describe('solveAnubisPow & solveAnubisPowAsync', () => {
     it('should find a nonce whose sha256(randomData+nonce) has the required zero prefix', () => {
         const randomData = 'test-random-data-123';
         const result = solveAnubisPow(randomData, 3);
@@ -20,6 +22,18 @@ describe('solveAnubisPow', () => {
         const result = solveAnubisPow('01a0c924-0f1a-76a5-b370-6422389c2d2e', 4);
         expect(result).not.toBeNull();
         expect(result!.hash.startsWith('0000')).toBe(true);
+    });
+
+    it('should solve PoW in a worker thread without blocking and abort immediately on signal (P0-3)', async () => {
+        const solved = await solveAnubisPowAsync('worker-test-seed', 3);
+        expect(solved).not.toBeNull();
+        expect(solved!.hash.startsWith('000')).toBe(true);
+
+        const controller = new AbortController();
+        controller.abort();
+        const abortedResult = await solveAnubisPowAsync('worker-test-seed', 5, controller.signal);
+        expect(abortedResult).toBeNull();
+        expect(getMaxAnubisPowDifficulty()).toBe(5);
     });
 });
 

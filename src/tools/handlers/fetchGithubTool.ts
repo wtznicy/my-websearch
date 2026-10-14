@@ -14,16 +14,18 @@ import {
 export function registerFetchGithubTool(server: McpServer, runtime: MyWebSearchRuntime): void {
     const fetchGithubToolName = getToolName('MCP_TOOL_FETCH_GITHUB_NAME', 'fetchGithubReadme');
 
-    server.tool(
+    server.registerTool(
         fetchGithubToolName,
-        "Fetch README content from a GitHub/Gitee repository URL (github.com or gitee.com repo URLs only; for other pages use fetchWebContent)",
         {
-            url: z.string().min(1).max(2048).refine(
-                (url) => validateGithubRepositoryUrl(url),
-                "URL must be a valid GitHub repository URL (supports HTTPS, SSH formats)"
-            )
+            description: "Fetch README content from a GitHub/Gitee repository URL (github.com or gitee.com repo URLs only; for other pages use fetchWebContent)",
+            inputSchema: {
+                url: z.string().min(1).max(2048).refine(
+                    (url) => validateGithubRepositoryUrl(url),
+                    "URL must be a valid GitHub repository URL (supports HTTPS, SSH formats)"
+                )
+            },
+            annotations: TOOL_ANNOTATION_HINTS
         },
-        TOOL_ANNOTATION_HINTS,
         async ({url}) => {
             try {
                 logTool(`Fetching GitHub README: ${url}`);

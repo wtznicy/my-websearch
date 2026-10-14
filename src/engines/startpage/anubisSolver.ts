@@ -1,5 +1,9 @@
 import * as crypto from 'node:crypto';
-import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
+import { Worker } from 'node:worker_threads';
+import type { AxiosRequestConfig, AxiosResponse } from 'axios';
+import { config, engineShouldUseProxy } from '../../config.js';
+import { buildAxiosRequestOptions, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { getSystemProxyFallbackUrl } from '../../utils/systemProxy.js';
 
 /**
  * Startpage Anubis 反爬的纯 Node 求解器（无浏览器）。
@@ -9,20 +13,33 @@ import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRe
  * 之前的方案是启动 Playwright（hidden-headed）跑通挑战，代价约 10s + 400MB 内存。
  *
  * Anubis 的 PoW 本质是 `SHA256(randomData + nonce)` 前缀满足 difficulty 个 0——
- * 在 Node 原生 crypto 里只需百毫秒级（实测 difficulty=4 约 150ms），因此可以：
+ * 在 Node 原生 crypto 里（difficulty=4~5）只需百毫秒到 1 秒级，因此可以：
  *   1. GET 首页 → 解析挑战 payload 与 Set-Cookie（spchal-cookie-verification）
- *   2. 本地 PoW 求解
+ *   2. Worker 线程异步 PoW 求解（不阻塞主事件循环，支持 AbortSignal 立即终止）
  *   3. GET pass-challenge（带 cookie）→ 302 + spchal-auth（JWT，有效期 5 分钟）
  *   4. 带全部 cookie 再取首页 → 搜索表单的 sc token
  *
- * 实测 Anubis v1.26.4：全流程约 2.6 秒。失败（协议变更/IP 信誉加重难度）时返回 null，
- * 由调用方回退 Playwright 兜底。
+ * 当 difficulty >= 6 时，单核期望迭代 16^6 ≈ 1677 万次（约 16s，远超单引擎 10s 预算），
+ * 此时直接放弃纯 HTTP PoW（返回 null），避免无意义耗尽 CPU 与阻塞超时。
  */
 
 const STARTPAGE_BASE_URL = 'https://www.startpage.com';
 const ANUBIS_PASS_PATH = '/.within.website/x/cmd/anubis/api/pass-challenge';
-/** PoW 迭代上限（difficulty 正常为 4~6；被标记 IP 可能升高，超限时回退浏览器） */
+/** PoW 迭代上限（difficulty 正常为 4~5；被标记 IP 升至 6+ 时直接跳过） */
 const POW_MAX_NONCE = 20_000_000;
+/** 默认内联求解的最大 difficulty（difficulty=6 期望 16.7M 次哈希 ≈ 16s，超出单引擎预算） */
+export const ANUBIS_DEFAULT_MAX_POW_DIFFICULTY = 5;
+
+export function getMaxAnubisPowDifficulty(): number {
+    const raw = process.env.ANUBIS_MAX_POW_DIFFICULTY?.trim();
+    if (raw) {
+        const parsed = Number(raw);
+        if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 8) {
+            return parsed;
+        }
+    }
+    return ANUBIS_DEFAULT_MAX_POW_DIFFICULTY;
+}
 
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 const BROWSER_UA = DEFAULT_DESKTOP_UA;
@@ -34,7 +51,7 @@ export type AnubisSession = {
     scCode: string;
 };
 
-/** 求解 Anubis PoW：找 nonce 使 sha256(randomData + nonce) 以 difficulty 个 '0' 开头 */
+/** 同步求解 Anubis PoW（保留供低难度单测调用）：找 nonce 使 sha256(randomData + nonce) 以 difficulty 个 '0' 开头 */
 export function solveAnubisPow(randomData: string, difficulty: number): { nonce: number; hash: string } | null {
     const prefix = '0'.repeat(Math.max(1, Math.min(Math.floor(difficulty) || 1, 8)));
     for (let nonce = 0; nonce < POW_MAX_NONCE; nonce += 1) {
@@ -44,6 +61,86 @@ export function solveAnubisPow(randomData: string, difficulty: number): { nonce:
         }
     }
     return null;
+}
+
+const ANUBIS_POW_WORKER_SCRIPT = `
+const { parentPort, workerData } = require('node:worker_threads');
+const crypto = require('node:crypto');
+const { randomData, difficulty, maxNonce } = workerData;
+const prefix = '0'.repeat(Math.max(1, Math.min(Math.floor(difficulty) || 1, 8)));
+let found = null;
+for (let nonce = 0; nonce < maxNonce; nonce += 1) {
+    const hash = crypto.createHash('sha256').update(randomData + nonce).digest('hex');
+    if (hash.startsWith(prefix)) {
+        found = { nonce, hash };
+        break;
+    }
+}
+parentPort.postMessage(found);
+`;
+
+/**
+ * 在独立 Worker 线程中异步求解 Anubis PoW：
+ * - 绝不阻塞主线程事件循环（并发的掘金/百度等请求不受影响）
+ * - 响应 AbortSignal：超时或取消时立即 terminate() 工作线程，不在后台空转烧 CPU
+ */
+export function solveAnubisPowAsync(
+    randomData: string,
+    difficulty: number,
+    signal?: AbortSignal
+): Promise<{ nonce: number; hash: string } | null> {
+    if (signal?.aborted) {
+        return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+        let settled = false;
+        let worker: Worker | undefined;
+        const finish = (result: { nonce: number; hash: string } | null) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            if (signal && onAbort) {
+                signal.removeEventListener('abort', onAbort);
+            }
+            resolve(result);
+        };
+        const onAbort = () => {
+            if (worker) {
+                void worker.terminate().catch(() => undefined);
+            }
+            finish(null);
+        };
+
+        try {
+            worker = new Worker(ANUBIS_POW_WORKER_SCRIPT, {
+                eval: true,
+                workerData: {
+                    randomData,
+                    difficulty,
+                    maxNonce: POW_MAX_NONCE
+                }
+            });
+        } catch {
+            // 极端受限环境无法创建 Worker 时回退同步求解（仅在 <= maxDifficulty 时调用）
+            finish(solveAnubisPow(randomData, difficulty));
+            return;
+        }
+
+        if (signal) {
+            signal.addEventListener('abort', onAbort, { once: true });
+        }
+
+        worker.once('message', (msg: { nonce: number; hash: string } | null) => {
+            finish(msg ?? null);
+        });
+        worker.once('error', () => {
+            finish(null);
+        });
+        worker.once('exit', () => {
+            finish(null);
+        });
+    });
 }
 
 /** 从挑战页 HTML 解析 Anubis payload（challenge.id / randomData / rules.difficulty） */
@@ -97,27 +194,43 @@ function mergeCookiePairs(...groups: string[][]): string {
 }
 
 /**
- * 纯 HTTP 走通 Anubis 挑战，返回放行 cookie 与 sc token。
- * 协议不符/站点封禁（拿到 "Startpage Blocked"）时返回 null，由调用方回退 Playwright。
+ * P0-4：startpage 已在 PROXY_ENGINES（或有系统代理兜底）时，直接走代理发起请求，
+ * 避免 requestDirectFirst 对每一步都先直连挂满 15s 超时（3 步 × 15s = 45s 必超单引擎预算）。
  */
-export async function warmupWithAnubisPow(): Promise<AnubisSession | null> {
+async function requestStartpageAnubisStep(
+    url: string,
+    buildOptions: (forceDirect: boolean) => AxiosRequestConfig,
+    label: string
+): Promise<AxiosResponse> {
+    const shouldUseProxy = (config.useProxy && Boolean(config.proxyUrl) && engineShouldUseProxy('startpage'))
+        || Boolean(getSystemProxyFallbackUrl('startpage'));
+    if (shouldUseProxy) {
+        return requestWithSafeRedirects('GET', url, buildOptions(false), label);
+    }
+    return requestDirectFirst('GET', url, buildOptions, label);
+}
+
+let inflightAnubisWarmup: Promise<AnubisSession | null> | null = null;
+
+async function runAnubisPowWarmup(signal?: AbortSignal): Promise<AnubisSession | null> {
     const startedAt = Date.now();
-    const requestOptions = (forceDirect: boolean) => buildAxiosRequestOptions({
+    const requestOptions = (forceDirect: boolean): AxiosRequestConfig => buildAxiosRequestOptions({
         engine: 'startpage',
         // 不用 trustedStaticHost：它强制禁用重定向，而 Anubis 流程本身依赖 302
         // （首页可能重定向、pass-challenge 的放行凭证就在 302 响应上）
         forceDirect,
+        signal,
         headers: {
             'User-Agent': BROWSER_UA,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9'
         },
-        timeout: 15000,
+        timeout: 8000,
         validateStatus: (status: number) => status >= 200 && status < 400
     });
 
     // 1) 首页 → 挑战 payload + cookie
-    const home = await requestDirectFirst('GET', `${STARTPAGE_BASE_URL}/`, requestOptions, 'Startpage Anubis');
+    const home = await requestStartpageAnubisStep(`${STARTPAGE_BASE_URL}/`, requestOptions, 'Startpage Anubis');
     const homeHtml = String(home.data || '');
     const initialCookies = collectSetCookies(home);
 
@@ -133,10 +246,20 @@ export async function warmupWithAnubisPow(): Promise<AnubisSession | null> {
         return null;
     }
 
-    // 2) 本地 PoW
-    const solved = solveAnubisPow(challenge.randomData, challenge.difficulty);
+    const maxDifficulty = getMaxAnubisPowDifficulty();
+    if (challenge.difficulty > maxDifficulty) {
+        console.warn(
+            `Startpage Anubis PoW difficulty ${challenge.difficulty} exceeds max inline threshold (${maxDifficulty}); skipping PoW to avoid blocking/timeout`
+        );
+        return null;
+    }
+
+    // 2) Worker 线程异步 PoW（支持 signal 立即终止）
+    const solved = await solveAnubisPowAsync(challenge.randomData, challenge.difficulty, signal);
     if (!solved) {
-        console.warn(`Startpage Anubis PoW exceeded ${POW_MAX_NONCE} iterations (difficulty ${challenge.difficulty})`);
+        if (!signal?.aborted) {
+            console.warn(`Startpage Anubis PoW failed or exceeded ${POW_MAX_NONCE} iterations (difficulty ${challenge.difficulty})`);
+        }
         return null;
     }
 
@@ -147,7 +270,7 @@ export async function warmupWithAnubisPow(): Promise<AnubisSession | null> {
         + `&nonce=${solved.nonce}`
         + `&redir=${encodeURIComponent(`${STARTPAGE_BASE_URL}/`)}`
         + `&elapsedTime=${Date.now() - startedAt}`;
-    const pass = await requestDirectFirst('GET', passUrl, (forceDirect) => ({
+    const pass = await requestStartpageAnubisStep(passUrl, (forceDirect) => ({
         ...requestOptions(forceDirect),
         // 302 响应上带 spchal-auth（跟随会丢失）——在此中断以读取 Set-Cookie
         stopOnRedirect: true,
@@ -164,7 +287,7 @@ export async function warmupWithAnubisPow(): Promise<AnubisSession | null> {
 
     // 4) 带全部 cookie 取首页 → sc token
     const allCookies = mergeCookiePairs(initialCookies, authCookies);
-    const home2 = await requestDirectFirst('GET', `${STARTPAGE_BASE_URL}/`, (forceDirect) => ({
+    const home2 = await requestStartpageAnubisStep(`${STARTPAGE_BASE_URL}/`, (forceDirect) => ({
         ...requestOptions(forceDirect),
         headers: {
             ...requestOptions(forceDirect).headers,
@@ -178,3 +301,20 @@ export async function warmupWithAnubisPow(): Promise<AnubisSession | null> {
 
     return { cookies: allCookies, scCode };
 }
+
+/**
+ * 纯 HTTP 走通 Anubis 挑战，返回放行 cookie 与 sc token。
+ * 并发调用共享同一 in-flight 预热（singleflight 去重），避免多个并发请求各自重复求解 PoW。
+ */
+export async function warmupWithAnubisPow(signal?: AbortSignal): Promise<AnubisSession | null> {
+    if (signal?.aborted) {
+        return null;
+    }
+    if (!inflightAnubisWarmup) {
+        inflightAnubisWarmup = runAnubisPowWarmup(signal).finally(() => {
+            inflightAnubisWarmup = null;
+        });
+    }
+    return inflightAnubisWarmup;
+}
+

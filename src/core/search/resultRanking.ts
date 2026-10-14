@@ -202,6 +202,27 @@ export function relevanceScores(results: SearchResult[], query: string): number[
  * 漏洞：N=5 时区分词 df=2 卡在边界外（2 < 2 不成立）→ 无稀有词 → 回退成"命中任一 token"
  * → 只含通用词的噪声也算可用 → 级联不触发。现在回退分支要求**至少命中 2 个不同 token**。
  */
+/**
+ * 检测结果集是否发生"首词漂移"（First-token drift）：
+ * cn.bing HTTP 请求对英文多词查询常退化为只按第一个词匹配（如搜 "model context protocol specification"
+ * 返回特斯拉 Model Y 和百科，搜 "rust tokio select" 返回 Rust 官网），前 N 条结果仅命中首词而对第 2 个及以后的词零命中。
+ */
+export function hasFirstTokenDrift(results: SearchResult[], query: string): boolean {
+    const uniqueQueryTokens = [...new Set(tokenizeForRanking(query || ''))];
+    if (uniqueQueryTokens.length < 2 || results.length === 0) {
+        return false;
+    }
+    const firstToken = uniqueQueryTokens[0]!;
+    const tailTokens = uniqueQueryTokens.slice(1);
+    const topSample = results.slice(0, Math.min(results.length, 5)).map(getDocTokens);
+    const anyTopHitsFirst = topSample.some((doc) => doc.includes(firstToken));
+    const anyTopHitsTail = topSample.some((doc) => {
+        const docSet = new Set(doc);
+        return tailTokens.some((token) => docSet.has(token));
+    });
+    return anyTopHitsFirst && !anyTopHitsTail;
+}
+
 export function countUsableResults(results: SearchResult[], query: string): number {
     const queryTokens = tokenizeForRanking(query || '');
     if (queryTokens.length === 0 || results.length === 0) {
@@ -225,15 +246,37 @@ export function countUsableResults(results: SearchResult[], query: string): numb
     // - df === total：全员命中（品牌查询里的品牌词）→ 无区分度 → 剔除
     // - df > ceil(sqrt(total))：出现得太普遍（如 5 条里 4 条都含的通用词）→ 剔除
     //   （仅靠 df < total 不够：实测 "model" 在 5 条里 df=4 仍会放行纯噪声结果）
+    const uniqueQueryTokens = [...new Set(queryTokens)];
+    // 首词漂移提前拦截：多词查询下，若前 N（最多 5）条结果对第 2 个及以后的所有词零命中，
+    // 即使首词因 df <= sqrt(total) 被误算进 discriminativeTerms，也整批判为 0 可用，提前触发回退或级联。
+    if (uniqueQueryTokens.length >= 2) {
+        const tailTokens = uniqueQueryTokens.slice(1);
+        const topSample = docs.slice(0, Math.min(docs.length, 5));
+        const anyTopHitsTail = topSample.some((doc) => {
+            const docSet = new Set(doc);
+            return tailTokens.some((token) => docSet.has(token));
+        });
+        if (!anyTopHitsTail) {
+            return 0;
+        }
+    }
     const rarityCap = Math.ceil(Math.sqrt(total));
-    const discriminativeTerms = queryTokens.filter((token) => {
+    const discriminativeTerms = uniqueQueryTokens.filter((token) => {
         const df = documentFrequency.get(token) || 0;
         return df > 0 && df < total && df <= rarityCap;
     });
 
     // 有区分性词：命中任一即算可用；否则（query 全是通用词）回退为"至少命中 2 个不同 token"
-    const requiredTerms = discriminativeTerms.length > 0 ? discriminativeTerms : queryTokens;
+    const requiredTerms = discriminativeTerms.length > 0 ? discriminativeTerms : uniqueQueryTokens;
     const minHits = discriminativeTerms.length > 0 ? 1 : Math.min(2, requiredTerms.length);
+    // 高覆盖率直通阈值（收紧边界）：
+    // 当主引擎返回的整页结果整体质量很高、多个核心查询词因 df > sqrt(total) 被踢出 discriminativeTerms
+    // （仅剩个别长尾词留在 discriminativeTerms）时，必须同时满足：
+    // 1. 查询本身包含 ≥3 个不同 token；
+    // 2. 单条结果至少命中 max(3, ceil(uniqueQueryTokens.length * 0.75)) 个不同查询 token。
+    // 这样既放行整页命中 3/4 核心词的高相关结果（如 "Model Context Protocol 教程" 命中前 3 词），
+    // 又严防 3~4 词查询（如 "model context protocol" 或 "react hooks 性能优化"）中只命中 1~2 个泛化词的噪声页蒙混过关。
+    const highCoverageThreshold = Math.max(3, Math.ceil(uniqueQueryTokens.length * 0.75));
 
     const navigational = isNavigationalQuery(query);
     let usable = 0;
@@ -243,7 +286,8 @@ export function countUsableResults(results: SearchResult[], query: string): numb
         }
         const docTokens = new Set(docs[index]);
         const hits = requiredTerms.filter((token) => docTokens.has(token)).length;
-        if (hits >= minHits) {
+        const totalQueryHits = uniqueQueryTokens.filter((token) => docTokens.has(token)).length;
+        if (hits >= minHits || (uniqueQueryTokens.length >= 3 && totalQueryHits >= highCoverageThreshold)) {
             usable += 1;
         }
     });
@@ -286,9 +330,11 @@ export function rankSearchResults(
 
     const scored = results.map((result, index) => {
         const positionScore = 1 / (1 + index * 0.35);
-        const relevance = (bm25[index] ?? 0) / maxBm25;
+        const rawBm25 = bm25[index] ?? 0;
+        const relevance = rawBm25 / maxBm25;
         const isEntryPage = applyEntryPagePenalty && isLikelySiteEntryPage(result.url);
-        const authority = isEntryPage ? 0 : authorityScore(result.url);
+        const hasQueryMatch = rawBm25 > 0;
+        const authority = (isEntryPage || !hasQueryMatch) ? 0 : authorityScore(result.url);
         const consensus = Math.min(result.engineHits ?? 1, 3) / 3;
         const entryPagePenalty = isEntryPage ? 0.25 : 0;
         const score = positionWeight * positionScore

@@ -157,7 +157,7 @@ export function hintProxyConnectionError(error: unknown): Error {
     const message = error instanceof Error ? error.message : String(error);
     if (config.useProxy && /ECONNREFUSED|ECONNRESET|socket hang up|ENETUNREACH/i.test(message)) {
         return new Error(
-            `${message} | Hint: 请求经代理 ${config.proxyUrl} 失败——请确认代理软件已启动、PROXY_URL 端口正确，或临时关闭 USE_PROXY（国内站点可直连）`,
+            `${message} | Hint: 请求经代理 ${config.proxyUrl} 失败——请确认代理软件已启动、PROXY_URL 端口正确，或将 PROXY_URL 设为 false 临时直连（国内站点可直连）`,
             error instanceof Error ? { cause: error } : undefined
         );
     }
@@ -346,12 +346,66 @@ export function isNetworkLayerError(message: string): boolean {
 }
 
 /**
+ * P1-3：直连慢/不可达主机记忆缓存（进程内 5 分钟 TTL，上限 128 个域名）：
+ * 当某域名在直连探测时超时/网络失败、且随后通过代理成功访问时，记住该域名在当前网络需走代理；
+ * 后续对该域名的 requestDirectFirst 请求直接优先走代理，省去每次先白等直连超时的代价。
+ */
+const DIRECT_SLOW_HOST_TTL_MS = 5 * 60 * 1000;
+const MAX_DIRECT_SLOW_HOST_ENTRIES = 128;
+const DEFAULT_DIRECT_FIRST_PROBE_TIMEOUT_MS = 3500;
+const directSlowHostCache = new Map<string, number>();
+
+function extractHostname(url: string): string | null {
+    try {
+        return new URL(url).hostname.toLowerCase();
+    } catch {
+        return null;
+    }
+}
+
+export function isHostMarkedDirectSlow(url: string, now = Date.now()): boolean {
+    const host = extractHostname(url);
+    if (!host) {
+        return false;
+    }
+    const expiresAt = directSlowHostCache.get(host);
+    if (expiresAt === undefined) {
+        return false;
+    }
+    if (now >= expiresAt) {
+        directSlowHostCache.delete(host);
+        return false;
+    }
+    return true;
+}
+
+function markHostDirectSlow(url: string, now = Date.now()): void {
+    const host = extractHostname(url);
+    if (!host) {
+        return;
+    }
+    if (directSlowHostCache.has(host)) {
+        directSlowHostCache.delete(host);
+    } else if (directSlowHostCache.size >= MAX_DIRECT_SLOW_HOST_ENTRIES) {
+        const oldest = directSlowHostCache.keys().next().value;
+        if (oldest !== undefined) {
+            directSlowHostCache.delete(oldest);
+        }
+    }
+    directSlowHostCache.set(host, now + DIRECT_SLOW_HOST_TTL_MS);
+}
+
+export function __resetDirectSlowHostCacheForTests(): void {
+    directSlowHostCache.clear();
+}
+
+/**
  * 直连优先、代理兜底的请求（供 fetchWebContent / fetchCsdnArticle / fetchJuejinArticle 等通用抓取）：
- * 1. 先无代理直连（快、国内站点最优，不依赖代理可用性）；
- * 2. 网络层失败（超时/连接错误，非 HTTP 状态错误）时：
- *    - 已配置代理（USE_PROXY=true + PROXY_URL）→ 走代理重试一次；代理也失败 → 附加"代理不可达"提示；
+ * 1. 若已配置代理且目标域名近期已证实"直连不通、代理可达"，直接走代理（代理网络故障时再兜底直连）；
+ * 2. 否则先无代理直连（当已配置代理兜底时，将直连试探超时收敛到 ≤3.5s，避免境外慢连接每次挂满 10~15s）；
+ * 3. 网络层失败（超时/连接错误，非 HTTP 状态错误）时：
+ *    - 已配置代理（USE_PROXY=true + PROXY_URL）→ 走代理重试一次，成功则记入 directSlowHostCache；
  *    - 未配置代理 → 错误附加"开启代理"提示（目标站点可能无法从当前网络直连）。
- * buildOptions 接收 forceDirect 决定请求是否挂代理，调用方用它构造 AxiosRequestConfig。
  */
 export async function requestDirectFirst(
     method: 'GET' | 'HEAD',
@@ -359,7 +413,40 @@ export async function requestDirectFirst(
     buildOptions: (forceDirect: boolean) => AxiosRequestConfig,
     urlLabel: string = 'Request URL'
 ): Promise<AxiosResponse> {
-    const directOptions = buildOptions(true);
+    const hasConfiguredProxy = Boolean(config.useProxy && config.proxyUrl);
+    if (hasConfiguredProxy && isHostMarkedDirectSlow(url)) {
+        const proxyOptions = buildOptions(false);
+        try {
+            return await requestWithSafeRedirects(method, url, proxyOptions, urlLabel);
+        } catch (proxyError) {
+            if (proxyOptions.signal?.aborted) {
+                throw proxyError;
+            }
+            const proxyMsg = proxyError instanceof Error ? proxyError.message : String(proxyError);
+            if (!isNetworkLayerError(proxyMsg)) {
+                throw proxyError;
+            }
+            // 代理突发不可达时清除慢主机标记并回退直连试一次
+            const host = extractHostname(url);
+            if (host) {
+                directSlowHostCache.delete(host);
+            }
+            try {
+                return await requestWithSafeRedirects(method, url, buildOptions(true), urlLabel);
+            } catch {
+                throw hintProxyConnectionError(proxyError);
+            }
+        }
+    }
+
+    const rawDirectOptions = buildOptions(true);
+    const probeTimeoutCap = Number(process.env.DIRECT_FIRST_PROBE_TIMEOUT_MS) || DEFAULT_DIRECT_FIRST_PROBE_TIMEOUT_MS;
+    const directOptions: AxiosRequestConfig = hasConfiguredProxy
+        && typeof rawDirectOptions.timeout === 'number'
+        && rawDirectOptions.timeout > probeTimeoutCap
+        ? { ...rawDirectOptions, timeout: probeTimeoutCap }
+        : rawDirectOptions;
+
     try {
         return await requestWithSafeRedirects(method, url, directOptions, urlLabel);
     } catch (directError) {
@@ -370,9 +457,11 @@ export async function requestDirectFirst(
         if (!isNetworkLayerError(message)) {
             throw directError;
         }
-        if (config.useProxy && config.proxyUrl) {
+        if (hasConfiguredProxy) {
             try {
-                return await requestWithSafeRedirects(method, url, buildOptions(false), urlLabel);
+                const response = await requestWithSafeRedirects(method, url, buildOptions(false), urlLabel);
+                markHostDirectSlow(url);
+                return response;
             } catch (proxyError) {
                 throw hintProxyConnectionError(proxyError);
             }
@@ -381,7 +470,7 @@ export async function requestDirectFirst(
             code: 'network_error',
             retryable: true,
             cause: directError,
-            message: `${message} | Hint: 直连失败——目标站点可能无法从当前网络直接访问；可开启代理（USE_PROXY=true + PROXY_URL，如 http://127.0.0.1:7890）后重试`
+            message: `${message} | Hint: 直连失败——目标站点可能无法从当前网络直接访问；可配置代理（PROXY_URL，如 http://127.0.0.1:7897）后重试`
         });
     }
 }

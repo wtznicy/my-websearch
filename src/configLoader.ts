@@ -78,7 +78,10 @@ export function getConfigLoadSnapshot(targetEnv: NodeJS.ProcessEnv = process.env
 /**
  * 将结构化 JSON 配置展平映射为标准环境变量
  */
-export function flattenConfigFileToEnv(configData: MyWebSearchConfigFile): Record<string, string> {
+export function flattenConfigFileToEnv(
+    configData: MyWebSearchConfigFile,
+    options?: { onWarning?: (message: string) => void }
+): Record<string, string> {
     const flat: Record<string, string> = {};
 
     // 1. apiKeys 映射
@@ -104,6 +107,11 @@ export function flattenConfigFileToEnv(configData: MyWebSearchConfigFile): Recor
     if (configData.proxy && typeof configData.proxy === 'object') {
         const p = configData.proxy;
         if (p.useProxy === false || p.enabled === false) {
+            if (typeof p.url === 'string' && p.url.trim().length > 0 && !/^(false|none|off|0|direct|no)$/i.test(p.url.trim())) {
+                options?.onWarning?.(
+                    `⚠️ [config] proxy.url ("${p.url.trim()}") is configured, but proxy.useProxy is false — proxy remains disabled. Set "useProxy": true (or remove "useProxy": false) to enable it.`
+                );
+            }
             flat.PROXY_URL = 'false';
             flat.USE_PROXY = 'false';
         } else {
@@ -119,6 +127,17 @@ export function flattenConfigFileToEnv(configData: MyWebSearchConfigFile): Recor
         }
         if (p.fakeIpCidrs !== undefined) {
             flat.FAKE_IP_CIDRS = Array.isArray(p.fakeIpCidrs) ? p.fakeIpCidrs.join(',') : String(p.fakeIpCidrs);
+        }
+    }
+
+    // 2.5. search 映射
+    if (configData.search && typeof configData.search === 'object') {
+        const s = configData.search as Record<string, unknown>;
+        if (s.autoRouteEnEngines !== undefined) {
+            flat.AUTO_ROUTE_EN_ENGINES = Array.isArray(s.autoRouteEnEngines) ? s.autoRouteEnEngines.join(',') : String(s.autoRouteEnEngines);
+        }
+        if (s.autoRouteZhEngines !== undefined) {
+            flat.AUTO_ROUTE_ZH_ENGINES = Array.isArray(s.autoRouteZhEngines) ? s.autoRouteZhEngines.join(',') : String(s.autoRouteZhEngines);
         }
     }
 
@@ -291,12 +310,19 @@ export function loadApplicationConfigEnv(
         // 忽略文件不存在或读取错误
     }
 
+    const configWarnings: string[] = [];
+    const onWarning = (msg: string) => {
+        if (!configWarnings.includes(msg)) {
+            configWarnings.push(msg);
+        }
+    };
+
     // 2. 读取项目根目录 .my-websearch.json
     const projectJsonPath = path.join(cwd, '.my-websearch.json');
     try {
         const raw = fs.readFileSync(projectJsonPath, 'utf8');
         const parsed = JSON.parse(raw);
-        const flat = flattenConfigFileToEnv(parsed);
+        const flat = flattenConfigFileToEnv(parsed, { onWarning });
         // .env 优先于 .my-websearch.json，按 key 是否已出现判断缺失（保留高优先级显式空字符串）
         mergeLowerPriorityEnv(candidateEnv, candidateSources, flat, 'project_config_json');
     } catch {
@@ -321,8 +347,14 @@ export function loadApplicationConfigEnv(
     }
 
     if (appConfigData) {
-        const flat = flattenConfigFileToEnv(appConfigData);
+        const flat = flattenConfigFileToEnv(appConfigData, { onWarning });
         mergeLowerPriorityEnv(candidateEnv, candidateSources, flat, 'app_config_json');
+    }
+
+    if (configWarnings.length > 0 && shouldEmitConfigStartupLog(targetEnv, options.quiet)) {
+        for (const warning of configWarnings) {
+            console.warn(warning);
+        }
     }
 
     // 4. 注入前保存原始环境变量键集合快照，按快照判断调用方显式覆盖，

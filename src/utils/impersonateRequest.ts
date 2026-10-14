@@ -3,7 +3,8 @@ import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { loadWreqModule, createWreqSession, WreqSession } from '../engines/bing/impersonate.js';
 import { toAxiosLikeResponse } from './wreqRequest.js';
 import { isTlsOrWafResetError } from './domesticDirectNetwork.js';
-import { AppError } from '../core/errors.js';
+import { AppError, isAbortedError, isCascadeAbortedError } from '../core/errors.js';
+import { metrics } from '../core/metrics.js';
 
 const engineSessions = new Map<string, Promise<WreqSession | null>>();
 
@@ -184,7 +185,10 @@ export async function impersonateHttpGet(
             return toAxiosLikeResponse(resolvedResponse.status, resolvedResponse.headers, body, options);
         }
     } catch (error) {
-        if (signal?.aborted) {
+        if (isAbortedError(error, signal)) {
+            if (isCascadeAbortedError(error, signal)) {
+                metrics.debug(`[${engine}] impersonate request cancelled (cascade_aborted)`);
+            }
             throw error;
         }
         // HTTP 业务状态错误（例如 429 限流）直接抛出，不进行无意义的 client 回退

@@ -418,7 +418,21 @@ async function main() {
     const HOST = process.env.OPEN_WEBSEARCH_HOST || process.env.HOST || '127.0.0.1';
 
     const httpServer = app.listen(PORT, HOST, () => {
-      console.error(`✅ HTTP server running on ${HOST}:${PORT}`)
+      console.error(`✅ HTTP server running on ${HOST}:${PORT}`);
+    });
+
+    httpServer.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        clearInterval(sessionReaper);
+        if (process.env.MODE !== 'http') {
+          console.error(`⚠️ HTTP port ${PORT} is already in use (${HOST}:${PORT}); HTTP server disabled for this instance, continuing in STDIO mode only.`);
+          return;
+        }
+        console.error(`❌ HTTP port ${PORT} is already in use (${HOST}:${PORT}). Exit.`);
+        process.exit(1);
+      }
+      console.error(`❌ Failed to start HTTP server on ${HOST}:${PORT}:`, err.message);
+      process.exit(1);
     });
 
     // MCP 路径此前完全没有信号处理（测评报告 P1-11）：SIGINT/SIGTERM 时不关会话、不关

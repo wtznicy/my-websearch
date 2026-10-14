@@ -205,6 +205,9 @@ my-websearch doctor --network
 
 # Limit network probes to selected engines
 my-websearch doctor --network --engine bing,duckduckgo --json
+
+# Reset and clear cached engine circuit breaker / health state
+my-websearch doctor --reset-health
 ```
 
 The report separates configuration, proxy TCP reachability, HTTP reachability, application parsing, browser launch, and anti-bot challenges. Network mode performs real requests and should not be used as a high-frequency health check.
@@ -247,14 +250,20 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `SEARCH_DEADLINE_MS` | `30000` | Global hard deadline for multi-engine search execution (milliseconds) |
 | `SEARCH_AUTHORITY_DOMAINS` | empty | Additional authority domain whitelist for result re-ranking (comma-separated, appended to built-in list) |
 | `SEARCH_MODE` | `auto` | Search mode and browser policy. Supports single mode, multi-engine per mode, and compound multi-mode combinations:<br/>• **Global mode**: `auto` (default fallback), `request`/`none` (pure HTTP), `playwright` (force browser)<br/>• **Single mode, multiple engines**: `playwright:bing,startpage`, `auto:bing,startpage`, `bing,startpage`<br/>• **Compound multiple modes**: `playwright:bing;auto:startpage` (bing forces browser, startpage uses auto fallback), `auto;request:startpage` (global auto but startpage uses pure HTTP) |
+| `AUTO_ROUTE_EN_ENGINES` | `bing,exa` | Comma-separated engines for default English auto-routing |
+| `AUTO_ROUTE_ZH_ENGINES` | `bing,baidu,sogou` | Comma-separated engines for default Chinese auto-routing |
 
 #### 2. 🌐 Proxy & Network Security
 
 | Variable | Default | Allowed Values / Description |
+| :--- | :--- | :--- |
 | `PROXY_URL` | empty (off) | Consolidated upstream proxy configuration (merges previous `USE_PROXY` and `PROXY_ENGINES`). Not needed in TUN mode.<br/>• **Default proxy**: passing empty `PROXY_URL=""` or `PROXY_URL=true` activates default `http://127.0.0.1:7897` (common port for Clash Verge; use `10809` for v2rayN or `7890` for legacy Clash; overseas engines use proxy, domestic engines stay direct)<br/>• **Custom address**: `PROXY_URL=http://127.0.0.1:10809`<br/>• **Custom engines**: `PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` or all engines `PROXY_URL=";all"` |
 | `FAKE_IP_CIDRS` | `198.18.0.0/15` | Whitelisted CIDRs for Clash Fake-IP mode to avoid SSRF false-positive blocking |
 | `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` browser TLS/H2 fingerprint profile (e.g. `chrome_149`, `safari_18`) |
 | `IMPERSONATE_OS` | `windows` | Operating system platform for fingerprint impersonation (`windows`, `macos`, `linux`) |
+| `BING_IMPERSONATE` | `true` | Toggle Chrome TLS impersonation for Bing HTTP mode (auto-trips circuit breaker after consecutive empty results) |
+| `ANUBIS_MAX_POW_DIFFICULTY` | `5` | Maximum difficulty threshold for Startpage Anubis PoW solver; skips/falls back when difficulty exceeds this |
+| `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `2000` | Timeout in ms for direct-first connection probes before proxy fallback |
 | `FETCH_WEB_INSECURE_TLS`| `false` | Disable TLS certificate verification for `fetchWebContent` only (for broken legacy site certs) |
 | `GITHUB_README_CDN_FIRST` | `false` | When `true`, forces skipping `raw.githubusercontent.com` direct probe and queries jsDelivr CDN first (domestic network acceleration) |
 
@@ -321,7 +330,7 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run the Vitest suite (38 files, 315 tests at the current baseline)
+npm test              # Run the Vitest suite (40 files, 341 tests at the current baseline)
 npm run test:live     # Run bounded-concurrency live integration tests
 npm run eval:live     # Run 22-case live STDIO JSON-RPC evaluation suite
 ```

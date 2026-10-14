@@ -26,10 +26,11 @@ describe('Context7 quota state tracking and dynamic notification', () => {
         expect(isContext7QuotaExhausted()).toBe(true);
     });
 
-    it('should notify registered listener when quota becomes exhausted', () => {
+    it('should notify registered listener once when quota transitions to exhausted', () => {
         const listener = vi.fn();
         setContext7QuotaListener(listener);
 
+        markContext7QuotaExhausted();
         markContext7QuotaExhausted();
         expect(listener).toHaveBeenCalledTimes(1);
     });

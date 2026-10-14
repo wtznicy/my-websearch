@@ -155,6 +155,52 @@ export function invalidateBingSession(): void {
     }
 }
 
+/**
+ * Bing wreq 指纹层连续失败熔断：
+ * 实测在部分网络/时间段下，wreq 请求 cn.bing.com 虽然返回 HTTP 200，但页面恒为「没有与此相关的结果」（0 条），
+ * 每次白白耗费 1~4s 后再回退 axios（而 axios 同 UA 反而能正常拿到 10 条）。
+ * 因此记录连续失败/0 条次数：连续达到阈值（默认 2 次）后在冷却期内关闭 Bing wreq 路径，直奔 axios。
+ */
+const BING_IMPERSONATE_MAX_CONSECUTIVE_FAILURES = 2;
+const BING_IMPERSONATE_COOLDOWN_MS = 10 * 60 * 1000;
+let consecutiveBingImpersonateFailures = 0;
+let bingImpersonateDisabledUntil = 0;
+
+export function isBingImpersonateCircuitOpen(now = Date.now()): boolean {
+    if (process.env.BING_IMPERSONATE === 'false') {
+        return true;
+    }
+    if (bingImpersonateDisabledUntil > now) {
+        return true;
+    }
+    if (bingImpersonateDisabledUntil > 0 && now >= bingImpersonateDisabledUntil) {
+        bingImpersonateDisabledUntil = 0;
+        consecutiveBingImpersonateFailures = 0;
+    }
+    return false;
+}
+
+export function recordBingImpersonateSuccess(): void {
+    consecutiveBingImpersonateFailures = 0;
+    bingImpersonateDisabledUntil = 0;
+}
+
+export function recordBingImpersonateFailure(now = Date.now()): void {
+    consecutiveBingImpersonateFailures += 1;
+    if (consecutiveBingImpersonateFailures >= BING_IMPERSONATE_MAX_CONSECUTIVE_FAILURES) {
+        bingImpersonateDisabledUntil = now + BING_IMPERSONATE_COOLDOWN_MS;
+        invalidateBingSession();
+        console.warn(
+            `Bing impersonate (wreq) failed or returned 0 results ${consecutiveBingImpersonateFailures} times consecutively; disabling Bing wreq path for ${Math.round(BING_IMPERSONATE_COOLDOWN_MS / 1000)}s and using axios directly.`
+        );
+    }
+}
+
+export function resetBingImpersonateStateForTests(): void {
+    consecutiveBingImpersonateFailures = 0;
+    bingImpersonateDisabledUntil = 0;
+}
+
 function createBingAbortError(signal: AbortSignal): Error {
     return signal.reason instanceof Error
         ? signal.reason
@@ -238,7 +284,6 @@ export async function searchBingWithImpersonate(
 
             if (results.length === 0) {
                 if (pageNumber === 0 && allResults.length === 0) {
-                    const { AppError } = await import('../../core/errors.js');
                     throw new AppError({
                         code: 'bot_challenge',
                         retryable: false,
@@ -256,12 +301,17 @@ export async function searchBingWithImpersonate(
         if (directAnswer) {
             finalResults.directAnswer = directAnswer;
         }
+        recordBingImpersonateSuccess();
         return finalResults;
     } catch (error) {
+        if (!signal?.aborted) {
+            recordBingImpersonateFailure();
+        }
         if (error instanceof Error && /socket|tls|econnreset|pipe|closed|reset/i.test(error.message)) {
             invalidateBingSession();
         }
         throw error;
     }
 }
+
 

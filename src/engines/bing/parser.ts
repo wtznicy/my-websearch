@@ -36,7 +36,25 @@ function decodeBingRedirectTarget(url: URL): string {
     return '';
 }
 
-function sanitizeBingUrl(rawUrl?: string): string {
+export function isValidBingTargetHostname(hostname: string): boolean {
+    if (!hostname || hostname.length > 253 || !hostname.includes('.')) {
+        return false;
+    }
+    if (hostname.startsWith('.') || hostname.endsWith('.')) {
+        return false;
+    }
+    const labels = hostname.split('.');
+    if (labels.some((label) => !label || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))) {
+        return false;
+    }
+    const tld = labels[labels.length - 1]!;
+    if (/^\d+$/.test(tld)) {
+        return false;
+    }
+    return true;
+}
+
+export function sanitizeBingUrl(rawUrl?: string): string {
     if (!rawUrl) {
         return '';
     }
@@ -66,6 +84,9 @@ function sanitizeBingUrl(rawUrl?: string): string {
     try {
         const url = new URL(resolvedUrl);
         const hostname = url.hostname.toLowerCase();
+        if (!isValidBingTargetHostname(hostname)) {
+            return '';
+        }
         const pathname = url.pathname.toLowerCase();
 
         // 解决 Bing 新结果页把真实目标站点包装成 /ck/a 跳转链接后被解析器整条丢弃的问题。

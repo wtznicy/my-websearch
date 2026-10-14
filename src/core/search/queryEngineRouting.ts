@@ -11,11 +11,67 @@
  * 显式指定 engines 时本逻辑不参与；非 auto 的默认引擎配置也不受影响。
  */
 
+import { isEngineCircuitOpen } from './engineCircuitBreaker.js';
+import { metrics } from '../metrics.js';
+
 /** 判定为中文查询的最小 CJK 字符数（单个汉字可能是噪声/标点） */
 const MIN_CJK_CHARS = 2;
 
 const DEFAULT_EN_ENGINES = ['bing', 'duckduckgo'];
 const DEFAULT_ZH_ENGINES = ['baidu', 'sogou'];
+
+function parseEnvEngineList(raw: string | undefined): string[] | undefined {
+    if (!raw || !raw.trim()) {
+        return undefined;
+    }
+    const list = raw.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
+    return list.length > 0 ? list : undefined;
+}
+
+function isEngineHealthyForPrimaryRouting(engine: string): boolean {
+    if (isEngineCircuitOpen(engine)) {
+        return false;
+    }
+    const health = metrics.getRecentEngineHealth(engine);
+    if (health && health.total >= 2 && health.successRate < 50) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * P1-6：主引擎组健康度过滤与替补：
+ * 当默认路由组中的某个引擎处于熔断期、或近期窗口内连续失败（样本 ≥2 且成功率 <50%，如 duckduckgo 连续超时）时，
+ * 自动将其从主引擎组剔除，并从同语种替补池（英文优先 exa/brave，中文优先 csdn/juejin/bing）补齐，
+ * 避免主引擎组持续挂着一个 100% 失败的引擎白白消耗配额与超时预算。
+ */
+function applyPrimaryHealthFilter(baseGroup: string[], isChinese: boolean, hasCustomOverride: boolean): string[] {
+    const healthyBase = baseGroup.filter((engine) => isEngineHealthyForPrimaryRouting(engine));
+    if (healthyBase.length === baseGroup.length) {
+        return [...baseGroup];
+    }
+    // 用户显式自定义了路由列表时，仅剔除不健康引擎（全不健康则保底返回原列表）
+    if (hasCustomOverride) {
+        return healthyBase.length > 0 ? healthyBase : [...baseGroup];
+    }
+
+    const result = [...healthyBase];
+    const hasExaKey = Boolean(process.env.EXA_API_KEY?.trim());
+    const fallbackPool = isChinese
+        ? ['csdn', 'juejin', 'bing']
+        : [...(hasExaKey ? ['exa'] : []), 'brave', 'startpage'];
+
+    for (const candidate of fallbackPool) {
+        if (result.length >= baseGroup.length) {
+            break;
+        }
+        if (!result.includes(candidate) && isEngineHealthyForPrimaryRouting(candidate)) {
+            result.push(candidate);
+        }
+    }
+
+    return result.length > 0 ? result : [...baseGroup];
+}
 
 /** 路由引擎组：auto 模式返回一组引擎（组内并列执行、融合去重） */
 export function pickDefaultEnginesForQuery(
@@ -27,19 +83,33 @@ export function pickDefaultEnginesForQuery(
         return [configuredDefault];
     }
 
-    const enEngines = routing?.en && routing.en.length > 0 ? routing.en : DEFAULT_EN_ENGINES;
-    const zhEngines = routing?.zh && routing.zh.length > 0 ? routing.zh : DEFAULT_ZH_ENGINES;
+    const envEn = parseEnvEngineList(process.env.AUTO_ROUTE_EN_ENGINES);
+    const envZh = parseEnvEngineList(process.env.AUTO_ROUTE_ZH_ENGINES);
+
+    const customEn = routing?.en && routing.en.length > 0 ? routing.en : envEn;
+    const customZh = routing?.zh && routing.zh.length > 0 ? routing.zh : envZh;
+
+    const enEngines = customEn ?? DEFAULT_EN_ENGINES;
+    const zhEngines = customZh ?? DEFAULT_ZH_ENGINES;
 
     const normalized = query.trim();
     if (!normalized) {
-        return [...enEngines];
+        return applyPrimaryHealthFilter(enEngines, false, Boolean(customEn));
     }
 
     const cjkCount = (normalized.match(/[\u4e00-\u9fff]/g) || []).length;
-    return cjkCount >= MIN_CJK_CHARS ? [...zhEngines] : [...enEngines];
+    const isChinese = cjkCount >= MIN_CJK_CHARS;
+    return isChinese
+        ? applyPrimaryHealthFilter(zhEngines, true, Boolean(customZh))
+        : applyPrimaryHealthFilter(enEngines, false, Boolean(customEn));
 }
 
 /** 兼容单引擎调用方（返回路由组的首个引擎） */
-export function pickDefaultEngineForQuery(query: string, configuredDefault: string): string {
-    return pickDefaultEnginesForQuery(query, configuredDefault)[0] ?? (configuredDefault || 'bing');
+export function pickDefaultEngineForQuery(
+    query: string,
+    configuredDefault: string,
+    routing?: { en?: string[]; zh?: string[] }
+): string {
+    return pickDefaultEnginesForQuery(query, configuredDefault, routing)[0] ?? (configuredDefault || 'bing');
 }
+

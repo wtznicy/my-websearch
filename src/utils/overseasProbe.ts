@@ -1,8 +1,9 @@
 import axios from 'axios';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { engineShouldUseProxy } from '../config.js';
 import { AppError } from '../core/errors.js';
 import { BROWSER_USER_AGENT } from './constants.js';
-import { detectSystemProxy, parseProxyUrl } from './systemProxy.js';
+import { detectSystemProxy, getDetectedSystemProxy } from './systemProxy.js';
 
 /**
  * 境外引擎可达性探测（方案二）：
@@ -12,8 +13,8 @@ import { detectSystemProxy, parseProxyUrl } from './systemProxy.js';
  * - 直连不可达（国内无代理，被墙挂 15s 超时）→ 快速失败，报"需要代理或改用国内引擎"
  *   （避免直连挂满超时 × 多层重试拖累整次搜索，实测 bing+duckduckgo 无代理时整体 ~30s）
  *
- * 探测仅在引擎未走代理时发生：USE_PROXY=true 且引擎在白名单（或白名单为空）时
- * 直接放行，不探测（代理可达性由代理保证，且代理链路延迟不影响探测阈值）。
+ * 探测仅在引擎未走代理时发生：已显式配置代理（PROXY_URL / USE_PROXY=true）且引擎在白名单
+ * （或白名单为空）时直接放行，不探测（代理可达性由代理保证，且代理链路延迟不影响探测阈值）。
  *
  * 阈值设计：单次 3s，失败重试 1 次（容错网络抖动），结果缓存 5 分钟
  * （避免 LLM 会话内多次搜索反复探测；开关代理后 TTL 过期自动重新探测）。
@@ -38,18 +39,51 @@ type ProbeState = { reachable: boolean; checkedAt: number };
 const probeCache = new Map<string, ProbeState>();
 
 /**
+ * 代理探测用的 HttpsProxyAgent 缓存（按代理 URL 复用连接）。
+ *
+ * 为什么不用 axios 原生 `proxy` 选项：axios 会为该选项装一个 **http** Agent，
+ * 对 https:// 目标直接抛 `ERR_INVALID_PROTOCOL: Protocol "https:" not supported`
+ * （axios 1.20 实测），**请求根本没发出去** → 系统代理兜底被误判为"不可达"，
+ * 于是"开了 Clash 但没配 PROXY_URL"时海外引擎全线被拦。这里改用与
+ * httpRequest.ts 真实请求链路相同的 HttpsProxyAgent。
+ */
+const MAX_PROBE_PROXY_AGENTS = 16;
+const probeProxyAgents = new Map<string, HttpsProxyAgent<string>>();
+
+function getProbeProxyAgent(proxyUrl: string): HttpsProxyAgent<string> {
+    const cached = probeProxyAgents.get(proxyUrl);
+    if (cached) {
+        probeProxyAgents.delete(proxyUrl);
+        probeProxyAgents.set(proxyUrl, cached);
+        return cached;
+    }
+    while (probeProxyAgents.size >= MAX_PROBE_PROXY_AGENTS) {
+        const oldest = probeProxyAgents.keys().next().value;
+        if (oldest === undefined) {
+            break;
+        }
+        probeProxyAgents.delete(oldest);
+    }
+    const agent = new HttpsProxyAgent(proxyUrl, { keepAlive: true, maxSockets: 4 });
+    probeProxyAgents.set(proxyUrl, agent);
+    return agent;
+}
+
+/**
  * 单次探测：任何 HTTP 响应（含 403/429）都说明链路可达，只有网络层失败才算不可达。
- * proxyUrl 提供时经该代理探测（用于系统代理兜底：用户开了 Clash 但未配 USE_PROXY 的场景）。
+ * proxyUrl 提供时经该代理探测（用于系统代理兜底：用户开了 Clash 但未配 PROXY_URL 的场景）。
  */
 async function probeOnce(url: string, proxyUrl?: string): Promise<boolean> {
     try {
-        const proxy = proxyUrl ? parseProxyUrl(proxyUrl) : undefined;
+        const agent = proxyUrl ? getProbeProxyAgent(proxyUrl) : undefined;
         await axios.get(url, {
             headers: { 'User-Agent': BROWSER_USER_AGENT },
             timeout: PROBE_TIMEOUT_MS,
             // 裸请求固定 URL：不依赖 buildAxiosRequestOptions（其代理路由会干扰"直连探测"语义）
             validateStatus: () => true,
-            ...(proxy ? { proxy } : {})
+            // 关闭 axios 对 env 代理变量的自动解析，代理只由上方 agent 决定
+            proxy: false,
+            ...(agent ? { httpAgent: agent, httpsAgent: agent } : {})
         });
         return true;
     } catch {
@@ -89,8 +123,11 @@ async function isDirectlyReachable(engine: 'duckduckgo' | 'brave' | 'startpage')
     if (cached) {
         const ttl = cached.reachable ? PROBE_CACHE_TTL_MS : PROBE_FAILURE_CACHE_TTL_MS;
         if (now - cached.checkedAt < ttl) {
+            probeCache.delete(engine);
+            probeCache.set(engine, cached);
             return cached.reachable;
         }
+        probeCache.delete(engine);
     }
 
     // 直连与系统代理**并行**探测（有系统代理时），任一可达即放行：
@@ -142,11 +179,42 @@ export function isKnownUnreachableOverseasEngine(engine: string): boolean {
     if (engineShouldUseProxy(engine)) {
         return false;
     }
+    const now = Date.now();
     const cached = probeCache.get(engine);
-    if (!cached || cached.reachable) {
-        return false;
+    if (cached) {
+        if (cached.reachable) {
+            return false;
+        }
+        return now - cached.checkedAt < PROBE_FAILURE_CACHE_TTL_MS;
     }
-    return Date.now() - cached.checkedAt < PROBE_FAILURE_CACHE_TTL_MS;
+    // 任一境外引擎刚探测出本机无直连且无可用系统代理（且尚无其他境外引擎探测成功）时，
+    // 其余同批/后续批次的境外引擎共享该不可达结论，避免 duckduckgo 失败后 brave/startpage 再各自挂满 6s 探测
+    let hasAnyFreshSuccess = false;
+    let hasAnyFreshFailure = false;
+    for (const state of probeCache.values()) {
+        if (state.reachable && now - state.checkedAt < PROBE_CACHE_TTL_MS) {
+            hasAnyFreshSuccess = true;
+            break;
+        }
+        if (!state.reachable && now - state.checkedAt < PROBE_FAILURE_CACHE_TTL_MS) {
+            hasAnyFreshFailure = true;
+        }
+    }
+    return !hasAnyFreshSuccess && hasAnyFreshFailure;
+}
+
+/**
+ * 供单元测试注入或清理境外可达性缓存
+ */
+export function __setOverseasReachableForTests(reachable: boolean | null): void {
+    probeCache.clear();
+    if (reachable === null) {
+        return;
+    }
+    const now = Date.now();
+    for (const key of Object.keys(PROBE_TARGETS)) {
+        probeCache.set(key, { reachable, checkedAt: now });
+    }
 }
 
 /**
@@ -160,18 +228,24 @@ export async function assertOverseasEngineUsable(engine: 'duckduckgo' | 'brave' 
     }
     const reachable = await isDirectlyReachable(engine);
     if (!reachable) {
+        // 把系统代理探测结果一并报出来：区分"压根没探测到代理"与"探测到了但走不通"，
+        // 否则用户只看到"需要代理"，无从判断该去开 Clash 的系统代理还是改 PROXY_URL。
+        const detectedSystemProxy = getDetectedSystemProxy();
+        const detectionNote = detectedSystemProxy
+            ? `A system proxy was detected at ${detectedSystemProxy} but the engine is still unreachable through it.`
+            : 'No usable system proxy was detected on this machine.';
         // 配置类/网络环境类确定性错误：抛出结构化 AppError（retryable=false），多引擎搜索时其他引擎不受影响
         throw new AppError({
             code: 'overseas_unreachable',
             retryable: false,
             status: 503,
             engine,
-            hint: 'Enable USE_PROXY=true + PROXY_URL or use domestic engines.',
+            hint: 'Set PROXY_URL (e.g. PROXY_URL=http://127.0.0.1:7897) or use domestic engines.',
             message:
-                `${engine} is unreachable from your current network without a proxy. ` +
-                'Enable USE_PROXY=true + PROXY_URL (and include this engine in PROXY_ENGINES if that whitelist is set), ' +
+                `${engine} is unreachable from your current network without a proxy. ${detectionNote} ` +
+                'Set PROXY_URL to your proxy address (e.g. PROXY_URL=http://127.0.0.1:7897; the legacy USE_PROXY=true + PROXY_URL form is still accepted), ' +
                 'or use domestic engines (bing/baidu/csdn/juejin/sogou) or exa (requires EXA_API_KEY). ' +
-                'Already running a proxy client? This server ignores system proxy env vars by design — check that USE_PROXY/PROXY_URL are set in your MCP client config, then restart the MCP server.'
+                'If your proxy client (Clash/v2ray/Surge) is running, make sure its "system proxy" switch is on, or set PROXY_URL explicitly in your MCP client config and restart the MCP server.'
         });
     }
 }

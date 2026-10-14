@@ -69,24 +69,28 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
             .pipe(enginesEnum);
     };
 
-    const searchTool = server.tool(
+    const searchTool = server.registerTool(
         searchToolName,
-        getSearchDescription(),
         {
-            query: z.string().min(1, "Search query must not be empty").max(500, "Search query too long (max 500 characters)").optional()
-                .describe("Single search query (required if 'queries' is omitted; use 'queries' for multi-intent fan-out)"),
-            queries: z.array(z.string().min(1, "Query must not be empty").max(500)).min(1).max(4).optional()
-                .describe("1-4 queries run concurrently and merged (required if 'query' is omitted) — for covering multiple intents in one call (e.g. official docs / Chinese community / English)"),
-            limit: z.number().min(1).max(50).optional()
-                .describe("Max results (default: server DEFAULT_SEARCH_LIMIT, usually 10)"),
-            searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
-            minResults: z.number().int().min(0).max(50).optional()
-                .describe("Auto-run additional engines when fewer than this many USABLE results (relevant, non-entry-page) come back (default: server DEFAULT_MIN_RESULTS, usually 5; max 50 — larger values only burn the search deadline)"),
-            engines: z.array(getEngineInputSchema()).min(1).optional()
-                .describe("Search engines to use (default: server default, which may auto-route by query language)")
+            description: getSearchDescription(),
+            inputSchema: {
+                query: z.string().min(1, "Search query must not be empty").max(500, "Search query too long (max 500 characters)").optional()
+                    .describe("Single search query (required if 'queries' is omitted; use 'queries' for multi-intent fan-out)"),
+                queries: z.array(z.string().min(1, "Query must not be empty").max(500)).min(1).max(4).optional()
+                    .describe("1-4 queries run concurrently and merged (required if 'query' is omitted) — for covering multiple intents in one call (e.g. official docs / Chinese community / English). Response includes 'cached: true' only when all sub-queries hit the TTL cache."),
+                limit: z.number().min(1).max(50).optional()
+                    .describe("Max results (default: server DEFAULT_SEARCH_LIMIT, usually 10)"),
+                searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
+                minResults: z.number().int().min(0).max(50).optional()
+                    .describe("Auto-run additional engines when fewer than this many USABLE results (relevant, non-entry-page) come back (default: server DEFAULT_MIN_RESULTS, usually 5; max 50 — larger values only burn the search deadline)"),
+                engines: z.array(getEngineInputSchema()).min(1).optional()
+                    .describe("Search engines to use (default: server default, which may auto-route by query language)"),
+                verbose: z.boolean().optional()
+                    .describe("Include verbose diagnostic fields (engineMetrics, full failure hints, and redundant source hostnames); default false to save tokens")
+            },
+            annotations: TOOL_ANNOTATION_HINTS
         },
-        TOOL_ANNOTATION_HINTS,
-        async ({query, queries, limit, searchMode, engines, minResults}) => {
+        async ({query, queries, limit, searchMode, engines, minResults, verbose}) => {
             try {
                 const queryList = (queries && queries.length > 0 ? queries : (query ? [query] : [])).map((q) => q.trim()).filter(Boolean);
                 if (queryList.length === 0) {
@@ -102,7 +106,10 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
 
                 const allowed = runtime.config.allowedSearchEngines;
                 const resolveEnginesForQuery = (queryText: string): SupportedSearchEngine[] => {
-                    const picked = pickDefaultEnginesForQuery(queryText, runtime.config.defaultSearchEngine);
+                    const picked = pickDefaultEnginesForQuery(queryText, runtime.config.defaultSearchEngine, {
+                        en: runtime.config.autoRouteEnEngines,
+                        zh: runtime.config.autoRouteZhEngines
+                    });
                     const reachable = picked.filter((engine) => !isKnownUnreachableOverseasEngine(engine));
                     const routable = reachable.length > 0 ? reachable : picked;
                     const filtered = allowed.length > 0 ? routable.filter((engine) => allowed.includes(engine)) : routable;
@@ -152,7 +159,40 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                 const allCascadedEngines = [...new Set(executed.flatMap((one) => one.cascadedEngines ?? []))];
                 const allMetrics = mergeEngineMetricsAcrossQueries(executed.map((one) => one.engineMetrics));
                 const directAnswer = executed.find((one) => one.directAnswer)?.directAnswer;
-                const { outcome, retryable } = computeSearchOutcome(mergedResults.length, failures, directAnswer);
+                // 多查询（queries）扇出下仅当所有子查询均命中缓存时才标注 cached: true；部分命中时不输出该字段
+                const allCached = executed.length > 0 && executed.every((one) => one.cached === true);
+                const { outcome, retryable } = computeSearchOutcome(mergedResults.length, failures, directAnswer, {
+                    requestedLimit: effectiveLimit,
+                    minResults: effectiveMinResults,
+                    primaryEngines: allEngines
+                });
+
+                const outputResults = verbose
+                    ? mergedResults
+                    : mergedResults.map((item) => {
+                        if (!item.source || !item.url) {
+                            return item;
+                        }
+                        try {
+                            const urlHost = new URL(item.url).hostname.replace(/^www\./i, '').toLowerCase();
+                            const srcHost = item.source.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/^www\./i, '').toLowerCase();
+                            if (urlHost && srcHost === urlHost) {
+                                const { source: _omittedSource, ...rest } = item;
+                                return rest;
+                            }
+                        } catch {
+                            // keep original item if URL cannot be parsed
+                        }
+                        return item;
+                    });
+
+                const outputFailures = (verbose || outcome === 'failed')
+                    ? failures
+                    : failures.map((f) => {
+                        const briefMessage = f.message.split(' | Hint:')[0]?.split(' (Hint:')[0]?.trim() || f.message;
+                        return { ...f, message: briefMessage };
+                    });
+
                 return {
                     content: [{
                         type: 'text',
@@ -165,13 +205,14 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                                 : { query: queryList[0] ?? '' }),
                             outcome,
                             retryable,
+                            ...(allCached ? { cached: true } : {}),
                             engines: allEngines,
                             ...(allCascadedEngines.length > 0 ? { cascadedEngines: allCascadedEngines } : {}),
                             totalResults: mergedResults.length,
-                            results: mergedResults,
-                            partialFailures: failures,
+                            results: outputResults,
+                            partialFailures: outputFailures,
                             ...(directAnswer ? { directAnswer } : {}),
-                            ...(allMetrics.length > 0 ? { engineMetrics: allMetrics } : {})
+                            ...(verbose && allMetrics.length > 0 ? { engineMetrics: allMetrics } : {})
                         })
                     }],
                     ...(outcome === 'failed' ? { isError: true } : {})

@@ -35,13 +35,27 @@ async function searchExaOfficial(query: string, limit: number, apiKey: string, s
         }
     };
 
-    const response = await axios.post<{ results: ExaResult[] }>(
-        `https://api.exa.ai/search`,
-        data,
-        requestOptions
-    );
+    try {
+        const response = await axios.post<{ results: ExaResult[] }>(
+            `https://api.exa.ai/search`,
+            data,
+            requestOptions
+        );
 
-    return parseExaResults(response.data.results, limit);
+        return parseExaResults(response.data.results, limit);
+    } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (/ECONNRESET|socket hang up|ECONNABORTED|ETIMEDOUT/i.test(msg) && !signal?.aborted) {
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            const retryResponse = await axios.post<{ results: ExaResult[] }>(
+                `https://api.exa.ai/search`,
+                data,
+                requestOptions
+            );
+            return parseExaResults(retryResponse.data.results, limit);
+        }
+        throw error;
+    }
 }
 
 /** 清洗 Exa 正文摘要：剥 HTML 标签、解码实体、压缩空白、限长（正文常为整段数百字，截断到 ~300 字控制 token 成本） */

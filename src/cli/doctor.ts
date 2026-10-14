@@ -18,12 +18,14 @@ import {
     isStartpageCaptchaPage,
     looksLikeBotChallengePage
 } from '../core/antiBot/antiBotDetection.js';
-import { isEngineCircuitOpen } from '../core/search/engineCircuitBreaker.js';
+import { isEngineCircuitOpen, resetEngineCircuits } from '../core/search/engineCircuitBreaker.js';
+import { metrics } from '../core/metrics.js';
+import { resetBingImpersonateStateForTests } from '../engines/bing/impersonate.js';
 import { SUPPORTED_SEARCH_ENGINES, normalizeEngineName } from '../core/search/searchEngines.js';
 import { MyWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { BROWSER_USER_AGENT } from '../utils/constants.js';
-import { buildAxiosRequestOptions } from '../utils/httpRequest.js';
-import { isKnownUnreachableOverseasEngine } from '../utils/overseasProbe.js';
+import { buildAxiosRequestOptions, __resetDirectSlowHostCacheForTests } from '../utils/httpRequest.js';
+import { isKnownUnreachableOverseasEngine, __setOverseasReachableForTests } from '../utils/overseasProbe.js';
 import {
     buildPlaywrightProxy,
     getLocalBrowserExecutablePath,
@@ -52,11 +54,16 @@ const RECOGNIZED_ENV_KEYS = [
     'EXA_API_KEY',
     'BRAVE_API_KEY',
     'GITHUB_TOKEN',
-    'GH_TOKEN'
+    'GH_TOKEN',
+    'AUTO_ROUTE_EN_ENGINES',
+    'AUTO_ROUTE_ZH_ENGINES',
+    'BING_IMPERSONATE',
+    'ANUBIS_MAX_POW_DIFFICULTY',
+    'DIRECT_FIRST_PROBE_TIMEOUT_MS'
 ] as const;
 
 const ENGINE_NETWORK_PROBE_URLS: Record<string, string> = {
-    bing: 'https://www.bing.com/search?q=mcp&count=1',
+    bing: 'https://cn.bing.com/search?q=mcp&count=1',
     baidu: 'https://www.baidu.com/s?wd=mcp&rn=1',
     sogou: 'https://m.sogou.com/web/searchList.jsp?keyword=mcp',
     csdn: 'https://so.csdn.net/api/v3/search?q=mcp&t=all&p=1&s=0&tm=0&lv=-1&ft=0&l=&u=',
@@ -120,6 +127,20 @@ const doctorProbeCache = new Map<string, CachedProbeEntry>();
 
 export function clearDoctorProbeCache(): void {
     doctorProbeCache.clear();
+}
+
+/**
+ * 重置所有进程内熔断状态、运行时指标、指纹失败计数、直连慢主机缓存、海外探测缓存与搜索缓存。
+ * 供 doctor --reset-health 或单元测试调用，防止长时间运行或网络波动污染诊断结果。
+ */
+export function resetAllHealthState(runtime?: MyWebSearchRuntime): void {
+    resetEngineCircuits();
+    metrics.reset();
+    resetBingImpersonateStateForTests();
+    __resetDirectSlowHostCacheForTests();
+    __setOverseasReachableForTests(null);
+    clearDoctorProbeCache();
+    runtime?.services?.search?.clearCache?.();
 }
 
 export function isEngineProbeChallengeResponse(
@@ -670,6 +691,7 @@ export type DoctorReport = {
     browser: BrowserLaunchProbeResult;
     engines: DoctorEngineStatus[];
     recommendations: string[];
+    healthReset?: boolean;
 };
 
 export async function buildDoctorReport(
@@ -696,8 +718,12 @@ export async function buildDoctorReport(
             appConfig: AppConfig,
             timeoutMs: number
         ) => Promise<EngineNetworkProbeResult>;
+        resetHealth?: boolean;
     } = {}
 ): Promise<DoctorReport> {
+    if (options.resetHealth) {
+        resetAllHealthState(runtime);
+    }
     const env = options.env ?? process.env;
     const cwd = options.cwd ?? process.cwd();
     const version = options.version ?? 'unknown';
@@ -1218,7 +1244,8 @@ export async function buildDoctorReport(
         },
         browser: browserInfo,
         engines,
-        recommendations
+        recommendations,
+        ...(options.resetHealth ? { healthReset: true } : {})
     };
 }
 
@@ -1239,6 +1266,7 @@ export function formatDoctorHumanReadable(report: DoctorReport): string {
     const lines = [
         `my-websearch doctor (v${report.version})`,
         `Checked at: ${report.checkedAt}`,
+        ...(report.healthReset ? ['Health state reset: yes'] : []),
         ...(report.networkNotice ? [`Notice: ${report.networkNotice}`] : []),
         '',
         'Configuration sources:',

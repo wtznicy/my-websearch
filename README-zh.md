@@ -205,6 +205,9 @@ my-websearch doctor --network
 
 # 只探测指定引擎，并输出 JSON
 my-websearch doctor --network --engine bing,duckduckgo --json
+
+# 重置并清除引擎熔断与健康状态缓存
+my-websearch doctor --reset-health
 ```
 
 报告会区分配置状态、代理 TCP 连通性、HTTP 连通性、应用层解析、浏览器启动和反爬挑战。网络模式会发起真实请求，不建议高频执行。
@@ -247,14 +250,20 @@ my-websearch doctor --network --engine bing,duckduckgo --json
 | `SEARCH_DEADLINE_MS` | `30000` | 搜索任务全局超时硬预算（毫秒） |
 | `SEARCH_AUTHORITY_DOMAINS` | 空 | 结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单） |
 | `SEARCH_MODE` | `auto` | 检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`playwright`（全强走浏览器）<br/>• **一种方式多选引擎**：`playwright:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`playwright:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP） |
+| `AUTO_ROUTE_EN_ENGINES` | `bing,exa` | 英文查询默认自动路由引擎列表（逗号分隔） |
+| `AUTO_ROUTE_ZH_ENGINES` | `bing,baidu,sogou` | 中文查询默认自动路由引擎列表（逗号分隔） |
 
 #### 2. 🌐 代理与网络安全
 
 | 变量名 | 默认值 | 可选值 / 说明 |
+| :--- | :--- | :--- |
 | `PROXY_URL` | 空（关闭） | 统一上游代理配置（已合并原 `USE_PROXY` 与 `PROXY_ENGINES`，TUN 模式无需配置保持直连）。<br/>• **开启默认代理**：传空值 `PROXY_URL=""` 或 `PROXY_URL=true` 即可启用默认 `http://127.0.0.1:7897`（默认端口常用于 Clash Verge；若使用 v2rayN 可配 `10809`，原版 Clash 可配 `7890`；默认仅海外引擎走代理，国内引擎直连）<br/>• **自定义地址**：`PROXY_URL=http://127.0.0.1:10809`<br/>• **自选引擎**：`PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` 或全部引擎走代理 `PROXY_URL=";all"` |
 | `FAKE_IP_CIDRS` | `198.18.0.0/15` | Clash Fake-IP 虚拟网段白名单，避免误触发 SSRF 本地私网地址拦截 |
 | `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` 模拟的现代浏览器 TLS/H2 指纹（如 `chrome_149`, `safari_18`） |
 | `IMPERSONATE_OS` | `windows` | 指纹模拟使用的操作系统平台（`windows`, `macos`, `linux`） |
+| `BING_IMPERSONATE` | `true` | 是否启用 Bing 的 Chrome TLS 指纹模拟（连续多次返回 0 条时会自动熔断降级为标准 HTTP） |
+| `ANUBIS_MAX_POW_DIFFICULTY` | `5` | Startpage Anubis 工作量证明（PoW）难度上限，超限时自动绕过或走降级策略 |
+| `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `2000` | 直连优先策略探测超时时间（毫秒） |
 | `FETCH_WEB_INSECURE_TLS`| `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点旧证书链损坏时使用） |
 | `GITHUB_README_CDN_FIRST` | `false` | 为 `true` 时强制跳过 `raw.githubusercontent.com` 直连探测，优先走 jsDelivr CDN 镜像（国内无代理网络加速，免除 3 秒直连探测等待） |
 
@@ -321,7 +330,7 @@ my-websearch doctor --network --engine bing,duckduckgo --json
 ```bash
 npm install
 npm run build
-npm test              # 执行 Vitest 测试套件（当前基线：38 个文件、315 个测试）
+npm test              # 执行 Vitest 测试套件（当前基线：40 个文件、341 个测试）
 npm run test:live     # 执行外网有界并发实时集成测试
 npm run eval:live     # 执行 22 用例真实 STDIO JSON-RPC 评测套件
 ```

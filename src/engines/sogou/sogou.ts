@@ -97,7 +97,10 @@ function extractSource(url: string, sourceText: string): string {
  * 且跳转不是 HTTP 3xx，而是页面内 JS 完成的（HTTP 200 + window.location.replace，
  * noscript 下是 meta refresh）。这里抓 body 里的跳转目标；失败时保留原链接，不影响整页结果。
  */
-async function resolveSogouLinkUrl(linkUrl: string): Promise<string> {
+async function resolveSogouLinkUrl(linkUrl: string, signal?: AbortSignal): Promise<string> {
+    if (signal?.aborted) {
+        return linkUrl;
+    }
     try {
         const parsed = new URL(linkUrl);
         if (!parsed.pathname.startsWith('/link')) {
@@ -111,7 +114,8 @@ async function resolveSogouLinkUrl(linkUrl: string): Promise<string> {
         const response = await sogouHttpGet(linkUrl, buildAxiosRequestOptions({ engine: 'sogou',
             trustedStaticHost: true,
             headers: COMMON_HEADERS,
-            timeout: 8000,
+            timeout: 4000,
+            signal,
             validateStatus: (status) => status >= 200 && status < 400
         }));
         const html = String(response.data || '');
@@ -182,7 +186,7 @@ async function fetchSogouHtml(initialUrl: string, signal?: AbortSignal): Promise
                 ...COMMON_HEADERS,
                 ...(cookieHeader ? { Cookie: cookieHeader } : {})
             },
-            timeout: 20000,
+            timeout: 8000,
             signal,
             validateStatus: (status) => status >= 200 && status < 400
         }));
@@ -236,7 +240,7 @@ async function fetchSogouMobileHtml(query: string, page: number = 1, signal?: Ab
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
         },
-        timeout: 15000,
+        timeout: 8000,
         signal,
         validateStatus: (status) => status >= 200 && status < 400
     }));
@@ -415,7 +419,7 @@ async function searchSogouPage(query: string, page: number, signal?: AbortSignal
         SOGOU_LINK_RESOLVE_CONCURRENCY,
         async (result) => ({
             ...result,
-            url: await resolveSogouLinkUrl(result.url),
+            url: await resolveSogouLinkUrl(result.url, signal),
             source: result.source
         }),
         SOGOU_LINK_RESOLVE_BUDGET_MS,
@@ -434,7 +438,7 @@ let sogouPcBlockedUntil = 0;
 /**
  * 双端策略（移动端优先 + PC 端兜底）：
  * - 移动端（WAP 集群）：风控宽松、响应快（~1.5s）、自带明文真实目标 URL（无需跟随 PC 端跳转链消耗 2~3s）。
- * - 移动端优先抓取并支持分页；仅在移动端结果不足或遇到异常时，才调用 PC 端补充/兜底。
+ * - 仅在移动端返回 0 条（失败或空页）且 PC 端未处于拦截暂停期时，才调用 PC 端兜底，避免移动端已拿到 7~9 条时再为补 1~2 条去跑慢速 PC 跳转链。
  */
 export async function searchSogou(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
     const signal = options?.signal;
@@ -480,8 +484,8 @@ export async function searchSogou(query: string, limit: number, options?: { sign
         console.warn('Sogou mobile endpoint failed, will attempt PC fallback:', error instanceof Error ? error.message : String(error));
     }
 
-    // ② PC 端兜底与补全（仅在移动端结果未满足 limit 且 PC 端未处于拦截暂停期时调用）
-    if (allResults.length < limit && Date.now() >= sogouPcBlockedUntil && !signal?.aborted) {
+    // ② PC 端兜底（仅在移动端完全无结果且 PC 端未处于拦截暂停期时调用）
+    if (allResults.length === 0 && Date.now() >= sogouPcBlockedUntil && !signal?.aborted) {
         try {
             const needed = limit - allResults.length;
             const pcResults = await paginateSearch({

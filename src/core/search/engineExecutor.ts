@@ -4,9 +4,60 @@ import { AppConfig } from '../../config.js';
 import { metrics } from '../metrics.js';
 import { AppError, isRetryableError, extractErrorStatus, extractErrorCode, extractErrorHint, extractErrorDetails } from '../errors.js';
 import {
+    Semaphore,
     SearchEngineExecutorMap,
     SearchExecutionFailure
 } from './searchService.js';
+
+/**
+ * P1-5：按引擎细粒度并发限流（避免突发并发把 sogou/baidu 等脆弱引擎打满 10s 超时或触发反爬）：
+ * 实测 8 个不同查询并发打向 sogou 时，第 4 个起全部吃满 10s 超时。
+ */
+const DEFAULT_ENGINE_CONCURRENCY_LIMITS: Record<string, number> = {
+    sogou: 3,
+    baidu: 4,
+    startpage: 2
+};
+
+let engineConcurrencyLimits: Record<string, number> = { ...DEFAULT_ENGINE_CONCURRENCY_LIMITS };
+const engineSemaphores = new Map<string, Semaphore>();
+
+function getEngineSemaphore(engine: string): Semaphore | undefined {
+    const normalized = engine.trim().toLowerCase();
+    const limit = engineConcurrencyLimits[normalized];
+    if (!limit || limit <= 0) {
+        return undefined;
+    }
+    let sem = engineSemaphores.get(normalized);
+    if (!sem) {
+        sem = new Semaphore(limit, Math.max(32, limit * 8));
+        engineSemaphores.set(normalized, sem);
+    }
+    return sem;
+}
+
+export async function withEngineConcurrencySlot<T>(
+    engine: string,
+    deadlineAt: number,
+    signal: AbortSignal | undefined,
+    fn: () => Promise<T>
+): Promise<T> {
+    const sem = getEngineSemaphore(engine);
+    if (!sem) {
+        return fn();
+    }
+    await sem.acquire(deadlineAt, signal);
+    try {
+        return await fn();
+    } finally {
+        sem.release();
+    }
+}
+
+export function configureEngineConcurrencyLimitsForTests(overrides?: Record<string, number>): void {
+    engineConcurrencyLimits = overrides ? { ...overrides } : { ...DEFAULT_ENGINE_CONCURRENCY_LIMITS };
+    engineSemaphores.clear();
+}
 
 export function isRetryableEngineError(error: unknown): boolean {
     return isRetryableError(error);
@@ -121,10 +172,12 @@ export async function executePrimaryEngines(
                 break;
             }
             try {
-                const results = await executor(searchQuery, engineLimit, {
-                    searchMode: effectiveSearchMode,
-                    signal
-                });
+                const results = await withEngineConcurrencySlot(engine, deadlineAt, signal, () =>
+                    executor(searchQuery, engineLimit, {
+                        searchMode: effectiveSearchMode,
+                        signal
+                    })
+                );
                 if (signal.aborted) {
                     return [];
                 }

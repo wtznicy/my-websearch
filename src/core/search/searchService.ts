@@ -4,6 +4,7 @@ import { distributeLimit, SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
 import { rankSearchResults } from './resultRanking.js';
 import { isEngineCircuitOpen, getEngineCircuitRemainingMs } from './engineCircuitBreaker.js';
 import { quoteModelLikeTerms } from '../../utils/queryPreprocess.js';
+import { extractSiteDomains, matchesSiteDomains } from '../../engines/bing/bing.js';
 import { metrics } from '../metrics.js';
 import { classifyFailureRetryable, AppError } from '../errors.js';
 import {
@@ -19,17 +20,20 @@ export {
     isRetryableEngineError,
     computeRetryBackoff,
     buildHintedMessage,
-    truncateMetricError
+    truncateMetricError,
+    extractSiteDomains,
+    matchesSiteDomains
 };
 
 // ---------------------------------------------------------------------------
-// 简单信号量：限制并发搜索数（支持队列上限与排队超时）
+// 简单信号量：限制并发搜索数（支持队列上限、排队超时与 AbortSignal 取消）
 // ---------------------------------------------------------------------------
 
 type SemaphoreWaiter = {
     resolve: () => void;
     reject: (error: Error) => void;
     timer?: ReturnType<typeof setTimeout>;
+    cleanupAbort?: () => void;
 };
 
 export class Semaphore {
@@ -42,7 +46,12 @@ export class Semaphore {
         this.maxQueueSize = maxQueueSize;
     }
 
-    async acquire(deadlineAt?: number): Promise<void> {
+    async acquire(deadlineAt?: number, signal?: AbortSignal): Promise<void> {
+        if (signal?.aborted) {
+            throw signal.reason instanceof Error
+                ? signal.reason
+                : new AppError({ code: 'aborted', retryable: false, message: 'Aborted while acquiring concurrency slot' });
+        }
         if (this.permits > 0) {
             this.permits -= 1;
             return;
@@ -68,15 +77,33 @@ export class Semaphore {
                     if (waiter.timer) {
                         clearTimeout(waiter.timer);
                     }
+                    waiter.cleanupAbort?.();
                     resolve();
                 },
                 reject: (err: Error) => {
                     if (waiter.timer) {
                         clearTimeout(waiter.timer);
                     }
+                    waiter.cleanupAbort?.();
                     reject(err);
                 }
             };
+
+            if (signal) {
+                const onAbort = () => {
+                    const idx = this.waitQueue.indexOf(waiter);
+                    if (idx !== -1) {
+                        this.waitQueue.splice(idx, 1);
+                    }
+                    waiter.reject(
+                        signal.reason instanceof Error
+                            ? signal.reason
+                            : new AppError({ code: 'aborted', retryable: false, message: 'Aborted while waiting in concurrency queue' })
+                    );
+                };
+                signal.addEventListener('abort', onAbort, { once: true });
+                waiter.cleanupAbort = () => signal.removeEventListener('abort', onAbort);
+            }
 
             if (deadlineAt !== undefined) {
                 const remainingMs = Math.max(0, deadlineAt - Date.now());
@@ -135,20 +162,61 @@ export type SearchExecutionFailure = {
 
 export type SearchOutcome = 'ok' | 'degraded' | 'empty' | 'failed';
 
+export interface ComputeSearchOutcomeOptions {
+    requestedLimit?: number;
+    minResults?: number;
+    primaryEngines?: string[];
+}
+
 export function computeSearchOutcome(
     totalResults: number,
     partialFailures: SearchExecutionFailure[],
-    directAnswer?: string
+    directAnswer?: string,
+    options?: ComputeSearchOutcomeOptions
 ): { outcome: SearchOutcome; retryable: boolean } {
+    const hardFailures = partialFailures.filter((failure) => failure.code !== 'no_results');
     const hasUsablePayload = totalResults > 0 || Boolean(directAnswer && directAnswer.trim().length > 0);
     if (hasUsablePayload) {
+        // 1. 无硬性错误（仅有其他引擎的 no_results）→ 整体状态为 ok
+        if (hardFailures.length === 0) {
+            return {
+                outcome: 'ok',
+                retryable: false
+            };
+        }
+        // 2. 结果数已满额达到请求的 requestedLimit（刻意拍板设计）：
+        //    即使主请求引擎发生超时/反爬硬失败，只要多引擎并跑或级联补位已将调用方请求的条数 100% 补齐，
+        //    整体状态即返回 ok（retryable: false），避免调用方/LLM 在结果已满额时继续发起无意义的重试；
+        //    具体失败引擎仍完整保留在 partialFailures 字段中供诊断。
+        if (options?.requestedLimit !== undefined && options.requestedLimit > 0 && totalResults >= options.requestedLimit) {
+            return {
+                outcome: 'ok',
+                retryable: false
+            };
+        }
+        // 3. 结果数未满 requestedLimit 但已达到 minResults 底线：
+        //    此时仅当主请求引擎本身无硬错误（即硬错误仅来自级联额外试探的次要引擎）时才判为 ok；
+        //    若主引擎发生了硬错误且结果数未满 requestedLimit（仅靠级联勉强凑够 minResults），仍判为 degraded。
+        if (options?.minResults !== undefined && options.minResults > 0 && totalResults >= options.minResults) {
+            const primarySet = options.primaryEngines ? new Set(options.primaryEngines) : null;
+            const primaryHardFailures = primarySet
+                ? hardFailures.filter((failure) => primarySet.has(failure.engine))
+                : hardFailures;
+            if (primaryHardFailures.length === 0) {
+                return {
+                    outcome: 'ok',
+                    retryable: false
+                };
+            }
+        }
+        // 4. 存在硬性引擎错误且结果未满额 → degraded；若硬错误中含可重试错误（如超时），retryable=true 供调用方按需重试补齐
+        const retryable = hardFailures.some((failure) => classifyFailureRetryable(failure));
         return {
-            outcome: partialFailures.length > 0 ? 'degraded' : 'ok',
-            retryable: false
+            outcome: 'degraded',
+            retryable
         };
     }
 
-    const hardFailures = partialFailures.filter((failure) => failure.code !== 'no_results');
     if (hardFailures.length === 0) {
         return {
             outcome: 'empty',
@@ -170,10 +238,12 @@ export type SearchExecutionResult = {
     totalResults: number;
     results: SearchResult[];
     partialFailures: SearchExecutionFailure[];
-    /** 搜索结果状态语义：ok（成功无失败）、degraded（有结果但部分引擎失败/无结果）、empty（引擎正常完成但无匹配结果）、failed（所有结果为空且引擎出错） */
+    /** 搜索结果状态语义：ok（成功无失败或已满额达标）、degraded（有结果但未满额且部分引擎硬失败）、empty（引擎正常完成但无匹配结果）、failed（所有结果为空且引擎出错） */
     outcome?: SearchOutcome;
-    /** 当 outcome === 'failed' 时指示是否建议重试 */
+    /** 当 outcome === 'failed' 或 'degraded' 时指示是否存在可重试的硬失败 */
     retryable?: boolean;
+    /** 是否命中内存 TTL 缓存 */
+    cached?: boolean;
     /** 级联补位实际成功的引擎（仅当 minResults 触发时出现） */
     cascadedEngines?: string[];
     /** SERP 首位的直接答案卡片文本（如百度汇率换算/百科摘要卡），LLM 可免抓详情页直接取事实 */
@@ -327,6 +397,17 @@ export class SearchTtlCache {
         });
     }
 
+    buildInflightKey(input: SearchExecutionInput): string {
+        const normalizedSearchMode = resolveSearchModeOverride(input.searchMode);
+        return JSON.stringify({
+            q: input.query.trim().toLowerCase(),
+            e: [...input.engines].sort(),
+            l: input.limit,
+            m: normalizedSearchMode,
+            r: input.minResults ?? 0
+        });
+    }
+
     get(input: SearchExecutionInput): SearchExecutionResult | undefined {
         const key = this.buildKey(input);
         const entry = this.cache.get(key);
@@ -396,6 +477,9 @@ export const MAX_QUERY_LENGTH = 500;
 
 export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: SearchTtlCache) {
     const ttlCache = cache ?? new SearchTtlCache();
+    // P1-4：并发同参数查询合并（singleflight 去重）：
+    // 在第一个请求尚未返回写进 TTL 缓存前，后续相同查询共享同一 in-flight Promise，避免同时打出 N 份上游请求。
+    const inflightSearches = new Map<string, Promise<SearchExecutionResult>>();
 
     return {
         async execute({ query, engines, limit, searchMode, minResults }: SearchExecutionInput): Promise<SearchExecutionResult> {
@@ -416,114 +500,150 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             }
 
             const searchQuery = quoteModelLikeTerms(cleanQuery);
+            const cacheInput: SearchExecutionInput = { query: searchQuery, engines, limit, searchMode, minResults };
 
-            const cached = ttlCache.get({ query: searchQuery, engines, limit, searchMode, minResults });
+            const cached = ttlCache.get(cacheInput);
             if (cached) {
                 metrics.recordCacheHit();
-                return cached;
+                return {
+                    ...cached,
+                    cached: true
+                };
             }
+
+            const inflightKey = ttlCache.buildInflightKey(cacheInput);
+            const existingInflight = inflightSearches.get(inflightKey);
+            if (existingInflight) {
+                metrics.recordCacheHit();
+                const shared = await existingInflight;
+                return {
+                    ...shared,
+                    results: [...shared.results],
+                    partialFailures: [...shared.partialFailures]
+                };
+            }
+
             metrics.recordCacheMiss();
 
-            const deadlineMs = SEARCH_DEADLINE_MS;
-            const deadlineAt = Date.now() + deadlineMs;
+            const runPromise = (async (): Promise<SearchExecutionResult> => {
+                const deadlineMs = SEARCH_DEADLINE_MS;
+                const deadlineAt = Date.now() + deadlineMs;
 
-            if (globalSemaphore) {
-                await globalSemaphore.acquire(deadlineAt);
-            }
+                if (globalSemaphore) {
+                    await globalSemaphore.acquire(deadlineAt);
+                }
 
-            try {
-                const circuitOpenEngines = engines.filter((engine) => isEngineCircuitOpen(engine));
-                const executableEngines = circuitOpenEngines.length > 0 && circuitOpenEngines.length < engines.length
-                    ? engines.filter((engine) => !isEngineCircuitOpen(engine))
-                    : engines;
+                try {
+                    const circuitOpenEngines = engines.filter((engine) => isEngineCircuitOpen(engine));
+                    const executableEngines = circuitOpenEngines.length > 0 && circuitOpenEngines.length < engines.length
+                        ? engines.filter((engine) => !isEngineCircuitOpen(engine))
+                        : engines;
 
-                const initialFailures: SearchExecutionFailure[] = [];
-                for (const engine of circuitOpenEngines) {
-                    if (!executableEngines.includes(engine)) {
-                        initialFailures.push({
-                            engine,
-                            code: 'circuit_open',
-                            retryable: true,
-                            message: `Engine circuit open (recent HTTP 429 rate limiting, ~${Math.ceil(getEngineCircuitRemainingMs(engine) / 1000)}s cooldown left) — quota reallocated to other engines`
-                        });
+                    const initialFailures: SearchExecutionFailure[] = [];
+                    for (const engine of circuitOpenEngines) {
+                        if (!executableEngines.includes(engine)) {
+                            initialFailures.push({
+                                engine,
+                                code: 'circuit_open',
+                                retryable: true,
+                                message: `Engine circuit open (recent HTTP 429 rate limiting, ~${Math.ceil(getEngineCircuitRemainingMs(engine) / 1000)}s cooldown left) — quota reallocated to other engines`
+                            });
+                        }
+                    }
+
+                    const limits = distributeLimit(limit, executableEngines.length);
+                    const effectiveSearchMode = resolveSearchModeOverride(searchMode);
+
+                    const perEngineTimeoutMs = Math.min(Math.floor(deadlineMs * 0.5), 10000);
+
+                    // 管道第 1 阶段：主引擎并发执行器
+                    const primary = await executePrimaryEngines({
+                        query: cleanQuery,
+                        searchQuery,
+                        executableEngines,
+                        limits,
+                        effectiveSearchMode,
+                        engineMap,
+                        deadlineAt,
+                        perEngineTimeoutMs
+                    });
+
+                    const allFailures: SearchExecutionFailure[] = [...initialFailures, ...primary.partialFailures];
+                    const allMetrics = [...primary.engineMetrics];
+                    const siteDomains = extractSiteDomains(cleanQuery);
+
+                    let merged = mergeSearchResults(primary.engineResults)
+                        .filter((result) => !isPlaceholderResult(result))
+                        .filter((result) => matchesSiteDomains(result.url, siteDomains));
+
+                    // 管道第 2 阶段：级联补位执行器（结果不足时按批补位）
+                    const cascade = await executeCascade({
+                        cleanQuery,
+                        searchQuery,
+                        minResults: minResults ?? 0,
+                        initialMerged: merged,
+                        initialEngineResults: primary.engineResults,
+                        engines,
+                        engineMap,
+                        effectiveSearchMode,
+                        deadlineAt,
+                        perEngineTimeoutMs
+                    });
+
+                    merged = cascade.merged.filter((result) => matchesSiteDomains(result.url, siteDomains));
+                    allFailures.push(...cascade.cascadeFailures);
+                    allMetrics.push(...cascade.cascadeMetrics);
+
+                    // 管道第 3 阶段：全局重排与截断
+                    merged = rankSearchResults(merged, cleanQuery).slice(0, limit);
+
+                    const { outcome, retryable } = computeSearchOutcome(
+                        merged.length,
+                        allFailures,
+                        primary.directAnswer,
+                        {
+                            requestedLimit: limit,
+                            minResults,
+                            primaryEngines: executableEngines
+                        }
+                    );
+
+                    const result: SearchExecutionResult = {
+                        query: cleanQuery,
+                        engines: executableEngines,
+                        totalResults: merged.length,
+                        results: merged,
+                        partialFailures: allFailures,
+                        outcome,
+                        retryable,
+                        cached: false,
+                        ...(cascade.cascadedEngines.length > 0 ? { cascadedEngines: cascade.cascadedEngines } : {}),
+                        ...(primary.directAnswer ? { directAnswer: primary.directAnswer } : {}),
+                        ...(allMetrics.some(Boolean) ? { engineMetrics: allMetrics.filter(Boolean) } : {})
+                    };
+
+                    // 管道第 4 阶段：TTL 缓存写入
+                    if (merged.length > 0) {
+                        const degraded = outcome === 'degraded';
+                        ttlCache.set(
+                            cacheInput,
+                            result,
+                            degraded ? DEGRADED_CACHE_TTL_MS : undefined
+                        );
+                    }
+
+                    return result;
+                } finally {
+                    if (globalSemaphore) {
+                        globalSemaphore.release();
                     }
                 }
+            })().finally(() => {
+                inflightSearches.delete(inflightKey);
+            });
 
-                const limits = distributeLimit(limit, executableEngines.length);
-                const effectiveSearchMode = resolveSearchModeOverride(searchMode);
-
-                const perEngineTimeoutMs = Math.min(Math.floor(deadlineMs * 0.5), 10000);
-
-                // 管道第 1 阶段：主引擎并发执行器
-                const primary = await executePrimaryEngines({
-                    query: cleanQuery,
-                    searchQuery,
-                    executableEngines,
-                    limits,
-                    effectiveSearchMode,
-                    engineMap,
-                    deadlineAt,
-                    perEngineTimeoutMs
-                });
-
-                const allFailures: SearchExecutionFailure[] = [...initialFailures, ...primary.partialFailures];
-                const allMetrics = [...primary.engineMetrics];
-
-                let merged = mergeSearchResults(primary.engineResults)
-                    .filter((result) => !isPlaceholderResult(result));
-
-                // 管道第 2 阶段：级联补位执行器（结果不足时按批补位）
-                const cascade = await executeCascade({
-                    cleanQuery,
-                    searchQuery,
-                    minResults: minResults ?? 0,
-                    initialMerged: merged,
-                    initialEngineResults: primary.engineResults,
-                    engines,
-                    engineMap,
-                    effectiveSearchMode,
-                    deadlineAt,
-                    perEngineTimeoutMs
-                });
-
-                merged = cascade.merged;
-                allFailures.push(...cascade.cascadeFailures);
-                allMetrics.push(...cascade.cascadeMetrics);
-
-                // 管道第 3 阶段：全局重排与截断
-                merged = rankSearchResults(merged, cleanQuery).slice(0, limit);
-
-                const { outcome, retryable } = computeSearchOutcome(merged.length, allFailures, primary.directAnswer);
-
-                const result: SearchExecutionResult = {
-                    query: cleanQuery,
-                    engines: executableEngines,
-                    totalResults: merged.length,
-                    results: merged,
-                    partialFailures: allFailures,
-                    outcome,
-                    retryable,
-                    ...(cascade.cascadedEngines.length > 0 ? { cascadedEngines: cascade.cascadedEngines } : {}),
-                    ...(primary.directAnswer ? { directAnswer: primary.directAnswer } : {}),
-                    ...(allMetrics.some(Boolean) ? { engineMetrics: allMetrics.filter(Boolean) } : {})
-                };
-
-                // 管道第 4 阶段：TTL 缓存写入
-                if (merged.length > 0) {
-                    const degraded = allFailures.length > 0;
-                    ttlCache.set(
-                        { query: searchQuery, engines, limit, searchMode, minResults },
-                        result,
-                        degraded ? DEGRADED_CACHE_TTL_MS : undefined
-                    );
-                }
-
-                return result;
-            } finally {
-                if (globalSemaphore) {
-                    globalSemaphore.release();
-                }
-            }
+            inflightSearches.set(inflightKey, runPromise);
+            return runPromise;
         },
 
         clearCache(): void {

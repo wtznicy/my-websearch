@@ -49,6 +49,9 @@ export interface AppConfig {
     fakeIpCidrs: string[];
     /** 结果重排的额外权威域名（追加在内置白名单之后，逗号分隔） */
     authorityDomains: string[];
+    /** DEFAULT_SEARCH_ENGINE=auto 时的中英文默认路由引擎组覆盖（AUTO_ROUTE_EN_ENGINES / AUTO_ROUTE_ZH_ENGINES） */
+    autoRouteEnEngines?: string[];
+    autoRouteZhEngines?: string[];
     /** 工具未显式传 limit/minResults 时的服务端默认（把部署策略从工具参数移到 env） */
     defaultSearchLimit: number;
     /** 级联补位阈值：按"可用结果"（相关、非入口页）计，噪声占位时仍会补跑其他引擎 */
@@ -387,6 +390,12 @@ export function createConfig(
         authorityDomains: env.SEARCH_AUTHORITY_DOMAINS ?
             env.SEARCH_AUTHORITY_DOMAINS.split(',').map(domain => domain.trim().toLowerCase()).filter(Boolean) :
             [],
+        autoRouteEnEngines: env.AUTO_ROUTE_EN_ENGINES ?
+            env.AUTO_ROUTE_EN_ENGINES.split(',').map(e => e.trim().toLowerCase()).filter(Boolean) :
+            undefined,
+        autoRouteZhEngines: env.AUTO_ROUTE_ZH_ENGINES ?
+            env.AUTO_ROUTE_ZH_ENGINES.split(',').map(e => e.trim().toLowerCase()).filter(Boolean) :
+            undefined,
         defaultSearchLimit: Number(env.DEFAULT_SEARCH_LIMIT || '10'),
         defaultMinResults: Number(env.DEFAULT_MIN_RESULTS || '5'),
         searchDeadlineMs: Number(env.SEARCH_DEADLINE_MS || '30000'),

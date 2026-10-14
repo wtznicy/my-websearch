@@ -88,10 +88,10 @@ const MAX_MAX_CHARS = 200000;
 /** 响应体硬上限：2MB（与 maxBodyLength/maxContentLength 一致） */
 const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024;
 
-/** 按 URL 路径扩展名判断"明显的小文件"：跳过 HEAD 预检（见 fetchWebContent） */
+/** 按 URL 路径扩展名判断"明显的小文件"：跳过 HEAD 预检（见 fetchWebContent，注意 .pdf 不跳过预检） */
 function isLikelySmallFile(parsedUrl: URL): boolean {
     const path = parsedUrl.pathname.toLowerCase();
-    return /\.(md|markdown|txt|text|json|csv|xml|ya?ml|html?|png|jpe?g|gif|webp|svg|ico|css|js|pdf)$/.test(path);
+    return /\.(md|markdown|txt|text|json|csv|xml|ya?ml|html?|png|jpe?g|gif|webp|svg|ico|css|js)$/.test(path);
 }
 const MIN_METADATA_FALLBACK_CHARS = 200;
 
@@ -113,8 +113,81 @@ const CHROME_NOISE_SELECTOR = [
     '.sidebar',
     '.navbar',
     '.breadcrumb',
-    '.pagination'
+    '.pagination',
+    '.page-footer',
+    '.article-footer',
+    '.doc-footer',
+    '.edit-on-github',
+    '.bc-github-link',
+    '#footer',
+    'aside.metadata'
 ].join(', ');
+
+/**
+ * 探测站点在页面顶部或 `<link rel="alternate" type="text/markdown">` 中声明的 LLM 专用 Markdown 地址
+ * （如 Vue.js 文档页顶部的 "Are you an LLM? You can read better optimized documentation at /guide/.../computed.md"）。
+ * 仅允许同源且路径为 `.md` / `.markdown` / `.mdx` 的地址，防止跳转到外部任意 URL。
+ */
+export function detectLlmMarkdownUrl(rawHtml: string, extractedText: string, baseUrl: string): string | null {
+    let baseParsed: URL;
+    try {
+        baseParsed = new URL(baseUrl);
+    } catch {
+        return null;
+    }
+
+    const resolveSameOriginMd = (candidate: string): string | null => {
+        const cleaned = candidate.trim().replace(/[).,;:'"]+$/, '');
+        if (!cleaned) {
+            return null;
+        }
+        try {
+            const resolved = new URL(cleaned, baseParsed);
+            if (resolved.origin !== baseParsed.origin) {
+                return null;
+            }
+            if (!isMarkdownPath(resolved)) {
+                return null;
+            }
+            if (resolved.toString() === baseParsed.toString()) {
+                return null;
+            }
+            return resolved.toString();
+        } catch {
+            return null;
+        }
+    };
+
+    const headSnippet = rawHtml.slice(0, 6000);
+    const linkMatch = headSnippet.match(/<link\b[^>]*rel=["']alternate["'][^>]*type=["']text\/(?:x-)?markdown["'][^>]*>/i)
+        || headSnippet.match(/<link\b[^>]*type=["']text\/(?:x-)?markdown["'][^>]*rel=["']alternate["'][^>]*>/i);
+    if (linkMatch) {
+        const hrefMatch = linkMatch[0].match(/\bhref=["']([^"']+)["']/i);
+        if (hrefMatch?.[1]) {
+            const resolved = resolveSameOriginMd(hrefMatch[1]);
+            if (resolved) {
+                return resolved;
+            }
+        }
+    }
+
+    const leadingText = `${extractedText.slice(0, 800)}\n${headSnippet}`;
+    const llmPromptPatterns = [
+        /Are you an LLM\?[\s\S]{0,240}?(https?:\/\/[^\s"'<>)+,]+\.(?:md|markdown|mdx)|\/[A-Za-z0-9._/-]+\.(?:md|markdown|mdx))\b/i,
+        /(?:for\s+LLMs?|LLM-friendly|AI\s+agent|language\s+model)[^\n.]{0,180}?(https?:\/\/[^\s"'<>)+,]+\.(?:md|markdown|mdx)|\/[A-Za-z0-9._/-]+\.(?:md|markdown|mdx))\b/i
+    ];
+    for (const pattern of llmPromptPatterns) {
+        const match = leadingText.match(pattern);
+        if (match?.[1]) {
+            const resolved = resolveSameOriginMd(match[1]);
+            if (resolved) {
+                return resolved;
+            }
+        }
+    }
+
+    return null;
+}
 
 /**
  * 在克隆节点上剥离导航栏/侧边栏/页脚等非正文区块。
@@ -631,6 +704,14 @@ export async function fetchWebContent(
                 responseType: 'json',
                 validateStatus: (status: number) => status >= 200 && status < 400
             }), 'Request URL');
+            const headContentType = String(headResponse.headers['content-type'] || '').toLowerCase();
+            if (headContentType.includes('application/pdf')) {
+                throw new AppError({
+                    code: 'invalid_arguments',
+                    retryable: false,
+                    message: 'PDF binary files (application/pdf) are not supported by fetchWebContent; maxChars only controls extracted text length, not binary download parsing'
+                });
+            }
             const headLength = Number(headResponse.headers['content-length']);
             if (Number.isFinite(headLength) && headLength > MAX_DOWNLOAD_BYTES) {
                 throw new AppError({
@@ -645,7 +726,7 @@ export async function fetchWebContent(
                 throw error;
             }
             const errCode = (error as { code?: string })?.code;
-            if (errCode === 'ERR_RESPONSE_TOO_LARGE' || errCode === 'response_too_large') {
+            if (errCode === 'ERR_RESPONSE_TOO_LARGE' || errCode === 'response_too_large' || errCode === 'invalid_arguments') {
                 throw error;
             }
             // HEAD 预检只是"提前发现超大响应"的优化，任何失败都不应否决后续 GET：
@@ -708,6 +789,14 @@ export async function fetchWebContent(
     assertPublicHttpUrl(finalUrl, 'Final URL');
     let raw = decodeRawResponse(response, contentType);
 
+    if (contentType.includes('application/pdf') || raw.startsWith('%PDF-')) {
+        throw new AppError({
+            code: 'invalid_arguments',
+            retryable: false,
+            message: 'PDF binary files (application/pdf) are not supported by fetchWebContent; maxChars only controls extracted text length, not binary download parsing'
+        });
+    }
+
     if (!usedBrowserCookies && looksLikeBotChallengePage(raw)) {
         let cookieRetry: { response?: AxiosResponse; usedBrowserCookies: boolean };
         try {
@@ -764,6 +853,37 @@ export async function fetchWebContent(
             htmlExtraction = extractMainTextFromHtml(raw);
             title = htmlExtraction.title;
             extractedContent = htmlExtraction.text;
+
+            // P2-4：若页面顶部或 <link rel="alternate" type="text/markdown"> 提示存在同源 LLM 专用 .md 版本
+            // （如 Vue.js 文档页顶部的 "Are you an LLM? ... read /guide/.../computed.md"），自动改读该 .md 正文
+            const llmMdUrl = detectLlmMarkdownUrl(raw, extractedContent, finalUrl);
+            if (llmMdUrl) {
+                try {
+                    const mdParsed = new URL(llmMdUrl);
+                    await assertPublicHttpUrlResolved(mdParsed, 'Alternate Markdown URL');
+                    const mdResponse = await requestDirectFirst(
+                        'GET',
+                        llmMdUrl,
+                        (forceDirect) => buildRequestOptions(undefined, forceDirect, signal),
+                        'Alternate Markdown URL'
+                    );
+                    const mdContentType = String(mdResponse.headers['content-type'] || '').toLowerCase();
+                    const mdRaw = decodeRawResponse(mdResponse, mdContentType);
+                    const mdText = normalizeText(mdRaw);
+                    if (mdText && !looksLikeHtml(mdRaw) && !looksLikeBotChallengePage(mdRaw)) {
+                        finalUrl = mdResponse.request?.res?.responseUrl || llmMdUrl;
+                        contentType = mdContentType || 'text/markdown';
+                        raw = mdRaw;
+                        extractedContent = mdText;
+                        htmlExtraction = undefined;
+                    }
+                } catch (mdError) {
+                    if (signal?.aborted) {
+                        throw mdError;
+                    }
+                    void mdError;
+                }
+            }
         } else if (isMarkdownContentType(contentType)) {
             extractedContent = normalizeText(raw);
         } else {
@@ -884,12 +1004,13 @@ export async function fetchWebContent(
     }
 
     const totalLength = extractedContent.length;
-    // startIndex 越界时显式报错，避免静默返回空内容
+    // startIndex 越界时显式报错，避免静默返回空内容，同时在 details/hint 中明确返回实际 totalLength
     if (startIndex >= totalLength) {
         throw new AppError({
             code: 'start_index_out_of_range',
             retryable: false,
-            details: { legacyCode: 'ERR_START_INDEX_OUT_OF_RANGE' },
+            details: { legacyCode: 'ERR_START_INDEX_OUT_OF_RANGE', totalLength, startIndex },
+            hint: `当前正文实际总长度为 totalLength=${totalLength}，请将 startIndex 设为小于 ${totalLength} 的偏移量（或重置为 0 从头读取）。`,
             message: `startIndex ${startIndex} is beyond content length ${totalLength}; reset to 0 to read from the beginning`
         });
     }

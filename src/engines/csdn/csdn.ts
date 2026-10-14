@@ -6,7 +6,8 @@ import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { paginateSearch } from '../../utils/pagination.js';
 import { impersonateHttpGet } from '../../utils/impersonateRequest.js';
 import { createDomesticDirectAgent, shouldAttemptDomesticDirectRetry } from '../../utils/domesticDirectNetwork.js';
-import { AppError } from '../../core/errors.js';
+import { AppError, isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
+import { metrics } from '../../core/metrics.js';
 
 /** CSDN 搜索结果里的 <em> 高亮标签，剥离后返回纯文本 */
 export function stripHighlightTags(value: string): string {
@@ -55,9 +56,16 @@ const CSDN_SEARCH_API = 'https://so.csdn.net/api/v3/search';
 const EMPTY_FIRST_PAGE_RETRY_DELAY_MS = 300;
 
 const defaultCsdnHttpGet = async (url: string, options: AxiosRequestConfig): Promise<AxiosResponse> => {
+    const signal = options.signal as AbortSignal | undefined;
     try {
         return await impersonateHttpGet('csdn', url, options);
     } catch (error) {
+        if (isAbortedError(error, signal)) {
+            if (isCascadeAbortedError(error, signal)) {
+                metrics.debug('[csdn] Impersonate request cancelled (cascade_aborted): target satisfied by sibling engine');
+            }
+            throw error;
+        }
         const status = (error as { response?: { status?: number } })?.response?.status;
         if (typeof status === 'number' && status !== 521 && status !== 522) {
             throw error;
@@ -77,6 +85,9 @@ const defaultCsdnHttpGet = async (url: string, options: AxiosRequestConfig): Pro
                 }
             }
         } catch (directError) {
+            if (isAbortedError(directError, signal)) {
+                throw directError;
+            }
             console.warn('[csdn] Domestic direct physical retry failed:', directError instanceof Error ? directError.message : String(directError));
         }
 

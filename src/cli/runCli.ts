@@ -65,8 +65,8 @@ function formatCliHelp(): string {
         '    Start the local daemon in the foreground.',
         '  my-websearch status [--base-url URL] [--json]',
         '    Check daemon status. `status` uses --base-url, not --daemon-url.',
-        '  my-websearch doctor [--network] [--browser] [--engine a,b] [--json]',
-        '    Inspect effective configuration, config sources, proxy connectivity, browser availability/launch, and engine status (with secrets masked).',
+        '  my-websearch doctor [--network] [--browser] [--engine a,b] [--reset-health] [--json]',
+        '    Inspect effective configuration, config sources, proxy connectivity, browser availability/launch, and engine status (with secrets masked). `--reset-health` resets internal circuit breakers and caches before running.',
         '',
         'One-shot action commands:',
         '  my-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--min-results N] [--daemon-url URL] [--spawn] [--json]',
@@ -297,7 +297,10 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
     }
 
     const resolveDefaultEngines = (queryText: string): SupportedSearchEngine[] => {
-        const picked = pickDefaultEnginesForQuery(queryText, runtime.config.defaultSearchEngine);
+        const picked = pickDefaultEnginesForQuery(queryText, runtime.config.defaultSearchEngine, {
+            en: runtime.config.autoRouteEnEngines,
+            zh: runtime.config.autoRouteZhEngines
+        });
         const reachable = picked.filter((engine) => !isKnownUnreachableOverseasEngine(engine));
         const routable = reachable.length > 0 ? reachable : picked;
         const allowed = runtime.config.allowedSearchEngines;
@@ -998,6 +1001,7 @@ export async function runCli(
         let json = false;
         let network = false;
         let browser = false;
+        let resetHealth = false;
         const rawEngines: string[] = [];
         try {
             for (let index = 0; index < rest.length; index += 1) {
@@ -1012,6 +1016,10 @@ export async function runCli(
                 }
                 if (arg === '--browser') {
                     browser = true;
+                    continue;
+                }
+                if (arg === '--reset-health') {
+                    resetHealth = true;
                     continue;
                 }
                 if (arg === '--engine' || arg === '--engines') {
@@ -1049,6 +1057,7 @@ export async function runCli(
                 version: readServerVersion(),
                 network: network || Boolean(engines && engines.length > 0),
                 browser,
+                resetHealth,
                 ...(engines ? { engines } : {})
             });
             if (json) {
@@ -1063,11 +1072,11 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     ErrorCode.INVALID_ARGUMENTS,
                     message,
-                    { hint: 'Use `my-websearch doctor [--network] [--browser] [--engine bing,baidu] [--json]`.' }
+                    { hint: 'Use `my-websearch doctor [--network] [--browser] [--engine bing,baidu] [--reset-health] [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: my-websearch doctor [--network] [--browser] [--engine bing,baidu] [--json]');
+                io.stderr('Usage: my-websearch doctor [--network] [--browser] [--engine bing,baidu] [--reset-health] [--json]');
             }
             return 1;
         }
