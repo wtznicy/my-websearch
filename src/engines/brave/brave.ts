@@ -46,8 +46,8 @@ function buildBraveErrorMessage(error: unknown): Error {
  *        │   └── .search-snippet-title (title)
  *        └── .generic-snippet (description)
  */
-export function parseBraveResults(html: string, seenUrls: Set<string>): SearchResult[] {
-    const $ = cheerio.load(html);
+export function parseBraveResults(html: string, seenUrls: Set<string>, $doc?: cheerio.CheerioAPI): SearchResult[] {
+    const $ = $doc ?? cheerio.load(html);
     const results: SearchResult[] = [];
 
     $('#results .snippet, .snippet').each((_, element) => {
@@ -144,8 +144,11 @@ export async function searchBrave(query: string, limit: number, options?: { sign
                 throw buildBraveErrorMessage(error);
             }
 
+            const html = String(response.data || '');
+            const $ = cheerio.load(html);
+
             // 反爬/拦截页检测：命中时抛明确错误（不再静默返回 0 条伪装成"没有结果"）
-            if (isBraveBlockedPage(String(response.data || ''))) {
+            if (isBraveBlockedPage(html, $)) {
                 throw new AppError({
                     code: 'bot_challenge',
                     retryable: false,
@@ -154,7 +157,7 @@ export async function searchBrave(query: string, limit: number, options?: { sign
                 });
             }
 
-            return parseBraveResults(String(response.data || ''), seenUrls);
+            return parseBraveResults(html, seenUrls, $);
         }
     });
 }

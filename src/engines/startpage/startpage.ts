@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { config, getEngineSearchMode } from '../../config.js';
+import { config, getEngineSearchMode, type AppConfig } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
@@ -25,6 +25,13 @@ let cachedCookies: string | undefined;
 let cachedScAt = 0;
 /** 当前缓存的会话 TTL（PoW 会话 4 分钟 / Playwright 会话 30 分钟） */
 let currentSessionTtlMs = STARTPAGE_SC_TTL_MS;
+
+export function resetStartpageCache(): void {
+    cachedScCode = undefined;
+    cachedCookies = undefined;
+    cachedScAt = 0;
+    inflightScWarmupPromise = null;
+}
 
 import { isStartpageCaptchaPage } from '../../core/antiBot/antiBotDetection.js';
 const isCaptchaPage = isStartpageCaptchaPage;
@@ -161,6 +168,35 @@ async function warmupStartpageSession(signal?: AbortSignal): Promise<void> {
 
 let inflightScWarmupPromise: Promise<string> | null = null;
 
+async function awaitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (!signal) {
+        return promise;
+    }
+    if (signal.aborted) {
+        throw signal.reason instanceof Error
+            ? signal.reason
+            : new AppError({ code: 'aborted', engine: 'startpage', message: 'Request aborted', retryable: false });
+    }
+    return new Promise<T>((resolve, reject) => {
+        const onAbort = () => {
+            reject(signal.reason instanceof Error
+                ? signal.reason
+                : new AppError({ code: 'aborted', engine: 'startpage', message: 'Request aborted', retryable: false }));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        promise.then(
+            (val) => {
+                signal.removeEventListener('abort', onAbort);
+                resolve(val);
+            },
+            (err) => {
+                signal.removeEventListener('abort', onAbort);
+                reject(err);
+            }
+        );
+    });
+}
+
 async function getScCode(signal?: AbortSignal): Promise<string> {
     if (signal?.aborted) {
         throw signal.reason instanceof Error
@@ -173,50 +209,60 @@ async function getScCode(signal?: AbortSignal): Promise<string> {
     }
 
     if (inflightScWarmupPromise) {
-        return inflightScWarmupPromise;
+        return awaitWithSignal(inflightScWarmupPromise, signal);
     }
 
     inflightScWarmupPromise = (async () => {
-        // ① 纯 HTTP Anubis PoW 求解（Worker 异步无阻塞；difficulty<=5 时全流程约 2.6s）
+        const warmupController = new AbortController();
+        const warmupTimer = setTimeout(() => warmupController.abort(), 35000);
         try {
-            const session = await warmupWithAnubisPow(signal);
-            if (session) {
-                cachedScCode = session.scCode;
-                cachedCookies = session.cookies;
-                cachedScAt = Date.now();
-                currentSessionTtlMs = ANUBIS_SESSION_TTL_MS;
-                console.error('✅ Startpage warmup via Anubis PoW (no browser needed)');
-                return cachedScCode;
+            // ① 纯 HTTP Anubis PoW 求解（Worker 异步无阻塞；difficulty<=5 时全流程约 2.6s）
+            try {
+                const session = await warmupWithAnubisPow(warmupController.signal);
+                if (session) {
+                    cachedScCode = session.scCode;
+                    cachedCookies = session.cookies;
+                    cachedScAt = Date.now();
+                    currentSessionTtlMs = ANUBIS_SESSION_TTL_MS;
+                    console.error('✅ Startpage warmup via Anubis PoW (no browser needed)');
+                    return cachedScCode;
+                }
+                console.warn('Startpage Anubis PoW warmup returned no session, falling back to Playwright');
+            } catch (error) {
+                if (warmupController.signal.aborted) {
+                    throw error;
+                }
+                console.warn('Startpage Anubis PoW warmup failed, falling back to Playwright:', error instanceof Error ? error.message : String(error));
             }
-            console.warn('Startpage Anubis PoW warmup returned no session, falling back to Playwright');
-        } catch (error) {
-            if (signal?.aborted) {
-                throw error;
-            }
-            console.warn('Startpage Anubis PoW warmup failed, falling back to Playwright:', error instanceof Error ? error.message : String(error));
-        }
 
-        // ② Playwright 兜底（hidden-headed 模式，见 warmupStartpageSession）
-        await warmupStartpageSession(signal);
-        if (!cachedScCode) {
-            throw new AppError({
-                code: 'engine_parse_error',
-                retryable: true,
-                engine: 'startpage',
-                message: 'Failed to extract Startpage search token'
-            });
+            // ② Playwright 兜底（hidden-headed 模式，见 warmupStartpageSession）
+            await warmupStartpageSession(warmupController.signal);
+            if (!cachedScCode) {
+                throw new AppError({
+                    code: 'engine_parse_error',
+                    retryable: true,
+                    engine: 'startpage',
+                    message: 'Failed to extract Startpage search token'
+                });
+            }
+            currentSessionTtlMs = STARTPAGE_SC_TTL_MS;
+            return cachedScCode;
+        } finally {
+            clearTimeout(warmupTimer);
         }
-        currentSessionTtlMs = STARTPAGE_SC_TTL_MS;
-        return cachedScCode;
     })().finally(() => {
         inflightScWarmupPromise = null;
     });
 
-    return inflightScWarmupPromise;
+    return awaitWithSignal(inflightScWarmupPromise, signal);
 }
 
 export function extractResultsFromHtml(html: string): SearchResult[] {
-    if (isCaptchaPage(html)) {
+    const $ = cheerio.load(html);
+    if (isCaptchaPage(html, $)) {
+        cachedScCode = undefined;
+        cachedCookies = undefined;
+        cachedScAt = 0;
         throw new AppError({
             code: 'bot_challenge',
             retryable: false,
@@ -225,7 +271,6 @@ export function extractResultsFromHtml(html: string): SearchResult[] {
         });
     }
 
-    const $ = cheerio.load(html);
     const results: SearchResult[] = [];
     const seenUrls = new Set<string>();
 
@@ -323,7 +368,11 @@ async function searchStartpagePage(query: string, page: number, signal?: AbortSi
 
 import { paginateSearch } from '../../utils/pagination.js';
 
-export async function searchStartpage(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
+export async function searchStartpage(
+    query: string,
+    limit: number,
+    options?: { searchMode?: AppConfig['searchMode']; signal?: AbortSignal }
+): Promise<SearchResult[]> {
     const signal = options?.signal;
     // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂超时拖累整次搜索
     await assertOverseasEngineUsable('startpage');

@@ -17,13 +17,16 @@ const CACHE_TTL_MS = 60 * 1000;
 const CACHE_MAX_ENTRIES = 200;
 
 type CacheEntry = {
-    addresses: string[];
-    family: number;
-    all: boolean;
+    addresses: Array<{ address: string; family: number }>;
     expiresAt: number;
 };
 
 const cache = new Map<string, CacheEntry>();
+
+export function resetDnsCache(): void {
+    cache.clear();
+    inFlight.clear();
+}
 
 function evictExpired(): void {
     const now = Date.now();
@@ -49,14 +52,50 @@ export type DnsLookupFn = (
 ) => void;
 
 // 独立 c-ares Resolver 实例（纯网络异步事件循环，不占用 libuv 线程池）
+const customDns = process.env.CUSTOM_DNS_SERVERS?.trim();
 const caresResolver = new PromisesResolver();
-try {
-    caresResolver.setServers(['223.5.5.5', '119.29.29.29', '1.1.1.1', '8.8.8.8']);
-} catch {
-    // 忽略特定沙箱环境下 setServers 报错
+if (customDns) {
+    try {
+        caresResolver.setServers(customDns.split(',').map((s) => s.trim()).filter(Boolean));
+    } catch {
+        // 忽略特定沙箱环境下 setServers 报错
+    }
+} else {
+    try {
+        caresResolver.setServers(['223.5.5.5', '119.29.29.29', '1.1.1.1', '8.8.8.8']);
+    } catch {
+        // 忽略特定沙箱环境下 setServers 报错
+    }
 }
 
-/** 默认底层非阻塞解析实现 */
+function resolveWithCares(
+    hostname: string,
+    options: dns.LookupOptions,
+    callback: (err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void
+): void {
+    const resolvePromise = (options.family === 6)
+        ? caresResolver.resolve6(hostname)
+        : caresResolver.resolve4(hostname);
+
+    resolvePromise
+        .then((ips) => {
+            if (!ips || ips.length === 0) {
+                throw new Error('No addresses returned');
+            }
+            const family = options.family === 6 ? 6 : 4;
+            if (options.all) {
+                const addrs: dns.LookupAddress[] = ips.map((ip) => ({ address: ip, family }));
+                callback(null, addrs);
+            } else {
+                callback(null, ips[0] ?? '', family);
+            }
+        })
+        .catch((err: unknown) => {
+            callback(err as NodeJS.ErrnoException, options.all ? [] : '', options.family === 6 ? 6 : 4);
+        });
+}
+
+/** 默认底层解析实现 */
 function defaultLookupImpl(
     hostname: string,
     options: dns.LookupOptions,
@@ -83,30 +122,33 @@ function defaultLookupImpl(
         return;
     }
 
-    // ③ 首选 c-ares Resolver（非阻塞事件循环，不占用 libuv 线程池）
-    const resolvePromise = (options.family === 6)
-        ? caresResolver.resolve6(hostname)
-        : caresResolver.resolve4(hostname);
-
-    resolvePromise
-        .then((ips) => {
-            if (!ips || ips.length === 0) {
-                throw new Error('No addresses returned');
-            }
-            const family = options.family === 6 ? 6 : 4;
-            if (options.all) {
-                const addrs: dns.LookupAddress[] = ips.map((ip) => ({ address: ip, family }));
-                callback(null, addrs);
+    // 若显式指定了 CUSTOM_DNS_SERVERS，优先走 c-ares Resolver 直连指定 DNS
+    if (customDns) {
+        resolveWithCares(hostname, options, (err, address, family) => {
+            if (!err) {
+                callback(null, address, family);
             } else {
-                callback(null, ips[0] ?? '', family);
+                dns.lookup(hostname, options, callback);
             }
-        })
-        .catch(() => {
-            // ④ c-ares 失败（如本地 intranet、hosts 文件域名、特定网络环境）时安全回退至系统 dns.lookup
-            dns.lookup(hostname, options, (err, address, family) => {
-                callback(err, address, family);
-            });
         });
+        return;
+    }
+
+    // ③ 默认优先使用系统 dns.lookup（尊重系统 DNS 配置、Clash TUN Fake-IP 网卡接管与 /etc/hosts）
+    dns.lookup(hostname, options, (err, address, family) => {
+        if (!err) {
+            callback(null, address, family);
+            return;
+        }
+        // ④ 系统 lookup 失败时，使用 c-ares Resolver 兜底
+        resolveWithCares(hostname, options, (caresErr, caresAddr, caresFamily) => {
+            if (!caresErr) {
+                callback(null, caresAddr, caresFamily);
+            } else {
+                callback(err, address, family);
+            }
+        });
+    });
 }
 
 /** 真实解析实现（测试可通过 __setDnsLookupForTests 替换） */
@@ -124,7 +166,7 @@ export function __setDnsLookupForTests(impl?: DnsLookupFn): void {
 export function peekCachedLookup(hostname: string): string[] | undefined {
     const entry = cache.get(hostname.toLowerCase());
     if (entry && Date.now() < entry.expiresAt) {
-        return entry.addresses;
+        return entry.addresses.map((item) => item.address);
     }
     return undefined;
 }
@@ -140,27 +182,45 @@ const inFlight = new Map<string, Promise<InFlightResult>>();
 export const cachedDnsLookup: DnsLookupFn = (hostname, options, callback) => {
     const now = Date.now();
     const cleanHost = hostname.toLowerCase();
-    const cacheKey = `${cleanHost}:${!!options.all}:${options.family ?? 'any'}`;
 
     const cached = cache.get(cleanHost);
-    if (cached && now < cached.expiresAt && cached.all === !!options.all) {
-        if (options.all) {
-            callback(null, cached.addresses.map((address) => ({ address, family: cached.family })));
-        } else {
-            callback(null, cached.addresses[0] ?? '', cached.family);
+    if (cached && now < cached.expiresAt) {
+        const family = options.family;
+        const matching = family
+            ? cached.addresses.filter((item) => item.family === family)
+            : cached.addresses;
+
+        if (matching.length > 0) {
+            if (options.all) {
+                callback(null, matching);
+            } else {
+                callback(null, matching[0]!.address, matching[0]!.family);
+            }
+            return;
         }
-        return;
     }
 
     // 检查是否有相同的并发查询正在执行（In-flight Coalescing，防止并发冲垮线程池）
-    const existingPromise = inFlight.get(cacheKey);
+    const inFlightKey = `${cleanHost}:${options.family ?? 'any'}`;
+    const existingPromise = inFlight.get(inFlightKey);
     if (existingPromise) {
         existingPromise
             .then((result) => {
-                callback(result.err, result.address, result.family);
+                if (result.err) {
+                    callback(result.err, options.all ? [] : '', result.family);
+                    return;
+                }
+                const addrs = Array.isArray(result.address)
+                    ? result.address
+                    : (result.address ? [{ address: result.address, family: result.family ?? 4 }] : []);
+                if (options.all) {
+                    callback(null, addrs);
+                } else {
+                    callback(null, addrs[0]?.address ?? '', addrs[0]?.family);
+                }
             })
             .catch((err) => {
-                callback(err, '');
+                callback(err, options.all ? [] : '');
             });
         return;
     }
@@ -171,16 +231,14 @@ export const cachedDnsLookup: DnsLookupFn = (hostname, options, callback) => {
             const family = rest[1] as number | undefined;
 
             if (!err) {
-                const addresses = options.all
-                    ? (address as dns.LookupAddress[])
-                    : [{ address: address as string, family: family as number }];
-                const first = addresses[0];
-                if (addresses.length > 0 && first && first.address) {
+                const addrs: Array<{ address: string; family: number }> = Array.isArray(address)
+                    ? address
+                    : (address ? [{ address: address as string, family: (family ?? 4) }] : []);
+                const first = addrs[0];
+                if (addrs.length > 0 && first && first.address) {
                     evictExpired();
                     cache.set(cleanHost, {
-                        addresses: addresses.map((item) => item.address),
-                        family: first.family ?? 4,
-                        all: !!options.all,
+                        addresses: addrs,
                         expiresAt: now + CACHE_TTL_MS
                     });
                 }
@@ -189,14 +247,25 @@ export const cachedDnsLookup: DnsLookupFn = (hostname, options, callback) => {
             resolve({ err, address, family });
         });
     }).finally(() => {
-        inFlight.delete(cacheKey);
+        inFlight.delete(inFlightKey);
     });
 
-    inFlight.set(cacheKey, pending);
+    inFlight.set(inFlightKey, pending);
 
     pending.then((result) => {
-        callback(result.err, result.address, result.family);
+        if (result.err) {
+            callback(result.err, options.all ? [] : '', result.family);
+            return;
+        }
+        const addrs = Array.isArray(result.address)
+            ? result.address
+            : (result.address ? [{ address: result.address, family: result.family ?? 4 }] : []);
+        if (options.all) {
+            callback(null, addrs);
+        } else {
+            callback(null, addrs[0]?.address ?? '', addrs[0]?.family);
+        }
     }).catch((err) => {
-        callback(err, '');
+        callback(err, options.all ? [] : '');
     });
 };

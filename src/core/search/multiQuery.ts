@@ -1,4 +1,5 @@
 import { SearchResult } from '../../types.js';
+import { normalizeResultUrl } from './searchService.js';
 
 /**
  * 多查询扇出结果的公平合并。
@@ -19,22 +20,6 @@ import { SearchResult } from '../../types.js';
 /** 报告/统计用的聚合指标形状（与 SearchExecutionResult.engineMetrics 一致） */
 export type EngineMetric = { engine: string; ms: number; count: number; error?: string; timedOut?: boolean };
 
-/** URL 归一化：去 hash 与常见跟踪参数（与 searchService 的归一化保持一致的简化版） */
-function normalizeForDedupe(rawUrl: string): string {
-    try {
-        const url = new URL(rawUrl);
-        url.hash = '';
-        for (const key of [...url.searchParams.keys()]) {
-            if (/^(utm_|spm|from|src|ref|ops_request_misc|spm_id_from)/i.test(key)) {
-                url.searchParams.delete(key);
-            }
-        }
-        return url.toString();
-    } catch {
-        return rawUrl;
-    }
-}
-
 export function mergeMultiQueryResults(
     perQueryResults: SearchResult[][],
     limit: number
@@ -50,7 +35,7 @@ export function mergeMultiQueryResults(
     const picked: SearchResult[] = [];
 
     const tryTake = (result: SearchResult): boolean => {
-        const key = normalizeForDedupe(result.url);
+        const key = normalizeResultUrl(result.url);
         if (seen.has(key)) {
             return false;
         }

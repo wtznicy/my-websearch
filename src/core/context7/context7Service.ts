@@ -59,6 +59,10 @@ function cachedSet(key: string, value: unknown): void {
     cache.set(key, { value, expiresAt: now + CACHE_TTL_MS });
 }
 
+export function resetContext7Cache(): void {
+    cache.clear();
+}
+
 export function createContext7Services() {
     return {
         libraries: {

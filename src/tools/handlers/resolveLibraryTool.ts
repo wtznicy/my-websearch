@@ -7,7 +7,8 @@ import {
     logSafeError,
     withErrorHint,
     CONTEXT7_QUOTA_HINT,
-    TOOL_ANNOTATION_HINTS
+    TOOL_ANNOTATION_HINTS,
+    capTextResponse
 } from '../toolShared.js';
 
 export function registerResolveLibraryTool(server: McpServer, runtime: MyWebSearchRuntime): void {
@@ -34,7 +35,7 @@ export function registerResolveLibraryTool(server: McpServer, runtime: MyWebSear
                 return {
                     content: [{
                         type: 'text',
-                        text: JSON.stringify(payload, null, 2)
+                        text: capTextResponse(JSON.stringify(payload, null, 2))
                     }]
                 };
             } catch (error) {

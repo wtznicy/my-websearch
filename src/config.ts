@@ -339,6 +339,23 @@ export function parseProxyConfig(
     };
 }
 
+export function parsePositiveIntEnv(rawValue: string | undefined, fallback: number, min?: number, max?: number): number {
+    if (rawValue === undefined || rawValue === '') {
+        return fallback;
+    }
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+        return fallback;
+    }
+    if (min !== undefined && parsed < min) {
+        return fallback;
+    }
+    if (max !== undefined && parsed > max) {
+        return fallback;
+    }
+    return parsed;
+}
+
 /**
  * 工厂函数：基于给定的环境变量字典创建独立的 AppConfig 实例（默认 process.env）。
  * 解锁测试隔离与多实例支持。
@@ -378,7 +395,7 @@ export function createConfig(
         bingPlaywrightFallback: parsedSearchMode.playwrightEngines.includes('bing') && (parsedSearchMode.engineSearchModes['bing'] ?? parsedSearchMode.searchMode) !== 'request',
         bingBaseUrl: (env.BING_BASE_URL || env.OPEN_WEBSEARCH_BING_HOST || 'https://cn.bing.com/search').trim().replace(/\/$/, ''),
         startpagePlaywrightFallback: parsedSearchMode.playwrightEngines.includes('startpage') && (parsedSearchMode.engineSearchModes['startpage'] ?? parsedSearchMode.searchMode) !== 'request',
-        maxConcurrentSearches: Number(env.MAX_CONCURRENT_SEARCHES || '20'),
+        maxConcurrentSearches: parsePositiveIntEnv(env.MAX_CONCURRENT_SEARCHES, 20, 0),
         impersonateBrowser: readOptionalEnv('IMPERSONATE_BROWSER') || 'chrome_149',
         impersonateOs: readOptionalEnv('IMPERSONATE_OS') || 'windows',
         proxyUrl: parsedProxy.proxyUrl,
@@ -396,14 +413,14 @@ export function createConfig(
         autoRouteZhEngines: env.AUTO_ROUTE_ZH_ENGINES ?
             env.AUTO_ROUTE_ZH_ENGINES.split(',').map(e => e.trim().toLowerCase()).filter(Boolean) :
             undefined,
-        defaultSearchLimit: Number(env.DEFAULT_SEARCH_LIMIT || '10'),
-        defaultMinResults: Number(env.DEFAULT_MIN_RESULTS || '5'),
-        searchDeadlineMs: Number(env.SEARCH_DEADLINE_MS || '30000'),
+        defaultSearchLimit: parsePositiveIntEnv(env.DEFAULT_SEARCH_LIMIT, 10, 1, 50),
+        defaultMinResults: parsePositiveIntEnv(env.DEFAULT_MIN_RESULTS, 5, 0, 50),
+        searchDeadlineMs: parsePositiveIntEnv(env.SEARCH_DEADLINE_MS, 30000, 1000, 300000),
         fetchWebAllowInsecureTls: env.FETCH_WEB_INSECURE_TLS === 'true',
         playwrightExecutablePath: readOptionalEnv('PLAYWRIGHT_EXECUTABLE_PATH'),
         playwrightCdpEndpoint: readOptionalEnv('PLAYWRIGHT_CDP_ENDPOINT'),
         playwrightHeadless: env.PLAYWRIGHT_HEADLESS !== 'false',
-        playwrightNavigationTimeoutMs: Number(env.PLAYWRIGHT_NAVIGATION_TIMEOUT_MS || 20000),
+        playwrightNavigationTimeoutMs: parsePositiveIntEnv(env.PLAYWRIGHT_NAVIGATION_TIMEOUT_MS, 20000, 1000, 300000),
         enableHttpServer: env.MODE ? ['both', 'http'].includes(env.MODE) : true,
         enableCors: env.ENABLE_CORS === 'true',
         corsOrigin: readOptionalEnv('CORS_ORIGIN') || '*'
@@ -578,7 +595,19 @@ export const config: AppConfig = createConfig(process.env);
  * Helper function to get the proxy URL if proxy is enabled
  */
 export function getProxyUrl(cfg: AppConfig = config): string | undefined {
-    return cfg.useProxy ? encodeURI(<string>cfg.proxyUrl) : undefined;
+    if (!cfg.useProxy || !cfg.proxyUrl) {
+        return undefined;
+    }
+    try {
+        const parsed = new URL(cfg.proxyUrl);
+        const str = parsed.toString();
+        if (str.endsWith('/') && !cfg.proxyUrl.endsWith('/')) {
+            return str.slice(0, -1);
+        }
+        return str;
+    } catch {
+        return cfg.proxyUrl;
+    }
 }
 
 // 判断某个引擎是否应走代理：USE_PROXY=true 时，若 PROXY_ENGINES 白名单为空则全部走代理（兼容旧全局行为），

@@ -284,7 +284,8 @@ export async function executePrimaryEngines(
 
     executableEngines.forEach((engine, index) => {
         const engineResult = engineResults[index] ?? [];
-        metrics.recordEngineSearch(engine, Date.now() - (startedAtByIndex[index] ?? Date.now()), engineResult.length > 0);
+        const elapsedMs = engineMetrics[index]?.ms ?? (Date.now() - (startedAtByIndex[index] ?? Date.now()));
+        metrics.recordEngineSearch(engine, elapsedMs, engineResult.length > 0);
     });
 
     let directAnswer: string | undefined;

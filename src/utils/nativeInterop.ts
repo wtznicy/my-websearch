@@ -333,6 +333,50 @@ function withUnixFileLock<T>(lockFilePath: string, operation: () => T): T {
     }
 }
 
+async function acquireWindowsFileLockNonBlocking(
+    w: ReturnType<typeof winLock>,
+    handle: unknown,
+    timeoutMs = 30000
+): Promise<{ overlapped: { Internal: number; InternalHigh: number; Offset: number; OffsetHigh: number; hEvent: null } }> {
+    const overlapped = { Internal: 0, InternalHigh: 0, Offset: 0, OffsetHigh: 0, hEvent: null };
+    const deadline = Date.now() + timeoutMs;
+    let delay = 25;
+
+    while (Date.now() < deadline) {
+        if (w.LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, overlapped)) {
+            return { overlapped };
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay = Math.min(250, Math.floor(delay * 1.5));
+    }
+
+    if (!w.LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, overlapped)) {
+        throw new Error('LockFileEx timeout waiting for lock');
+    }
+    return { overlapped };
+}
+
+async function acquireUnixFileLockNonBlocking(
+    u: ReturnType<typeof unixLock>,
+    fd: number,
+    timeoutMs = 30000
+): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let delay = 25;
+
+    while (Date.now() < deadline) {
+        if (u.flock(fd, LOCK_EX | LOCK_NB) === 0) {
+            return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay = Math.min(250, Math.floor(delay * 1.5));
+    }
+
+    if (u.flock(fd, LOCK_EX) !== 0) {
+        throw new Error('flock timeout waiting for lock');
+    }
+}
+
 async function withWindowsFileLockAsync<T>(lockFilePath: string, operation: () => Promise<T>): Promise<T> {
     const w = winLock();
     const k = koffi();
@@ -348,16 +392,18 @@ async function withWindowsFileLockAsync<T>(lockFilePath: string, operation: () =
         throw new Error(`withNativeFileLockAsync: CreateFileW failed for ${lockFilePath}`);
     }
 
-    const overlapped = { Internal: 0, InternalHigh: 0, Offset: 0, OffsetHigh: 0, hEvent: null };
-    if (!w.LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, overlapped)) {
+    let lockInfo: { overlapped: { Internal: number; InternalHigh: number; Offset: number; OffsetHigh: number; hEvent: null } };
+    try {
+        lockInfo = await acquireWindowsFileLockNonBlocking(w, handle);
+    } catch (err) {
         w.CloseHandle(handle);
-        throw new Error(`withNativeFileLockAsync: LockFileEx failed for ${lockFilePath}`);
+        throw new Error(`withNativeFileLockAsync: LockFileEx failed for ${lockFilePath}: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     try {
         return await operation();
     } finally {
-        w.UnlockFileEx(handle, 0, 1, 0, overlapped);
+        w.UnlockFileEx(handle, 0, 1, 0, lockInfo.overlapped);
         w.CloseHandle(handle);
     }
 }
@@ -366,9 +412,11 @@ async function withUnixFileLockAsync<T>(lockFilePath: string, operation: () => P
     const u = unixLock();
     const fd = openSync(lockFilePath, 'a');
 
-    if (u.flock(fd, LOCK_EX) !== 0) {
+    try {
+        await acquireUnixFileLockNonBlocking(u, fd);
+    } catch (err) {
         closeSync(fd);
-        throw new Error(`withNativeFileLockAsync: flock failed for ${lockFilePath}`);
+        throw new Error(`withNativeFileLockAsync: flock failed for ${lockFilePath}: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     try {

@@ -36,8 +36,8 @@ export type CreateMyWebSearchRuntimeOptions = {
     dependencies?: RuntimeDependencies;
 };
 
-function createDefaultSearchExecutors(): SearchEngineExecutorMap {
-    return {
+function createDefaultSearchExecutors(runtimeConfig?: AppConfig): SearchEngineExecutorMap {
+    const all: SearchEngineExecutorMap = {
         baidu: searchBaidu,
         bing: searchBing,
         csdn: searchCsdn,
@@ -48,12 +48,23 @@ function createDefaultSearchExecutors(): SearchEngineExecutorMap {
         startpage: searchStartpage,
         sogou: searchSogou
     };
+    if (runtimeConfig?.allowedSearchEngines && runtimeConfig.allowedSearchEngines.length > 0) {
+        const allowed = new Set(runtimeConfig.allowedSearchEngines);
+        const filtered: SearchEngineExecutorMap = {};
+        for (const [engine, fn] of Object.entries(all)) {
+            if (allowed.has(engine)) {
+                filtered[engine] = fn;
+            }
+        }
+        return filtered;
+    }
+    return all;
 }
 
 export function createMyWebSearchRuntime(options: CreateMyWebSearchRuntimeOptions = {}): MyWebSearchRuntime {
     const runtimeConfig = options.config ?? config;
     const dependencies = options.dependencies ?? {};
-    const searchExecutors = dependencies.searchExecutors ?? createDefaultSearchExecutors();
+    const searchExecutors = dependencies.searchExecutors ?? createDefaultSearchExecutors(runtimeConfig);
     // 只实例化一次 context7 服务，libraries/docs 共享同一份缓存
     const context7 = createContext7Services();
 
@@ -63,7 +74,7 @@ export function createMyWebSearchRuntime(options: CreateMyWebSearchRuntimeOption
     return {
         config: runtimeConfig,
         services: {
-            search: createSearchService(searchExecutors),
+            search: createSearchService(searchExecutors, undefined, runtimeConfig),
             fetchCsdnArticle: createArticleFetchService('csdn', dependencies.fetchCsdnArticle ?? fetchCsdnArticle),
             fetchJuejinArticle: createArticleFetchService('juejin', dependencies.fetchJuejinArticle ?? fetchJuejinArticle),
             fetchGithubReadme: createGithubReadmeService(dependencies.fetchGithubReadme ?? fetchGithubReadme),

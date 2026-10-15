@@ -19,8 +19,8 @@ startCommand:
         description: CORS origin
       defaultSearchEngine:
         type: string
-        default: duckduckgo
-        description: Default search engine (bing, baidu, csdn, duckduckgo, exa, brave, juejin, startpage, sogou)
+        default: auto
+        description: Default search engine (auto, bing, baidu, csdn, duckduckgo, exa, brave, juejin, startpage, sogou)
       useProxy:
         type: boolean
         default: false
@@ -36,4 +36,4 @@ startCommand:
   exampleConfig:
     enableCors: false
     corsOrigin: "*"
-    defaultSearchEngine: duckduckgo
+    defaultSearchEngine: auto

@@ -26,6 +26,12 @@ import { MyWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { BROWSER_USER_AGENT } from '../utils/constants.js';
 import { buildAxiosRequestOptions, __resetDirectSlowHostCacheForTests } from '../utils/httpRequest.js';
 import { isKnownUnreachableOverseasEngine, __setOverseasReachableForTests } from '../utils/overseasProbe.js';
+import { resetDnsCache } from '../utils/dnsCache.js';
+import { resetSystemProxyCache } from '../utils/systemProxy.js';
+import { resetStartpageCache } from '../engines/startpage/startpage.js';
+import { __resetGithubReadmeCacheForTests } from '../engines/github/github.js';
+import { resetContext7Cache } from '../core/context7/context7Service.js';
+import { resetSogouState } from '../engines/sogou/sogou.js';
 import {
     buildPlaywrightProxy,
     getLocalBrowserExecutablePath,
@@ -139,6 +145,12 @@ export function resetAllHealthState(runtime?: MyWebSearchRuntime): void {
     resetBingImpersonateStateForTests();
     __resetDirectSlowHostCacheForTests();
     __setOverseasReachableForTests(null);
+    resetDnsCache();
+    resetSystemProxyCache();
+    resetStartpageCache();
+    __resetGithubReadmeCacheForTests();
+    resetContext7Cache();
+    resetSogouState();
     clearDoctorProbeCache();
     runtime?.services?.search?.clearCache?.();
 }

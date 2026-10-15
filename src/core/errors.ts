@@ -25,7 +25,9 @@ export const ErrorCode = {
     /** 网络错误 */
     NETWORK_ERROR: 'network_error',
     /** 内容提取失败 */
-    EXTRACTION_FAILED: 'extraction_failed'
+    EXTRACTION_FAILED: 'extraction_failed',
+    /** 频率限制 / 配额耗尽 */
+    RATE_LIMITED: 'rate_limited'
 } as const;
 
 export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode];

@@ -35,6 +35,8 @@ const COMMANDS_REQUIRING_RUNTIME = new Set([
     'fetch-github-readme',
     'fetch-csdn',
     'fetch-juejin',
+    'resolve-library-id',
+    'query-docs',
     'cache-clear',
     'doctor',
     'serve'
@@ -44,7 +46,9 @@ const MCP_TO_CLI_COMMAND_HINTS: Record<string, string> = {
     fetchWebContent: 'fetch-web',
     fetchGithubReadme: 'fetch-github-readme',
     fetchCsdnArticle: 'fetch-csdn',
-    fetchJuejinArticle: 'fetch-juejin'
+    fetchJuejinArticle: 'fetch-juejin',
+    resolveLibraryId: 'resolve-library-id',
+    queryDocs: 'query-docs'
 };
 
 export function commandNeedsRuntime(argv: string[]): boolean {
@@ -73,11 +77,15 @@ function formatCliHelp(): string {
         '    Search the web. `--search-mode` is request|auto|playwright and currently only affects Bing. `--min-results N` auto-runs additional engines when fewer than N results come back.',
         '  my-websearch cache-clear [--daemon-url URL] [--spawn] [--json]',
         '    Clear the search TTL cache (engine just recovered, stale results cached, etc.).',
-        '  my-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--daemon-url URL] [--spawn] [--json]',
-        '    Fetch readable page content. `--readability` enables Mozilla Readability extraction; `--include-links` returns preserved article links; `--raw` returns the raw response body; `--start-index N` continues reading from character offset N.',
+        '  my-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--format text|markdown] [--daemon-url URL] [--spawn] [--json]',
+        '    Fetch readable page content. `--readability` enables Mozilla Readability extraction; `--include-links` returns preserved article links; `--raw` returns the raw response body; `--start-index N` continues reading from character offset N; `--format` selects output format (text or markdown).',
         '  my-websearch fetch-github-readme <url> [--daemon-url URL] [--spawn] [--json]',
         '  my-websearch fetch-csdn <url> [--daemon-url URL] [--spawn] [--json]',
         '  my-websearch fetch-juejin <url> [--daemon-url URL] [--spawn] [--json]',
+        '  my-websearch resolve-library-id <name> [--query QUERY] [--limit N] [--daemon-url URL] [--spawn] [--json]',
+        '    Resolve a library/package name to a Context7 library ID (e.g. /vercel/next.js).',
+        '  my-websearch query-docs <library-id> [--query QUERY] [--limit N] [--daemon-url URL] [--spawn] [--json]',
+        '    Get official documentation and code snippets for a Context7 library ID (e.g. /vercel/next.js).',
         '',
         'Common action flags:',
         '  --daemon-url URL',
@@ -96,17 +104,22 @@ function formatCliHelp(): string {
         '  - Bare `my-websearch` starts the MCP server compatibility path, not the recommended daemon path.',
         '  - MCP tool names differ from CLI commands. For example:',
         '      fetchWebContent -> fetch-web',
-        '      fetchGithubReadme -> fetch-github-readme'
+        '      fetchGithubReadme -> fetch-github-readme',
+        '      resolveLibraryId -> resolve-library-id',
+        '      queryDocs -> query-docs'
     ].join('\n');
 }
 
 export type ParsedSearchArgs = {
     query: string;
     limit: number;
+    limitExplicit?: boolean;
     engines: SupportedSearchEngine[];
+    enginesExplicit?: boolean;
     searchMode?: AppConfig['searchMode'];
     /** 结果数低于此值时自动用其他引擎补位（0 = 不启用） */
     minResults: number;
+    minResultsExplicit?: boolean;
     json: boolean;
 };
 
@@ -117,11 +130,26 @@ export type ParsedFetchWebArgs = {
     includeLinks: boolean;
     raw: boolean;
     startIndex: number;
+    format?: 'text' | 'markdown';
     json: boolean;
 };
 
 export type ParsedFetchGithubArgs = {
     url: string;
+    json: boolean;
+};
+
+export type ParsedResolveLibraryArgs = {
+    libraryName: string;
+    query?: string;
+    limit?: number;
+    json: boolean;
+};
+
+export type ParsedQueryDocsArgs = {
+    libraryId: string;
+    query?: string;
+    limit?: number;
     json: boolean;
 };
 
@@ -223,9 +251,9 @@ function extractDaemonTransportArgs(argv: string[]): DaemonTransportArgs {
 export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): ParsedSearchArgs {
     const positional: string[] = [];
     const requestedEngines: string[] = [];
-    let limit = 10;
+    let limit: number | undefined;
     let searchMode: AppConfig['searchMode'] | undefined;
-    let minResults = 0;
+    let minResults: number | undefined;
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -292,7 +320,13 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
     if (query.length > 500) {
         throw new Error(`Search query too long (${query.length} characters, max 500)`);
     }
-    if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+
+    const limitExplicit = limit !== undefined;
+    const minResultsExplicit = minResults !== undefined;
+    const effectiveLimit = limit ?? 10;
+    const effectiveMinResults = minResults ?? 0;
+
+    if (!Number.isInteger(effectiveLimit) || effectiveLimit < 1 || effectiveLimit > 50) {
         throw new Error('Limit must be an integer between 1 and 50');
     }
 
@@ -325,10 +359,13 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
 
     return {
         query,
-        limit,
+        limit: effectiveLimit,
+        limitExplicit,
         engines: resolvedEngines,
+        enginesExplicit: requestedEngines.length > 0,
         searchMode,
-        minResults,
+        minResults: effectiveMinResults,
+        minResultsExplicit,
         json
     };
 }
@@ -340,6 +377,7 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
     let includeLinks = false;
     let raw = false;
     let startIndex = 0;
+    let format: 'text' | 'markdown' | undefined;
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -380,6 +418,16 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
             continue;
         }
 
+        if (arg === '--format') {
+            const next = requireFlagValue(argv, index, '--format');
+            if (next !== 'text' && next !== 'markdown') {
+                throw new Error('format must be one of: text, markdown');
+            }
+            format = next;
+            index += 1;
+            continue;
+        }
+
         if (isFlag(arg)) {
             throw new Error(`Unknown argument: ${arg}`);
         }
@@ -407,6 +455,7 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
         includeLinks,
         raw,
         startIndex,
+        format,
         json
     };
 }
@@ -435,6 +484,113 @@ export function parseFetchGithubArgs(argv: string[]): ParsedFetchGithubArgs {
 
     return {
         url,
+        json
+    };
+}
+
+export function parseResolveLibraryArgs(argv: string[]): ParsedResolveLibraryArgs {
+    const positional: string[] = [];
+    let query: string | undefined;
+    let limit: number | undefined;
+    let json = false;
+
+    for (let index = 0; index < argv.length; index += 1) {
+        const arg = argv[index];
+        if (!arg) {
+            continue;
+        }
+
+        if (arg === '--json') {
+            json = true;
+            continue;
+        }
+
+        if (arg === '--query') {
+            query = requireFlagValue(argv, index, '--query');
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--limit') {
+            limit = Number(requireFlagValue(argv, index, '--limit'));
+            index += 1;
+            continue;
+        }
+
+        if (isFlag(arg)) {
+            throw new Error(`Unknown argument: ${arg}`);
+        }
+
+        positional.push(arg);
+    }
+
+    const libraryName = positional.join(' ').trim();
+    if (!libraryName) {
+        throw new Error('libraryName is required');
+    }
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 10)) {
+        throw new Error('Limit must be an integer between 1 and 10');
+    }
+
+    return {
+        libraryName,
+        query,
+        limit,
+        json
+    };
+}
+
+export function parseQueryDocsArgs(argv: string[]): ParsedQueryDocsArgs {
+    const positional: string[] = [];
+    let query: string | undefined;
+    let limit: number | undefined;
+    let json = false;
+
+    for (let index = 0; index < argv.length; index += 1) {
+        const arg = argv[index];
+        if (!arg) {
+            continue;
+        }
+
+        if (arg === '--json') {
+            json = true;
+            continue;
+        }
+
+        if (arg === '--query') {
+            query = requireFlagValue(argv, index, '--query');
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--limit') {
+            limit = Number(requireFlagValue(argv, index, '--limit'));
+            index += 1;
+            continue;
+        }
+
+        if (isFlag(arg)) {
+            throw new Error(`Unknown argument: ${arg}`);
+        }
+
+        positional.push(arg);
+    }
+
+    const libraryId = positional.join(' ').trim();
+    if (!libraryId) {
+        throw new Error('libraryId is required');
+    }
+    if (!libraryId.startsWith('/')) {
+        throw new Error("libraryId must start with '/' (e.g. /vercel/next.js)");
+    }
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 10)) {
+        throw new Error('Limit must be an integer between 1 and 10');
+    }
+
+    return {
+        libraryId,
+        query,
+        limit,
         json
     };
 }
@@ -576,6 +732,27 @@ function formatGithubReadmeHumanReadable(url: string, content: string): string {
 
 function formatArticleHumanReadable(label: string, url: string, content: string): string {
     return `Fetched ${label} article from ${url}\n\n${content}`;
+}
+
+function formatResolveLibraryHumanReadable(result: { libraryName: string; query?: string; results: Array<{ id: string; description?: string }> }): string {
+    const lines = [`Resolved library matches for "${result.libraryName}":`];
+    for (const item of result.results) {
+        lines.push(`  - ${item.id}${item.description ? `: ${item.description}` : ''}`);
+    }
+    return lines.join('\n');
+}
+
+function formatQueryDocsHumanReadable(result: { libraryId: string; snippets?: Array<{ title?: string; code?: string; content?: string }> }): string {
+    const lines = [`Documentation for ${result.libraryId}:`];
+    if (result.snippets) {
+        for (const snippet of result.snippets) {
+            lines.push('');
+            if (snippet.title) lines.push(`### ${snippet.title}`);
+            if (snippet.content) lines.push(snippet.content);
+            if (snippet.code) lines.push('```\n' + snippet.code + '\n```');
+        }
+    }
+    return lines.join('\n');
 }
 
 function formatStatusHumanReadable(status: {
@@ -920,10 +1097,10 @@ export async function runCli(
                 '/search',
                 {
                     query: parsed.query,
-                    engines: parsed.engines,
-                    limit: parsed.limit,
+                    engines: parsed.enginesExplicit ? parsed.engines : undefined,
+                    limit: parsed.limitExplicit ? parsed.limit : undefined,
                     searchMode: parsed.searchMode,
-                    minResults: parsed.minResults
+                    minResults: parsed.minResultsExplicit ? parsed.minResults : undefined
                 },
                 options
             );
@@ -1160,11 +1337,11 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     ErrorCode.INVALID_ARGUMENTS,
                     message,
-                    { hint: 'Use `my-websearch fetch-web <url> [--max-chars N] [--json]`.' }
+                    { hint: 'Use `my-websearch fetch-web <url> [--max-chars N] [--format text|markdown] [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: my-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--json]');
+                io.stderr('Usage: my-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--format text|markdown] [--json]');
             }
             return 1;
         }
@@ -1179,7 +1356,8 @@ export async function runCli(
                     readability: parsed.readability,
                     includeLinks: parsed.includeLinks,
                     raw: parsed.raw,
-                    startIndex: parsed.startIndex
+                    startIndex: parsed.startIndex,
+                    format: parsed.format
                 },
                 options
             );
@@ -1203,7 +1381,8 @@ export async function runCli(
                 readability: parsed.readability,
                 includeLinks: parsed.includeLinks,
                 raw: parsed.raw,
-                startIndex: parsed.startIndex
+                startIndex: parsed.startIndex,
+                format: parsed.format
             });
 
             if (parsed.json) {
@@ -1444,6 +1623,159 @@ export async function runCli(
                 ), null, 2));
             } else {
                 io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);
+            }
+            return 1;
+        }
+    }
+
+    if (command === 'resolve-library-id') {
+        let transport: DaemonTransportArgs;
+        let parsed: ParsedResolveLibraryArgs;
+        try {
+            transport = extractDaemonTransportArgs(rest);
+            parsed = parseResolveLibraryArgs(transport.argv);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (rest.includes('--json')) {
+                io.stdout(JSON.stringify(createErrorEnvelope(
+                    ErrorCode.INVALID_ARGUMENTS,
+                    message,
+                    { hint: 'Use `my-websearch resolve-library-id <name> [--query QUERY] [--limit N] [--json]`.' }
+                ), null, 2));
+            } else {
+                io.stderr(message);
+                io.stderr('Usage: my-websearch resolve-library-id <name> [--query QUERY] [--limit N] [--json]');
+            }
+            return 1;
+        }
+
+        try {
+            const daemonResult = await tryDaemonRequest<Awaited<ReturnType<MyWebSearchRuntime['services']['context7Libraries']['execute']>>>(
+                transport,
+                '/resolve-library-id',
+                {
+                    libraryName: parsed.libraryName,
+                    query: parsed.query,
+                    limit: parsed.limit
+                },
+                options
+            );
+            if (daemonResult) {
+                if (parsed.json) {
+                    io.stdout(JSON.stringify(daemonResult, null, 2));
+                } else if (isSuccessEnvelope(daemonResult)) {
+                    io.stdout(formatResolveLibraryHumanReadable(daemonResult.data));
+                } else {
+                    io.stderr(`Resolve library failed: ${daemonResult.error?.message ?? 'Unknown error'}`);
+                    if (daemonResult.hint) {
+                        io.stderr(daemonResult.hint);
+                    }
+                }
+                return daemonResult.status === 'ok' ? 0 : 1;
+            }
+
+            const result = await runtime.services.context7Libraries.execute({
+                libraryName: parsed.libraryName,
+                query: parsed.query,
+                limit: parsed.limit
+            });
+            const payload = result.query
+                ? result
+                : { libraryName: result.libraryName, results: result.results };
+
+            if (parsed.json) {
+                io.stdout(JSON.stringify(createSuccessEnvelope(payload), null, 2));
+            } else {
+                io.stdout(formatResolveLibraryHumanReadable(payload));
+            }
+            return 0;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (parsed.json) {
+                io.stdout(JSON.stringify(createErrorEnvelope(
+                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : ErrorCode.INVALID_ARGUMENTS,
+                    message,
+                    { hint: isDaemonRequestError(error)
+                        ? getDaemonCliErrorHint(error)
+                        : 'Verify library name or check connectivity to context7.com.' }
+                ), null, 2));
+            } else {
+                io.stderr(`${getDaemonCliErrorLabel(error, 'Resolve library failed')}: ${message}`);
+            }
+            return 1;
+        }
+    }
+
+    if (command === 'query-docs') {
+        let transport: DaemonTransportArgs;
+        let parsed: ParsedQueryDocsArgs;
+        try {
+            transport = extractDaemonTransportArgs(rest);
+            parsed = parseQueryDocsArgs(transport.argv);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (rest.includes('--json')) {
+                io.stdout(JSON.stringify(createErrorEnvelope(
+                    ErrorCode.INVALID_ARGUMENTS,
+                    message,
+                    { hint: 'Use `my-websearch query-docs <library-id> [--query QUERY] [--limit N] [--json]`.' }
+                ), null, 2));
+            } else {
+                io.stderr(message);
+                io.stderr('Usage: my-websearch query-docs <library-id> [--query QUERY] [--limit N] [--json]');
+            }
+            return 1;
+        }
+
+        try {
+            const daemonResult = await tryDaemonRequest<Awaited<ReturnType<MyWebSearchRuntime['services']['context7Docs']['execute']>>>(
+                transport,
+                '/query-docs',
+                {
+                    libraryId: parsed.libraryId,
+                    query: parsed.query,
+                    limit: parsed.limit
+                },
+                options
+            );
+            if (daemonResult) {
+                if (parsed.json) {
+                    io.stdout(JSON.stringify(daemonResult, null, 2));
+                } else if (isSuccessEnvelope(daemonResult)) {
+                    io.stdout(formatQueryDocsHumanReadable(daemonResult.data));
+                } else {
+                    io.stderr(`Query docs failed: ${daemonResult.error?.message ?? 'Unknown error'}`);
+                    if (daemonResult.hint) {
+                        io.stderr(daemonResult.hint);
+                    }
+                }
+                return daemonResult.status === 'ok' ? 0 : 1;
+            }
+
+            const result = await runtime.services.context7Docs.execute({
+                libraryId: parsed.libraryId,
+                query: parsed.query,
+                limit: parsed.limit
+            });
+
+            if (parsed.json) {
+                io.stdout(JSON.stringify(createSuccessEnvelope(result), null, 2));
+            } else {
+                io.stdout(formatQueryDocsHumanReadable(result));
+            }
+            return 0;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (parsed.json) {
+                io.stdout(JSON.stringify(createErrorEnvelope(
+                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : ErrorCode.INVALID_ARGUMENTS,
+                    message,
+                    { hint: isDaemonRequestError(error)
+                        ? getDaemonCliErrorHint(error)
+                        : 'Verify libraryId or check connectivity to context7.com.' }
+                ), null, 2));
+            } else {
+                io.stderr(`${getDaemonCliErrorLabel(error, 'Query docs failed')}: ${message}`);
             }
             return 1;
         }

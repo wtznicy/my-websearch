@@ -28,7 +28,7 @@
 - 🌐 **9-Engine Federated Search & Smart Routing**  
   Aggregates direct domestic engines (**Bing, Baidu, CSDN, Juejin, Sogou**) and global engines (**DuckDuckGo, Brave, Startpage, Exa**). Features automatic language-aware routing (`auto`), parallel multi-query execution (`queries: string[]`), URL deduplication, and automatic `minResults` cascading fallback.
 - ⚡ **Native Anti-Bot & Proof-of-Work Solvers (Zero-Browser Fast Path)**  
-  Built on `wreq-js` with native Chrome TLS/HTTP2 handshake emulation and persistent session cookies. Includes pure-JS/Rust solvers for **Startpage's Anubis SHA-256 PoW challenge** and **DuckDuckGo's `d.js` (`isJsaChallenge`) HTML5/arithmetic challenge**, bypassing anti-bot walls in milliseconds without launching a 400MB browser. Real URL decryption for Sogou (`uigs_para`), Baidu `Location`, and Bing Base64 links.
+  Built on `wreq-js` with native Chrome TLS/HTTP2 handshake emulation and persistent session cookies. Includes pure-JS/Rust solvers for **Startpage's Anubis SHA-256 PoW challenge** and **DuckDuckGo's `d.js` (`isJsaChallenge`) HTML5/arithmetic challenge**, bypassing anti-bot walls in milliseconds without launching a 400MB browser. Real URL decryption for Sogou redirect links, Baidu `Location`, and Bing Base64 links.
 - 📄 **High-Purity Markdown Article Extraction**  
   Combines Mozilla Readability with intelligent chrome noise stripping. Removes `<nav>`, `<aside>`, `<footer>`, and breadcrumbs while faithfully preserving article titles (`<article><header><h1>`), code blocks, and GFM tables. Supports seamless pagination (`startIndex`).
 - 📚 **Official Context7 Library Docs Lookup**  
@@ -84,7 +84,7 @@ flowchart TB
 | **`baidu`** | 🇨🇳 Direct | None | Concurrent `Location` redirect resolution + anti-bot detection | Chinese news, documentation, domestic forums |
 | **`csdn`** | 🇨🇳 Direct | None | WAF cookie jar persistence + empty response auto-retry | Chinese error logs, debugging tutorials |
 | **`juejin`** | 🇨🇳 Direct | None | Direct official API querying for clean long-form articles | Modern frontend/backend technical blogs |
-| **`sogou`** | 🇨🇳 Direct | None | Desktop & mobile dual parsing + `uigs_para` token decoding + ad removal | WeChat ecosystem links & long-tail queries |
+| **`sogou`** | 🇨🇳 Direct | None | Desktop & mobile dual parsing + redirect link decoding + ad removal | WeChat ecosystem links & long-tail queries |
 | **`duckduckgo`** | 🌐 Proxy in CN | None | Preload `d.js` + **built-in `isJsaChallenge` JS solver** | English technical search & open-source discussions |
 | **`startpage`** | 🌐 Proxy in CN | None | **Built-in Anubis SHA-256 PoW solver** + cookie session (no browser needed) | Google-backed high-privacy results |
 | **`brave`** | 🌐 Proxy in CN | None | Native TLS fingerprinting + strict sponsored ad stripping | Independent English index & technical blogs |
@@ -250,8 +250,8 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `SEARCH_DEADLINE_MS` | `30000` | Global hard deadline for multi-engine search execution (milliseconds) |
 | `SEARCH_AUTHORITY_DOMAINS` | empty | Additional authority domain whitelist for result re-ranking (comma-separated, appended to built-in list) |
 | `SEARCH_MODE` | `auto` | Search mode and browser policy. Supports single mode, multi-engine per mode, and compound multi-mode combinations:<br/>• **Global mode**: `auto` (default fallback), `request`/`none` (pure HTTP), `playwright` (force browser)<br/>• **Single mode, multiple engines**: `playwright:bing,startpage`, `auto:bing,startpage`, `bing,startpage`<br/>• **Compound multiple modes**: `playwright:bing;auto:startpage` (bing forces browser, startpage uses auto fallback), `auto;request:startpage` (global auto but startpage uses pure HTTP) |
-| `AUTO_ROUTE_EN_ENGINES` | `bing,exa` | Comma-separated engines for default English auto-routing |
-| `AUTO_ROUTE_ZH_ENGINES` | `bing,baidu,sogou` | Comma-separated engines for default Chinese auto-routing |
+| `AUTO_ROUTE_EN_ENGINES` | `bing,duckduckgo` | Comma-separated engines for default English auto-routing |
+| `AUTO_ROUTE_ZH_ENGINES` | `baidu,sogou` | Comma-separated engines for default Chinese auto-routing |
 
 #### 2. 🌐 Proxy & Network Security
 

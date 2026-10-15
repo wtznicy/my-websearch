@@ -5,6 +5,8 @@ import {
     parseSearchArgs,
     parseFetchWebArgs,
     parseFetchGithubArgs,
+    parseResolveLibraryArgs,
+    parseQueryDocsArgs,
     parseStatusArgs,
     parseServeArgs
 } from '../../cli/runCli.js';
@@ -33,6 +35,8 @@ describe('runCli argument parsing', () => {
         it('identifies runtime-dependent commands', () => {
             expect(commandNeedsRuntime(['search', 'query'])).toBe(true);
             expect(commandNeedsRuntime(['fetch-web', 'https://example.com'])).toBe(true);
+            expect(commandNeedsRuntime(['resolve-library-id', 'next.js'])).toBe(true);
+            expect(commandNeedsRuntime(['query-docs', '/vercel/next.js'])).toBe(true);
             expect(commandNeedsRuntime(['serve'])).toBe(true);
             expect(commandNeedsRuntime(['status'])).toBe(false);
             expect(commandNeedsRuntime(['--help'])).toBe(false);
@@ -92,10 +96,11 @@ describe('runCli argument parsing', () => {
 
     describe('parseFetchWebArgs', () => {
         it('parses valid fetch-web arguments', () => {
-            const parsed = parseFetchWebArgs(['https://example.com', '--max-chars', '5000', '--readability', '--json']);
+            const parsed = parseFetchWebArgs(['https://example.com', '--max-chars', '5000', '--readability', '--format', 'markdown', '--json']);
             expect(parsed.url).toBe('https://example.com');
             expect(parsed.maxChars).toBe(5000);
             expect(parsed.readability).toBe(true);
+            expect(parsed.format).toBe('markdown');
             expect(parsed.json).toBe(true);
         });
 
@@ -105,6 +110,47 @@ describe('runCli argument parsing', () => {
 
         it('throws if maxChars is invalid', () => {
             expect(() => parseFetchWebArgs(['https://example.com', '--max-chars', '50'])).toThrow('maxChars must be an integer between 100 and 200000');
+        });
+
+        it('throws if format is invalid', () => {
+            expect(() => parseFetchWebArgs(['https://example.com', '--format', 'xml'])).toThrow('format must be one of: text, markdown');
+        });
+    });
+
+    describe('parseResolveLibraryArgs', () => {
+        it('parses valid resolve-library-id arguments', () => {
+            const parsed = parseResolveLibraryArgs(['next.js', '--query', 'middleware auth', '--limit', '3', '--json']);
+            expect(parsed.libraryName).toBe('next.js');
+            expect(parsed.query).toBe('middleware auth');
+            expect(parsed.limit).toBe(3);
+            expect(parsed.json).toBe(true);
+        });
+
+        it('throws if libraryName is missing', () => {
+            expect(() => parseResolveLibraryArgs(['--limit', '5'])).toThrow('libraryName is required');
+        });
+
+        it('throws if limit is out of range', () => {
+            expect(() => parseResolveLibraryArgs(['next.js', '--limit', '0'])).toThrow('Limit must be an integer between 1 and 10');
+            expect(() => parseResolveLibraryArgs(['next.js', '--limit', '20'])).toThrow('Limit must be an integer between 1 and 10');
+        });
+    });
+
+    describe('parseQueryDocsArgs', () => {
+        it('parses valid query-docs arguments', () => {
+            const parsed = parseQueryDocsArgs(['/vercel/next.js', '--query', 'app router', '--limit', '5', '--json']);
+            expect(parsed.libraryId).toBe('/vercel/next.js');
+            expect(parsed.query).toBe('app router');
+            expect(parsed.limit).toBe(5);
+            expect(parsed.json).toBe(true);
+        });
+
+        it('throws if libraryId does not start with /', () => {
+            expect(() => parseQueryDocsArgs(['vercel/next.js'])).toThrow("libraryId must start with '/'");
+        });
+
+        it('throws if libraryId is missing', () => {
+            expect(() => parseQueryDocsArgs(['--limit', '5'])).toThrow('libraryId is required');
         });
     });
 

@@ -99,7 +99,10 @@ const nonNetworkFailurePatterns = [
     /Playwright client is not available/i,
     /Playwright client is unavailable/i,
     /Cannot find module ['`](playwright|playwright-core)['`]/i,
-    /Cannot find package ['`](playwright|playwright-core)['`]/i
+    /Cannot find package ['`](playwright|playwright-core)['`]/i,
+    /\bAssertionError\b/,
+    /\bERR_ASSERTION\b/,
+    /Expected values to be strictly equal/i
 ];
 
 function getCapturedOutput(test: RunningTest): string {
@@ -259,6 +262,19 @@ function runAllTestsInParallel(): Promise<number> {
         };
         runningTests.set(testName, runningTest);
 
+        const timeoutMs = 90000;
+        const timer = setTimeout(() => {
+            if (runningTests.has(testName)) {
+                runningTest.killRequested = true;
+                runningTest.outputChunks.push({
+                    stream: 'stderr',
+                    text: `\n[TIMEOUT] Test exceeded ${timeoutMs / 1000}s deadline, terminating process.\n`
+                });
+                killProcessTree(runningTest);
+            }
+        }, timeoutMs);
+        timer.unref();
+
         child.stdout?.on('data', (chunk: Buffer) => {
             runningTest.outputChunks.push({ stream: 'stdout', text: chunk.toString('utf8') });
         });
@@ -269,6 +285,7 @@ function runAllTestsInParallel(): Promise<number> {
             runningTest.spawnError = error;
         });
         child.on('close', (code, signal) => {
+            clearTimeout(timer);
             runningTests.delete(testName);
             activeTests -= 1;
             completed += 1;

@@ -111,7 +111,7 @@ function getApiKey(): string | undefined {
 }
 
 let quotaExhaustedUntil: number | null = null;
-let onQuotaExhaustedListener: (() => void) | null = null;
+const quotaExhaustedListeners = new Set<() => void>();
 
 export function isContext7QuotaExhausted(): boolean {
     if (getApiKey()) {
@@ -132,22 +132,30 @@ export function markContext7QuotaExhausted(resetEpoch?: number): void {
     }
     // 仅在状态首次从"未耗尽"翻转为"已耗尽"时通知一次 MCP 工具描述更新（sendToolListChanged）；
     // 若已处于耗尽状态期间被更长的 resetEpoch 续期，工具描述文本本身无变化（引导文案均已移除），无需重复推送通知。
-    if (!wasExhausted && onQuotaExhaustedListener) {
-        try {
-            onQuotaExhaustedListener();
-        } catch {
-            // 忽略监听回调异常
+    if (!wasExhausted && quotaExhaustedListeners.size > 0) {
+        for (const listener of quotaExhaustedListeners) {
+            try {
+                listener();
+            } catch {
+                // 忽略监听回调异常
+            }
         }
     }
 }
 
-export function setContext7QuotaListener(listener: (() => void) | null): void {
-    onQuotaExhaustedListener = listener;
+export function setContext7QuotaListener(listener: (() => void) | null): (() => void) | void {
+    if (!listener) {
+        return;
+    }
+    quotaExhaustedListeners.add(listener);
+    return () => {
+        quotaExhaustedListeners.delete(listener);
+    };
 }
 
 export function resetContext7QuotaExhaustedForTests(): void {
     quotaExhaustedUntil = null;
-    onQuotaExhaustedListener = null;
+    quotaExhaustedListeners.clear();
 }
 
 function buildHeaders(): Record<string, string> {

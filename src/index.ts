@@ -2,7 +2,6 @@
 // 必须先于其他 import：在静态依赖链（playwrightClient → config）求值前决定是否静默启动日志
 import './utils/startupQuiet.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { setupTools } from './tools/setupTools.js';
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
@@ -44,13 +43,17 @@ type SseSession = {
   lastActiveAt?: number;
 };
 
+let setupToolsFn: ((server: McpServer, runtime: MyWebSearchRuntime) => void) | undefined;
+
 function createServer(runtime: MyWebSearchRuntime): McpServer {
   const server = new McpServer({
     name: 'web-search',
     version: serverVersion
   });
 
-  setupTools(server, runtime);
+  if (setupToolsFn) {
+    setupToolsFn(server, runtime);
+  }
   return server;
 }
 
@@ -58,6 +61,8 @@ async function main() {
   const argv = process.argv.slice(2);
   // 启动日志静默已由 ./utils/startupQuiet.js（首个 import）按参数决定
   const { config } = await import('./config.js');
+  const { setupTools } = await import('./tools/setupTools.js');
+  setupToolsFn = setupTools;
   const runtime = shouldCreateFullRuntimeForInvocation(argv)
     ? (await import('./runtime/createRuntime.js')).createMyWebSearchRuntime()
     : ({
@@ -90,11 +95,48 @@ async function main() {
     process.exit(1);
   }
 
+  let isShuttingDown = false;
+  let httpShutdownCleanup: (() => void) | undefined;
+
+  const gracefulShutdown = async (signalOrReason: string) => {
+    if (isShuttingDown) {
+      return;
+    }
+    isShuttingDown = true;
+    console.error(`👋 Received ${signalOrReason}: shutting down MCP server and cleaning up browser sessions...`);
+
+    if (httpShutdownCleanup) {
+      try {
+        httpShutdownCleanup();
+      } catch {
+        // ignore
+      }
+    }
+
+    try {
+      await shutdownLocalPlaywrightBrowserSessions();
+    } catch {
+      // ignore
+    }
+
+    const force = setTimeout(() => process.exit(0), 1500);
+    if (typeof force.unref === 'function') {
+      force.unref();
+    }
+    process.exit(0);
+  };
+
+  process.once('SIGINT', () => { void gracefulShutdown('SIGINT'); });
+  process.once('SIGTERM', () => { void gracefulShutdown('SIGTERM'); });
+
   // Enable STDIO mode if MODE is 'both' or 'stdio' or not specified
   if (process.env.MODE === undefined || process.env.MODE === 'both' || process.env.MODE === 'stdio') {
     console.error('🔌 Starting STDIO transport...');
     const server = createServer(runtime);
     const stdioTransport = new StdioServerTransport();
+    process.stdin.once('close', () => {
+      void gracefulShutdown('stdin close');
+    });
     await server.connect(stdioTransport).then(() => {
       console.error('✅ STDIO transport enabled');
     }).catch(error => {
@@ -435,10 +477,7 @@ async function main() {
       process.exit(1);
     });
 
-    // MCP 路径此前完全没有信号处理（测评报告 P1-11）：SIGINT/SIGTERM 时不关会话、不关
-    // HTTP server，会话条目与浏览器会话可能残留。这里做最小优雅关闭。
-    const shutdown = (signal: string) => {
-      console.error(`👋 Received ${signal}: closing MCP sessions and HTTP server...`);
+    httpShutdownCleanup = () => {
       for (const id of Object.keys(transports.streamable)) {
         closeSession('streamable', id);
       }
@@ -446,15 +485,12 @@ async function main() {
         closeSession('sse', id);
       }
       clearInterval(sessionReaper);
-      httpServer.close(() => process.exit(0));
-      // 长连接可能让 close 回调迟迟不来，留一个兜底强制退出
-      const force = setTimeout(() => process.exit(0), 1500);
-      if (typeof force.unref === 'function') {
-        force.unref();
+      try {
+        httpServer.close();
+      } catch {
+        // ignore
       }
     };
-    process.once('SIGINT', () => shutdown('SIGINT'));
-    process.once('SIGTERM', () => shutdown('SIGTERM'));
   } else {
     console.error('ℹ️ HTTP server disabled, running in STDIO mode only')
   }

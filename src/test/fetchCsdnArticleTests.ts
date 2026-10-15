@@ -18,13 +18,17 @@ async function testFetchCsdnArticle() {
     console.error(`   ${result.content}`);
     console.error(`\n📊 Total content length: ${result.content.length} characters`);
 
+    if (!result.content || result.content.length === 0) {
+      throw new Error('Expected article content to be non-empty');
+    }
+
     return result;
   } catch (error) {
     console.error('❌ Test failed:', error);
     if (error instanceof Error) {
       console.error(`   Error message: ${error.message}`);
     }
-    return { content: '' };
+    throw error;
   }
 }
 

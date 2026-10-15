@@ -17,10 +17,11 @@
 | `/cache/clear` | `POST` | 本地守护进程 (`serve`) | 运行时主动清空当前 TTL 搜索缓存 |
 
 > 💡 **Prometheus 指标核心字段**：
-> - `search_requests_total{engine="...", outcome="success|failure"}`: 各引擎请求计数
-> - `search_cache_hits_total` / `search_cache_misses_total`: 缓存命中率指标
-> - `search_circuit_open_total{engine="..."}`: 引擎熔断触发次数
-> - `security_events_total{type="ssrf_blocked"}`: SSRF 拦截与重绑定拦截计数
+> - `mywebsearch_engine_searches_total{engine="...", outcome="success|failure|total"}`: 各引擎请求计数
+> - `mywebsearch_cache_hits_total` / `mywebsearch_cache_misses_total` / `mywebsearch_cache_hit_rate_percent`: 缓存命中率指标
+> - `mywebsearch_engine_search_duration_ms_avg{engine="..."}`: 引擎平均耗时
+> - `mywebsearch_engine_recent_success_rate_percent{engine="..."}`: 近期窗口成功率（%）
+> - `mywebsearch_process_resident_memory_bytes` / `mywebsearch_process_uptime_seconds`: 进程内存常驻与运行时间
 
 ---
 

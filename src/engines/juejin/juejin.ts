@@ -3,7 +3,7 @@ import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
-import { isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
+import { AppError, isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
 
 interface JuejinSearchResponse {
@@ -121,12 +121,20 @@ export async function searchJuejin(query: string, limit: number, options?: { sig
             const responseData = response.data;
 
             if (responseData.err_no !== 0) {
-                console.error(`❌ Juejin API error: ${responseData.err_msg}`);
+                const message = `Juejin API error: ${responseData.err_msg || `err_no ${responseData.err_no}`}`;
+                if (allResults.length === 0) {
+                    throw new AppError({
+                        code: 'engine_error',
+                        engine: 'juejin',
+                        message,
+                        retryable: true
+                    });
+                }
+                metrics.warn('juejin.pagination_error', { engine: 'juejin', message });
                 break;
             }
 
             if (!responseData.data || !Array.isArray(responseData.data)) {
-                console.error('⚠️ No more results from Juejin API');
                 break;
             }
 
@@ -136,7 +144,6 @@ export async function searchJuejin(query: string, limit: number, options?: { sig
 
             // 检查是否有下一页
             if (!responseData.has_more || !responseData.cursor || results.length === 0) {
-                console.error('⚠️ No more results, ending search');
                 break;
             }
 

@@ -418,15 +418,26 @@ export class SearchTtlCache {
             this.cache.delete(key);
             return undefined;
         }
-        if (entry.requestedLimit < input.limit) {
+        if (entry.requestedLimit < input.limit && entry.value.results.length < input.limit) {
             return undefined;
         }
         if (entry.value.results.length > input.limit) {
             const truncatedResults = entry.value.results.slice(0, input.limit);
+            const { outcome } = computeSearchOutcome(
+                truncatedResults.length,
+                entry.value.partialFailures,
+                entry.value.directAnswer,
+                {
+                    requestedLimit: input.limit,
+                    minResults: input.minResults,
+                    primaryEngines: entry.value.engines
+                }
+            );
             return {
                 ...entry.value,
                 totalResults: truncatedResults.length,
-                results: truncatedResults
+                results: truncatedResults,
+                outcome
             };
         }
         return entry.value;
@@ -439,6 +450,12 @@ export class SearchTtlCache {
                 this.cache.delete(key);
             }
         }
+        const key = this.buildKey(input);
+        const existing = this.cache.get(key);
+        if (existing && existing.requestedLimit > input.limit && existing.expiresAt > now) {
+            // 保留更大 requestedLimit 的丰富缓存，不被小 limit 请求冲掉
+            return;
+        }
         while (this.cache.size >= this.maxEntries) {
             const oldestKey = this.cache.keys().next().value;
             if (oldestKey === undefined) {
@@ -446,7 +463,7 @@ export class SearchTtlCache {
             }
             this.cache.delete(oldestKey);
         }
-        this.cache.set(this.buildKey(input), {
+        this.cache.set(key, {
             value,
             expiresAt: now + (ttlMs ?? this.defaultTtlMs),
             requestedLimit: input.limit
@@ -475,7 +492,11 @@ const DEGRADED_CACHE_TTL_MS = 60 * 1000;
 // 查询长度上限：防止超长查询导致搜索引擎请求超时或被封禁
 export const MAX_QUERY_LENGTH = 500;
 
-export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: SearchTtlCache) {
+export function createSearchService(
+    engineMap: SearchEngineExecutorMap,
+    cache?: SearchTtlCache,
+    appConfig: AppConfig = config
+) {
     const ttlCache = cache ?? new SearchTtlCache();
     // P1-4：并发同参数查询合并（singleflight 去重）：
     // 在第一个请求尚未返回写进 TTL 缓存前，后续相同查询共享同一 in-flight Promise，避免同时打出 N 份上游请求。
@@ -526,7 +547,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
             metrics.recordCacheMiss();
 
             const runPromise = (async (): Promise<SearchExecutionResult> => {
-                const deadlineMs = SEARCH_DEADLINE_MS;
+                const deadlineMs = appConfig.searchDeadlineMs;
                 const deadlineAt = Date.now() + deadlineMs;
 
                 if (globalSemaphore) {
@@ -587,7 +608,9 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                         engineMap,
                         effectiveSearchMode,
                         deadlineAt,
-                        perEngineTimeoutMs
+                        perEngineTimeoutMs,
+                        allowedEngines: appConfig.allowedSearchEngines,
+                        siteDomains
                     });
 
                     merged = cascade.merged.filter((result) => matchesSiteDomains(result.url, siteDomains));
@@ -595,7 +618,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, cache?: 
                     allMetrics.push(...cascade.cascadeMetrics);
 
                     // 管道第 3 阶段：全局重排与截断
-                    merged = rankSearchResults(merged, cleanQuery).slice(0, limit);
+                    merged = rankSearchResults(merged, cleanQuery, { authorityDomains: appConfig.authorityDomains }).slice(0, limit);
 
                     const { outcome, retryable } = computeSearchOutcome(
                         merged.length,

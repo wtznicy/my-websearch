@@ -43,10 +43,12 @@ export async function resolveHttpRedirectUrl(
             })
         );
 
-        const finalUrl = response.request?.res?.responseUrl
-            ?? (typeof response.request?.res?.headers?.location === 'string'
+        const locationHeader = typeof response.headers?.location === 'string'
+            ? response.headers.location
+            : (typeof response.request?.res?.headers?.location === 'string'
                 ? response.request.res.headers.location
                 : undefined);
+        const finalUrl = response.request?.res?.responseUrl ?? locationHeader;
 
         if (typeof finalUrl === 'string' && finalUrl.startsWith('http')) {
             return finalUrl;

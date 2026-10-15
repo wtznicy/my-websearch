@@ -253,7 +253,8 @@ async function fetchSogouMobileHtml(query: string, page: number = 1, signal?: Ab
  * 真实链接直接来自 URL 参数，无需 HTTP 跟随（这是移动端路径最大的性能收益）。
  */
 export function parseSogouMobileResults(html: string): SearchResult[] {
-    if (isSogouChallengePage(html)) {
+    const $ = cheerio.load(html);
+    if (isSogouChallengePage(html, $)) {
         throw new AppError({
             code: 'bot_challenge',
             retryable: false,
@@ -262,7 +263,6 @@ export function parseSogouMobileResults(html: string): SearchResult[] {
         });
     }
 
-    const $ = cheerio.load(html);
     const results: SearchResult[] = [];
 
     $('.vrResult').each((_, element) => {
@@ -319,7 +319,8 @@ export function parseSogouMobileResults(html: string): SearchResult[] {
 }
 
 export function parseSogouSearchResults(html: string): SearchResult[] {
-    if (isSogouChallengePage(html)) {
+    const $ = cheerio.load(html);
+    if (isSogouChallengePage(html, $)) {
         throw new AppError({
             code: 'bot_challenge',
             retryable: false,
@@ -328,7 +329,6 @@ export function parseSogouSearchResults(html: string): SearchResult[] {
         });
     }
 
-    const $ = cheerio.load(html);
     const results: SearchResult[] = [];
     const seenUrls = new Set<string>();
 
@@ -434,6 +434,10 @@ async function searchSogouPage(query: string, page: number, signal?: AbortSignal
 /** PC 端被反爬拦截后的"暂停期"：期间直接走移动端，避免每次白等 PC 端的失败路径 */
 const SOGOU_PC_BLOCK_TTL_MS = 10 * 60 * 1000;
 let sogouPcBlockedUntil = 0;
+
+export function resetSogouState(): void {
+    sogouPcBlockedUntil = 0;
+}
 
 /**
  * 双端策略（移动端优先 + PC 端兜底）：

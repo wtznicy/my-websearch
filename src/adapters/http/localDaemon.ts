@@ -10,6 +10,7 @@ import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
 import { ErrorCode, extractErrorCode, extractErrorStatus } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
+import { isContext7QuotaExhaustedError } from '../../engines/context7/context7.js';
 
 export type LocalDaemonOptions = {
     host?: string;
@@ -149,11 +150,21 @@ function parseMaxChars(maxChars: unknown): number {
         return 30000;
     }
 
-    if (typeof maxChars !== 'number' || !Number.isInteger(maxChars) || maxChars < 1000 || maxChars > 200000) {
-        throw new Error('maxChars must be an integer between 1000 and 200000');
+    if (typeof maxChars !== 'number' || !Number.isInteger(maxChars) || maxChars < 100 || maxChars > 200000) {
+        throw new Error('maxChars must be an integer between 100 and 200000');
     }
 
     return maxChars;
+}
+
+function parseContext7Limit(value: unknown, fallback: number = 5): number {
+    if (value === undefined) {
+        return fallback;
+    }
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 10) {
+        throw new Error('limit must be an integer between 1 and 10');
+    }
+    return value;
 }
 
 function parseBooleanFlag(value: unknown, name: string): boolean | undefined {
@@ -413,7 +424,7 @@ export async function startLocalDaemon(
             const result = await runtime.services.fetchGithubReadme.execute({ url });
 
             if (!result) {
-                sendError(res, 404, 'not_found', 'README not found or repository does not exist', {
+                sendError(res, 404, ErrorCode.NOT_FOUND, 'README not found or repository does not exist', {
                     hint: 'Verify the repository URL and default branch contents.'
                 });
                 return;
@@ -424,8 +435,9 @@ export async function startLocalDaemon(
                 content: result
             }));
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            sendError(res, 400, 'validation_failed', message, {
+            const classification = classifyFetchError(error);
+            sendError(res, classification.statusCode, classification.code, classification.message, {
+                retryable: classification.retryable,
                 hint: 'Use a valid GitHub repository URL in HTTPS or SSH form.'
             });
         }
@@ -440,8 +452,9 @@ export async function startLocalDaemon(
                 content: result.content
             }));
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            sendError(res, 400, 'validation_failed', message, {
+            const classification = classifyFetchError(error);
+            sendError(res, classification.statusCode, classification.code, classification.message, {
+                retryable: classification.retryable,
                 hint: 'Use a valid blog.csdn.net article URL.'
             });
         }
@@ -450,16 +463,79 @@ export async function startLocalDaemon(
     app.post('/fetch-juejin', async (req, res) => {
         try {
             const url = parseUrl(req.body?.url);
-            const result = await runtime.services.fetchJuejinArticle.execute({ url });
+            const format = parseFormat(req.body?.format);
+            const result = await runtime.services.fetchJuejinArticle.execute({ url, format });
             res.json(createSuccessEnvelope({
                 url,
                 content: result.content
             }));
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            sendError(res, 400, 'validation_failed', message, {
+            const classification = classifyFetchError(error);
+            sendError(res, classification.statusCode, classification.code, classification.message, {
+                retryable: classification.retryable,
                 hint: 'Use a valid juejin.cn post URL.'
             });
+        }
+    });
+
+    app.post('/resolve-library-id', async (req, res) => {
+        try {
+            const libraryName = typeof req.body?.libraryName === 'string' ? req.body.libraryName.trim() : '';
+            if (!libraryName) {
+                sendError(res, 400, ErrorCode.INVALID_ARGUMENTS, 'libraryName must be a non-empty string', {
+                    hint: 'Provide a library or package name (e.g. Next.js, express).'
+                });
+                return;
+            }
+            const query = typeof req.body?.query === 'string' && req.body.query.trim() ? req.body.query.trim() : undefined;
+            const limit = parseContext7Limit(req.body?.limit, 5);
+            const result = await runtime.services.context7Libraries.execute({ libraryName, query, limit });
+            const payload = result.query
+                ? result
+                : { libraryName: result.libraryName, results: result.results };
+            res.json(createSuccessEnvelope(payload));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const quotaExhausted = isContext7QuotaExhaustedError(error);
+            sendError(
+                res,
+                quotaExhausted ? 429 : 502,
+                quotaExhausted ? ErrorCode.RATE_LIMITED : ErrorCode.UPSTREAM_ERROR,
+                message,
+                {
+                    retryable: true,
+                    hint: quotaExhausted ? 'Context7 quota exhausted, retry later.' : 'Check connectivity to context7.com or retry later.'
+                }
+            );
+        }
+    });
+
+    app.post('/query-docs', async (req, res) => {
+        try {
+            const libraryId = typeof req.body?.libraryId === 'string' ? req.body.libraryId.trim() : '';
+            if (!libraryId || !libraryId.startsWith('/')) {
+                sendError(res, 400, ErrorCode.INVALID_ARGUMENTS, "libraryId must be a non-empty string starting with '/' (e.g. /vercel/next.js)", {
+                    hint: 'Resolve library ID first using /resolve-library-id.'
+                });
+                return;
+            }
+            const query = typeof req.body?.query === 'string' && req.body.query.trim() ? req.body.query.trim() : undefined;
+            const limit = parseContext7Limit(req.body?.limit, 5);
+            const result = await runtime.services.context7Docs.execute({ libraryId, query, limit });
+            res.json(createSuccessEnvelope(result));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const quotaExhausted = isContext7QuotaExhaustedError(error);
+            sendError(
+                res,
+                quotaExhausted ? 429 : 502,
+                quotaExhausted ? ErrorCode.RATE_LIMITED : ErrorCode.UPSTREAM_ERROR,
+                message,
+                {
+                    retryable: true,
+                    hint: quotaExhausted ? 'Context7 quota exhausted, retry later.' : 'Verify libraryId or retry later.'
+                }
+            );
         }
     });
 

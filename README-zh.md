@@ -28,7 +28,7 @@
 - 🌐 **9 大引擎融合与自适应路由**  
   聚合国内直连（**Bing、百度、CSDN、掘金、搜狗**）与海外主流（**DuckDuckGo、Brave、Startpage、Exa**）。支持中文/英文按语种自动路由（`auto`）、多词并发检索（`queries`）、跨引擎去重排序与 `minResults` 自动级联补位。
 - ⚡ **原生级反爬与算力求解（零浏览器毫秒直通）**  
-  基于 `wreq-js` 原生模拟现代 Chrome TLS/HTTP2 指纹；内置轻量算法秒解 **Startpage Anubis SHA-256 PoW 算力挑战** 与 **DuckDuckGo `d.js` (`isJsaChallenge`) HTML5/算术挑战**；真实 URL 深度解密（搜狗 `uigs_para`、百度 `Location` 直取、Bing Base64 解码）；无需拉起 400MB 浏览器即可稳定穿透风控。
+  基于 `wreq-js` 原生模拟现代 Chrome TLS/HTTP2 指纹；内置轻量算法秒解 **Startpage Anubis SHA-256 PoW 算力挑战** 与 **DuckDuckGo `d.js` (`isJsaChallenge`) HTML5/算术挑战**；真实 URL 深度解密（搜狗跳转页快速还原、百度 `Location` 直取、Bing Base64 解码）；无需拉起 400MB 浏览器即可稳定穿透风控。
 - 📄 **高纯度 Markdown 正文提纯**  
   整合 Mozilla Readability 与容器级智能降噪，剥离导航栏、侧边栏、页脚等干扰信息，精准保留文章主标题（`<article><header><h1>`）、代码围栏及 GFM 表格；支持长文无缝分页（`startIndex`）。
 - 📚 **Context7 官方框架/库文档直查**  
@@ -84,7 +84,7 @@ flowchart TB
 | **`baidu`** | 🇨🇳 直连 | 免 Key | 并发 `Location` 跳转直取 + 反爬验证页精准识别 | 中文资讯、本土百科、国内论坛 |
 | **`csdn`** | 🇨🇳 直连 | 免 Key | 自动持久化阿里云 WAF Cookie + 空壳响应智能重试 | 中文报错排查、开发踩坑笔记 |
 | **`juejin`** | 🇨🇳 直连 | 免 Key | 掘金官方接口直调，极速提取干净长文 | 前端/后端现代中文高质量技术博文 |
-| **`sogou`** | 🇨🇳 直连 | 免 Key | 桌面/移动双栈解析 + `uigs_para` 令牌还原 + 自动去推广 | 微信公众号外链、中文长尾问答 |
+| **`sogou`** | 🇨🇳 直连 | 免 Key | 桌面/移动双栈解析 + 跳转页快速还原 + 自动去推广 | 微信公众号外链、中文长尾问答 |
 | **`duckduckgo`** | 🌐 需代理 | 免 Key | Preload `d.js` + **内置 `isJsaChallenge` 求解器** | 英文技术检索、海外开源讨论 |
 | **`startpage`** | 🌐 需代理 | 免 Key | **内置 Anubis SHA-256 PoW 算力求解器** + 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
 | **`brave`** | 🌐 需代理 | 免 Key | 原生指纹直连 + 赞助商商业推广深度剥离 | 独立海外英文索引、技术博客 |
@@ -250,8 +250,8 @@ my-websearch doctor --reset-health
 | `SEARCH_DEADLINE_MS` | `30000` | 搜索任务全局超时硬预算（毫秒） |
 | `SEARCH_AUTHORITY_DOMAINS` | 空 | 结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单） |
 | `SEARCH_MODE` | `auto` | 检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`playwright`（全强走浏览器）<br/>• **一种方式多选引擎**：`playwright:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`playwright:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP） |
-| `AUTO_ROUTE_EN_ENGINES` | `bing,exa` | 英文查询默认自动路由引擎列表（逗号分隔） |
-| `AUTO_ROUTE_ZH_ENGINES` | `bing,baidu,sogou` | 中文查询默认自动路由引擎列表（逗号分隔） |
+| `AUTO_ROUTE_EN_ENGINES` | `bing,duckduckgo` | 英文查询默认自动路由引擎列表（逗号分隔） |
+| `AUTO_ROUTE_ZH_ENGINES` | `baidu,sogou` | 中文查询默认自动路由引擎列表（逗号分隔） |
 
 #### 2. 🌐 代理与网络安全
 

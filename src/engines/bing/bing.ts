@@ -19,7 +19,15 @@ import { metrics } from '../../core/metrics.js';
 import { hasFirstTokenDrift } from '../../core/search/resultRanking.js';
 
 // 默认面向大陆部署用 cn.bing.com；可通过 BING_BASE_URL（兼容 OPEN_WEBSEARCH_BING_HOST）覆盖为 www.bing.com 等获取国际区结果
-const BING_HOME_URL = 'https://www.bing.com/?mkt=zh-CN';
+export function getBingHomeUrl(): string {
+    try {
+        const url = new URL(config.bingBaseUrl || 'https://cn.bing.com/search');
+        return `${url.origin}/?mkt=zh-CN`;
+    } catch {
+        return 'https://www.bing.com/?mkt=zh-CN';
+    }
+}
+const BING_HOME_URL = getBingHomeUrl();
 import { DEFAULT_DESKTOP_UA, DESKTOP_UA_POOL } from '../../utils/userAgents.js';
 const BROWSER_USER_AGENT = DEFAULT_DESKTOP_UA;
 const SEARCH_INPUT_SELECTORS = [
@@ -181,7 +189,7 @@ import { analyzeBingBlockedPage } from '../../core/antiBot/antiBotDetection.js';
  * 判断 Bing 页面是否被反爬拦截。复用调用方已 load 的 cheerio 文档实例，
  * 避免与正式提取重复解析同一页 HTML（原实现每页 load 3 次）。
  */
-function analyzeBlockedPage($: cheerio.CheerioAPI, html: string): { blocked: boolean; hasResults: boolean; detectedKeywords: string[]; title: string } {
+function analyzeBlockedPage($: cheerio.CheerioAPI, html: string): ReturnType<typeof analyzeBingBlockedPage> {
     return analyzeBingBlockedPage($, html);
 }
 
@@ -271,7 +279,7 @@ export function __buildBingBrowserLaunchArgsForTests(hideWindow: boolean, platfo
     return buildBrowserLaunchArgs(hideWindow, platform);
 }
 
-export function __analyzeBlockedPageForTests($: cheerio.CheerioAPI, html: string): { blocked: boolean; hasResults: boolean; detectedKeywords: string[]; title: string } {
+export function __analyzeBlockedPageForTests($: cheerio.CheerioAPI, html: string): ReturnType<typeof analyzeBingBlockedPage> {
     return analyzeBlockedPage($, html);
 }
 
@@ -469,7 +477,7 @@ async function openBingAndSearch(page: PlaywrightPageLike, query: string): Promi
     if (!searchInput) {
         // 修复 hidden-headed 冷启动并发搜索时，Bing 首页少量子资源迟迟不触发 load，导致可用搜索框已经出现但 page.goto 仍超时的问题。
         // 搜索流程只依赖 DOM 和搜索框，改为 domcontentloaded 后再显式等待搜索框，避免把资源加载慢误判为搜索失败。
-        await page.goto(BING_HOME_URL, {
+        await page.goto(getBingHomeUrl(), {
             waitUntil: 'domcontentloaded',
             timeout: Math.max(config.playwrightNavigationTimeoutMs, 30000)
         });
@@ -659,6 +667,9 @@ async function searchBingWithHttp(query: string, limit: number, signal?: AbortSi
 
         if (results.length === 0) {
             if (pageNumber === 0 && allResults.length === 0) {
+                if (pageState.isNoResults) {
+                    break;
+                }
                 throw new AppError({
                     code: 'bot_challenge',
                     retryable: false,

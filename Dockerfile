@@ -36,7 +36,7 @@ ENV NODE_ENV=production
 COPY package*.json ./
 
 # Install production dependencies only (keep container small and fast)
-RUN npm ci --omit=dev --ignore-scripts || npm install --omit=dev
+RUN npm ci --omit=dev || npm install --omit=dev
 
 # Copy compiled JavaScript output from builder
 COPY --from=builder /app/build ./build
@@ -49,7 +49,7 @@ EXPOSE 3211
 
 # Health check probe for Glama, Docker, and Kubernetes
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://127.0.0.1:3211/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(0))"
+  CMD node -e "require('http').get('http://127.0.0.1:3211/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
 # Default entrypoint: runs in STDIO / HTTP MCP server mode
 ENTRYPOINT ["node", "build/index.js"]

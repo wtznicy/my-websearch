@@ -5,7 +5,7 @@ import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { BROWSER_USER_AGENT as BAIDU_USER_AGENT } from '../../utils/constants.js';
 import { mapWithConcurrencyBudget } from '../../utils/concurrency.js';
 
-const BAIDU_LINK_PREFIX = 'http://www.baidu.com/link?url=';
+const BAIDU_LINK_REGEX = /^https?:\/\/www\.baidu\.com\/link\?url=/i;
 
 /** 压缩空白：兼容新版百度页面的多行/缩进噪声（title 前导换行、description 尾部空白等） */
 function normalizeWhitespace(value: string): string {
@@ -35,12 +35,12 @@ export { isBaiduAntiBotPage };
 import { resolveHttpRedirectUrl, resolveBatchRedirects } from '../../utils/redirectResolver.js';
 
 /**
- * 解析百度搜索结果里的中转跳转链接（http://www.baidu.com/link?url=...）。
+ * 解析百度搜索结果里的中转跳转链接（http/https://www.baidu.com/link?url=...）。
  * 百度桌面端对每个结果生成一次性的跳转 URL，直接拿它无法 fetch 到真实页面。
  * 通过一次 HEAD 请求跟随重定向拿到最终目标 URL；失败时回退到原链接。
  */
 async function resolveBaiduRedirectUrl(linkUrl: string): Promise<string> {
-    if (!linkUrl.startsWith(BAIDU_LINK_PREFIX)) {
+    if (!BAIDU_LINK_REGEX.test(linkUrl)) {
         return linkUrl;
     }
 

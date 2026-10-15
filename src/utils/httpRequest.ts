@@ -195,7 +195,7 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
     if (signal !== undefined) {
         requestOptions.signal = signal;
     }
-    const effectiveMaxRedirects = trustedStaticHost ? 0 : maxRedirects;
+    const effectiveMaxRedirects = maxRedirects ?? (trustedStaticHost ? 0 : undefined);
     if (effectiveMaxRedirects !== undefined) {
         requestOptions.maxRedirects = effectiveMaxRedirects;
     }

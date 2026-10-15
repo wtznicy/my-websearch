@@ -61,7 +61,7 @@ describe('cookie persistence', () => {
         // TTL 设为极小值（1 天 = 86400000ms > 0；通过回写过期时间模拟）
         const storePath = path.join(tempDir, 'cookies.json');
         const store = JSON.parse(fs.readFileSync(storePath, 'utf8'));
-        store.baidu.savedAt = Date.now() - 8 * 24 * 60 * 60 * 1000; // 8 天前
+        store.baidu.savedAt = Date.now() - 31 * 24 * 60 * 60 * 1000; // 31 天前
         fs.writeFileSync(storePath, JSON.stringify(store), 'utf8');
         expect(await loadPersistedBaiduCookies()).toBeNull();
     });

@@ -98,7 +98,8 @@ export function isImpersonateAvailable(): Promise<boolean> {
 }
 
 function buildImpersonateSearchUrl(query: string, pageNumber: number): string {
-    const url = new URL('https://cn.bing.com/search');
+    const baseUrl = config.bingBaseUrl || 'https://cn.bing.com/search';
+    const url = new URL(baseUrl);
     url.searchParams.set('q', query);
     if (url.hostname.includes('cn.bing.com')) {
         url.searchParams.set('setlang', 'zh-CN');
@@ -284,6 +285,12 @@ export async function searchBingWithImpersonate(
 
             if (results.length === 0) {
                 if (pageNumber === 0 && allResults.length === 0) {
+                    const isNoResults = html.includes('class="b_no"')
+                        || html.includes('id="b_no"')
+                        || /没有与此相关的结果|找不到和您的查询相符的结果|no results found for|there are no results for/i.test(html);
+                    if (isNoResults) {
+                        break;
+                    }
                     throw new AppError({
                         code: 'bot_challenge',
                         retryable: false,

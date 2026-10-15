@@ -26,7 +26,7 @@ if (isDirectMode) {
 } else if (process.env.PROXY_URL !== undefined) {
     evalProxyUrl = process.env.PROXY_URL;
 } else {
-    evalProxyUrl = 'http://127.0.0.1:7897';
+    evalProxyUrl = '';
 }
 
 try {
@@ -120,6 +120,7 @@ const cases = [
     { id: 'fetch-juejin', tool: 'fetchJuejinArticle', args: { url: 'https://juejin.cn/post/7115474775136272392' } },
     { id: 'fetch-github', tool: 'fetchGithubReadme', args: { url: 'https://github.com/modelcontextprotocol/servers' } },
     { id: 'resolve-lib', tool: 'resolveLibraryId', args: { libraryName: 'react', query: 'hooks' } },
+    { id: 'query-docs', tool: 'queryDocs', args: { libraryId: '/facebook/react', query: 'useState hooks', limit: 3 } },
     // —— 安全与错误处理 ——
     { id: 'ssrf-loopback', tool: 'fetchWebContent', args: { url: 'http://127.0.0.1:18080/secret', maxChars: 3000 }, expectError: true, expectedErrorPattern: /public HTTP|private or local|loopback|not allowed/i },
     { id: 'ssrf-private-ip', tool: 'fetchWebContent', args: { url: 'http://192.168.1.1/admin', maxChars: 3000 }, expectError: true, expectedErrorPattern: /public HTTP|private or local|not allowed/i },

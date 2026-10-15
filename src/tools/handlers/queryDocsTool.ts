@@ -7,7 +7,8 @@ import {
     logSafeError,
     withErrorHint,
     CONTEXT7_QUOTA_HINT,
-    TOOL_ANNOTATION_HINTS
+    TOOL_ANNOTATION_HINTS,
+    capTextResponse
 } from '../toolShared.js';
 
 export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRuntime): void {
@@ -36,7 +37,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 return {
                     content: [{
                         type: 'text',
-                        text: JSON.stringify(result, null, 2)
+                        text: capTextResponse(JSON.stringify(result, null, 2))
                     }]
                 };
             } catch (error) {

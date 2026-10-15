@@ -14,7 +14,7 @@ import * as path from 'node:path';
  * 存储：~/.my-websearch/cookies.json（可用 MYWEBSEARCH_DATA_DIR 覆盖，测试用）
  */
 
-const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** 百度长期 cookie 白名单（按 name 匹配） */
 const BAIDU_LONG_LIVED_COOKIE_NAMES = new Set(['BAIDUID', 'BAIDUID_BFESS', 'BIDUPSID']);
@@ -65,7 +65,10 @@ function writeStore(store: CookieStoreFile): void {
     try {
         const dir = getDataDir();
         fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(getStorePath(), JSON.stringify(store, null, 2), 'utf8');
+        const targetPath = getStorePath();
+        const tmpPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+        fs.writeFileSync(tmpPath, JSON.stringify(store, null, 2), { encoding: 'utf8', mode: 0o600 });
+        fs.renameSync(tmpPath, targetPath);
     } catch (error) {
         console.warn('Failed to persist cookies (best-effort, continuing):', error instanceof Error ? error.message : String(error));
     }

@@ -8,8 +8,11 @@ export { extractErrorStatus };
  * MCP 单次响应硬上限（字节）。防止 fetchWebContent 在 raw/大 maxChars 场景下
  * 把数 MB JSON 塞进 MCP response 浪费客户端 token。默认 60KB，可配置。
  */
-const rawResponseCap = Number(process.env.OPEN_WEBSEARCH_RESPONSE_CAP_BYTES ?? 60000);
-export const RESPONSE_CAP_BYTES = Number.isFinite(rawResponseCap) && rawResponseCap > 0 ? rawResponseCap : 60000;
+export function getResponseCapBytes(): number {
+    const raw = Number(process.env.OPEN_WEBSEARCH_RESPONSE_CAP_BYTES ?? 60000);
+    return Number.isFinite(raw) && raw > 0 ? raw : 60000;
+}
+export const RESPONSE_CAP_BYTES = 60000;
 
 export const TOOL_ANNOTATION_HINTS = {
     readOnlyHint: true,
@@ -94,11 +97,13 @@ export function buildFetchWebErrorHint(error: unknown): string {
  * 工具级日志门控：LOG_LEVEL=quiet（或 OPEN_WEBSEARCH_QUIET_STARTUP=true）时
  * 静默所有工具执行日志（搜索词、URL、库名等），避免噪音与隐私信息写入宿主日志。
  */
-const quietToolLogs = (process.env.LOG_LEVEL ?? '').toLowerCase() === 'quiet'
-    || process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true';
+export function isQuietToolLogs(): boolean {
+    return (process.env.LOG_LEVEL ?? '').toLowerCase() === 'quiet'
+        || process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true';
+}
 
 export function logTool(message: string): void {
-    if (!quietToolLogs) {
+    if (!isQuietToolLogs()) {
         console.error(message);
     }
 }
@@ -128,15 +133,16 @@ export function logSafeError(context: string, error: unknown): void {
  * 按 UTF-8 字节计量（中文 1 字 = 3 字节），并避免切断多字节字符。
  */
 export function capTextResponse(text: string): string {
-    if (Buffer.byteLength(text, 'utf8') <= RESPONSE_CAP_BYTES) {
+    const cap = getResponseCapBytes();
+    if (Buffer.byteLength(text, 'utf8') <= cap) {
         return text;
     }
-    let truncated = Buffer.from(text, 'utf8').subarray(0, RESPONSE_CAP_BYTES).toString('utf8');
+    let truncated = Buffer.from(text, 'utf8').subarray(0, cap).toString('utf8');
     // 截断点可能落在多字节字符中间，去掉因此产生的替换符（U+FFFD）
     while (truncated.endsWith('\uFFFD')) {
         truncated = truncated.slice(0, -1);
     }
-    return `${truncated}\n[truncated by response cap (${RESPONSE_CAP_BYTES} bytes); article too long to return in full]`;
+    return `${truncated}\n[truncated by response cap (${cap} bytes); article too long to return in full]`;
 }
 
 /**
@@ -146,25 +152,37 @@ export function capTextResponse(text: string): string {
  *    调用方可用 startIndex 继续读完整个文档。
  */
 export function serializeFetchWebResult(result: FetchWebContentResult): string {
+    const cap = getResponseCapBytes();
     const full = JSON.stringify(result, null, 2);
-    if (full.length <= RESPONSE_CAP_BYTES) {
+    if (Buffer.byteLength(full, 'utf8') <= cap) {
         return full;
     }
 
     const { readableHtml, raw, ...core } = result as unknown as Record<string, unknown> & { content?: string; startIndex?: number; totalLength?: number };
     const trimmed = JSON.stringify(core, null, 2);
-    if (trimmed.length <= RESPONSE_CAP_BYTES) {
+    if (Buffer.byteLength(trimmed, 'utf8') <= cap) {
         return trimmed;
     }
 
     const content = core.content ?? '';
-    const overhead = trimmed.length - content.length;
-    const room = Math.max(0, RESPONSE_CAP_BYTES - overhead - 256);
-    const cut = Math.min(content.length, room);
+    const contentBytes = Buffer.byteLength(content, 'utf8');
+    const trimmedBytes = Buffer.byteLength(trimmed, 'utf8');
+    const overhead = Math.max(0, trimmedBytes - contentBytes);
+    const room = Math.max(0, cap - overhead - 256);
+
+    let cutStr = '';
+    if (room > 0) {
+        const cutBuf = Buffer.from(content, 'utf8').subarray(0, room);
+        cutStr = cutBuf.toString('utf8');
+        while (cutStr.endsWith('\uFFFD')) {
+            cutStr = cutStr.slice(0, -1);
+        }
+    }
+    const cut = cutStr.length;
     const startIndex = core.startIndex ?? 0;
     return JSON.stringify({
         ...core,
-        content: `${content.slice(0, cut)}\n[truncated by response cap; use startIndex=${startIndex + cut} to continue]`,
+        content: `${cutStr}\n[truncated by response cap; use startIndex=${startIndex + cut} to continue]`,
         truncated: true,
         hasMore: true,
         nextStartIndex: startIndex + cut,

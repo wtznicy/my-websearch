@@ -15,8 +15,9 @@ This document defines the current machine-readable contract for the CLI control 
 - `my-websearch fetch-web`
 - `my-websearch fetch-csdn`
 - `my-websearch fetch-juejin`
-- `my-websearch fetch-linuxdo`
 - `my-websearch fetch-github-readme`
+- `my-websearch resolve-library-id`
+- `my-websearch query-docs`
 - `my-websearch status`
 - `my-websearch serve`
 
@@ -156,7 +157,6 @@ This shape applies to:
 - `fetch-github-readme`
 - `fetch-csdn`
 - `fetch-juejin`
-- `fetch-linuxdo`
 
 ```json
 {
@@ -183,7 +183,7 @@ Example:
     "daemon": "running",
     "runtime": "ready",
     "activation": "active",
-    "version": "2.x.x",
+    "version": "1.x.x",
     "baseUrl": "http://127.0.0.1:3210",
     "capabilities": [
       "search",
@@ -191,7 +191,9 @@ Example:
       "fetch-csdn",
       "fetch-juejin",
       "fetch-github-readme",
-      "fetch-linuxdo"
+      "resolve-library-id",
+      "query-docs",
+      "metrics"
     ],
     "configSummary": {
       "defaultSearchEngine": "bing",

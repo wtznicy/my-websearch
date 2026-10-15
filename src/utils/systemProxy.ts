@@ -26,6 +26,10 @@ export function isOverseasEngine(engine: string | undefined): boolean {
 /** 缓存状态：undefined = 尚未检测，null = 检测过但无系统代理，string = 系统代理 URL */
 let cachedSystemProxy: string | null | undefined;
 
+export function resetSystemProxyCache(): void {
+    cachedSystemProxy = undefined;
+}
+
 /** 解析系统代理 URL（http://host:port），失败返回 null */
 export function parseProxyUrl(proxyUrl: string): { protocol: 'http'; host: string; port: number } | null {
     try {
@@ -57,13 +61,42 @@ async function readWindowsSystemProxy(): Promise<string | null> {
     return match?.[1] ?? null;
 }
 
+export function parseMacScutilProxyOutput(stdout: string): string | null {
+    const parseField = (pattern: RegExp): string | null => {
+        const m = stdout.match(pattern);
+        return m && m[1] ? m[1].trim() : null;
+    };
+
+    // 检查 HTTPS 代理
+    const httpsEnable = parseField(/HTTPSEnable\s*:\s*([01])/i);
+    const httpsProxy = parseField(/HTTPSProxy\s*:\s*(\S+)/i);
+    const httpsPort = parseField(/HTTPSPort\s*:\s*(\d+)/i);
+    if (httpsEnable === '1' && httpsProxy && httpsPort) {
+        return `http://${httpsProxy}:${httpsPort}`;
+    }
+
+    // 检查 HTTP 代理
+    const httpEnable = parseField(/HTTPEnable\s*:\s*([01])/i);
+    const httpProxy = parseField(/HTTPProxy\s*:\s*(\S+)/i);
+    const httpPort = parseField(/HTTPPort\s*:\s*(\d+)/i);
+    if (httpEnable === '1' && httpProxy && httpPort) {
+        return `http://${httpProxy}:${httpPort}`;
+    }
+
+    // 检查 SOCKS 代理
+    const socksEnable = parseField(/SOCKSEnable\s*:\s*([01])/i);
+    const socksProxy = parseField(/SOCKSProxy\s*:\s*(\S+)/i);
+    const socksPort = parseField(/SOCKSPort\s*:\s*(\d+)/i);
+    if (socksEnable === '1' && socksProxy && socksPort) {
+        return `socks5://${socksProxy}:${socksPort}`;
+    }
+
+    return null;
+}
+
 async function readMacSystemProxy(): Promise<string | null> {
     const { stdout } = await execFileAsync('scutil', ['--proxy']);
-    const parsed = JSON.parse(stdout) as { HTTPEnable?: boolean; HTTPProxy?: string; HTTPPort?: number };
-    if (parsed.HTTPEnable && parsed.HTTPProxy && parsed.HTTPPort) {
-        return `http://${parsed.HTTPProxy}:${parsed.HTTPPort}`;
-    }
-    return null;
+    return parseMacScutilProxyOutput(stdout);
 }
 
 function readEnvSystemProxy(): string | null {

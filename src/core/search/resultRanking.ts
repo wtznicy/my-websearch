@@ -42,19 +42,23 @@ const DEFAULT_AUTHORITY_DOMAINS = [
     'docs.aws.amazon.com'
 ];
 
-function getAuthorityDomains(): string[] {
-    return config.authorityDomains.length > 0
-        ? [...DEFAULT_AUTHORITY_DOMAINS, ...config.authorityDomains]
+function getAuthorityDomains(customDomains?: string[]): string[] {
+    const list = customDomains ?? config.authorityDomains;
+    return list.length > 0
+        ? [...DEFAULT_AUTHORITY_DOMAINS, ...list]
         : DEFAULT_AUTHORITY_DOMAINS;
 }
 
-/** 文本分词：英文/数字词（长度 ≥2）+ 中文 bigram */
+/** 文本分词：英文/数字词（长度 ≥2 或特定技术单字/独立数字/常见标记）+ 中文 bigram */
 export function tokenizeForRanking(text: string): string[] {
     const tokens: string[] = [];
     const lower = text.toLowerCase();
 
-    for (const match of lower.matchAll(/[a-z0-9]{2,}/g)) {
-        tokens.push(match[0]);
+    for (const match of lower.matchAll(/([a-z0-9]+[+#]*|[a-z]|\d+)/g)) {
+        const token = match[0];
+        if (token.length >= 2 || /^[crv\d]$/.test(token)) {
+            tokens.push(token);
+        }
     }
 
     const cjkRuns = lower.match(/[\u4e00-\u9fff]+/g) || [];
@@ -121,7 +125,7 @@ function bm25Scores(queryTokens: string[], docs: string[][]): number[] {
 }
 
 /** 域名权威度（0..1） */
-function authorityScore(url: string): number {
+function authorityScore(url: string, customDomains?: string[]): number {
     let host = '';
     try {
         host = new URL(url).hostname.toLowerCase();
@@ -129,7 +133,7 @@ function authorityScore(url: string): number {
         return 0;
     }
 
-    if (getAuthorityDomains().some((domain) => host === domain || host.endsWith(`.${domain}`))) {
+    if (getAuthorityDomains(customDomains).some((domain) => host === domain || host.endsWith(`.${domain}`))) {
         return 1;
     }
     // 官方文档域：docs.*、*.github.io（官方文档站）、developer.*、*.readthedocs.io
@@ -301,7 +305,7 @@ export function countUsableResults(results: SearchResult[], query: string): numb
 export function rankSearchResults(
     results: SearchResult[],
     query: string,
-    options?: { positionWeight?: number }
+    options?: { positionWeight?: number; authorityDomains?: string[] }
 ): SearchResult[] {
     if (results.length <= 1) {
         return results;
@@ -334,7 +338,7 @@ export function rankSearchResults(
         const relevance = rawBm25 / maxBm25;
         const isEntryPage = applyEntryPagePenalty && isLikelySiteEntryPage(result.url);
         const hasQueryMatch = rawBm25 > 0;
-        const authority = (isEntryPage || !hasQueryMatch) ? 0 : authorityScore(result.url);
+        const authority = (isEntryPage || !hasQueryMatch) ? 0 : authorityScore(result.url, options?.authorityDomains);
         const consensus = Math.min(result.engineHits ?? 1, 3) / 3;
         const entryPagePenalty = isEntryPage ? 0.25 : 0;
         const score = positionWeight * positionScore

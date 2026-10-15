@@ -107,14 +107,16 @@ Example response:
     "daemon": "running",
     "runtime": "ready",
     "activation": "active",
-    "version": "2.x.x",
+    "version": "1.x.x",
     "capabilities": [
       "search",
       "fetch-web",
       "fetch-csdn",
       "fetch-juejin",
       "fetch-github-readme",
-      "fetch-linuxdo"
+      "resolve-library-id",
+      "query-docs",
+      "metrics"
     ],
     "baseUrl": "http://127.0.0.1:3210",
     "configSummary": {
@@ -251,22 +253,42 @@ curl --noproxy '*' -X POST http://127.0.0.1:3210/fetch-juejin \
   -d '{"url":"https://juejin.cn/post/7514613876334721075"}'
 ```
 
-### `POST /fetch-linuxdo`
+### `POST /resolve-library-id`
 
 Request body:
 
 ```json
 {
-  "url": "https://linux.do/t/topic/123.json"
+  "library": "next.js"
 }
 ```
 
 Example:
 
 ```bash
-curl --noproxy '*' -X POST http://127.0.0.1:3210/fetch-linuxdo \
+curl --noproxy '*' -X POST http://127.0.0.1:3210/resolve-library-id \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://linux.do/t/topic/123.json"}'
+  -d '{"library":"next.js"}'
+```
+
+### `POST /query-docs`
+
+Request body:
+
+```json
+{
+  "libraryId": "/vercel/next.js",
+  "query": "app router migration",
+  "limit": 5
+}
+```
+
+Example:
+
+```bash
+curl --noproxy '*' -X POST http://127.0.0.1:3210/query-docs \
+  -H "Content-Type: application/json" \
+  -d '{"libraryId":"/vercel/next.js","query":"app router migration","limit":5}'
 ```
 
 ## Notes

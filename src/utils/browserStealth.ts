@@ -6,7 +6,9 @@
  * （fetchPageHtmlWithBrowser）共用同一套反检测能力，避免重复实现。
  */
 
-const STEALTH_BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+import { DEFAULT_DESKTOP_UA } from './userAgents.js';
+
+const STEALTH_BROWSER_USER_AGENT = DEFAULT_DESKTOP_UA;
 
 const STEALTH_VIEWPORT = { width: 1920, height: 1080 };
 
@@ -27,11 +29,16 @@ export async function setupAntiDetection(page: StealthPage): Promise<void> {
         });
         delete (navigator as unknown as { __proto__?: { webdriver?: unknown } }).__proto__?.webdriver;
 
+        const currentUa = navigator.userAgent || '';
+        const cleanUa = currentUa.replace(/Headless/gi, '') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
         Object.defineProperty(navigator, 'userAgent', {
-            get: () => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            get: () => cleanUa
         });
+        const isMac = cleanUa.includes('Macintosh');
+        const isWin = cleanUa.includes('Windows');
+        const platform = isMac ? 'MacIntel' : (isWin ? 'Win32' : (navigator.platform || 'Win32'));
         Object.defineProperty(navigator, 'platform', {
-            get: () => 'MacIntel'
+            get: () => platform
         });
         Object.defineProperty(navigator, 'languages', {
             get: () => ['zh-CN', 'zh', 'en-US', 'en']

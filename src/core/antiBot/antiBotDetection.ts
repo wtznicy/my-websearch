@@ -78,6 +78,7 @@ export function isBingAntiBotPage(html: string): boolean {
 export function analyzeBingBlockedPage($: cheerio.CheerioAPI, html: string): {
     blocked: boolean;
     hasResults: boolean;
+    isNoResults: boolean;
     detectedKeywords: string[];
     title: string;
 } {
@@ -88,6 +89,9 @@ export function analyzeBingBlockedPage($: cheerio.CheerioAPI, html: string): {
     const resultSelector = '#b_results .b_algo, #b_results li.b_algo, .b_algo, .b_ans';
     const fallbackLinkSelector = '#b_results a[href], #b_topw a[href], .b_algo a[href], .b_ans a[href]';
     const hasResults = $(resultSelector).length > 0 || $(fallbackLinkSelector).length > 0;
+    const isNoResults = $('.b_no').length > 0
+        || $('#b_results > li.b_no').length > 0
+        || /没有与此相关的结果|找不到和您的查询相符的结果|no results found for|there are no results for/i.test($('#b_results').text() || $('body').text() || '');
     const hasCaptchaUi = $([
         'iframe[src*="captcha"]',
         '[id*="captcha"]',
@@ -106,11 +110,12 @@ export function analyzeBingBlockedPage($: cheerio.CheerioAPI, html: string): {
         '人机验证',
         '请验证'
     ].some((keyword) => title.includes(keyword));
-    const blocked = !hasResults && (hasCaptchaUi || hasStrongTitleSignal || detectedKeywords.length >= 2);
+    const blocked = !hasResults && !isNoResults && (hasCaptchaUi || hasStrongTitleSignal || detectedKeywords.length >= 2);
 
     return {
         blocked,
         hasResults,
+        isNoResults,
         detectedKeywords,
         title
     };
@@ -119,17 +124,18 @@ export function analyzeBingBlockedPage($: cheerio.CheerioAPI, html: string): {
 /**
  * Brave 反爬/拦截页检测（按 title 关键词判断）
  */
-export function isBraveBlockedPage(html: string): boolean {
-    const title = cheerio.load(html)('title').first().text().trim().toLowerCase();
+export function isBraveBlockedPage(html: string, $doc?: cheerio.CheerioAPI): boolean {
+    const $ = $doc ?? cheerio.load(html);
+    const title = $('title').first().text().trim().toLowerCase();
     return BRAVE_BLOCKED_TITLE_KEYWORDS.some((keyword) => title.includes(keyword));
 }
 
 /**
  * 搜狗验证码/拦截页检测
  */
-export function isSogouChallengePage(html: string): boolean {
+export function isSogouChallengePage(html: string, $doc?: cheerio.CheerioAPI): boolean {
     const normalized = html.toLowerCase();
-    const $ = cheerio.load(html);
+    const $ = $doc ?? cheerio.load(html);
     const title = $('title').first().text().trim();
 
     return normalized.includes('antispider')
@@ -141,9 +147,9 @@ export function isSogouChallengePage(html: string): boolean {
 /**
  * Startpage Captcha / 人机验证页检测
  */
-export function isStartpageCaptchaPage(html: string): boolean {
+export function isStartpageCaptchaPage(html: string, $doc?: cheerio.CheerioAPI): boolean {
     const normalized = html.toLowerCase();
-    const $ = cheerio.load(html);
+    const $ = $doc ?? cheerio.load(html);
     const title = $('title').first().text().trim().toLowerCase();
 
     if (normalized.includes('/sp/captcha')) {

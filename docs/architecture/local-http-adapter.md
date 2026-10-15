@@ -65,7 +65,8 @@ Current `GET /status` success payload includes:
 - `POST /fetch-csdn`
 - `POST /fetch-juejin`
 - `POST /fetch-github-readme`
-- `POST /fetch-linuxdo`
+- `POST /resolve-library-id`
+- `POST /query-docs`
 
 ## Optional future routes
 
@@ -118,7 +119,9 @@ Current daemon capability names are CLI/HTTP-oriented:
 - `fetch-csdn`
 - `fetch-juejin`
 - `fetch-github-readme`
-- `fetch-linuxdo`
+- `resolve-library-id`
+- `query-docs`
+- `metrics`
 
 This is intentionally not the same naming layer as MCP tool names.
 The mapping question should be treated as a compatibility decision, not changed casually.

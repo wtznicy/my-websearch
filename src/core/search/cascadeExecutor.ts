@@ -12,6 +12,7 @@ import {
     mergeSearchResults,
     isPlaceholderResult
 } from './searchService.js';
+import { matchesSiteDomains } from '../../engines/bing/bing.js';
 import {
     buildHintedMessage,
     isRetryableEngineError,
@@ -30,6 +31,8 @@ export interface ExecuteCascadeOptions {
     effectiveSearchMode?: AppConfig['searchMode'];
     deadlineAt: number;
     perEngineTimeoutMs: number;
+    allowedEngines?: string[];
+    siteDomains?: string[];
 }
 
 export interface ExecuteCascadeResult {
@@ -113,11 +116,13 @@ export function pickCascadeCandidates(
     cleanQuery: string,
     usedEngines: Set<string>,
     engineMap: SearchEngineExecutorMap,
-    hasExaKey: boolean
+    hasExaKey: boolean,
+    allowedEngines?: string[]
 ): string[] {
     const isEligible = (engine: string): boolean => (
         !usedEngines.has(engine)
         && typeof engineMap[engine] === 'function'
+        && (!allowedEngines || allowedEngines.length === 0 || allowedEngines.includes(engine))
         && !isEngineCircuitOpen(engine)
         && !isKnownUnreachableOverseasEngine(engine)
         && (engine !== 'exa' || hasExaKey)
@@ -134,7 +139,10 @@ export function pickCascadeCandidates(
     }
 
     // 刻意权衡：只要 engineMap 注册过任一全球引擎（真实运行环境），英文查询在无可用全球候选时直接返回 []，绝不跨语言回落中文引擎
-    const hasAnyGlobalEngineRegistered = EN_CASCADE_PRIORITY.some((engine) => typeof engineMap[engine] === 'function');
+    const hasAnyGlobalEngineRegistered = EN_CASCADE_PRIORITY.some((engine) =>
+        typeof engineMap[engine] === 'function'
+        && (!allowedEngines || allowedEngines.length === 0 || allowedEngines.includes(engine))
+    );
     if (hasAnyGlobalEngineRegistered) {
         return [];
     }
@@ -155,7 +163,9 @@ export async function executeCascade(
         engineMap,
         effectiveSearchMode,
         deadlineAt,
-        perEngineTimeoutMs
+        perEngineTimeoutMs,
+        allowedEngines,
+        siteDomains
     } = options;
 
     let merged = initialMerged;
@@ -180,7 +190,7 @@ export async function executeCascade(
 
     const usedEngines = new Set(engines);
     const hasExaKey = Boolean(process.env.EXA_API_KEY?.trim());
-    const initialCandidates = pickCascadeCandidates(cleanQuery, usedEngines, engineMap, hasExaKey);
+    const initialCandidates = pickCascadeCandidates(cleanQuery, usedEngines, engineMap, hasExaKey, allowedEngines);
 
     let cascadeBatches = 0;
     let remainingCandidates = [...initialCandidates];
@@ -263,7 +273,8 @@ export async function executeCascade(
                         cascadedEngines.push(candidate);
                         engineResults.push(results);
                         merged = mergeSearchResults(engineResults)
-                            .filter((result) => !isPlaceholderResult(result));
+                            .filter((result) => !isPlaceholderResult(result))
+                            .filter((result) => matchesSiteDomains(result.url, siteDomains ?? []));
                         batchNewResults += merged.length - before;
                         // 同批内一旦某个候选引擎已凑够 minResults 可用结果，立即用 cascade_aborted 哨兵取消同批仍在等待的其他慢引擎
                         if (countUsableResults(merged, cleanQuery) >= minResults) {

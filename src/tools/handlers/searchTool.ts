@@ -233,7 +233,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
         }
     );
 
-    setContext7QuotaListener(() => {
+    const unsubscribe = setContext7QuotaListener(() => {
         try {
             searchTool.update({
                 description: getSearchDescription()
@@ -242,4 +242,14 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
             // best-effort update
         }
     });
+
+    if (server.server && typeof (server.server as { onclose?: () => void }).onclose !== 'undefined') {
+        const prevOnClose = (server.server as { onclose?: () => void }).onclose;
+        (server.server as { onclose?: () => void }).onclose = () => {
+            unsubscribe?.();
+            if (typeof prevOnClose === 'function') {
+                prevOnClose();
+            }
+        };
+    }
 }
