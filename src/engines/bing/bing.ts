@@ -27,7 +27,6 @@ export function getBingHomeUrl(): string {
         return 'https://www.bing.com/?mkt=zh-CN';
     }
 }
-const BING_HOME_URL = getBingHomeUrl();
 import { DEFAULT_DESKTOP_UA, DESKTOP_UA_POOL } from '../../utils/userAgents.js';
 const BROWSER_USER_AGENT = DEFAULT_DESKTOP_UA;
 const SEARCH_INPUT_SELECTORS = [

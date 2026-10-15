@@ -480,7 +480,10 @@ export async function startLocalDaemon(
 
     app.post('/resolve-library-id', async (req, res) => {
         try {
-            const libraryName = typeof req.body?.libraryName === 'string' ? req.body.libraryName.trim() : '';
+            const rawName = typeof req.body?.libraryName === 'string'
+                ? req.body.libraryName
+                : (typeof req.body?.library === 'string' ? req.body.library : '');
+            const libraryName = rawName.trim();
             if (!libraryName) {
                 sendError(res, 400, ErrorCode.INVALID_ARGUMENTS, 'libraryName must be a non-empty string', {
                     hint: 'Provide a library or package name (e.g. Next.js, express).'

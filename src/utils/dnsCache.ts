@@ -226,7 +226,7 @@ export const cachedDnsLookup: DnsLookupFn = (hostname, options, callback) => {
     }
 
     const pending: Promise<InFlightResult> = new Promise<InFlightResult>((resolve) => {
-        lookupImpl(hostname, options, (err, ...rest) => {
+        lookupImpl(hostname, { ...options, all: true }, (err, ...rest) => {
             const address = rest[0] as string | dns.LookupAddress[];
             const family = rest[1] as number | undefined;
 

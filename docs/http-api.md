@@ -259,7 +259,7 @@ Request body:
 
 ```json
 {
-  "library": "next.js"
+  "libraryName": "next.js"
 }
 ```
 
@@ -268,7 +268,7 @@ Example:
 ```bash
 curl --noproxy '*' -X POST http://127.0.0.1:3210/resolve-library-id \
   -H "Content-Type: application/json" \
-  -d '{"library":"next.js"}'
+  -d '{"libraryName":"next.js"}'
 ```
 
 ### `POST /query-docs`

@@ -350,10 +350,7 @@ async function acquireWindowsFileLockNonBlocking(
         delay = Math.min(250, Math.floor(delay * 1.5));
     }
 
-    if (!w.LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, overlapped)) {
-        throw new Error('LockFileEx timeout waiting for lock');
-    }
-    return { overlapped };
+    throw new Error('LockFileEx timeout waiting for lock');
 }
 
 async function acquireUnixFileLockNonBlocking(
@@ -372,9 +369,7 @@ async function acquireUnixFileLockNonBlocking(
         delay = Math.min(250, Math.floor(delay * 1.5));
     }
 
-    if (u.flock(fd, LOCK_EX) !== 0) {
-        throw new Error('flock timeout waiting for lock');
-    }
+    throw new Error('flock timeout waiting for lock');
 }
 
 async function withWindowsFileLockAsync<T>(lockFilePath: string, operation: () => Promise<T>): Promise<T> {
