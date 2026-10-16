@@ -31,6 +31,7 @@ export type FetchWebService = {
         raw?: boolean;
         startIndex?: number;
         format?: 'text' | 'markdown';
+        focus?: string;
     }): Promise<FetchWebContentResult>;
 };
 

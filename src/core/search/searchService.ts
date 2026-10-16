@@ -3,7 +3,7 @@ import { AppConfig, config } from '../../config.js';
 import { distributeLimit, SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
 import { rankSearchResults } from './resultRanking.js';
 import { isEngineCircuitOpen, getEngineCircuitRemainingMs } from './engineCircuitBreaker.js';
-import { quoteModelLikeTerms } from '../../utils/queryPreprocess.js';
+import { quoteModelLikeTerms, preprocessSearchQuery } from '../../utils/queryPreprocess.js';
 import { extractSiteDomains, matchesSiteDomains } from '../../engines/bing/bing.js';
 import { metrics } from '../metrics.js';
 import { classifyFailureRetryable, AppError } from '../errors.js';
@@ -520,7 +520,7 @@ export function createSearchService(
                 });
             }
 
-            const searchQuery = quoteModelLikeTerms(cleanQuery);
+            const searchQuery = preprocessSearchQuery(cleanQuery);
             const cacheInput: SearchExecutionInput = { query: searchQuery, engines, limit, searchMode, minResults };
 
             const cached = ttlCache.get(cacheInput);

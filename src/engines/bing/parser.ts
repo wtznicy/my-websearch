@@ -174,6 +174,23 @@ function extractSource(element: CheerioSelection, url: string): string {
     }
 }
 
+function extractDate(element: CheerioSelection, description: string): string | undefined {
+    const rawDate = normalizeWhitespace(
+        element.find('.news_dt, .c_date, .b_attribution .c_date').first().text()
+    );
+    if (rawDate) {
+        const match = rawDate.match(/(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/);
+        if (match && match[1]) {
+            return match[1].replace(/[年/.]/g, '-').replace(/[月日]/g, '');
+        }
+    }
+    const descMatch = description.match(/^(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/);
+    if (descMatch && descMatch[1]) {
+        return descMatch[1].replace(/[年/.]/g, '-').replace(/[月日]/g, '');
+    }
+    return undefined;
+}
+
 function collectFallbackLinks($: LoadedDoc, limit: number, seenUrls: Set<string>, results: SearchResult[]): void {
     const linkContainers = $('#b_results a[href], #b_topw a[href], .b_algo a[href], .b_ans a[href]');
 
@@ -237,12 +254,14 @@ export function parseBingSearchResults(htmlContent: string, limit: number, loade
             }
 
             seenUrls.add(url);
+            const date = extractDate(element, description);
             results.push({
                 title,
                 url,
                 description,
                 source: extractSource(element, url),
-                engine: 'bing'
+                engine: 'bing',
+                ...(date ? { date } : {})
             });
         });
 

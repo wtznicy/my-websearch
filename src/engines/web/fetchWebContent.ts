@@ -53,6 +53,11 @@ export interface FetchWebContentResult {
     byline?: string;
     excerpt?: string;
     siteName?: string;
+    /** 当提取的 Markdown 发生截断（truncated: true）时扫描生成的目录索引，如 ["# Intro (0)", "## Auth (34200)"] */
+    toc?: string[];
+    /** 是否命中 focus 关键词靶向抓取 */
+    focused?: boolean;
+    focusMatchOffset?: number;
 }
 
 export type ExtractedLink = {
@@ -74,6 +79,8 @@ export type FetchWebContentOptions = {
      * 转为 Markdown——保留围栏代码块语言与 GFM 表格，更适合技术文档与 LLM。
      */
     format?: 'text' | 'markdown';
+    /** 章节靶向关键词：在全文中定位该词并返回前后上下文（前后各约 2500 字），大幅节省 Token */
+    focus?: string;
     /** 可选取消信号：触发时中止在途 HTTP 请求与浏览器页面操作 */
     signal?: AbortSignal;
 };
@@ -689,7 +696,7 @@ export async function fetchWebContent(
 
     const withinCookieBudget = createBrowserBudget('fetchWebContent cookie', FETCH_WEB_COOKIE_BUDGET_MS, signal);
     const withinBrowserBudget = createBrowserBudget('fetchWebContent render', FETCH_WEB_BROWSER_BUDGET_MS, signal);
-    const startIndex = Math.max(0, Math.floor(options.startIndex ?? 0));
+    let startIndex = Math.max(0, Math.floor(options.startIndex ?? 0));
     const targetMaxChars = clampMaxChars(maxChars);
 
     // Pre-flight check to avoid downloading oversized payloads when Content-Length is present.
@@ -1024,21 +1031,50 @@ export async function fetchWebContent(
     }
 
     const totalLength = extractedContent.length;
-    // startIndex 越界时显式报错，避免静默返回空内容，同时在 details/hint 中明确返回实际 totalLength
-    if (startIndex >= totalLength) {
-        throw new AppError({
-            code: 'start_index_out_of_range',
-            retryable: false,
-            details: { legacyCode: 'ERR_START_INDEX_OUT_OF_RANGE', totalLength, startIndex },
-            hint: `当前正文实际总长度为 totalLength=${totalLength}，请将 startIndex 设为小于 ${totalLength} 的偏移量（或重置为 0 从头读取）。`,
-            message: `startIndex ${startIndex} is beyond content length ${totalLength}; reset to 0 to read from the beginning`
-        });
+    let pageContent = '';
+    let truncated = false;
+    let focused = false;
+    let focusMatchOffset: number | undefined;
+
+    if (options.focus && options.focus.trim()) {
+        const focusTerm = options.focus.trim().toLowerCase();
+        const lowerContent = extractedContent.toLowerCase();
+        const focusIdx = lowerContent.indexOf(focusTerm);
+        if (focusIdx !== -1) {
+            focused = true;
+            focusMatchOffset = focusIdx;
+            const windowSize = 2500;
+            const start = Math.max(0, focusIdx - windowSize);
+            const end = Math.min(totalLength, focusIdx + focusTerm.length + windowSize);
+            const snippet = extractedContent.slice(start, end);
+            const prefix = start > 0 ? `[... focused on "${options.focus}" at offset ${focusIdx}, showing ${start}-${end} of ${totalLength} ...]\n\n` : '';
+            const suffix = end < totalLength ? `\n\n[... truncated; continue with startIndex=${end} or specify another focus ...]` : '';
+            pageContent = `${prefix}${snippet}${suffix}`;
+            startIndex = start;
+            truncated = start > 0 || end < totalLength;
+        }
     }
-    const pageContent = extractedContent.slice(startIndex, startIndex + targetMaxChars);
-    const truncated = startIndex + targetMaxChars < totalLength;
-    const content = truncated
+
+    if (!focused) {
+        // startIndex 越界时显式报错，避免静默返回空内容，同时在 details/hint 中明确返回实际 totalLength
+        if (startIndex >= totalLength) {
+            throw new AppError({
+                code: 'start_index_out_of_range',
+                retryable: false,
+                details: { legacyCode: 'ERR_START_INDEX_OUT_OF_RANGE', totalLength, startIndex },
+                hint: `当前正文实际总长度为 totalLength=${totalLength}，请将 startIndex 设为小于 ${totalLength} 的偏移量（或重置为 0 从头读取）。`,
+                message: `startIndex ${startIndex} is beyond content length ${totalLength}; reset to 0 to read from the beginning`
+            });
+        }
+        pageContent = extractedContent.slice(startIndex, startIndex + targetMaxChars);
+        truncated = startIndex + targetMaxChars < totalLength;
+    }
+
+    const content = (!focused && truncated)
         ? `${pageContent}\n\n[truncated; continue with startIndex=${startIndex + pageContent.length}]`
         : pageContent;
+
+    const toc = (truncated && !options.raw) ? generateMarkdownToc(extractedContent) : undefined;
 
     return {
         url: parsedUrl.toString(),
@@ -1059,6 +1095,24 @@ export async function fetchWebContent(
         ...(links ? { links } : {}),
         ...(byline ? { byline } : {}),
         ...(excerpt ? { excerpt } : {}),
-        ...(siteName ? { siteName } : {})
+        ...(siteName ? { siteName } : {}),
+        ...(toc && toc.length > 0 ? { toc } : {}),
+        ...(focused ? { focused: true, focusMatchOffset } : {})
     };
+}
+
+export function generateMarkdownToc(markdown: string): string[] {
+    const headingRegex = /(?:^|\n)(#{1,3})\s+([^\n\r]+)/g;
+    const toc: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = headingRegex.exec(markdown)) !== null) {
+        const level = match[1];
+        const title = match[2]?.trim() ?? '';
+        const offset = match.index + (match[0].startsWith('\n') ? 1 : 0);
+        if (title) {
+            const cleanTitle = title.length > 50 ? title.slice(0, 47) + '...' : title;
+            toc.push(`${level} ${cleanTitle} (${offset})`);
+        }
+    }
+    return toc;
 }

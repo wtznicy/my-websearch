@@ -39,12 +39,31 @@ export function parseCsdnResults(
             continue;
         }
         seenUrls.add(url);
+        const rawTime = (re as { post_time?: unknown; create_time?: unknown; created_at?: unknown }).post_time
+            ?? (re as { create_time?: unknown }).create_time
+            ?? (re as { created_at?: unknown }).created_at;
+        let date: string | undefined;
+        if (typeof rawTime === 'number' || (typeof rawTime === 'string' && /^\d{10,13}$/.test(rawTime))) {
+            const num = Number(rawTime);
+            if (!isNaN(num) && num > 0) {
+                date = new Date(num > 1e11 ? num : num * 1000).toISOString().slice(0, 10);
+            }
+        } else if (typeof rawTime === 'string' && rawTime) {
+            const m = rawTime.match(/(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/);
+            if (m && m[1]) date = m[1].replace(/[年/.]/g, '-').replace(/[月日]/g, '');
+        }
+        if (!date) {
+            const m = cleanDigest.match(/^(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/);
+            if (m && m[1]) date = m[1].replace(/[年/.]/g, '-').replace(/[月日]/g, '');
+        }
+
         results.push({
             title: cleanTitle,
             url,
             description: cleanDigest,
             source: nickname || '',
-            engine: 'csdn'
+            engine: 'csdn',
+            ...(date ? { date } : {})
         });
     }
     return results;

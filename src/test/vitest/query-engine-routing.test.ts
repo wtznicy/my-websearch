@@ -61,18 +61,27 @@ describe('pickDefaultEngineForQuery', () => {
         metrics.recordEngineSearch('duckduckgo', 10000, false);
         expect(pickDefaultEnginesForQuery('rust tokio select', 'auto')).toEqual(['bing', 'exa']);
 
-        // 中文主引擎 sogou 熔断时，自动替补 csdn
+        // 中文主引擎 sogou 熔断时，纯中文查询自动替补 csdn
         tripEngineCircuit('sogou');
-        expect(pickDefaultEnginesForQuery('Rust 异步运行时对比', 'auto')).toEqual(['baidu', 'csdn']);
+        expect(pickDefaultEnginesForQuery('异步运行时原理对比', 'auto')).toEqual(['baidu', 'csdn']);
     });
 
-    it('should route CJK-containing queries to baidu regardless of latin technical terms', () => {
-        // 实测：中文技术查询（含英文技术词）在国内引擎召回质量显著更好
-        expect(pickDefaultEngineForQuery('DeepSeek Harness MCP 配置', 'auto')).toBe('baidu');
-        expect(pickDefaultEngineForQuery('RAG 检索增强生成 原理', 'auto')).toBe('baidu');
-        expect(pickDefaultEngineForQuery('React useEffect 依赖数组', 'auto')).toBe('baidu');
-        expect(pickDefaultEngineForQuery('怎么用 npm install 装包', 'auto')).toBe('baidu');
-        expect(pickDefaultEngineForQuery('TypeScript 泛型', 'auto')).toBe('baidu');
+    it('should route mixed Chinese-English technical queries to [bing, juejin, baidu]', () => {
+        expect(pickDefaultEnginesForQuery('Next.js 15 Hydration failed 怎么解决', 'auto'))
+            .toEqual(['bing', 'juejin', 'baidu']);
+        expect(pickDefaultEnginesForQuery('TypeScript satisfies 用法', 'auto'))
+            .toEqual(['bing', 'juejin', 'baidu']);
+        expect(pickDefaultEnginesForQuery('rust tokio 死锁排查', 'auto'))
+            .toEqual(['bing', 'juejin', 'baidu']);
+        expect(pickDefaultEnginesForQuery('vue3 响应式原理', 'auto'))
+            .toEqual(['bing', 'juejin', 'baidu']);
+    });
+
+    it('should route pure Chinese general queries to [baidu, sogou]', () => {
+        expect(pickDefaultEnginesForQuery('量化宽松政策是什么', 'auto'))
+            .toEqual(['baidu', 'sogou']);
+        expect(pickDefaultEnginesForQuery('红烧肉的做法', 'auto'))
+            .toEqual(['baidu', 'sogou']);
     });
 
     it('should route a single CJK char (likely noise) to bing', () => {

@@ -38,6 +38,8 @@ export type Context7Library = {
 
 export type Context7CodeSnippet = {
     codeTitle: string;
+    pageTitle?: string;
+    codeDescription?: string;
     codeList: {
         code: string;
         path?: string;

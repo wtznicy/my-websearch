@@ -108,7 +108,7 @@ export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>)
     const elements = $('#content_left').children().toArray();
 
     // 第一遍：只收集原始数据，避免在循环里串行 await 解析跳转链
-    const collected: Array<{ title: string; href: string; description: string; source: string }> = [];
+    const collected: Array<{ title: string; href: string; description: string; source: string; date?: string }> = [];
     let directAnswer: string | undefined;
     for (const element of elements) {
         const template = String($(element).attr('tpl') || '');
@@ -148,11 +148,21 @@ export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>)
         if (description && sourceText && description.endsWith(sourceText)) {
             description = description.slice(0, -sourceText.length).trim();
         }
+
+        const dateText = normalizeWhitespace($(element).find('.c-color-gray2, .c-gap-right').first().text());
+        let date: string | undefined;
+        const dateMatch = dateText.match(/(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/)
+            || description.match(/^(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/);
+        if (dateMatch && dateMatch[1]) {
+            date = dateMatch[1].replace(/[年/.]/g, '-').replace(/[月日]/g, '');
+        }
+
         collected.push({
             title: normalizeWhitespace(titleElement.text()),
             href,
             description,
-            source: sourceText
+            source: sourceText,
+            date
         });
     }
 
@@ -171,7 +181,8 @@ export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>)
             url,
             description: item.description,
             source: item.source || hostnameOf(url),
-            engine: 'baidu'
+            engine: 'baidu',
+            ...(item.date ? { date: item.date } : {})
         });
     });
 

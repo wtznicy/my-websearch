@@ -93,12 +93,21 @@ export function parseBraveResults(html: string, seenUrls: Set<string>, $doc?: ch
         // Ensure that we have a valid title and URL before adding
         if (title && url && !seenUrls.has(url)) {
             seenUrls.add(url);
+            const ageText = resultElement.find('.snippet-age, .age').first().text().trim();
+            let date: string | undefined;
+            const m = ageText.match(/(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/)
+                || description.match(/(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/);
+            if (m && m[1]) {
+                date = m[1].replace(/[年/.]/g, '-').replace(/[月日]/g, '');
+            }
+
             results.push({
                 title: title,
                 url: url,
                 description: description,
                 source: source,
-                engine: 'brave'
+                engine: 'brave',
+                ...(date ? { date } : {})
             });
         }
     });

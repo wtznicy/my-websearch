@@ -1,4 +1,4 @@
-import { FetchWebContentOptions, FetchWebContentResult } from '../../engines/web/fetchWebContent.js';
+import { FetchWebContentOptions, FetchWebContentResult, generateMarkdownToc } from '../../engines/web/fetchWebContent.js';
 import {
     validateArticleUrl,
     validateGithubRepositoryUrl,
@@ -64,7 +64,8 @@ export function createWebFetchService(
             includeLinks,
             raw,
             startIndex,
-            format
+            format,
+            focus
         }: {
             url: string;
             maxChars: number;
@@ -73,6 +74,7 @@ export function createWebFetchService(
             raw?: boolean;
             startIndex?: number;
             format?: 'text' | 'markdown';
+            focus?: string;
         }): Promise<FetchWebContentResult> {
             if (!validatePublicWebUrl(url)) {
                 throw new AppError({
@@ -89,51 +91,67 @@ export function createWebFetchService(
                     const parsed = new URL(url);
                     const offset = startIndex ?? 0;
 
-                    if (options?.fetchCsdn && parsed.hostname === 'blog.csdn.net' && /^\/[^/]+\/article\/details\/\d+/.test(parsed.pathname)) {
-                        const article = await options.fetchCsdn(url, { format });
+                    const forwardToArticle = async (articleFetcher: ArticleFetcher) => {
+                        const article = await articleFetcher(url, { format });
                         const fullText = article.content;
-                        const pageContent = fullText.slice(offset, offset + maxChars);
-                        const hasMore = fullText.length > offset + maxChars;
+                        let pageContent = '';
+                        let hasMore = false;
+                        let focused = false;
+                        let effectiveOffset = offset;
+
+                        if (focus && focus.trim()) {
+                            const focusTerm = focus.trim().toLowerCase();
+                            const focusIdx = fullText.toLowerCase().indexOf(focusTerm);
+                            if (focusIdx !== -1) {
+                                focused = true;
+                                const windowSize = 2500;
+                                const start = Math.max(0, focusIdx - windowSize);
+                                const end = Math.min(fullText.length, focusIdx + focusTerm.length + windowSize);
+                                const snippet = fullText.slice(start, end);
+                                const prefix = start > 0 ? `[... focused on "${focus}" at offset ${focusIdx}, showing ${start}-${end} of ${fullText.length} ...]\n\n` : '';
+                                const suffix = end < fullText.length ? `\n\n[... truncated; continue with startIndex=${end} or specify another focus ...]` : '';
+                                pageContent = `${prefix}${snippet}${suffix}`;
+                                effectiveOffset = start;
+                                hasMore = start > 0 || end < fullText.length;
+                            }
+                        }
+
+                        if (!focused) {
+                            pageContent = fullText.slice(effectiveOffset, effectiveOffset + maxChars);
+                            hasMore = fullText.length > effectiveOffset + maxChars;
+                        }
+
+                        const toc = hasMore ? generateMarkdownToc(fullText) : undefined;
                         return {
                             url,
                             finalUrl: url,
                             contentType: 'text/markdown',
                             title: '',
-                            retrievalMethod: 'request',
+                            retrievalMethod: 'request' as const,
                             truncated: hasMore,
                             content: pageContent,
                             totalLength: fullText.length,
-                            startIndex: offset,
+                            startIndex: effectiveOffset,
                             hasMore,
-                            nextStartIndex: hasMore ? offset + maxChars : undefined
+                            nextStartIndex: hasMore ? effectiveOffset + maxChars : undefined,
+                            ...(toc && toc.length > 0 ? { toc } : {}),
+                            ...(focused ? { focused: true } : {})
                         };
+                    };
+
+                    if (options?.fetchCsdn && parsed.hostname === 'blog.csdn.net' && /^\/[^/]+\/article\/details\/\d+/.test(parsed.pathname)) {
+                        return await forwardToArticle(options.fetchCsdn);
                     }
 
                     if (options?.fetchJuejin && (parsed.hostname === 'juejin.cn' || parsed.hostname === 'juejin.im') && /^\/post\/\d+/.test(parsed.pathname)) {
-                        const article = await options.fetchJuejin(url, { format });
-                        const fullText = article.content;
-                        const pageContent = fullText.slice(offset, offset + maxChars);
-                        const hasMore = fullText.length > offset + maxChars;
-                        return {
-                            url,
-                            finalUrl: url,
-                            contentType: 'text/markdown',
-                            title: '',
-                            retrievalMethod: 'request',
-                            truncated: hasMore,
-                            content: pageContent,
-                            totalLength: fullText.length,
-                            startIndex: offset,
-                            hasMore,
-                            nextStartIndex: hasMore ? offset + maxChars : undefined
-                        };
+                        return await forwardToArticle(options.fetchJuejin);
                     }
                 } catch {
                     // 若专有抓取器异常，平滑回退到通用 fetcher
                 }
             }
 
-            return fetcher(url, maxChars, { readability, includeLinks, raw, startIndex, format });
+            return fetcher(url, maxChars, { readability, includeLinks, raw, startIndex, format, focus });
         }
     };
 }

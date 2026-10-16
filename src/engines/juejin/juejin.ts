@@ -71,12 +71,21 @@ export function parseJuejinResults(data: JuejinSearchResponse['data']): SearchRe
         const tagNames = tagList.map((tag) => tag?.tag_name).filter(Boolean).join(', ');
         const description = `${cleanContent} | 分类: ${category?.category_name ?? ''} | 标签: ${tagNames} | 👍 ${article.digg_count ?? 0} | 👀 ${article.view_count ?? 0}`;
 
+        let dateStr: string | undefined;
+        if (article.ctime) {
+            const ctimeNum = Number(article.ctime);
+            if (!isNaN(ctimeNum) && ctimeNum > 0) {
+                dateStr = new Date(ctimeNum > 1e11 ? ctimeNum : ctimeNum * 1000).toISOString().slice(0, 10);
+            }
+        }
+
         return {
             title: cleanTitle,
             url: `https://juejin.cn/post/${result_model?.article_id ?? ''}`,
             description: description,
             source: author.user_name ?? '',
-            engine: 'juejin'
+            engine: 'juejin',
+            ...(dateStr ? { date: dateStr } : {})
         };
     });
 }

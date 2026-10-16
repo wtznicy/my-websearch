@@ -66,21 +66,28 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
             inputSchema: {
                 query: z.string().min(1, "Search query must not be empty").max(500, "Search query too long (max 500 characters)").optional()
                     .describe("Single search query (required if 'queries' is omitted; use 'queries' for multi-intent fan-out)"),
-                queries: z.array(z.string().min(1, "Query must not be empty").max(500)).min(1).max(4).optional()
+                queries: z.preprocess((val) => (typeof val === 'string' ? [val] : val), z.array(z.string().min(1, "Query must not be empty").max(500)).min(1).max(4).optional())
                     .describe("1-4 queries run concurrently and merged (required if 'query' is omitted) — for covering multiple intents in one call (e.g. official docs / Chinese community / English). Response includes 'cached: true' only when all sub-queries hit the TTL cache."),
-                limit: z.number().min(1).max(50).optional()
+                limit: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(1).max(50).optional())
                     .describe("Max results (default: server DEFAULT_SEARCH_LIMIT, usually 10)"),
                 searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
-                minResults: z.number().int().min(0).max(50).optional()
+                minResults: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(0).max(50).optional())
                     .describe("Auto-run additional engines when fewer than this many USABLE results (relevant, non-entry-page) come back (default: server DEFAULT_MIN_RESULTS, usually 5; max 50 — larger values only burn the search deadline)"),
-                engines: z.array(getEngineInputSchema()).min(1).optional()
+                engines: z.preprocess((val) => {
+                    if (typeof val === 'string') {
+                        return val.split(',').map((s) => s.trim()).filter(Boolean);
+                    }
+                    return val;
+                }, z.array(getEngineInputSchema()).min(1).optional())
                     .describe("Search engines to use (default: server default, which may auto-route by query language)"),
+                fetchTop: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(0).max(3).optional())
+                    .describe("Two-in-one search & fetch: automatically fetch full readable Markdown content for top N results (0~3) in a single turn (up to 4000 chars per article)"),
                 verbose: z.boolean().optional()
                     .describe("Include verbose diagnostic fields (engineMetrics, full failure hints, and redundant source hostnames); default false to save tokens")
             },
             annotations: TOOL_ANNOTATION_HINTS
         },
-        async ({query, queries, limit, searchMode, engines, minResults, verbose}) => {
+        async ({ query, queries, limit, searchMode, engines, minResults, fetchTop, verbose }) => {
             try {
                 const queryList = (queries && queries.length > 0 ? queries : (query ? [query] : [])).map((q) => q.trim()).filter(Boolean);
                 if (queryList.length === 0) {
@@ -144,6 +151,31 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                     )
                     : (executed[0]?.results ?? []);
 
+                // fetchTop: 为排名前 N (0~3) 的搜索结果并发拉取正文并注入 fullContent 字段
+                if (fetchTop && fetchTop > 0) {
+                    const topN = Math.min(fetchTop, 3, mergedResults.length);
+                    if (topN > 0) {
+                        logTool(`Fetching fullContent for top ${topN} search results`);
+                        const fetchTargets = mergedResults.slice(0, topN);
+                        const fetchSettled = await Promise.allSettled(
+                            fetchTargets.map((item) =>
+                                runtime.services.fetchWeb.execute({
+                                    url: item.url,
+                                    maxChars: 4000,
+                                    readability: true,
+                                    format: 'markdown'
+                                })
+                            )
+                        );
+                        fetchTargets.forEach((item, idx) => {
+                            const res = fetchSettled[idx];
+                            if (res && res.status === 'fulfilled' && res.value.content) {
+                                item.fullContent = res.value.content;
+                            }
+                        });
+                    }
+                }
+
                 const failures = executed.flatMap((one) => one.partialFailures);
                 const allEngines = [...new Set(executed.flatMap((one) => one.engines))];
                 const allCascadedEngines = [...new Set(executed.flatMap((one) => one.cascadedEngines ?? []))];
@@ -160,20 +192,21 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                 const outputResults = verbose
                     ? mergedResults
                     : mergedResults.map((item) => {
-                        if (!item.source || !item.url) {
-                            return item;
+                        const { engine: _omittedEngine, engineHits: _omittedHits, ...rest } = item;
+                        if (!rest.source || !rest.url) {
+                            return rest;
                         }
                         try {
-                            const urlHost = new URL(item.url).hostname.replace(/^www\./i, '').toLowerCase();
-                            const srcHost = item.source.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/^www\./i, '').toLowerCase();
+                            const urlHost = new URL(rest.url).hostname.replace(/^www\./i, '').toLowerCase();
+                            const srcHost = rest.source.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/^www\./i, '').toLowerCase();
                             if (urlHost && srcHost === urlHost) {
-                                const { source: _omittedSource, ...rest } = item;
-                                return rest;
+                                const { source: _omittedSource, ...cleanItem } = rest;
+                                return cleanItem;
                             }
                         } catch {
                             // keep original item if URL cannot be parsed
                         }
-                        return item;
+                        return rest;
                     });
 
                 const outputFailures = (verbose || outcome === 'failed')
@@ -194,13 +227,13 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                                 }
                                 : { query: queryList[0] ?? '' }),
                             outcome,
-                            retryable,
+                            ...(outcome !== 'ok' || verbose ? { retryable } : {}),
                             ...(allCached ? { cached: true } : {}),
                             engines: allEngines,
                             ...(allCascadedEngines.length > 0 ? { cascadedEngines: allCascadedEngines } : {}),
                             totalResults: mergedResults.length,
                             results: outputResults,
-                            partialFailures: outputFailures,
+                            ...(outputFailures.length > 0 ? { partialFailures: outputFailures } : {}),
                             ...(directAnswer ? { directAnswer } : {}),
                             ...(verbose && allMetrics.length > 0 ? { engineMetrics: allMetrics } : {})
                         })

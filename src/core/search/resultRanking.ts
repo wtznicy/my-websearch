@@ -298,6 +298,29 @@ export function countUsableResults(results: SearchResult[], query: string): numb
     return usable;
 }
 
+const FRESHNESS_KEYWORDS = /\b(202[4-9]|latest|recent|newest|today)\b|最新|新版|新特性|升级|版本|\bv\d+\b/i;
+
+export function computeFreshnessAdjustment(dateStr?: string, queryHasFreshness?: boolean): number {
+    if (!queryHasFreshness || !dateStr) {
+        return 0;
+    }
+    const yearMatch = dateStr.match(/\b(20\d{2})\b/);
+    if (!yearMatch || !yearMatch[1]) {
+        return 0;
+    }
+    const year = parseInt(yearMatch[1], 10);
+    const currentYear = new Date().getFullYear();
+    // 近 1~2 年（如 2025、2026）加 +0.10 分
+    if (year >= currentYear - 1) {
+        return 0.10;
+    }
+    // 3 年以前（如 2023 及更早）扣 -0.10 分
+    if (year <= currentYear - 3) {
+        return -0.10;
+    }
+    return 0;
+}
+
 /**
  * 对融合后的结果做混合重排；查询为空或结果数 ≤1 时原样返回。
  * 只调整顺序，不增删结果、不修改字段。
@@ -323,6 +346,7 @@ export function rankSearchResults(
     // 非导航类查询下对"站点入口页"降权：惩罚 + 取消权威加分
     // （github.com/ 这类入口页此前因域在白名单里拿满权威分，仍能压过真实结果页）
     const applyEntryPagePenalty = !isNavigationalQuery(query);
+    const queryHasFreshness = FRESHNESS_KEYWORDS.test(query);
 
     // 权重归一：positionWeight 默认 0.4（单查询内位置分有意义）；
     // 多查询合并后重排传 0——配额顺序不代表排名，位置分应让位给内容信号
@@ -341,11 +365,13 @@ export function rankSearchResults(
         const authority = (isEntryPage || !hasQueryMatch) ? 0 : authorityScore(result.url, options?.authorityDomains);
         const consensus = Math.min(result.engineHits ?? 1, 3) / 3;
         const entryPagePenalty = isEntryPage ? 0.25 : 0;
+        const freshnessAdjustment = computeFreshnessAdjustment(result.date, queryHasFreshness);
         const score = positionWeight * positionScore
             + relevanceWeight * relevance
             + authorityWeight * authority
             + consensusWeight * consensus
-            - entryPagePenalty;
+            - entryPagePenalty
+            + freshnessAdjustment;
         return { result, score, index };
     });
 

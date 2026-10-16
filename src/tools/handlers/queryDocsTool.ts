@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { isContext7QuotaExhaustedError } from '../../engines/context7/context7.js';
+import { isContext7QuotaExhaustedError, Context7DocsResult } from '../../engines/context7/context7.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import {
     logTool,
@@ -10,6 +10,71 @@ import {
     TOOL_ANNOTATION_HINTS,
     capTextResponse
 } from '../toolShared.js';
+
+export function formatContext7DocsAsMarkdown(result: Context7DocsResult): string {
+    const lines: string[] = [];
+    const titleParts = [`# Docs: ${result.libraryId}`];
+    if (result.resolvedFrom) {
+        titleParts.push(`(resolved from "${result.resolvedFrom}")`);
+    } else if (result.redirectedFrom) {
+        titleParts.push(`(redirected from "${result.redirectedFrom}")`);
+    }
+    lines.push(titleParts.join(' '));
+    if (result.query) {
+        lines.push(`> Query: ${result.query}`);
+    }
+    lines.push('');
+
+    if (result.infoSnippets && result.infoSnippets.length > 0) {
+        for (const info of result.infoSnippets) {
+            if (info.content) {
+                lines.push(info.content.trim());
+                lines.push('');
+            }
+        }
+    }
+
+    if (result.codeSnippets && result.codeSnippets.length > 0) {
+        for (const snippet of result.codeSnippets) {
+            const pageTitle = snippet.pageTitle || 'Documentation';
+            const codeTitle = snippet.codeTitle || '';
+            const heading = codeTitle ? `### ${pageTitle}: ${codeTitle}` : `### ${pageTitle}`;
+            lines.push(heading);
+            if (snippet.codeDescription) {
+                lines.push(snippet.codeDescription.trim());
+            }
+            if (Array.isArray(snippet.codeList) && snippet.codeList.length > 0) {
+                for (const item of snippet.codeList) {
+                    if (item.path) {
+                        lines.push(`*File: ${item.path}*`);
+                    }
+                    const lang = item.language || '';
+                    lines.push(`\`\`\`${lang}\n${(item.code || '').trim()}\n\`\`\``);
+                    lines.push('');
+                }
+            } else if ((snippet as unknown as { code?: string; codeLanguage?: string }).code) {
+                const legacy = snippet as unknown as { code?: string; codeLanguage?: string; language?: string };
+                const lang = legacy.codeLanguage || legacy.language || '';
+                lines.push(`\`\`\`${lang}\n${(legacy.code || '').trim()}\n\`\`\``);
+                lines.push('');
+            }
+        }
+    } else if (!result.infoSnippets || result.infoSnippets.length === 0) {
+        lines.push('*No code snippets returned.*');
+        lines.push('');
+    }
+
+    if (result.alternativeLibraries && result.alternativeLibraries.length > 0) {
+        lines.push('---');
+        lines.push('**Alternative Libraries:**');
+        for (const alt of result.alternativeLibraries) {
+            lines.push(`- **${alt.id}** (${alt.title})${alt.description ? `: ${alt.description}` : ''}`);
+        }
+        lines.push('');
+    }
+
+    return lines.join('\n').trim();
+}
 
 export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRuntime): void {
     server.registerTool(
@@ -38,7 +103,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 return {
                     content: [{
                         type: 'text',
-                        text: capTextResponse(JSON.stringify(result, null, 2))
+                        text: capTextResponse(formatContext7DocsAsMarkdown(result))
                     }]
                 };
             } catch (error) {

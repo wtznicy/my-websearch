@@ -6,6 +6,10 @@ export interface SearchResult {
     engine: string;
     /** 跨引擎融合后该结果被几个引擎命中（仅多引擎搜索时出现，帮助 LLM 判断可信度） */
     engineHits?: number;
+    /** 发布/更新日期（如 "2025-11-20"、"2026-02" 等） */
+    date?: string;
+    /** 抓取的正文内容（fetchTop 时注入） */
+    fullContent?: string;
 }
 
 /**
