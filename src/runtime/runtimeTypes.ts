@@ -43,7 +43,13 @@ export type Context7LibrariesService = {
 };
 
 export type Context7DocsService = {
-    execute(input: { libraryId: string; query?: string; limit?: number }): Promise<Context7DocsResult>;
+    execute(input: {
+        library?: string;
+        libraryId?: string;
+        libraryName?: string;
+        query?: string;
+        limit?: number;
+    }): Promise<Context7DocsResult>;
 };
 
 export type MyWebSearchRuntimeServices = {

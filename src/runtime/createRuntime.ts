@@ -63,7 +63,10 @@ export function createMyWebSearchRuntime(options: CreateMyWebSearchRuntimeOption
             fetchCsdnArticle: createArticleFetchService('csdn', dependencies.fetchCsdnArticle ?? fetchCsdnArticle),
             fetchJuejinArticle: createArticleFetchService('juejin', dependencies.fetchJuejinArticle ?? fetchJuejinArticle),
             fetchGithubReadme: createGithubReadmeService(dependencies.fetchGithubReadme ?? fetchGithubReadme),
-            fetchWeb: createWebFetchService(dependencies.fetchWebContent ?? fetchWebContent),
+            fetchWeb: createWebFetchService(dependencies.fetchWebContent ?? fetchWebContent, {
+                fetchCsdn: dependencies.fetchCsdnArticle ?? fetchCsdnArticle,
+                fetchJuejin: dependencies.fetchJuejinArticle ?? fetchJuejinArticle
+            }),
             context7Libraries: context7.libraries,
             context7Docs: context7.docs
         }

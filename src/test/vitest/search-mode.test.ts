@@ -276,7 +276,7 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
             const emptyCfg = createConfig({ PROXY_URL: '' }, { quiet: true });
             expect(emptyCfg.useProxy).toBe(true);
             expect(emptyCfg.proxyUrl).toBe('http://127.0.0.1:7897');
-            expect(emptyCfg.proxyEngines).toEqual(['duckduckgo', 'exa', 'brave', 'startpage']);
+            expect(emptyCfg.proxyEngines).toEqual(DEFAULT_PROXY_ENGINES);
 
             // Legacy USE_PROXY=true with no PROXY_URL
             const legacyTrueCfg = createConfig({ USE_PROXY: 'true' }, { quiet: true });

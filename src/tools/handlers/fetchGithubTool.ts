@@ -17,11 +17,11 @@ export function registerFetchGithubTool(server: McpServer, runtime: MyWebSearchR
     server.registerTool(
         fetchGithubToolName,
         {
-            description: "Fetch README content from a GitHub/Gitee repository URL (github.com or gitee.com repo URLs only; for other pages use fetchWebContent)",
+            description: "Fetch README, source code file (e.g. /blob/main/src/index.ts), or issue discussion (e.g. /issues/123) from a GitHub or Gitee repository URL (github.com or gitee.com URLs only; for other web pages use fetchWebContent)",
             inputSchema: {
                 url: z.string().min(1).max(2048).refine(
                     (url) => validateGithubRepositoryUrl(url),
-                    "URL must be a valid GitHub repository URL (supports HTTPS, SSH formats)"
+                    "URL must be a valid GitHub or Gitee repository, file, or issue URL (supports HTTPS, SSH formats)"
                 )
             },
             annotations: TOOL_ANNOTATION_HINTS

@@ -140,3 +140,137 @@ describe('context7GetWithRetry', () => {
         expect(get).toHaveBeenCalledWith('https://context7.com/api/v2/context', { libraryId: '/vercel/next.js' });
     });
 });
+
+import { pickBestLibrary, createContext7Services, resetContext7Cache } from '../../core/context7/context7Service.js';
+import * as context7Engine from '../../engines/context7/context7.js';
+
+describe('pickBestLibrary and smart Context7DocsService resolution', () => {
+    afterEach(() => {
+        resetContext7Cache();
+        vi.restoreAllMocks();
+    });
+
+    it('prioritizes exact name match over slightly higher scored partial match', () => {
+        const candidates: context7Engine.Context7Library[] = [
+            {
+                id: '/user/react-native-router',
+                title: 'react-native-router',
+                description: 'A router',
+                versions: ['1.0'],
+                trustScore: 9,
+                benchmarkScore: 9,
+                totalSnippets: 100
+            },
+            {
+                id: '/facebook/react',
+                title: 'React',
+                description: 'The library for web and native user interfaces',
+                versions: ['18.0'],
+                trustScore: 8,
+                benchmarkScore: 8,
+                totalSnippets: 50
+            }
+        ];
+
+        const best = pickBestLibrary(candidates, 'react');
+        expect(best?.id).toBe('/facebook/react');
+    });
+
+    it('ranks by trustScore and snippet richness when no exact title match', () => {
+        const candidates: context7Engine.Context7Library[] = [
+            {
+                id: '/org/low-quality',
+                title: 'Something Router',
+                description: 'Low quality',
+                versions: ['1.0'],
+                trustScore: 2,
+                benchmarkScore: 1,
+                totalSnippets: 5
+            },
+            {
+                id: '/remix-run/react-router',
+                title: 'React Router',
+                description: 'Declarative routing for React',
+                versions: ['6.0'],
+                trustScore: 9,
+                benchmarkScore: 8,
+                totalSnippets: 300
+            }
+        ];
+
+        const best = pickBestLibrary(candidates, 'router');
+        expect(best?.id).toBe('/remix-run/react-router');
+    });
+
+    it('auto-resolves natural library name and enriches docs result with alternatives', async () => {
+        const mockSearch = vi.spyOn(context7Engine, 'searchContext7Libraries').mockResolvedValue({
+            query: 'next.js',
+            libraryName: 'next.js',
+            results: [
+                {
+                    id: '/vercel/next.js',
+                    title: 'Next.js',
+                    description: 'The React Framework for the Web',
+                    versions: ['15.0'],
+                    trustScore: 10,
+                    totalSnippets: 500
+                },
+                {
+                    id: '/alternative/next-lite',
+                    title: 'Next Lite',
+                    description: 'Lite version',
+                    versions: ['1.0'],
+                    trustScore: 5
+                }
+            ]
+        });
+
+        const mockFetch = vi.spyOn(context7Engine, 'fetchContext7Docs').mockResolvedValue({
+            libraryId: '/vercel/next.js',
+            query: 'middleware',
+            codeSnippets: [{ codeTitle: 'Middleware example', codeList: [{ code: 'export function middleware() {}' }] }],
+            infoSnippets: []
+        });
+
+        const services = createContext7Services();
+        const res = await services.docs.execute({ library: 'next.js', query: 'middleware' });
+
+        expect(mockSearch).toHaveBeenCalledWith('next.js', 'middleware', 5);
+        expect(mockFetch).toHaveBeenCalledWith('/vercel/next.js', 'middleware', 5);
+        expect(res.libraryId).toBe('/vercel/next.js');
+        expect(res.resolvedFrom).toBe('next.js');
+        expect(res.alternativeLibraries).toHaveLength(1);
+        expect(res.alternativeLibraries?.[0].id).toBe('/alternative/next-lite');
+    });
+
+    it('heals 404 on blind guessed /tailwind/tailwindcss by extracting tailwindcss', async () => {
+        const mockFetch = vi.spyOn(context7Engine, 'fetchContext7Docs')
+            .mockRejectedValueOnce(new Error('Request failed with status code 404'))
+            .mockResolvedValueOnce({
+                libraryId: '/tailwindlabs/tailwindcss',
+                query: 'flex',
+                codeSnippets: [{ codeTitle: 'Flexbox', codeList: [{ code: 'class="flex"' }] }],
+                infoSnippets: []
+            });
+
+        const mockSearch = vi.spyOn(context7Engine, 'searchContext7Libraries').mockResolvedValue({
+            query: 'tailwindcss',
+            libraryName: 'tailwindcss',
+            results: [
+                {
+                    id: '/tailwindlabs/tailwindcss',
+                    title: 'Tailwind CSS',
+                    description: 'A utility-first CSS framework',
+                    versions: ['3.4'],
+                    trustScore: 10
+                }
+            ]
+        });
+
+        const services = createContext7Services();
+        const res = await services.docs.execute({ library: '/tailwind/tailwindcss', query: 'flex' });
+
+        expect(res.libraryId).toBe('/tailwindlabs/tailwindcss');
+        expect(res.resolvedFrom).toBe('/tailwind/tailwindcss');
+    });
+});

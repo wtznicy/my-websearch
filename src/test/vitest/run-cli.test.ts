@@ -145,8 +145,9 @@ describe('runCli argument parsing', () => {
             expect(parsed.json).toBe(true);
         });
 
-        it('throws if libraryId does not start with /', () => {
-            expect(() => parseQueryDocsArgs(['vercel/next.js'])).toThrow("libraryId must start with '/'");
+        it('accepts library without leading slash', () => {
+            const parsed = parseQueryDocsArgs(['vercel/next.js', '--query', 'app router']);
+            expect(parsed.libraryId).toBe('vercel/next.js');
         });
 
         it('throws if libraryId is missing', () => {

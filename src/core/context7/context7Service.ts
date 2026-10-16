@@ -16,8 +16,16 @@ export type Context7LibrariesService = {
     }>;
 };
 
+export type Context7DocsInput = {
+    library?: string;
+    libraryId?: string;
+    libraryName?: string;
+    query?: string;
+    limit?: number;
+};
+
 export type Context7DocsService = {
-    execute(input: { libraryId: string; query?: string; limit?: number }): Promise<Context7DocsResult>;
+    execute(input: Context7DocsInput): Promise<Context7DocsResult>;
 };
 
 // 文档类响应时效性低，做短 TTL 内存缓存（10 分钟）。
@@ -27,6 +35,15 @@ const CACHE_TTL_MS = 10 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 100;
 type CacheEntry = { value: unknown; expiresAt: number };
 const cache = new Map<string, CacheEntry>();
+
+// 库名解析映射表缓存（30 分钟），按 libraryName 归一化为 key，避免多次 query 问答重复打 libs/search 消耗配额
+const RESOLVED_NAME_CACHE_TTL_MS = 30 * 60 * 1000;
+type ResolvedLibraryEntry = {
+    bestId: string;
+    alternatives: Array<{ id: string; title: string; description?: string }>;
+    expiresAt: number;
+};
+const resolvedNameCache = new Map<string, ResolvedLibraryEntry>();
 
 function cachedGet<T>(key: string): T | undefined {
     const entry = cache.get(key);
@@ -40,7 +57,7 @@ function cachedGet<T>(key: string): T | undefined {
     return entry.value as T;
 }
 
-function cachedSet(key: string, value: unknown): void {
+function cachedSet(key: string, value: unknown, ttlMs = CACHE_TTL_MS): void {
     const now = Date.now();
     // 淘汰过期条目
     for (const [k, entry] of cache) {
@@ -56,11 +73,36 @@ function cachedSet(key: string, value: unknown): void {
         }
         cache.delete(oldest);
     }
-    cache.set(key, { value, expiresAt: now + CACHE_TTL_MS });
+    cache.set(key, { value, expiresAt: now + ttlMs });
 }
 
 export function resetContext7Cache(): void {
     cache.clear();
+    resolvedNameCache.clear();
+}
+
+/**
+ * 候选库智能打分函数（防个人 fork / 镜像库排在官方库前面）：
+ * 1. 名称或 ID 尾段精确匹配优先
+ * 2. 综合质量分（trustScore + benchmarkScore）与代码片段数排序
+ */
+export function pickBestLibrary(candidates: Context7Library[], rawInput: string): Context7Library | undefined {
+    if (!candidates || candidates.length === 0) {
+        return undefined;
+    }
+    const target = rawInput.trim().toLowerCase();
+    return [...candidates].sort((a, b) => {
+        const aExact = a.title.toLowerCase() === target || a.id.toLowerCase().endsWith(`/${target}`) ? 1 : 0;
+        const bExact = b.title.toLowerCase() === target || b.id.toLowerCase().endsWith(`/${target}`) ? 1 : 0;
+        if (aExact !== bExact) {
+            return bExact - aExact;
+        }
+        const aSnippets = a.totalSnippets ?? 0;
+        const bSnippets = b.totalSnippets ?? 0;
+        const aScore = (a.trustScore ?? 0) * 10 + (a.benchmarkScore ?? 0) + Math.min(aSnippets, 500) / 100;
+        const bScore = (b.trustScore ?? 0) * 10 + (b.benchmarkScore ?? 0) + Math.min(bSnippets, 500) / 100;
+        return bScore - aScore;
+    })[0];
 }
 
 export function createContext7Services() {
@@ -93,27 +135,118 @@ export function createContext7Services() {
                 }
             }
         } satisfies Context7LibrariesService,
+
         docs: {
-            async execute(input: { libraryId: string; query?: string; limit?: number }) {
+            async execute(input: Context7DocsInput) {
+                const rawTarget = (input.library ?? input.libraryId ?? input.libraryName ?? '').trim();
+                if (!rawTarget) {
+                    throw new AppError({
+                        code: 'invalid_arguments',
+                        retryable: false,
+                        engine: 'context7',
+                        message: 'Library name or ID cannot be empty'
+                    });
+                }
+
                 const queryStr = (input.query ?? '').trim();
                 const limitVal = input.limit ?? 5;
-                const cacheKey = `docs:${input.libraryId.trim()}:${queryStr}:${limitVal}`;
+
+                // 核心解析与文档获取流程
+                async function resolveAndFetchDocs(
+                    libraryName: string,
+                    originalRequested?: string
+                ): Promise<Context7DocsResult> {
+                    const normalizedKey = libraryName.toLowerCase();
+                    const now = Date.now();
+                    let bestId: string;
+                    let alternatives: Array<{ id: string; title: string; description?: string }> = [];
+
+                    const cachedResolved = resolvedNameCache.get(normalizedKey);
+                    if (cachedResolved && now < cachedResolved.expiresAt) {
+                        bestId = cachedResolved.bestId;
+                        alternatives = cachedResolved.alternatives;
+                    } else {
+                        const searchRes = await searchContext7Libraries(libraryName, input.query, 5);
+                        const best = pickBestLibrary(searchRes.results, libraryName);
+                        if (!best) {
+                            throw new AppError({
+                                code: 'not_found',
+                                retryable: false,
+                                engine: 'context7',
+                                message: `No matching Context7 library found for "${libraryName}". Try searching with another name or provide exact /owner/repo ID.`
+                            });
+                        }
+                        bestId = best.id;
+                        alternatives = searchRes.results
+                            .filter((r) => r.id !== best.id)
+                            .slice(0, 3)
+                            .map((r) => ({ id: r.id, title: r.title, description: r.description }));
+
+                        resolvedNameCache.set(normalizedKey, {
+                            bestId,
+                            alternatives,
+                            expiresAt: now + RESOLVED_NAME_CACHE_TTL_MS
+                        });
+                    }
+
+                    const docsResult = await fetchContext7Docs(bestId, input.query, limitVal);
+                    const enriched: Context7DocsResult = {
+                        ...docsResult,
+                        resolvedFrom: originalRequested ?? libraryName,
+                        alternativeLibraries: alternatives.length > 0 ? alternatives : undefined
+                    };
+                    return enriched;
+                }
+
+                // 分支 1：传入的是明确路径 ID（以 '/' 开头，如 '/vercel/next.js' 或 '/vercel/next.js@v15.1.8'）
+                if (rawTarget.startsWith('/')) {
+                    const cacheKey = `docs:${rawTarget}:${queryStr}:${limitVal}`;
+                    const cached = cachedGet<Context7DocsResult>(cacheKey);
+                    if (cached) {
+                        return cached;
+                    }
+
+                    try {
+                        const result = await fetchContext7Docs(rawTarget, input.query, limitVal);
+                        cachedSet(cacheKey, result);
+                        if (result.redirectedFrom) {
+                            cachedSet(`docs:${result.redirectedFrom}:${queryStr}:${limitVal}`, result);
+                        }
+                        if (result.redirectUrl && result.redirectUrl !== rawTarget) {
+                            cachedSet(`docs:${result.redirectUrl}:${queryStr}:${limitVal}`, result);
+                        }
+                        return result;
+                    } catch (error) {
+                        // 404 / 瞎猜 ID 自愈兜底：例如传了 /tailwind/tailwindcss 找不到，提取尾段 tailwindcss 回退到名称解析
+                        const segments = rawTarget.replace(/^\/+/, '').split('/');
+                        const trailing = segments.pop()?.split('@')[0]?.trim();
+                        if (trailing && trailing !== rawTarget) {
+                            try {
+                                const healed = await resolveAndFetchDocs(trailing, rawTarget);
+                                cachedSet(cacheKey, healed);
+                                return healed;
+                            } catch {
+                                // 自愈失败则抛出原错误
+                            }
+                        }
+
+                        if (isContext7QuotaExhaustedError(error)) {
+                            markContext7QuotaExhausted();
+                        }
+                        throw error;
+                    }
+                }
+
+                // 分支 2：传入的是自然库名（不带 '/'，如 'next.js'、'react'、'fastapi'）
+                const cacheKey = `docs:resolved:${rawTarget.toLowerCase()}:${queryStr}:${limitVal}`;
                 const cached = cachedGet<Context7DocsResult>(cacheKey);
                 if (cached) {
                     return cached;
                 }
+
                 try {
-                    const result = await fetchContext7Docs(input.libraryId, input.query, limitVal);
+                    const result = await resolveAndFetchDocs(rawTarget);
                     cachedSet(cacheKey, result);
-                    // 若发生 301 重定向，同时在原始 ID 与重定向后的目标 ID 两侧建缓存
-                    if (result.redirectedFrom) {
-                        const fromKey = `docs:${result.redirectedFrom}:${queryStr}:${limitVal}`;
-                        cachedSet(fromKey, result);
-                    }
-                    if (result.redirectUrl && result.redirectUrl !== input.libraryId.trim()) {
-                        const toKey = `docs:${result.redirectUrl}:${queryStr}:${limitVal}`;
-                        cachedSet(toKey, result);
-                    }
                     return result;
                 } catch (error) {
                     if (isContext7QuotaExhaustedError(error)) {

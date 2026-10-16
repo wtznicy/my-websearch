@@ -10,7 +10,11 @@ const SUPPORTED_ENGINES = [
     'brave',
     'juejin',
     'startpage',
-    'sogou'
+    'sogou',
+    'github',
+    'stackoverflow',
+    'hackernews',
+    'arxiv'
 ] as const;
 
 const engineSchema = z.array(

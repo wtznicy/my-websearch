@@ -84,8 +84,8 @@ function formatCliHelp(): string {
         '  my-websearch fetch-juejin <url> [--daemon-url URL] [--spawn] [--json]',
         '  my-websearch resolve-library-id <name> [--query QUERY] [--limit N] [--daemon-url URL] [--spawn] [--json]',
         '    Resolve a library/package name to a Context7 library ID (e.g. /vercel/next.js).',
-        '  my-websearch query-docs <library-id> [--query QUERY] [--limit N] [--daemon-url URL] [--spawn] [--json]',
-        '    Get official documentation and code snippets for a Context7 library ID (e.g. /vercel/next.js).',
+        '  my-websearch query-docs <library> [--query QUERY] [--limit N] [--daemon-url URL] [--spawn] [--json]',
+        '    Get official documentation and code snippets for any library or Context7 ID (e.g. next.js or /vercel/next.js).',
         '',
         'Common action flags:',
         '  --daemon-url URL',
@@ -147,6 +147,7 @@ export type ParsedResolveLibraryArgs = {
 };
 
 export type ParsedQueryDocsArgs = {
+    library: string;
     libraryId: string;
     query?: string;
     limit?: number;
@@ -576,19 +577,17 @@ export function parseQueryDocsArgs(argv: string[]): ParsedQueryDocsArgs {
         positional.push(arg);
     }
 
-    const libraryId = positional.join(' ').trim();
-    if (!libraryId) {
-        throw new Error('libraryId is required');
-    }
-    if (!libraryId.startsWith('/')) {
-        throw new Error("libraryId must start with '/' (e.g. /vercel/next.js)");
+    const target = positional.join(' ').trim();
+    if (!target) {
+        throw new Error('libraryId is required (e.g. next.js or /vercel/next.js)');
     }
     if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 10)) {
         throw new Error('Limit must be an integer between 1 and 10');
     }
 
     return {
-        libraryId,
+        library: target,
+        libraryId: target,
         query,
         limit,
         json
@@ -742,14 +741,47 @@ function formatResolveLibraryHumanReadable(result: { libraryName: string; query?
     return lines.join('\n');
 }
 
-function formatQueryDocsHumanReadable(result: { libraryId: string; snippets?: Array<{ title?: string; code?: string; content?: string }> }): string {
-    const lines = [`Documentation for ${result.libraryId}:`];
+function formatQueryDocsHumanReadable(result: {
+    libraryId: string;
+    resolvedFrom?: string;
+    alternativeLibraries?: Array<{ id: string; title: string }>;
+    snippets?: Array<{ title?: string; code?: string; content?: string }>;
+    codeSnippets?: Array<{ codeTitle?: string; codeList?: Array<{ code: string }> }>;
+    infoSnippets?: Array<{ title: string; content: string }>;
+}): string {
+    const titleHeader = result.resolvedFrom
+        ? `Documentation for ${result.libraryId} (resolved from "${result.resolvedFrom}"):`
+        : `Documentation for ${result.libraryId}:`;
+    const lines = [titleHeader];
+
+    if (result.alternativeLibraries && result.alternativeLibraries.length > 0) {
+        lines.push(`(Alternative matches: ${result.alternativeLibraries.map(a => `${a.title} [${a.id}]`).join(', ')})`);
+    }
+
     if (result.snippets) {
         for (const snippet of result.snippets) {
             lines.push('');
             if (snippet.title) lines.push(`### ${snippet.title}`);
             if (snippet.content) lines.push(snippet.content);
             if (snippet.code) lines.push('```\n' + snippet.code + '\n```');
+        }
+    }
+    if (result.infoSnippets) {
+        for (const snippet of result.infoSnippets) {
+            lines.push('');
+            if (snippet.title) lines.push(`### ${snippet.title}`);
+            if (snippet.content) lines.push(snippet.content);
+        }
+    }
+    if (result.codeSnippets) {
+        for (const snippet of result.codeSnippets) {
+            lines.push('');
+            if (snippet.codeTitle) lines.push(`### ${snippet.codeTitle}`);
+            if (snippet.codeList) {
+                for (const item of snippet.codeList) {
+                    lines.push('```\n' + item.code + '\n```');
+                }
+            }
         }
     }
     return lines.join('\n');
@@ -1718,11 +1750,11 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     ErrorCode.INVALID_ARGUMENTS,
                     message,
-                    { hint: 'Use `my-websearch query-docs <library-id> [--query QUERY] [--limit N] [--json]`.' }
+                    { hint: 'Use `my-websearch query-docs <library> [--query QUERY] [--limit N] [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: my-websearch query-docs <library-id> [--query QUERY] [--limit N] [--json]');
+                io.stderr('Usage: my-websearch query-docs <library> [--query QUERY] [--limit N] [--json]');
             }
             return 1;
         }
@@ -1732,6 +1764,7 @@ export async function runCli(
                 transport,
                 '/query-docs',
                 {
+                    library: parsed.library,
                     libraryId: parsed.libraryId,
                     query: parsed.query,
                     limit: parsed.limit
@@ -1753,7 +1786,7 @@ export async function runCli(
             }
 
             const result = await runtime.services.context7Docs.execute({
-                libraryId: parsed.libraryId,
+                library: parsed.library,
                 query: parsed.query,
                 limit: parsed.limit
             });

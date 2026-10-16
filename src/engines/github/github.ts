@@ -385,9 +385,137 @@ async function fetchReadme(owner: string, repo: string, host: RepoHost): Promise
 }
 
 /**
- * Main function: parse URL and fetch README content
+ * 从 GitHub 仓库抓取指定源码文件（支持 blob 链接）。
+ * 优先 raw.githubusercontent.com，不可达时通过 jsDelivr CDN 兜底。
+ */
+async function fetchGithubBlob(
+    owner: string,
+    repo: string,
+    branch: string,
+    filePath: string
+): Promise<string | null> {
+    const ownerEnc = encodeURIComponent(owner.trim());
+    const repoEnc = encodeURIComponent(repo.trim());
+    const cleanPath = filePath.split('/').map(encodeURIComponent).join('/');
+    const branchEnc = encodeURIComponent(branch.trim());
+
+    const rawUrl = `${RAW_GITHUB_BASE}/${ownerEnc}/${repoEnc}/${branchEnc}/${cleanPath}`;
+    const rawResult = await fetchReadmeSource(rawUrl, 'raw', 15000);
+    if (rawResult.status === 'ok') {
+        return rawResult.content;
+    }
+
+    // jsDelivr 兜底
+    const cdnUrl = `${JSDELIVR_CDN_BASE}/${ownerEnc}/${repoEnc}@${branchEnc}/${cleanPath}`;
+    const cdnResult = await fetchReadmeSource(cdnUrl, 'jsDelivr', 15000);
+    if (cdnResult.status === 'ok') {
+        return cdnResult.content;
+    }
+
+    return null;
+}
+
+/**
+ * 通过 GitHub REST API 获取 Issue 详情与评论讨论（免 key 10次/分，支持 GITHUB_TOKEN）。
+ */
+async function fetchGithubIssue(
+    owner: string,
+    repo: string,
+    issueNumber: string
+): Promise<string | null> {
+    const ownerEnc = encodeURIComponent(owner.trim());
+    const repoEnc = encodeURIComponent(repo.trim());
+    const numEnc = encodeURIComponent(issueNumber.trim());
+
+    try {
+        const headers = {
+            'User-Agent': 'GitHub-Issue-Fetcher/1.0',
+            'Accept': 'application/vnd.github.v3+json',
+            ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
+        };
+
+        const issueUrl = `https://api.github.com/repos/${ownerEnc}/${repoEnc}/issues/${numEnc}`;
+        const issueRes = await requestDirectFirst('GET', issueUrl, (forceDirect) => ({
+            ...buildAxiosRequestOptions({
+                headers,
+                timeout: 10000,
+                forceDirect
+            })
+        }), 'GitHub Issue API');
+
+        if (issueRes.status === 404) {
+            return null;
+        }
+
+        const issueData = issueRes.data as {
+            number: number;
+            title: string;
+            state: string;
+            user?: { login: string };
+            created_at: string;
+            body?: string;
+            html_url: string;
+            comments?: number;
+        };
+
+        const lines: string[] = [
+            `# Issue #${issueData.number}: ${issueData.title}`,
+            `- **Status**: ${issueData.state.toUpperCase()}`,
+            `- **Author**: @${issueData.user?.login ?? 'unknown'}`,
+            `- **Created**: ${issueData.created_at}`,
+            `- **URL**: ${issueData.html_url}`,
+            '',
+            '## Description',
+            issueData.body?.trim() || '_No description provided._'
+        ];
+
+        // 尝试抓取前 15 条评论
+        if (issueData.comments && issueData.comments > 0) {
+            try {
+                const commentsUrl = `https://api.github.com/repos/${ownerEnc}/${repoEnc}/issues/${numEnc}/comments?per_page=15`;
+                const commentsRes = await requestDirectFirst('GET', commentsUrl, (forceDirect) => ({
+                    ...buildAxiosRequestOptions({
+                        headers,
+                        timeout: 10000,
+                        forceDirect
+                    })
+                }), 'GitHub Issue Comments API');
+
+                const comments = commentsRes.data as Array<{
+                    user?: { login: string };
+                    created_at: string;
+                    body?: string;
+                }>;
+
+                if (Array.isArray(comments) && comments.length > 0) {
+                    lines.push('', `## Discussion (${comments.length} comments)`);
+                    for (let idx = 0; idx < comments.length; idx += 1) {
+                        const c = comments[idx];
+                        if (c) {
+                            lines.push(
+                                '',
+                                `### Comment ${idx + 1} by @${c.user?.login ?? 'unknown'} (${c.created_at})`,
+                                c.body?.trim() || '_Empty comment_'
+                            );
+                        }
+                    }
+                }
+            } catch (commentErr) {
+                console.warn(`Failed to fetch comments for issue #${issueNumber}:`, commentErr instanceof Error ? commentErr.message : String(commentErr));
+            }
+        }
+
+        return lines.join('\n');
+    } catch (error) {
+        console.error(`Failed to fetch issue #${issueNumber} for ${owner}/${repo}:`, error instanceof Error ? error.message : String(error));
+        return null;
+    }
+}
+
+/**
+ * Main function: parse URL and fetch README / source file / issue content
  * @param githubUrl GitHub repository URL
- * @returns README content or null if failed
+ * @returns Content string or null if failed
  */
 async function getReadmeFromUrl(githubUrl: string): Promise<string | null> {
     console.error(`\n--- Processing URL: ${githubUrl} ---`);
@@ -397,6 +525,30 @@ async function getReadmeFromUrl(githubUrl: string): Promise<string | null> {
         return null;
     }
 
+    const trimmed = githubUrl.trim();
+
+    // 1. 匹配 GitHub blob 源码文件链接：https://github.com/{owner}/{repo}/blob/{branch}/{path}
+    const blobMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/blob\/([^\/\s]+)\/(.+)/i);
+    if (blobMatch && blobMatch[1] && blobMatch[2] && blobMatch[3] && blobMatch[4]) {
+        const owner = blobMatch[1];
+        const repo = blobMatch[2];
+        const branch = blobMatch[3];
+        const filePath = blobMatch[4];
+        console.error(`✅ Detected GitHub source file: ${owner}/${repo} @ ${branch}:${filePath}`);
+        return fetchGithubBlob(owner, repo, branch, filePath.replace(/[?#].*$/, ''));
+    }
+
+    // 2. 匹配 GitHub Issue 链接：https://github.com/{owner}/{repo}/issues/{number}
+    const issueMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/issues\/(\d+)/i);
+    if (issueMatch && issueMatch[1] && issueMatch[2] && issueMatch[3]) {
+        const owner = issueMatch[1];
+        const repo = issueMatch[2];
+        const issueNumber = issueMatch[3];
+        console.error(`✅ Detected GitHub issue: ${owner}/${repo} #${issueNumber}`);
+        return fetchGithubIssue(owner, repo, issueNumber);
+    }
+
+    // 3. 默认 README 抓取流程
     const repoInfo = extractOwnerAndRepo(githubUrl);
 
     if (!repoInfo) {
@@ -418,9 +570,9 @@ async function getReadmeFromUrl(githubUrl: string): Promise<string | null> {
 }
 
 /**
- * Fetch README content from GitHub repository
- * @param githubUrl GitHub repository URL (supports HTTPS, SSH, with params)
- * @returns README content string or null if failed
+ * Fetch README content, code file, or issue discussion from GitHub repository
+ * @param githubUrl GitHub URL (supports repo, /blob/... files, /issues/...)
+ * @returns Content string or null if failed
  */
 export async function fetchGithubReadme(githubUrl: string): Promise<string | null> {
     return getReadmeFromUrl(githubUrl);

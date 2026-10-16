@@ -25,14 +25,16 @@
 
 `my-websearch` 是专为 AI Agent（Claude Desktop、Cursor、Cherry Studio、Windsurf、Cline、ZCode 等）打造的**全栈联网检索与技术文档基础设施**。无需付费 API Key，开箱即用：
 
-- 🌐 **9 大引擎融合与自适应路由**  
-  聚合国内直连（**Bing、百度、CSDN、掘金、搜狗**）与海外主流（**DuckDuckGo、Brave、Startpage、Exa**）。支持中文/英文按语种自动路由（`auto`）、多词并发检索（`queries`）、跨引擎去重排序与 `minResults` 自动级联补位。
+- 🌐 **13 大引擎融合与自适应路由**  
+  聚合国内直连（**Bing、百度、CSDN、掘金、搜狗**）、海外通用（**DuckDuckGo、Brave、Startpage、Exa**）与垂直开发者平台（**GitHub、StackOverflow、Hacker News、arXiv**）。支持中文/英文按语种自动路由（`auto`）、多词并发检索（`queries`）、跨引擎去重排序与 `minResults` 自动级联补位。
 - ⚡ **原生级反爬与算力求解（零浏览器毫秒直通）**  
   基于 `wreq-js` 原生模拟现代 Chrome TLS/HTTP2 指纹；内置轻量算法秒解 **Startpage Anubis SHA-256 PoW 算力挑战** 与 **DuckDuckGo `d.js` (`isJsaChallenge`) HTML5/算术挑战**；真实 URL 深度解密（搜狗跳转页快速还原、百度 `Location` 直取、Bing Base64 解码）；无需拉起 400MB 浏览器即可稳定穿透风控。
-- 📄 **高纯度 Markdown 正文提纯**  
-  整合 Mozilla Readability 与容器级智能降噪，剥离导航栏、侧边栏、页脚等干扰信息，精准保留文章主标题（`<article><header><h1>`）、代码围栏及 GFM 表格；支持长文无缝分页（`startIndex`）。
-- 📚 **Context7 官方框架/库文档直查**  
-  原生集成 `resolveLibraryId` 与 `queryDocs`，无需额外部署 Context7 服务即可按库名和钉定版本查询官方文档与最新代码示例，支持 HTTP 301 自动重定向追踪与配额自适应。
+- 📄 **高纯度 Markdown 正文提纯与特色站点规则**  
+  整合 Mozilla Readability 与容器级智能降噪，为**微信公众号**（`#js_content` 深度清洗）、**StackOverflow**（问答主体与采纳答案精准提纯）定制专属净化器，针对 **CSDN 与掘金** 自动走专用提取链路；精准保留文章主标题、代码围栏及 GFM 表格；支持长文无缝分页（`startIndex`）。
+- 📚 **统一 Context7 官方框架/库文档直查（`queryDocs` 一站式合体）**  
+  直接输入技术库名（如 `"next.js"`, `"vue"`）或 Context7 ID，内部自动多候选排序、404 自愈重搜并返回相似替代库，免去额外调用 ID 解析步骤。
+- 🐙 **全面升级的 GitHub 资源抓取**  
+  `fetchGithubReadme` 扩展支持 GitHub/Gitee 仓库 README、代码单文件（`/blob/...`）及 Issue 完整讨论上下文（`/issues/...`）。
 - 🌏 **零配置网络感知（Clash TUN / Fake-IP 完美适配）**  
   自动嗅探系统代理（Windows 注册表 / macOS scutil / Linux 环境变量），海外引擎走代理、国内引擎直连；原生支持 `198.18.0.0/15` 放行，无缝兼容 Clash TUN 虚拟网卡，严守内网 SSRF 安全边界。
 - 🔌 **全形态接入支持**  
@@ -63,10 +65,10 @@ flowchart TB
         Guard["SSRF 防护 & Clash Fake-IP 兼容<br/>(PROXY_ENGINES 分流 + 198.18.0.0/15)"]
     end
 
-    subgraph Engines["🌍 9 大引擎 + 6 大内容/文档服务"]
+    subgraph Engines["🌍 13 大引擎 + 6 大内容/文档服务"]
         CN["🇨🇳 国内直连引擎<br/>Bing · 百度 · CSDN · 掘金 · 搜狗"]
-        INTL["🌐 海外代理引擎<br/>DuckDuckGo · Brave · Startpage · Exa"]
-        Docs["📚 内容抓取与文档<br/>fetchWebContent · Context7 · GitHub/Gitee · CSDN/掘金全文"]
+        INTL["🌐 海外与垂直引擎<br/>DuckDuckGo · Brave · Startpage · Exa<br/>GitHub · StackOverflow · HackerNews · arXiv"]
+        Docs["📚 内容抓取与文档<br/>fetchWebContent · queryDocs · GitHub/Gitee · CSDN/掘金全文"]
     end
 
     Clients --> Core
@@ -76,7 +78,7 @@ flowchart TB
 
 ---
 
-## 🌍 9 大搜索引擎一览
+## 🌍 13 大搜索引擎一览
 
 | 引擎标识 | 网络要求 | API Key | 核心技术与优势 | 最擅长场景 |
 | :--- | :---: | :---: | :--- | :--- |
@@ -89,20 +91,23 @@ flowchart TB
 | **`startpage`** | 🌐 需代理 | 免 Key | **内置 Anubis SHA-256 PoW 算力求解器** + 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
 | **`brave`** | 🌐 需代理 | 免 Key | 原生指纹直连 + 赞助商商业推广深度剥离 | 独立海外英文索引、技术博客 |
 | **`exa`** | 🌐 API直连 | 选配免费 Key | 官方语义搜索 API（未配置时自动跳过，不阻断级联） | 深度语义相似搜索、学术与技术前沿 |
+| **`github`** | 🌐 需代理 | 免 Key | 官方 REST API 检索仓库与 Issue 问答 | 开源项目源码、开源库 Issues 排查 |
+| **`stackoverflow`**| 🌐 需代理 | 免 Key | StackExchange 2.3 官方 API + HTML 实体智能解码 | 编程报错排错、高质量代码问答 |
+| **`hackernews`** | 🌐 需代理 | 免 Key | Algolia HN API，含 points、评论数与作者元信息 | 极客社区讨论、前沿科技热点与观点 |
+| **`arxiv`** | 🌐 需代理 | 免 Key | 官方 Atom XML API 检索论文标题、作者与摘要 | 计算机科学、AI/ML 与自然科学最新论文 |
 
 ---
 
 <a id="mcp-tools"></a>
 
-## 🛠️ 7 大 MCP 工具
+## 🛠️ 6 大 MCP 工具
 
 | 工具名称 | 功能定位 | 关键特性 |
 | :--- | :--- | :--- |
-| **`search`** | 多引擎联合联网检索 | 支持单词 `query` 或并发多词 `queries: string[]`，支持 `minResults` 自动级联补齐 |
-| **`fetchWebContent`** | 通用网页正文与 Markdown 提纯 | 支持 `format: "markdown"`、智能保留文章主标题、去导航降噪、长文分页（`startIndex`） |
-| **`resolveLibraryId`** | 查询技术库的 Context7 规范 ID | 输入开源库名（如 `"Next.js"`），返回 Context7 官方标准 ID 与信誉评分，支持 301 自动重定向 |
-| **`queryDocs`** | 获取开源库的最新官方文档/代码 | 按 Context7 ID 获取最新 API 规范与示例代码，支持版本钉定（如 `"/vercel/next.js@v15.1.8"`） |
-| **`fetchGithubReadme`** | 抓取 GitHub / Gitee 仓库 README | 支持 HTTPS / SSH 链接；**Gitee 自动走官方 API（国内秒开）** |
+| **`search`** | 13 大引擎联合联网检索 | 支持单词 `query` 或并发多词 `queries: string[]`，支持 `minResults` 自动级联补齐 |
+| **`fetchWebContent`** | 通用网页正文与 Markdown 提纯 | 内置**微信公众号**与 **StackOverflow** 专属净化规则，自动分流 CSDN/掘金，长文分页（`startIndex`） |
+| **`queryDocs`** | 一站式开源框架/库官方文档 | 支持直接输入库名（如 `"next.js"`、`"vue"`）或 Context7 ID，支持 404 自愈、候选评分与相关库推荐 |
+| **`fetchGithubReadme`** | 抓取 GitHub / Gitee 仓库、代码与 Issue | 支持仓库 README、代码单文件（`/blob/...`）及 Issue 完整讨论上下文；Gitee 国内直连秒开 |
 | **`fetchCsdnArticle`** | 抓取 CSDN 技术博客全文 | 精准提取文章主体容器，支持浏览器会话 Cookie 自动续期 |
 | **`fetchJuejinArticle`** | 抓取稀土掘金技术长文 | 直调官方接口，传 `format: "markdown"` 完整保留代码高亮围栏与 GFM 表格 |
 

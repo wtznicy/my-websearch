@@ -515,16 +515,20 @@ export async function startLocalDaemon(
 
     app.post('/query-docs', async (req, res) => {
         try {
-            const libraryId = typeof req.body?.libraryId === 'string' ? req.body.libraryId.trim() : '';
-            if (!libraryId || !libraryId.startsWith('/')) {
-                sendError(res, 400, ErrorCode.INVALID_ARGUMENTS, "libraryId must be a non-empty string starting with '/' (e.g. /vercel/next.js)", {
-                    hint: 'Resolve library ID first using /resolve-library-id.'
+            const library = typeof req.body?.library === 'string'
+                ? req.body.library.trim()
+                : (typeof req.body?.libraryId === 'string'
+                    ? req.body.libraryId.trim()
+                    : (typeof req.body?.libraryName === 'string' ? req.body.libraryName.trim() : ''));
+            if (!library) {
+                sendError(res, 400, ErrorCode.INVALID_ARGUMENTS, "library must be a non-empty string (e.g. 'next.js' or '/vercel/next.js')", {
+                    hint: 'Pass a library name like "next.js" or an exact ID like "/vercel/next.js".'
                 });
                 return;
             }
             const query = typeof req.body?.query === 'string' && req.body.query.trim() ? req.body.query.trim() : undefined;
             const limit = parseContext7Limit(req.body?.limit, 5);
-            const result = await runtime.services.context7Docs.execute({ libraryId, query, limit });
+            const result = await runtime.services.context7Docs.execute({ library, query, limit });
             res.json(createSuccessEnvelope(result));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

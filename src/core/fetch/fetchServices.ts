@@ -49,7 +49,13 @@ export function createGithubReadmeService(fetcher: GithubReadmeFetcher) {
     };
 }
 
-export function createWebFetchService(fetcher: WebFetcher) {
+export function createWebFetchService(
+    fetcher: WebFetcher,
+    options?: {
+        fetchCsdn?: ArticleFetcher;
+        fetchJuejin?: ArticleFetcher;
+    }
+) {
     return {
         async execute({
             url,
@@ -74,6 +80,57 @@ export function createWebFetchService(fetcher: WebFetcher) {
                     retryable: false,
                     message: 'Invalid public HTTP(S) URL'
                 });
+            }
+
+            // 专用站点内部转发（非 raw 模式生效）：
+            // 命中 CSDN/掘金文章时，自动内部转发给专用文章提取器，获得高保真代码排版与广告剥离
+            if (!raw) {
+                try {
+                    const parsed = new URL(url);
+                    const offset = startIndex ?? 0;
+
+                    if (options?.fetchCsdn && parsed.hostname === 'blog.csdn.net' && /^\/[^/]+\/article\/details\/\d+/.test(parsed.pathname)) {
+                        const article = await options.fetchCsdn(url, { format });
+                        const fullText = article.content;
+                        const pageContent = fullText.slice(offset, offset + maxChars);
+                        const hasMore = fullText.length > offset + maxChars;
+                        return {
+                            url,
+                            finalUrl: url,
+                            contentType: 'text/markdown',
+                            title: '',
+                            retrievalMethod: 'request',
+                            truncated: hasMore,
+                            content: pageContent,
+                            totalLength: fullText.length,
+                            startIndex: offset,
+                            hasMore,
+                            nextStartIndex: hasMore ? offset + maxChars : undefined
+                        };
+                    }
+
+                    if (options?.fetchJuejin && (parsed.hostname === 'juejin.cn' || parsed.hostname === 'juejin.im') && /^\/post\/\d+/.test(parsed.pathname)) {
+                        const article = await options.fetchJuejin(url, { format });
+                        const fullText = article.content;
+                        const pageContent = fullText.slice(offset, offset + maxChars);
+                        const hasMore = fullText.length > offset + maxChars;
+                        return {
+                            url,
+                            finalUrl: url,
+                            contentType: 'text/markdown',
+                            title: '',
+                            retrievalMethod: 'request',
+                            truncated: hasMore,
+                            content: pageContent,
+                            totalLength: fullText.length,
+                            startIndex: offset,
+                            hasMore,
+                            nextStartIndex: hasMore ? offset + maxChars : undefined
+                        };
+                    }
+                } catch {
+                    // 若专有抓取器异常，平滑回退到通用 fetcher
+                }
             }
 
             return fetcher(url, maxChars, { readability, includeLinks, raw, startIndex, format });

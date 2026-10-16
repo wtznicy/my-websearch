@@ -9,6 +9,7 @@ import {
     getBrowserCookieHeader,
     looksLikeBotChallengePage
 } from '../../utils/browserCookies.js';
+import { purifySiteContent } from './sitePurifiers.js';
 import { AppError } from '../../core/errors.js';
 
 // jsdom 是 optionalDependencies（仅 readability/链接提取使用）：
@@ -911,7 +912,26 @@ export async function fetchWebContent(
             }
         }
 
-        if (options.readability && (contentType.includes('text/html') || looksLikeHtml(raw))) {
+        const sitePurified = (contentType.includes('text/html') || looksLikeHtml(raw))
+            ? purifySiteContent(finalUrl || parsedUrl.toString(), raw)
+            : undefined;
+
+        if (sitePurified) {
+            if (sitePurified.title) title = sitePurified.title;
+            if (sitePurified.author) byline = sitePurified.author;
+            if (sitePurified.siteName) siteName = sitePurified.siteName;
+            readableHtml = sitePurified.html;
+            if (options.format === 'markdown') {
+                try {
+                    const markdown = htmlToMarkdown(sitePurified.html);
+                    extractedContent = markdown || sitePurified.text;
+                } catch {
+                    extractedContent = sitePurified.text;
+                }
+            } else {
+                extractedContent = sitePurified.text;
+            }
+        } else if (options.readability && (contentType.includes('text/html') || looksLikeHtml(raw))) {
             try {
                 const article = await readabilityParser(raw, finalUrl);
                 if (article?.content) {

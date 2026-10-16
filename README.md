@@ -25,14 +25,16 @@
 
 `my-websearch` is a full-stack search and technical documentation engine built specifically for AI coding agents (**Claude Desktop, Cursor, Cherry Studio, Windsurf, Cline, ZCode**, etc.). It requires **zero paid API keys**:
 
-- 🌐 **9-Engine Federated Search & Smart Routing**  
-  Aggregates direct domestic engines (**Bing, Baidu, CSDN, Juejin, Sogou**) and global engines (**DuckDuckGo, Brave, Startpage, Exa**). Features automatic language-aware routing (`auto`), parallel multi-query execution (`queries: string[]`), URL deduplication, and automatic `minResults` cascading fallback.
+- 🌐 **13-Engine Federated Search & Smart Routing**  
+  Aggregates direct domestic engines (**Bing, Baidu, CSDN, Juejin, Sogou**), global engines (**DuckDuckGo, Brave, Startpage, Exa**), and specialized developer platforms (**GitHub, StackOverflow, Hacker News, arXiv**). Features automatic language-aware routing (`auto`), parallel multi-query execution (`queries: string[]`), URL deduplication, and automatic `minResults` cascading fallback.
 - ⚡ **Native Anti-Bot & Proof-of-Work Solvers (Zero-Browser Fast Path)**  
   Built on `wreq-js` with native Chrome TLS/HTTP2 handshake emulation and persistent session cookies. Includes pure-JS/Rust solvers for **Startpage's Anubis SHA-256 PoW challenge** and **DuckDuckGo's `d.js` (`isJsaChallenge`) HTML5/arithmetic challenge**, bypassing anti-bot walls in milliseconds without launching a 400MB browser. Real URL decryption for Sogou redirect links, Baidu `Location`, and Bing Base64 links.
-- 📄 **High-Purity Markdown Article Extraction**  
-  Combines Mozilla Readability with intelligent chrome noise stripping. Removes `<nav>`, `<aside>`, `<footer>`, and breadcrumbs while faithfully preserving article titles (`<article><header><h1>`), code blocks, and GFM tables. Supports seamless pagination (`startIndex`).
-- 📚 **Official Context7 Library Docs Lookup**  
-  Integrated `resolveLibraryId` and `queryDocs` allow searching version-pinned official documentation and code examples without hosting a separate Context7 server. Features automatic HTTP 301 canonical ID tracking and runtime quota fallback.
+- 📄 **High-Purity Markdown Article Extraction & Dedicated Site Purifiers**  
+  Combines Mozilla Readability with intelligent chrome noise stripping. Features dedicated purification rules for **WeChat Official Accounts** (`mp.weixin.qq.com`), **StackOverflow questions & accepted answers**, and transparent internal routing for **CSDN & Juejin**. Removes `<nav>`, `<aside>`, `<footer>`, and breadcrumbs while faithfully preserving article titles, code blocks, and GFM tables. Supports seamless pagination (`startIndex`).
+- 📚 **Unified Context7 Library Docs Lookup (`queryDocs`)**  
+  Directly query official documentation with natural package names (e.g. `"next.js"`, `"vue"`) or Context7 IDs without needing a separate resolve step. Includes automatic candidate ranking, blind-guess 404 self-healing, and related alternatives discovery.
+- 🐙 **Extended GitHub Resource Fetcher**  
+  `fetchGithubReadme` supports GitHub/Gitee repository READMEs, raw code blob files (`/blob/...`), and complete issue discussions with comments (`/issues/...`).
 - 🌏 **Zero-Config Network Detection & Clash Fake-IP Ready**  
   Auto-detects OS system proxies (Windows Registry / macOS scutil / Linux env). Automatically routes overseas engines through proxy while keeping domestic engines on fast direct lines. Pre-whitelists `198.18.0.0/15` for Clash TUN / Fake-IP compatibility while enforcing strict SSRF security bounds.
 - 🔌 **Versatile Deployment Modes**  
@@ -63,10 +65,10 @@ flowchart TB
         Guard["SSRF Guard & Clash Fake-IP Support<br/>(PROXY_ENGINES Split Routing + 198.18.0.0/15)"]
     end
 
-    subgraph Engines["🌍 9 Search Engines + 6 Content/Docs Tools"]
-        CN["🇨🇳 Direct Engines<br/>Bing · Baidu · CSDN · Juejin · Sogou"]
-        INTL["🌐 Global Engines<br/>DuckDuckGo · Brave · Startpage · Exa"]
-        Docs["📚 Content & Official Docs<br/>fetchWebContent · Context7 · GitHub/Gitee · CSDN/Juejin"]
+    subgraph Engines["🌍 13 Search Engines + 6 Content/Docs Tools"]
+        CN["🇨🇳 Direct Domestic Engines<br/>Bing · Baidu · CSDN · Juejin · Sogou"]
+        INTL["🌐 Global & Tech Engines<br/>DuckDuckGo · Brave · Startpage · Exa<br/>GitHub · StackOverflow · HackerNews · arXiv"]
+        Docs["📚 Content & Official Docs<br/>fetchWebContent · queryDocs · GitHub/Gitee · CSDN/Juejin"]
     end
 
     Clients --> Core
@@ -76,7 +78,7 @@ flowchart TB
 
 ---
 
-## 🌍 9 Search Engines
+## 🌍 13 Search Engines
 
 | Engine | Mainland China Connectivity | API Key | Core Technology | Best For |
 | :--- | :---: | :---: | :--- | :--- |
@@ -89,20 +91,23 @@ flowchart TB
 | **`startpage`** | 🌐 Proxy in CN | None | **Built-in Anubis SHA-256 PoW solver** + cookie session (no browser needed) | Google-backed high-privacy results |
 | **`brave`** | 🌐 Proxy in CN | None | Native TLS fingerprinting + strict sponsored ad stripping | Independent English index & technical blogs |
 | **`exa`** | 🌐 Direct API | Optional Free Key | Official semantic search API (skipped if key is unset) | Semantic similarity, AI research & papers |
+| **`github`** | 🌐 Proxy in CN | None | Official GitHub Search REST API for issues & repositories | GitHub issues, bug reports, and repositories |
+| **`stackoverflow`**| 🌐 Proxy in CN | None | Official StackExchange 2.3 API with HTML entity decoding | Developer troubleshooting, stack traces & answers |
+| **`hackernews`** | 🌐 Proxy in CN | None | Algolia HN Search API with points, comments & author metadata | Tech discussions, startup launches & engineering news |
+| **`arxiv`** | 🌐 Proxy in CN | None | Official arXiv Atom XML API parsing titles, authors & abstracts | Scientific papers, machine learning & AI research |
 
 ---
 
 <a id="mcp-tools"></a>
 
-## 🛠️ 7 MCP Tools
+## 🛠️ 6 MCP Tools
 
 | Tool Name | Purpose | Key Highlights |
 | :--- | :--- | :--- |
-| **`search`** | Multi-engine federated search | Supports `query` or parallel `queries: string[]`, `engines`, `limit`, and `minResults` cascading |
-| **`fetchWebContent`** | Web page extraction & Markdown conversion | Supports `format: "markdown"`, title rescue, chrome noise stripping, and `startIndex` pagination |
-| **`resolveLibraryId`** | Resolve package name to Context7 ID | Resolves `"Next.js"`, `"prisma"`, etc. with trust metadata; supports HTTP 301 redirection |
-| **`queryDocs`** | Retrieve official library documentation | Fetches versioned API documentation and code snippets (e.g. `"/vercel/next.js@v15.1.8"`) |
-| **`fetchGithubReadme`** | Fetch GitHub or Gitee repository README | Supports HTTPS/SSH URLs; **Gitee uses official API directly without proxy** |
+| **`search`** | Multi-engine federated search (13 engines) | Supports `query` or parallel `queries: string[]`, `engines`, `limit`, and `minResults` cascading |
+| **`fetchWebContent`** | Web page extraction & Markdown conversion | Dedicated purifiers for **WeChat** and **StackOverflow**; auto-forwards CSDN/Juejin; supports `format: "markdown"` and `startIndex` |
+| **`queryDocs`** | All-in-one official library documentation | Directly resolves library names (e.g. `"next.js"`, `"vue"`), auto-heals 404s, returns alternative libraries & versioned code |
+| **`fetchGithubReadme`** | Fetch GitHub / Gitee repositories & code | Supports repository READMEs, raw code blobs (`/blob/...`), and issue threads (`/issues/...`) |
 | **`fetchCsdnArticle`** | Extract full CSDN blog article | Clean content extraction with automated cookie persistence |
 | **`fetchJuejinArticle`** | Extract full Juejin blog article | Direct official API fetch; pass `format: "markdown"` for formatted code blocks and tables |
 

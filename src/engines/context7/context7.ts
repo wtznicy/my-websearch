@@ -103,6 +103,10 @@ export type Context7DocsResult = {
     redirectUrl?: string;
     /** 若通过重定向自动解析，记录最初请求的旧 ID */
     redirectedFrom?: string;
+    /** 若通过自然库名解析，记录解析前原始输入名 */
+    resolvedFrom?: string;
+    /** 备选候选库简表（解决歧义与多选） */
+    alternativeLibraries?: Array<{ id: string; title: string; description?: string }>;
 };
 
 function getApiKey(): string | undefined {

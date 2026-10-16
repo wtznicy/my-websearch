@@ -59,7 +59,7 @@ function applyPrimaryHealthFilter(baseGroup: string[], isChinese: boolean, hasCu
     const hasExaKey = Boolean(process.env.EXA_API_KEY?.trim());
     const fallbackPool = isChinese
         ? ['csdn', 'juejin', 'bing']
-        : [...(hasExaKey ? ['exa'] : []), 'brave', 'startpage'];
+        : [...(hasExaKey ? ['exa'] : []), 'stackoverflow', 'github', 'brave', 'startpage', 'hackernews', 'arxiv'];
 
     for (const candidate of fallbackPool) {
         if (result.length >= baseGroup.length) {

@@ -25,13 +25,13 @@ import {
 export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntime): void {
     const searchToolName = getToolName('MCP_TOOL_SEARCH_NAME', 'search');
 
-    const DOCS_GUIDANCE = ' For OFFICIAL library/framework documentation, prefer resolveLibraryId + queryDocs (more reliable, works without proxy). Use the site: operator for site-specific queries (e.g. "update site:docs.elastic.co").';
+    const DOCS_GUIDANCE = ' For OFFICIAL library/framework documentation, prefer queryDocs (more reliable, works without proxy). Use the site: operator for site-specific queries (e.g. "update site:docs.elastic.co").';
     const getDocsGuidance = () => {
         return isContext7QuotaExhausted() ? '' : DOCS_GUIDANCE;
     };
     const getSearchDescription = () => {
         const queryRequirement = ' Requires either "query" (single query string) or "queries" (array of 1-4 queries for fan-out).';
-        const routingGuidance = ' Engine guidance: for Chinese queries prefer engines=["baidu","sogou","csdn","juejin"] (domestic engines have far better Chinese content coverage); for English/official docs use bing; overseas engines (duckduckgo/brave/startpage/exa) need a proxy. Omit engines to use server-side auto routing. Cite the relevant result URLs as markdown links in your answer.';
+        const routingGuidance = ' Engine guidance: for Chinese queries prefer engines=["baidu","sogou","csdn","juejin"]; for English general/official docs use bing; for bug/issue lookups use github; for developer Q&A use stackoverflow; for tech reviews use hackernews; for papers use arxiv; overseas engines (duckduckgo/brave/startpage/exa/github/stackoverflow/hackernews/arxiv) need a proxy. Omit engines to use server-side auto routing. Cite the relevant result URLs as markdown links in your answer.';
         const searchModeDescription = ' searchMode: omit/auto = server SEARCH_MODE; request/playwright force that mode.';
         const docsGuidance = getDocsGuidance();
         if (runtime.config.allowedSearchEngines.length === 0) {

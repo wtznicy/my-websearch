@@ -11,6 +11,10 @@ import { searchBrave } from './brave/index.js';
 import { searchJuejin } from './juejin/index.js';
 import { searchStartpage, resetStartpageCache } from './startpage/startpage.js';
 import { searchSogou, resetSogouState } from './sogou/sogou.js';
+import { searchGithub } from './github/searchGithub.js';
+import { searchStackOverflow } from './stackoverflow/stackoverflow.js';
+import { searchHackerNews } from './hackernews/hackernews.js';
+import { searchArxiv } from './arxiv/arxiv.js';
 
 export type SearchExecutionContext = {
     searchMode?: AppConfig['searchMode'];
@@ -34,7 +38,11 @@ export const SUPPORTED_SEARCH_ENGINES = [
     'brave',
     'juejin',
     'startpage',
-    'sogou'
+    'sogou',
+    'github',
+    'stackoverflow',
+    'hackernews',
+    'arxiv'
 ] as const;
 
 export type SupportedSearchEngine = typeof SUPPORTED_SEARCH_ENGINES[number];
@@ -178,6 +186,54 @@ export const ENGINE_REGISTRY: readonly EngineDescriptor[] = [
         probeUrl: 'https://m.sogou.com/web/searchList.jsp?keyword=mcp',
         execute: searchSogou,
         resetHealth: resetSogouState
+    },
+    {
+        name: 'github',
+        label: 'GitHub',
+        aliases: ['github', 'gh'],
+        region: 'overseas',
+        cascade: { enPriority: 35 },
+        supportsNativeSite: true,
+        supportsPlaywright: false,
+        defaultTimeoutMs: 10000,
+        probeUrl: 'https://api.github.com',
+        execute: searchGithub
+    },
+    {
+        name: 'stackoverflow',
+        label: 'StackOverflow',
+        aliases: ['stackoverflow', 'so'],
+        region: 'overseas',
+        cascade: { enPriority: 25 },
+        supportsNativeSite: true,
+        supportsPlaywright: false,
+        defaultTimeoutMs: 10000,
+        probeUrl: 'https://api.stackexchange.com',
+        execute: searchStackOverflow
+    },
+    {
+        name: 'hackernews',
+        label: 'HackerNews',
+        aliases: ['hackernews', 'hn'],
+        region: 'overseas',
+        cascade: { enPriority: 45 },
+        supportsNativeSite: true,
+        supportsPlaywright: false,
+        defaultTimeoutMs: 8000,
+        probeUrl: 'https://hn.algolia.com/api/v1/search?query=test',
+        execute: searchHackerNews
+    },
+    {
+        name: 'arxiv',
+        label: 'arXiv',
+        aliases: ['arxiv'],
+        region: 'overseas',
+        cascade: { enPriority: 55 },
+        supportsNativeSite: true,
+        supportsPlaywright: false,
+        defaultTimeoutMs: 10000,
+        probeUrl: 'http://export.arxiv.org/api/query?search_query=all:electron&max_results=1',
+        execute: searchArxiv
     }
 ] as const;
 
