@@ -5,7 +5,7 @@ import { isEngineCircuitOpen } from './engineCircuitBreaker.js';
 import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { metrics } from '../metrics.js';
 import { AppError, extractErrorCode, extractErrorDetails, extractErrorStatus, isAppError } from '../errors.js';
-import { SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
+import { SUPPORTED_SEARCH_ENGINES, ENGINE_REGISTRY } from './searchEngines.js';
 import {
     SearchEngineExecutorMap,
     SearchExecutionFailure,
@@ -42,25 +42,17 @@ export interface ExecuteCascadeResult {
     cascadeMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }>;
 }
 
-const ZH_CASCADE_PRIORITY = [
-    'baidu',
-    'sogou',
-    'bing',
-    'juejin',
-    'csdn',
-    'duckduckgo',
-    'brave',
-    'exa',
-    'startpage'
-] as const;
+const ZH_CASCADE_PRIORITY: readonly string[] = ENGINE_REGISTRY
+    .filter((e) => typeof e.cascade.zhPriority === 'number')
+    .slice()
+    .sort((a, b) => a.cascade.zhPriority! - b.cascade.zhPriority!)
+    .map((e) => e.name);
 
-const EN_CASCADE_PRIORITY = [
-    'bing',
-    'duckduckgo',
-    'brave',
-    'exa',
-    'startpage'
-] as const;
+const EN_CASCADE_PRIORITY: readonly string[] = ENGINE_REGISTRY
+    .filter((e) => typeof e.cascade.enPriority === 'number')
+    .slice()
+    .sort((a, b) => a.cascade.enPriority! - b.cascade.enPriority!)
+    .map((e) => e.name);
 
 /**
  * 按近期滑动窗口健康度对级联候选引擎动态微调排序：

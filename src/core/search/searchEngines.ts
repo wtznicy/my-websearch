@@ -1,45 +1,33 @@
-export const SUPPORTED_SEARCH_ENGINES = [
-    'baidu',
-    'bing',
-    'csdn',
-    'duckduckgo',
-    'exa',
-    'brave',
-    'juejin',
-    'startpage',
-    'sogou'
-] as const;
+import {
+    SUPPORTED_SEARCH_ENGINES,
+    type SupportedSearchEngine,
+    ENGINE_REGISTRY,
+    getEngineDescriptor,
+    getEngineLabel
+} from '../../engines/registry.js';
 
-export type SupportedSearchEngine = typeof SUPPORTED_SEARCH_ENGINES[number];
+export {
+    SUPPORTED_SEARCH_ENGINES,
+    type SupportedSearchEngine,
+    ENGINE_REGISTRY,
+    getEngineDescriptor,
+    getEngineLabel
+};
+
+const ENGINE_ALIASES = new Map<string, SupportedSearchEngine>();
+for (const engine of ENGINE_REGISTRY) {
+    ENGINE_ALIASES.set(engine.name.toLowerCase().replace(/[\s._-]+/g, ''), engine.name);
+    if (engine.aliases) {
+        for (const alias of engine.aliases) {
+            ENGINE_ALIASES.set(alias.toLowerCase().replace(/[\s._-]+/g, ''), engine.name);
+        }
+    }
+}
 
 export function normalizeEngineName(engine: string): string {
     const cleaned = engine.trim().toLowerCase();
     const compact = cleaned.replace(/[\s._-]+/g, '');
-
-    switch (compact) {
-        case 'baidu':
-            return 'baidu';
-        case 'bing':
-            return 'bing';
-        case 'csdn':
-            return 'csdn';
-        case 'duckduckgo':
-            return 'duckduckgo';
-        case 'exa':
-            return 'exa';
-        case 'brave':
-            return 'brave';
-        case 'juejin':
-            return 'juejin';
-        case 'startpage':
-            return 'startpage';
-        case 'sogou':
-        case 'sougou':
-        case '搜狗':
-            return 'sogou';
-        default:
-            return cleaned;
-    }
+    return ENGINE_ALIASES.get(compact) ?? cleaned;
 }
 
 export function distributeLimit(totalLimit: number, engineCount: number): number[] {

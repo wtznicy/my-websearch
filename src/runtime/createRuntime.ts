@@ -1,19 +1,12 @@
 import { config, AppConfig } from '../config.js';
-import { searchBaidu } from '../engines/baidu/baidu.js';
-import { searchBing } from '../engines/bing/bing.js';
-import { searchCsdn } from '../engines/csdn/csdn.js';
-import { searchDuckDuckGo } from '../engines/duckduckgo/index.js';
-import { searchExa } from '../engines/exa/index.js';
-import { searchBrave } from '../engines/brave/index.js';
-import { searchJuejin } from '../engines/juejin/index.js';
-import { searchStartpage } from '../engines/startpage/index.js';
-import { searchSogou } from '../engines/sogou/index.js';
+import { ENGINE_REGISTRY, SearchEngineExecutorMap } from '../engines/registry.js';
 import { fetchCsdnArticle } from '../engines/csdn/fetchCsdnArticle.js';
 import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
 import { fetchGithubReadme } from '../engines/github/index.js';
 import { fetchWebContent } from '../engines/web/index.js';
 import { createContext7Services } from '../core/context7/context7Service.js';
-import { createSearchService, configureGlobalConcurrencyLimit, SearchEngineExecutorMap } from '../core/search/searchService.js';import {
+import { createSearchService, configureGlobalConcurrencyLimit } from '../core/search/searchService.js';
+import {
     createArticleFetchService,
     createGithubReadmeService,
     createWebFetchService,
@@ -37,17 +30,9 @@ export type CreateMyWebSearchRuntimeOptions = {
 };
 
 function createDefaultSearchExecutors(runtimeConfig?: AppConfig): SearchEngineExecutorMap {
-    const all: SearchEngineExecutorMap = {
-        baidu: searchBaidu,
-        bing: searchBing,
-        csdn: searchCsdn,
-        duckduckgo: searchDuckDuckGo,
-        exa: searchExa,
-        brave: searchBrave,
-        juejin: searchJuejin,
-        startpage: searchStartpage,
-        sogou: searchSogou
-    };
+    const all: SearchEngineExecutorMap = Object.fromEntries(
+        ENGINE_REGISTRY.map((e) => [e.name, e.execute])
+    );
     if (runtimeConfig?.allowedSearchEngines && runtimeConfig.allowedSearchEngines.length > 0) {
         const allowed = new Set(runtimeConfig.allowedSearchEngines);
         const filtered: SearchEngineExecutorMap = {};

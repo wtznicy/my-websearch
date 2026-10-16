@@ -4,7 +4,8 @@ import {
     normalizeEngineName,
     resolveRequestedEngines,
     SUPPORTED_SEARCH_ENGINES,
-    SupportedSearchEngine
+    SupportedSearchEngine,
+    getEngineLabel
 } from '../../core/search/searchEngines.js';
 import { pickDefaultEnginesForQuery } from '../../core/search/queryEngineRouting.js';
 import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
@@ -36,18 +37,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
         if (runtime.config.allowedSearchEngines.length === 0) {
             return `Search the web across multiple engines with no API key required.${queryRequirement}${searchModeDescription}${routingGuidance}${docsGuidance}`;
         } else {
-            const enginesText = runtime.config.allowedSearchEngines.map(e => {
-                switch (e) {
-                    case 'juejin':
-                        return 'Juejin(掘金)';
-                    case 'startpage':
-                        return 'Startpage';
-                    case 'sogou':
-                        return 'Sogou(搜狗)';
-                    default:
-                        return e.charAt(0).toUpperCase() + e.slice(1);
-                }
-            }).join(', ');
+            const enginesText = runtime.config.allowedSearchEngines.map(getEngineLabel).join(', ');
             return `Search the web using these engines: ${enginesText} (no API key required).${queryRequirement}${searchModeDescription}${routingGuidance}${docsGuidance}`;
         }
     };

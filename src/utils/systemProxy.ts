@@ -14,13 +14,24 @@ import { config } from '../config.js';
  * 走系统代理，国内引擎保持直连（Clash 系统代理模式下国内直连更快，且绕行节点易超时）。
  */
 
+import { ENGINE_REGISTRY } from '../engines/registry.js';
+
 const execFileAsync = promisify(execFile);
 
-/** 海外引擎集合：系统代理兜底仅作用于这些引擎（与 PROXY_ENGINES 的推荐值一致） */
-const OVERSEAS_ENGINES = new Set(['duckduckgo', 'brave', 'startpage', 'exa', 'github']);
+let overseasEnginesSet: Set<string> | undefined;
+
+function getOverseasEngines(): Set<string> {
+    if (!overseasEnginesSet) {
+        overseasEnginesSet = new Set([
+            ...ENGINE_REGISTRY.filter((e) => e.region === 'overseas').map((e) => e.name),
+            'github'
+        ]);
+    }
+    return overseasEnginesSet;
+}
 
 export function isOverseasEngine(engine: string | undefined): boolean {
-    return engine !== undefined && OVERSEAS_ENGINES.has(engine);
+    return engine !== undefined && getOverseasEngines().has(engine);
 }
 
 /** 缓存状态：undefined = 尚未检测，null = 检测过但无系统代理，string = 系统代理 URL */

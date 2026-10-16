@@ -20,18 +20,16 @@ import {
 } from '../core/antiBot/antiBotDetection.js';
 import { isEngineCircuitOpen, resetEngineCircuits } from '../core/search/engineCircuitBreaker.js';
 import { metrics } from '../core/metrics.js';
-import { resetBingImpersonateStateForTests } from '../engines/bing/impersonate.js';
 import { SUPPORTED_SEARCH_ENGINES, normalizeEngineName } from '../core/search/searchEngines.js';
+import { ENGINE_REGISTRY } from '../engines/registry.js';
 import { MyWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { BROWSER_USER_AGENT } from '../utils/constants.js';
 import { buildAxiosRequestOptions, __resetDirectSlowHostCacheForTests } from '../utils/httpRequest.js';
 import { isKnownUnreachableOverseasEngine, __setOverseasReachableForTests } from '../utils/overseasProbe.js';
 import { resetDnsCache } from '../utils/dnsCache.js';
 import { resetSystemProxyCache } from '../utils/systemProxy.js';
-import { resetStartpageCache } from '../engines/startpage/startpage.js';
 import { __resetGithubReadmeCacheForTests } from '../engines/github/github.js';
 import { resetContext7Cache } from '../core/context7/context7Service.js';
-import { resetSogouState } from '../engines/sogou/sogou.js';
 import {
     buildPlaywrightProxy,
     getLocalBrowserExecutablePath,
@@ -68,17 +66,9 @@ const RECOGNIZED_ENV_KEYS = [
     'DIRECT_FIRST_PROBE_TIMEOUT_MS'
 ] as const;
 
-const ENGINE_NETWORK_PROBE_URLS: Record<string, string> = {
-    bing: 'https://cn.bing.com/search?q=mcp&count=1',
-    baidu: 'https://www.baidu.com/s?wd=mcp&rn=1',
-    sogou: 'https://m.sogou.com/web/searchList.jsp?keyword=mcp',
-    csdn: 'https://so.csdn.net/api/v3/search?q=mcp&t=all&p=1&s=0&tm=0&lv=-1&ft=0&l=&u=',
-    juejin: 'https://api.juejin.cn',
-    exa: 'https://api.exa.ai',
-    duckduckgo: 'https://html.duckduckgo.com/html/?q=mcp',
-    brave: 'https://search.brave.com/search?q=mcp',
-    startpage: 'https://www.startpage.com/sp/search?query=mcp'
-};
+const ENGINE_NETWORK_PROBE_URLS: Record<string, string> = Object.fromEntries(
+    ENGINE_REGISTRY.map((e) => [e.name, e.probeUrl])
+);
 
 export const DEFAULT_DOCTOR_PROBE_TTL_MS = 30_000;
 export const DEFAULT_DOCTOR_PROBE_OK_TTL_MS = 30_000;
@@ -142,15 +132,15 @@ export function clearDoctorProbeCache(): void {
 export function resetAllHealthState(runtime?: MyWebSearchRuntime): void {
     resetEngineCircuits();
     metrics.reset();
-    resetBingImpersonateStateForTests();
     __resetDirectSlowHostCacheForTests();
     __setOverseasReachableForTests(null);
     resetDnsCache();
     resetSystemProxyCache();
-    resetStartpageCache();
     __resetGithubReadmeCacheForTests();
     resetContext7Cache();
-    resetSogouState();
+    for (const engine of ENGINE_REGISTRY) {
+        engine.resetHealth?.();
+    }
     clearDoctorProbeCache();
     runtime?.services?.search?.clearCache?.();
 }
