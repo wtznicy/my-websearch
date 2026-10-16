@@ -96,7 +96,7 @@ async function main() {
   }
 
   let isShuttingDown = false;
-  let httpShutdownCleanup: (() => void) | undefined;
+  let httpShutdownCleanup: (() => Promise<void>) | undefined;
 
   const gracefulShutdown = async (signalOrReason: string) => {
     if (isShuttingDown) {
@@ -107,7 +107,10 @@ async function main() {
 
     if (httpShutdownCleanup) {
       try {
-        httpShutdownCleanup();
+        await Promise.race([
+          httpShutdownCleanup(),
+          new Promise((resolve) => setTimeout(resolve, 1500))
+        ]);
       } catch {
         // ignore
       }
@@ -119,10 +122,6 @@ async function main() {
       // ignore
     }
 
-    const force = setTimeout(() => process.exit(0), 1500);
-    if (typeof force.unref === 'function') {
-      force.unref();
-    }
     process.exit(0);
   };
 
@@ -215,6 +214,11 @@ async function main() {
       const session = (kind === 'streamable' ? transports.streamable : transports.sse)[id];
       if (!session) {
         return;
+      }
+      try {
+        void session.server.close?.();
+      } catch (error) {
+        console.error(`❌ Failed to close ${kind} session server ${id}:`, error);
       }
       try {
         void session.transport.close?.();
@@ -485,11 +489,13 @@ async function main() {
         closeSession('sse', id);
       }
       clearInterval(sessionReaper);
-      try {
-        httpServer.close();
-      } catch {
-        // ignore
-      }
+      return new Promise<void>((resolve) => {
+        try {
+          httpServer.close(() => resolve());
+        } catch {
+          resolve();
+        }
+      });
     };
   } else {
     console.error('ℹ️ HTTP server disabled, running in STDIO mode only')

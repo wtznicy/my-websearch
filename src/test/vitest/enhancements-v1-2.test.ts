@@ -85,3 +85,64 @@ Deep dive topics.
     });
 });
 
+describe('Substantive tokens in drift & usable results', () => {
+    it('should not let a random number bypass hasFirstTokenDrift', async () => {
+        const { hasFirstTokenDrift } = await import('../../core/search/resultRanking.js');
+        // Query has tail tokens "context", "protocol", and number "2"
+        // Results only hit "model" and have a random "2", but zero hit on "context" or "protocol"
+        const results = [
+            {
+                title: 'Tesla Model 2 news',
+                url: 'https://example.com/tesla',
+                description: 'Model 2 will be released soon with 2 doors',
+                source: 'example.com',
+                engine: 'bing'
+            }
+        ];
+        expect(hasFirstTokenDrift(results, 'model context protocol 2')).toBe(true);
+    });
+
+    it('should not count noise with single digit as usable discriminative term', async () => {
+        const { countUsableResults } = await import('../../core/search/resultRanking.js');
+        const results = [
+            {
+                title: 'Article 3',
+                url: 'https://example.com/item3',
+                description: 'Just mentions 3 apples',
+                source: 'example.com',
+                engine: 'bing'
+            }
+        ];
+        // Searching for "react performance optimization 3", result only hits "3"
+        expect(countUsableResults(results, 'react performance optimization 3')).toBe(0);
+    });
+});
+
+describe('serializeFetchWebResult links truncation', () => {
+    it('should truncate excessive links when overhead is large and stay under byte cap', async () => {
+        const { serializeFetchWebResult } = await import('../../tools/toolShared.js');
+        const links = Array.from({ length: 300 }, (_, i) => ({
+            href: `https://example.com/deep/path/to/resource/item/number/${i}?query=parameter&extra=data`,
+            text: `Link text description item #${i} with some long text to take up space`
+        }));
+        const mockResult = {
+            url: 'https://example.com',
+            finalUrl: 'https://example.com',
+            contentType: 'text/html',
+            title: 'Test Page with Many Links',
+            retrievalMethod: 'request' as const,
+            truncated: false,
+            content: 'Hello world, this is a page with many links.'.repeat(20),
+            totalLength: 900,
+            startIndex: 0,
+            links
+        };
+
+        const serialized = serializeFetchWebResult(mockResult);
+        expect(Buffer.byteLength(serialized, 'utf8')).toBeLessThanOrEqual(60 * 1024);
+        const parsed = JSON.parse(serialized);
+        expect(parsed.links.length).toBeLessThanOrEqual(50);
+    });
+});
+
+

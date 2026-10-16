@@ -75,6 +75,20 @@ export function tokenizeForRanking(text: string): string[] {
     return tokens;
 }
 
+/**
+ * 判断 token 是否为具备实质语义的内容词：
+ * 纯数字（如 "2", "3", "2026"）或单个非 CJK 字符（如单个字母）不应单独充当“首词漂移检测”或“可用结果统计”的唯一区分通行证。
+ */
+export function isSubstantiveRankingToken(token: string): boolean {
+    if (/^\d+$/.test(token)) {
+        return false;
+    }
+    if (token.length < 2 && !/[\u4e00-\u9fff]/.test(token)) {
+        return false;
+    }
+    return true;
+}
+
 /** 结果分词缓存（按 SearchResult 对象引用存储，生命周期跟随请求结果生命周期，自动 GC 无内存泄漏） */
 const docTokensCache = new WeakMap<SearchResult, string[]>();
 
@@ -212,7 +226,9 @@ export function relevanceScores(results: SearchResult[], query: string): number[
  * 返回特斯拉 Model Y 和百科，搜 "rust tokio select" 返回 Rust 官网），前 N 条结果仅命中首词而对第 2 个及以后的词零命中。
  */
 export function hasFirstTokenDrift(results: SearchResult[], query: string): boolean {
-    const uniqueQueryTokens = [...new Set(tokenizeForRanking(query || ''))];
+    const rawTokens = tokenizeForRanking(query || '');
+    const substantive = rawTokens.filter(isSubstantiveRankingToken);
+    const uniqueQueryTokens = [...new Set(substantive.length >= 2 ? substantive : rawTokens)];
     if (uniqueQueryTokens.length < 2 || results.length === 0) {
         return false;
     }
@@ -228,10 +244,12 @@ export function hasFirstTokenDrift(results: SearchResult[], query: string): bool
 }
 
 export function countUsableResults(results: SearchResult[], query: string): number {
-    const queryTokens = tokenizeForRanking(query || '');
-    if (queryTokens.length === 0 || results.length === 0) {
+    const rawQueryTokens = tokenizeForRanking(query || '');
+    if (rawQueryTokens.length === 0 || results.length === 0) {
         return results.length;
     }
+    const substantive = rawQueryTokens.filter(isSubstantiveRankingToken);
+    const queryTokens = substantive.length > 0 ? substantive : rawQueryTokens;
 
     const docs = results.map(getDocTokens);
     const total = results.length;

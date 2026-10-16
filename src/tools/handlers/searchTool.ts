@@ -266,7 +266,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
         }
     });
 
-    if (server.server && typeof (server.server as { onclose?: () => void }).onclose !== 'undefined') {
+    if (server.server) {
         const prevOnClose = (server.server as { onclose?: () => void }).onclose;
         (server.server as { onclose?: () => void }).onclose = () => {
             unsubscribe?.();

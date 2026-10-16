@@ -237,8 +237,15 @@ export const cachedDnsLookup: DnsLookupFn = (hostname, options, callback) => {
                 const first = addrs[0];
                 if (addrs.length > 0 && first && first.address) {
                     evictExpired();
+                    const existing = cache.get(cleanHost);
+                    let mergedAddrs = addrs;
+                    if (existing && now < existing.expiresAt) {
+                        const seen = new Set(addrs.map((item) => `${item.address}:${item.family}`));
+                        const kept = existing.addresses.filter((item) => !seen.has(`${item.address}:${item.family}`));
+                        mergedAddrs = [...addrs, ...kept];
+                    }
                     cache.set(cleanHost, {
-                        addresses: addrs,
+                        addresses: mergedAddrs,
                         expiresAt: now + CACHE_TTL_MS
                     });
                 }

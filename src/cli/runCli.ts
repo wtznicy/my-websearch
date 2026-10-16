@@ -324,8 +324,8 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
 
     const limitExplicit = limit !== undefined;
     const minResultsExplicit = minResults !== undefined;
-    const effectiveLimit = limit ?? 10;
-    const effectiveMinResults = minResults ?? 0;
+    const effectiveLimit = limit ?? runtime.config.defaultSearchLimit ?? 10;
+    const effectiveMinResults = minResults ?? Math.min(effectiveLimit, runtime.config.defaultMinResults ?? 0);
 
     if (!Number.isInteger(effectiveLimit) || effectiveLimit < 1 || effectiveLimit > 50) {
         throw new Error('Limit must be an integer between 1 and 50');
@@ -746,7 +746,7 @@ function formatQueryDocsHumanReadable(result: {
     resolvedFrom?: string;
     alternativeLibraries?: Array<{ id: string; title: string }>;
     snippets?: Array<{ title?: string; code?: string; content?: string }>;
-    codeSnippets?: Array<{ codeTitle?: string; codeList?: Array<{ code: string }> }>;
+    codeSnippets?: Array<{ codeTitle?: string; pageTitle?: string; codeDescription?: string; codeList?: Array<{ code: string; language?: string; path?: string }> }>;
     infoSnippets?: Array<{ title: string; content: string }>;
 }): string {
     const titleHeader = result.resolvedFrom
@@ -758,30 +758,35 @@ function formatQueryDocsHumanReadable(result: {
         lines.push(`(Alternative matches: ${result.alternativeLibraries.map(a => `${a.title} [${a.id}]`).join(', ')})`);
     }
 
-    if (result.snippets) {
-        for (const snippet of result.snippets) {
-            lines.push('');
-            if (snippet.title) lines.push(`### ${snippet.title}`);
-            if (snippet.content) lines.push(snippet.content);
-            if (snippet.code) lines.push('```\n' + snippet.code + '\n```');
-        }
-    }
-    if (result.infoSnippets) {
+    if (result.infoSnippets && result.infoSnippets.length > 0) {
         for (const snippet of result.infoSnippets) {
             lines.push('');
             if (snippet.title) lines.push(`### ${snippet.title}`);
             if (snippet.content) lines.push(snippet.content);
         }
     }
-    if (result.codeSnippets) {
+    if (result.codeSnippets && result.codeSnippets.length > 0) {
         for (const snippet of result.codeSnippets) {
             lines.push('');
-            if (snippet.codeTitle) lines.push(`### ${snippet.codeTitle}`);
+            const heading = [snippet.pageTitle, snippet.codeTitle].filter(Boolean).join(': ') || snippet.codeTitle || 'Code Snippet';
+            lines.push(`### ${heading}`);
+            if (snippet.codeDescription) {
+                lines.push(snippet.codeDescription);
+            }
             if (snippet.codeList) {
                 for (const item of snippet.codeList) {
-                    lines.push('```\n' + item.code + '\n```');
+                    const lang = item.language ?? '';
+                    lines.push(`\`\`\`${lang}\n${item.code}\n\`\`\``);
                 }
             }
+        }
+    }
+    if (result.snippets && result.snippets.length > 0) {
+        for (const snippet of result.snippets) {
+            lines.push('');
+            if (snippet.title) lines.push(`### ${snippet.title}`);
+            if (snippet.content) lines.push(snippet.content);
+            if (snippet.code) lines.push('```\n' + snippet.code + '\n```');
         }
     }
     return lines.join('\n');

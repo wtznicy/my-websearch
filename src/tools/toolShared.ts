@@ -158,16 +158,36 @@ export function serializeFetchWebResult(result: FetchWebContentResult): string {
         return full;
     }
 
-    const { readableHtml, raw, ...core } = result as unknown as Record<string, unknown> & { content?: string; startIndex?: number; totalLength?: number };
-    const trimmed = JSON.stringify(core, null, 2);
+    const { readableHtml, raw, ...core } = result as unknown as Record<string, unknown> & {
+        content?: string;
+        startIndex?: number;
+        totalLength?: number;
+        links?: unknown[];
+    };
+    let trimmed = JSON.stringify(core, null, 2);
     if (Buffer.byteLength(trimmed, 'utf8') <= cap) {
         return trimmed;
     }
 
     const content = core.content ?? '';
     const contentBytes = Buffer.byteLength(content, 'utf8');
-    const trimmedBytes = Buffer.byteLength(trimmed, 'utf8');
-    const overhead = Math.max(0, trimmedBytes - contentBytes);
+    let trimmedBytes = Buffer.byteLength(trimmed, 'utf8');
+    let overhead = Math.max(0, trimmedBytes - contentBytes);
+
+    // 当 overhead 占用过大（> cap * 0.5）且包含大量 links 时，先对 links 做截断避免挤爆 cap
+    if (overhead > cap * 0.5 && Array.isArray(core.links) && core.links.length > 50) {
+        core.links = core.links.slice(0, 50);
+        trimmed = JSON.stringify(core, null, 2);
+        trimmedBytes = Buffer.byteLength(trimmed, 'utf8');
+        overhead = Math.max(0, trimmedBytes - contentBytes);
+    }
+    if (overhead > cap * 0.8 && Array.isArray(core.links)) {
+        core.links = core.links.slice(0, 10);
+        trimmed = JSON.stringify(core, null, 2);
+        trimmedBytes = Buffer.byteLength(trimmed, 'utf8');
+        overhead = Math.max(0, trimmedBytes - contentBytes);
+    }
+
     const room = Math.max(0, cap - overhead - 256);
 
     let cutStr = '';
