@@ -63,6 +63,45 @@ describe('New Developer Search Engines (github, stackoverflow, hackernews, arxiv
             expect(results[1].description).toContain('★220000');
             expect(results[1].description).toContain('[JavaScript]');
         });
+
+        it('falls back to anonymous search when GITHUB_TOKEN is invalid (HTTP 401)', async () => {
+            const originalToken = process.env.GITHUB_TOKEN;
+            process.env.GITHUB_TOKEN = 'invalid_mock_token';
+            try {
+                vi.spyOn(axios, 'request')
+                    // 1. Initial attempt with token fails with 401
+                    .mockRejectedValueOnce({
+                        isAxiosError: true,
+                        response: { status: 401, data: { message: 'Bad credentials' } }
+                    })
+                    // 2. Fallback anonymous attempt succeeds
+                    .mockResolvedValueOnce({
+                        status: 200,
+                        data: {
+                            total_count: 1,
+                            items: [
+                                {
+                                    title: 'Fallback Issue Title',
+                                    html_url: 'https://github.com/test/repo/issues/1',
+                                    state: 'open',
+                                    body: 'Anonymous fallback issue body'
+                                }
+                            ]
+                        },
+                        headers: {}
+                    });
+
+                const results = await searchGithub('test query', 1);
+                expect(results).toHaveLength(1);
+                expect(results[0].title).toBe('Fallback Issue Title');
+            } finally {
+                if (originalToken !== undefined) {
+                    process.env.GITHUB_TOKEN = originalToken;
+                } else {
+                    delete process.env.GITHUB_TOKEN;
+                }
+            }
+        });
     });
 
     describe('searchStackOverflow', () => {
@@ -90,6 +129,50 @@ describe('New Developer Search Engines (github, stackoverflow, hackernews, arxiv
             expect(results[0].title).toBe('How to use "async/await" with <div> in React?');
             expect(results[0].description).toContain('[Score: 88, Answers: 4, Accepted]');
             expect(results[0].description).toContain('[reactjs, async-await, javascript]');
+        });
+
+        it('falls back to anonymous request when STACKOVERFLOW_API_KEY is invalid (error_id 400)', async () => {
+            const originalKey = process.env.STACKOVERFLOW_API_KEY;
+            process.env.STACKOVERFLOW_API_KEY = 'invalid_stack_key';
+            try {
+                vi.spyOn(axios, 'request')
+                    // 1. Initial attempt with invalid key returns bad_parameter error
+                    .mockResolvedValueOnce({
+                        status: 200,
+                        data: {
+                            error_id: 400,
+                            error_message: 'key is not valid',
+                            error_name: 'bad_parameter'
+                        },
+                        headers: {}
+                    })
+                    // 2. Fallback anonymous attempt succeeds
+                    .mockResolvedValueOnce({
+                        status: 200,
+                        data: {
+                            items: [
+                                {
+                                    title: 'Fallback StackOverflow Question',
+                                    link: 'https://stackoverflow.com/questions/999/test',
+                                    score: 10,
+                                    is_answered: false,
+                                    answer_count: 1
+                                }
+                            ]
+                        },
+                        headers: {}
+                    });
+
+                const results = await searchStackOverflow('test query', 1);
+                expect(results).toHaveLength(1);
+                expect(results[0].title).toBe('Fallback StackOverflow Question');
+            } finally {
+                if (originalKey !== undefined) {
+                    process.env.STACKOVERFLOW_API_KEY = originalKey;
+                } else {
+                    delete process.env.STACKOVERFLOW_API_KEY;
+                }
+            }
         });
     });
 

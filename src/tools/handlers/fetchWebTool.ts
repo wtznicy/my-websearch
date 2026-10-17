@@ -39,7 +39,7 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
     server.registerTool(
         fetchWebToolName,
         {
-            description: "Fetch readable content from a public HTTP(S) URL (web pages, technical docs, and Markdown files). Defaults to format='markdown' to preserve headings, code blocks (with language), and GFM tables. Supports focus='keyword' for chapter targeting (~5000 chars) and batch 'urls' (1~3 URLs concurrently). When response has truncated=true, inspect 'toc' for heading offsets or pass nextStartIndex as startIndex.",
+            description: "Fetch high-quality readable content from any public HTTP(S) URL (web pages, technical documentation, Markdown files, and technical articles such as CSDN, Juejin, WeChat, Stack Overflow). Automatically bypasses domestic anti-bot walls, removes promotional noise/watermarks, and preserves code blocks (with programming language) and GFM tables. Defaults to format='markdown'. Supports focus='keyword' for chapter targeting (~5000 chars) and batch 'urls' (1~3 URLs concurrently). When response has truncated=true, inspect 'toc' for heading offsets or pass nextStartIndex as startIndex.",
             inputSchema: {
                 url: z.preprocess(normalizeHttpUrl, z.string().url().refine(
                     (u) => validatePublicWebUrl(u),

@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { purifyWeChatArticle, purifyStackOverflowQuestion, purifySiteContent } from '../../engines/web/sitePurifiers.js';
+import {
+    purifyWeChatArticle,
+    purifyStackOverflowQuestion,
+    purifyCsdnArticle,
+    purifyJuejinArticle,
+    purifySiteContent
+} from '../../engines/web/sitePurifiers.js';
 
 describe('Site Purifiers (mp.weixin.qq.com & stackoverflow.com)', () => {
     describe('WeChat Articles (mp.weixin.qq.com)', () => {
@@ -77,6 +83,70 @@ describe('Site Purifiers (mp.weixin.qq.com & stackoverflow.com)', () => {
         });
     });
 
+    describe('CSDN Articles (blog.csdn.net)', () => {
+        it('purifies CSDN article, extracts title, author, and strips promo sections', () => {
+            const html = `
+                <!DOCTYPE html>
+                <html>
+                <head><title>Vue3 核心原理剖析_前端架构师_CSDN博客</title></head>
+                <body>
+                    <h1 class="title-article" id="articleContentId">Vue3 核心原理剖析</h1>
+                    <a class="follow-nickName">前端大牛</a>
+                    <div id="content_views" class="markdown_views prism-atom-one-dark">
+                        <p>Vue3 采用了基于 Proxy 的响应式系统，相较于 Vue2 的 Object.defineProperty 有质的飞跃。本篇深入剖析其实现细节与源码机制。</p>
+                        <div class="recommend-box">相关推荐内容</div>
+                        <div class="toolbar">分享点赞</div>
+                        <p>扫码关注大模型技术社区，免费公开项目源码包！</p>
+                    </div>
+                </body>
+                </html>
+            `;
+
+            const res = purifyCsdnArticle(html);
+            expect(res).toBeDefined();
+            expect(res?.title).toBe('Vue3 核心原理剖析');
+            expect(res?.author).toBe('前端大牛');
+            expect(res?.siteName).toBe('CSDN博客: 前端大牛');
+            expect(res?.text).toContain('Vue3 采用了基于 Proxy 的响应式系统');
+            expect(res?.text).not.toContain('扫码关注大模型技术社区');
+            expect(res?.html).not.toContain('recommend-box');
+        });
+
+        it('returns undefined for soft 404 pages', () => {
+            const html = '<html><body><h1>你想找的内容离你而去了</h1></body></html>';
+            expect(purifyCsdnArticle(html)).toBeUndefined();
+        });
+    });
+
+    describe('Juejin Articles (juejin.cn)', () => {
+        it('purifies Juejin article, extracts title, author, and strips noise', () => {
+            const html = `
+                <!DOCTYPE html>
+                <html>
+                <head><title>深入理解 React 19 新特性 - 掘金</title></head>
+                <body>
+                    <h1 class="article-title">深入理解 React 19 新特性</h1>
+                    <div class="author-name"><span class="name">技术极客</span></div>
+                    <div class="markdown-body">
+                        <p>React 19 带来了 Actions、use() 等重磅特性，极大简化了异步状态管理与全栈开发。下面我们通过实战代码逐一解析其用法。</p>
+                        <div class="code-block-extension">复制代码</div>
+                        <div class="hljs-ln-numbers">1 2 3</div>
+                    </div>
+                </body>
+                </html>
+            `;
+
+            const res = purifyJuejinArticle(html);
+            expect(res).toBeDefined();
+            expect(res?.title).toBe('深入理解 React 19 新特性');
+            expect(res?.author).toBe('技术极客');
+            expect(res?.siteName).toBe('稀土掘金: 技术极客');
+            expect(res?.text).toContain('React 19 带来了 Actions');
+            expect(res?.html).not.toContain('code-block-extension');
+            expect(res?.html).not.toContain('hljs-ln-numbers');
+        });
+    });
+
     describe('purifySiteContent dispatcher', () => {
         it('routes mp.weixin.qq.com correctly', () => {
             const html = '<div id="js_content"><p>Wechat content</p></div>';
@@ -90,6 +160,20 @@ describe('Site Purifiers (mp.weixin.qq.com & stackoverflow.com)', () => {
             const res = purifySiteContent('https://stackoverflow.com/questions/999/test-question', html);
             expect(res).toBeDefined();
             expect(res?.html).toContain('SO content');
+        });
+
+        it('routes blog.csdn.net/.../article/details/... correctly', () => {
+            const html = '<h1 id="articleContentId">CSDN Title</h1><div id="content_views"><p>CSDN 文章详细正文内容必须足够长超过一百字以便提纯器能够识别出有效内容，否则会被当作片段忽略。</p></div>';
+            const res = purifySiteContent('https://blog.csdn.net/user/article/details/123456', html);
+            expect(res).toBeDefined();
+            expect(res?.title).toBe('CSDN Title');
+        });
+
+        it('routes juejin.cn/post/... correctly', () => {
+            const html = '<h1 class="article-title">Juejin Title</h1><div class="markdown-body"><p>Juejin 文章详细正文内容必须足够长超过一百字以便提纯器能够识别出有效内容，否则会被当作片段忽略。</p></div>';
+            const res = purifySiteContent('https://juejin.cn/post/7234567890123456789', html);
+            expect(res).toBeDefined();
+            expect(res?.title).toBe('Juejin Title');
         });
 
         it('returns undefined for other hosts', () => {

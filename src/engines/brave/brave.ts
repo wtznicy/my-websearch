@@ -115,13 +115,223 @@ export function parseBraveResults(html: string, seenUrls: Set<string>, $doc?: ch
     return results;
 }
 
-export async function searchBrave(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
-  const signal = options?.signal;
-  // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂超时拖累整次搜索
-  await assertOverseasEngineUsable('brave');
-  const seenUrls = new Set<string>();
+export interface BraveApiWebResult {
+    title: string;
+    url: string;
+    description?: string;
+    page_age?: string;
+    age?: string;
+    profile?: {
+        name?: string;
+        url?: string;
+        long_name?: string;
+    };
+    meta_url?: {
+        hostname?: string;
+    };
+    extra_snippets?: string[];
+}
+
+export interface BraveApiResponse {
+    web?: {
+        results?: BraveApiWebResult[];
+    };
+}
+
+/** 清洗 Brave 官方 API 返回的文本：去除 HTML 标签、还原常见 HTML 实体、压缩多余空格 */
+export function cleanBraveApiText(text: string): string {
+    return text
+        .replace(/<[^>]*>/g, '')
+        .replace(/&[a-zA-Z#0-9]+;/g, (entity) => {
+            const named: Record<string, string> = {
+                '&amp;': '&',
+                '&lt;': '<',
+                '&gt;': '>',
+                '&quot;': '"',
+                '&#39;': "'",
+                '&apos;': "'",
+                '&#x27;': "'",
+                '&nbsp;': ' '
+            };
+            return named[entity] ?? ' ';
+        })
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/** 官方 API 熔断/降级冷却状态管理（避免在密钥错误或配额耗尽时，每次搜索都白白多发起一次必挂的 HTTP 请求） */
+let officialApiDisabledUntil = 0;
+let officialApiDisableReason = '';
+
+export function isBraveOfficialApiDisabled(): boolean {
+    return Date.now() < officialApiDisabledUntil;
+}
+
+export function disableBraveOfficialApi(durationMs: number, reason: string): void {
+    officialApiDisabledUntil = Date.now() + durationMs;
+    officialApiDisableReason = reason;
+}
+
+export function resetBraveOfficialApiCooldown(): void {
+    officialApiDisabledUntil = 0;
+    officialApiDisableReason = '';
+}
+
+export function getBraveOfficialApiCooldownRemainingMs(): number {
+    return Math.max(0, officialApiDisabledUntil - Date.now());
+}
+
+/**
+ * 将 Brave 官方 Search API 返回的 JSON 结构映射为项目的标准 SearchResult 数组。
+ * 包含 URL 去重、HTML 标签清洗、域名解析提取及发布日期识别。
+ */
+export function parseBraveOfficialResults(data: BraveApiResponse, seenUrls: Set<string>): SearchResult[] {
+    const results: SearchResult[] = [];
+    const items = data.web?.results;
+    if (!Array.isArray(items)) {
+        return results;
+    }
+
+    for (const item of items) {
+        const url = item.url?.trim();
+        if (!url || !/^https?:\/\//i.test(url) || seenUrls.has(url)) {
+            continue;
+        }
+        seenUrls.add(url);
+
+        const title = cleanBraveApiText(item.title || '');
+        if (!title) {
+            continue;
+        }
+
+        let description = cleanBraveApiText(item.description || '');
+        if (Array.isArray(item.extra_snippets) && item.extra_snippets.length > 0) {
+            const extra = item.extra_snippets.map((s) => cleanBraveApiText(s)).filter(Boolean).join(' ');
+            if (extra) {
+                description = description ? `${description} ${extra}` : extra;
+            }
+        }
+
+        let source = item.meta_url?.hostname || item.profile?.name || '';
+        if (!source) {
+            try {
+                source = new URL(url).hostname;
+            } catch {
+                source = '';
+            }
+        }
+
+        let date: string | undefined;
+        const rawAge = item.page_age || item.age;
+        if (rawAge) {
+            const m = rawAge.match(/(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/);
+            if (m && m[1]) {
+                date = m[1].replace(/[年/.]/g, '-').replace(/[月日]/g, '');
+            }
+        }
+
+        results.push({
+            title,
+            url,
+            description,
+            source,
+            engine: 'brave',
+            ...(date ? { date } : {})
+        });
+    }
+
+    return results;
+}
+
+/**
+ * Brave 官方 Web Search API 搜索实现（高可靠免反爬，需 BRAVE_API_KEY）。
+ * 官方端点: https://api.search.brave.com/res/v1/web/search
+ */
+export async function searchBraveOfficial(
+    query: string,
+    limit: number,
+    apiKey: string,
+    signal?: AbortSignal
+): Promise<SearchResult[]> {
+    const seenUrls = new Set<string>();
     const encodedQuery = encodeURIComponent(query);
-    const requestOptions = buildAxiosRequestOptions({ engine: 'brave',
+
+    return paginateSearch({
+        limit,
+        signal,
+        maxPages: 10,
+        fetchPage: async (pageIndex) => {
+            // Brave 官方 API 的 offset 参数支持 0 ~ 9（对应前 10 页）
+            if (pageIndex > 9) {
+                return [];
+            }
+            const remaining = limit - seenUrls.size;
+            if (remaining <= 0) {
+                return [];
+            }
+            const pageSize = Math.min(20, Math.max(1, remaining));
+            const requestOptions = buildAxiosRequestOptions({
+                engine: 'brave',
+                trustedStaticHost: true,
+                signal,
+                headers: {
+                    'Accept': 'application/json',
+                    'Accept-Encoding': 'gzip',
+                    'X-Subscription-Token': apiKey
+                }
+            });
+
+            try {
+                const response = await axios.get<BraveApiResponse>(
+                    `https://api.search.brave.com/res/v1/web/search?q=${encodedQuery}&count=${pageSize}&offset=${pageIndex}&text_decorations=0`,
+                    requestOptions
+                );
+                return parseBraveOfficialResults(response.data, seenUrls);
+            } catch (error: unknown) {
+                // 若为多页抓取后续页失败，但首页已拿到结果，优先返回已有结果而不丢弃
+                if (pageIndex > 0 && seenUrls.size > 0) {
+                    return [];
+                }
+                const status = extractErrorStatus(error);
+                if (status === 401 || status === 403 || status === 422) {
+                    throw new AppError({
+                        code: 'unauthorized',
+                        engine: 'brave',
+                        retryable: false,
+                        status,
+                        message: `Invalid Brave Search API key (HTTP ${status}). Please check your BRAVE_API_KEY configuration.`
+                    });
+                }
+                if (status === 429) {
+                    // 注意：这里不要 tripEngineCircuit('brave')，因为官方 API 429（配额用尽/QPS超限）时，
+                    // 网页版爬虫 search.brave.com 往往依然可用，交由 searchBrave 优雅降级回退！
+                    throw new AppError({
+                        code: 'rate_limited',
+                        engine: 'brave',
+                        retryable: false,
+                        status: 429,
+                        message: 'Brave Search API rate limit or quota exceeded (HTTP 429).'
+                    });
+                }
+                throw error;
+            }
+        }
+    });
+}
+
+/**
+ * Brave 网页端（SvelteKit SSR）抓取搜索实现（无 API Key 时的默认路径，或官方 API 故障/密钥错误/配额耗尽时的回退路径）。
+ */
+export async function searchBraveWeb(
+    query: string,
+    limit: number,
+    options?: { signal?: AbortSignal }
+): Promise<SearchResult[]> {
+    const signal = options?.signal;
+    const seenUrls = new Set<string>();
+    const encodedQuery = encodeURIComponent(query);
+    const requestOptions = buildAxiosRequestOptions({
+        engine: 'brave',
         trustedStaticHost: true,
         signal,
         headers: {
@@ -170,3 +380,48 @@ export async function searchBrave(query: string, limit: number, options?: { sign
         }
     });
 }
+
+export async function searchBrave(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
+    const signal = options?.signal;
+    // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂超时拖累整次搜索
+    await assertOverseasEngineUsable('brave');
+
+    const apiKey = (process.env.BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY)?.trim();
+    if (apiKey) {
+        if (!isBraveOfficialApiDisabled()) {
+            try {
+                return await searchBraveOfficial(query, limit, apiKey, signal);
+            } catch (error: unknown) {
+                // 用户显式取消操作时直接透传其中断信号，不降级重试
+                if (signal?.aborted) {
+                    throw signal.reason instanceof Error ? signal.reason : new Error('Brave search aborted');
+                }
+                const status = extractErrorStatus(error);
+                const message = error instanceof Error ? error.message : String(error);
+
+                if (status === 401 || status === 403 || status === 422) {
+                    // 场景 1: 密钥填错 / 格式非法 / 未授权（冷却 10 分钟）
+                    disableBraveOfficialApi(10 * 60 * 1000, `Invalid API Key (HTTP ${status})`);
+                    console.warn(`⚠️ [Brave] Official API key invalid or unauthorized (HTTP ${status}), falling back to web scraping (cached 10m): ${message}`);
+                } else if (status === 429 || /quota|rate limit/i.test(message)) {
+                    // 场景 2: 配额用尽 / 频率限流（冷却 5 分钟）
+                    disableBraveOfficialApi(5 * 60 * 1000, 'Quota Exhausted / Rate Limited (HTTP 429)');
+                    console.warn(`⚠️ [Brave] Official API quota exhausted or rate limited (HTTP ${status || 429}), falling back to web scraping (cached 5m): ${message}`);
+                } else {
+                    // 场景 3: 官方服务暂不可用 (5xx/超时/网络异常)（冷却 1 分钟）
+                    disableBraveOfficialApi(60 * 1000, `Service Unavailable (HTTP ${status || 'Network'})`);
+                    console.warn(`⚠️ [Brave] Official API temporarily unavailable (${status ? `HTTP ${status}: ` : ''}${message}), falling back to web scraping (cached 1m)`);
+                }
+
+                // 统一优雅降级到网页端抓取
+                return searchBraveWeb(query, limit, options);
+            }
+        } else {
+            // 冷却期内直接走网页端抓取，避免每次搜索白白浪费一次必挂的网络请求
+            return searchBraveWeb(query, limit, options);
+        }
+    }
+
+    return searchBraveWeb(query, limit, options);
+}
+

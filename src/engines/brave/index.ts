@@ -1,1 +1,1 @@
-export { searchBrave } from './brave.js';
+export { searchBrave, searchBraveWeb, resetBraveOfficialApiCooldown } from './brave.js';

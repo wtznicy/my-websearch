@@ -385,6 +385,70 @@ async function fetchReadme(owner: string, repo: string, host: RepoHost): Promise
 }
 
 /**
+ * 从文件路径推断 Markdown 围栏代码块语言标识
+ */
+export function detectLanguageFromPath(filePath: string): string {
+    const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+    const map: Record<string, string> = {
+        ts: 'typescript',
+        tsx: 'typescript',
+        js: 'javascript',
+        jsx: 'javascript',
+        mjs: 'javascript',
+        cjs: 'javascript',
+        json: 'json',
+        jsonc: 'json',
+        py: 'python',
+        rs: 'rust',
+        go: 'go',
+        java: 'java',
+        c: 'c',
+        cpp: 'cpp',
+        cc: 'cpp',
+        h: 'c',
+        hpp: 'cpp',
+        cs: 'csharp',
+        rb: 'ruby',
+        php: 'php',
+        swift: 'swift',
+        kt: 'kotlin',
+        kts: 'kotlin',
+        sh: 'bash',
+        bash: 'bash',
+        zsh: 'bash',
+        yaml: 'yaml',
+        yml: 'yaml',
+        md: 'markdown',
+        markdown: 'markdown',
+        mdx: 'mdx',
+        toml: 'toml',
+        sql: 'sql',
+        html: 'html',
+        css: 'css',
+        scss: 'scss',
+        less: 'less',
+        vue: 'vue',
+        svelte: 'svelte',
+        graphql: 'graphql',
+        gql: 'graphql',
+        proto: 'protobuf',
+        xml: 'xml',
+        dockerfile: 'dockerfile',
+        makefile: 'makefile'
+    };
+    return map[ext] || '';
+}
+
+function formatSourceFile(owner: string, repo: string, branch: string, filePath: string, content: string): string {
+    const isMd = /\.mdx?$/i.test(filePath) || /\.markdown$/i.test(filePath);
+    if (isMd) {
+        return `# File: \`${filePath}\` (${owner}/${repo} @ ${branch})\n\n${content}`;
+    }
+    const lang = detectLanguageFromPath(filePath);
+    return `# File: \`${filePath}\` (${owner}/${repo} @ ${branch})\n\n\`\`\`${lang}\n${content}\n\`\`\``;
+}
+
+/**
  * 从 GitHub 仓库抓取指定源码文件（支持 blob 链接）。
  * 优先 raw.githubusercontent.com，不可达时通过 jsDelivr CDN 兜底。
  */
@@ -402,17 +466,150 @@ async function fetchGithubBlob(
     const rawUrl = `${RAW_GITHUB_BASE}/${ownerEnc}/${repoEnc}/${branchEnc}/${cleanPath}`;
     const rawResult = await fetchReadmeSource(rawUrl, 'raw', 15000);
     if (rawResult.status === 'ok') {
-        return rawResult.content;
+        return formatSourceFile(owner, repo, branch, filePath, rawResult.content);
     }
 
     // jsDelivr 兜底
     const cdnUrl = `${JSDELIVR_CDN_BASE}/${ownerEnc}/${repoEnc}@${branchEnc}/${cleanPath}`;
     const cdnResult = await fetchReadmeSource(cdnUrl, 'jsDelivr', 15000);
     if (cdnResult.status === 'ok') {
-        return cdnResult.content;
+        return formatSourceFile(owner, repo, branch, filePath, cdnResult.content);
     }
 
     return null;
+}
+
+/**
+ * 渲染小巧精美的 ASCII 目录树
+ */
+export function renderAsciiTree(items: Array<{ path: string; type: 'blob' | 'tree'; size?: number }>): string {
+    interface TreeNode {
+        name: string;
+        type: 'blob' | 'tree';
+        size?: number;
+        children: Map<string, TreeNode>;
+    }
+    const root: TreeNode = { name: '', type: 'tree', children: new Map() };
+
+    for (const item of items) {
+        const parts = item.path.split('/').filter(Boolean);
+        let current = root;
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i]!;
+            const isLast = i === parts.length - 1;
+            if (!current.children.has(part)) {
+                current.children.set(part, {
+                    name: part,
+                    type: isLast ? item.type : 'tree',
+                    size: isLast ? item.size : undefined,
+                    children: new Map()
+                });
+            }
+            current = current.children.get(part)!;
+        }
+    }
+
+    const lines: string[] = [];
+    function formatSize(bytes?: number): string {
+        if (typeof bytes !== 'number') return '';
+        if (bytes < 1024) return ` (${bytes} B)`;
+        if (bytes < 1024 * 1024) return ` (${(bytes / 1024).toFixed(1)} KB)`;
+        return ` (${(bytes / (1024 * 1024)).toFixed(1)} MB)`;
+    }
+
+    function traverse(node: TreeNode, prefix: string, isTail: boolean, isRoot: boolean) {
+        if (!isRoot) {
+            const icon = node.type === 'tree' ? '📁 ' : '📄 ';
+            const connector = isTail ? '└── ' : '├── ';
+            lines.push(`${prefix}${connector}${icon}${node.name}${formatSize(node.size)}`);
+        }
+        const children = Array.from(node.children.values());
+        children.sort((a, b) => {
+            if (a.type !== b.type) return a.type === 'tree' ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        const newPrefix = isRoot ? '' : prefix + (isTail ? '    ' : '│   ');
+        for (let i = 0; i < children.length; i++) {
+            traverse(children[i]!, newPrefix, i === children.length - 1, false);
+        }
+    }
+
+    traverse(root, '', true, true);
+    return lines.join('\n');
+}
+
+/**
+ * 通过 GitHub Git Trees API 获取仓库目录树结构。
+ * API: GET /repos/{owner}/{repo}/git/trees/{ref}?recursive=1
+ */
+async function fetchGithubTree(
+    owner: string,
+    repo: string,
+    ref: string,
+    dirPath?: string
+): Promise<string | null> {
+    const ownerEnc = encodeURIComponent(owner.trim());
+    const repoEnc = encodeURIComponent(repo.trim());
+    const refEnc = encodeURIComponent(ref.trim());
+
+    try {
+        const headers: Record<string, string> = {
+            'User-Agent': 'GitHub-Tree-Fetcher/1.0',
+            'Accept': 'application/vnd.github.v3+json',
+            ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
+        };
+
+        const treeUrl = `https://api.github.com/repos/${ownerEnc}/${repoEnc}/git/trees/${refEnc}?recursive=1`;
+        const res = await requestDirectFirst('GET', treeUrl, (forceDirect) => ({
+            ...buildAxiosRequestOptions({
+                headers,
+                timeout: 10000,
+                forceDirect
+            })
+        }), 'GitHub Trees API');
+
+        if (res.status === 404) {
+            return null;
+        }
+
+        const data = res.data as {
+            sha?: string;
+            tree?: Array<{ path: string; mode: string; type: 'blob' | 'tree'; size?: number }>;
+            truncated?: boolean;
+        };
+
+        if (!data?.tree || !Array.isArray(data.tree) || data.tree.length === 0) {
+            return `# Directory Tree: ${owner}/${repo} @ ${ref}\n\n_Empty directory or no files found._`;
+        }
+
+        let items = data.tree;
+        const normalizedDirPath = dirPath ? dirPath.replace(/^\/+|\/+$/g, '') : '';
+        if (normalizedDirPath) {
+            const prefix = `${normalizedDirPath}/`;
+            items = items
+                .filter((item) => item.path === normalizedDirPath || item.path.startsWith(prefix))
+                .map((item) => ({
+                    ...item,
+                    path: item.path.startsWith(prefix) ? item.path.slice(prefix.length) : item.path
+                }))
+                .filter((item) => item.path.length > 0);
+        }
+
+        const totalItemsCount = items.length;
+        const maxTreeItems = 150;
+        const isCapped = totalItemsCount > maxTreeItems;
+        const displayItems = isCapped ? items.slice(0, maxTreeItems) : items;
+
+        const renderedTree = renderAsciiTree(displayItems);
+        const header = `# Directory Tree: ${owner}/${repo} @ ${ref}${normalizedDirPath ? ` (subpath: /${normalizedDirPath})` : ''}\n\nTotal items: ${totalItemsCount}${isCapped ? ` (showing first ${maxTreeItems})` : ''}\n\n`;
+        const truncationNotice = isCapped ? `\n\n... and ${totalItemsCount - maxTreeItems} more items.` : '';
+
+        return `${header}\`\`\`\n${renderedTree}\n\`\`\`${truncationNotice}`;
+    } catch (error) {
+        console.error(`Failed to fetch tree for ${owner}/${repo} @ ${ref}:`, error instanceof Error ? error.message : String(error));
+        return null;
+    }
 }
 
 /**
@@ -428,7 +625,7 @@ async function fetchGithubIssue(
     const numEnc = encodeURIComponent(issueNumber.trim());
 
     try {
-        const headers = {
+        const headers: Record<string, string> = {
             'User-Agent': 'GitHub-Issue-Fetcher/1.0',
             'Accept': 'application/vnd.github.v3+json',
             ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
@@ -456,6 +653,7 @@ async function fetchGithubIssue(
             body?: string;
             html_url: string;
             comments?: number;
+            reactions?: { total_count?: number; '+1'?: number; 'heart'?: number };
         };
 
         const lines: string[] = [
@@ -463,11 +661,14 @@ async function fetchGithubIssue(
             `- **Status**: ${issueData.state.toUpperCase()}`,
             `- **Author**: @${issueData.user?.login ?? 'unknown'}`,
             `- **Created**: ${issueData.created_at}`,
-            `- **URL**: ${issueData.html_url}`,
-            '',
-            '## Description',
-            issueData.body?.trim() || '_No description provided._'
+            `- **URL**: ${issueData.html_url}`
         ];
+
+        if (issueData.reactions && typeof issueData.reactions.total_count === 'number' && issueData.reactions.total_count > 0) {
+            lines.push(`- **Reactions**: 👍 ${issueData.reactions['+1'] ?? 0} ❤️ ${issueData.reactions['heart'] ?? 0} (total: ${issueData.reactions.total_count})`);
+        }
+
+        lines.push('', '## Description', issueData.body?.trim() || '_No description provided._');
 
         // 尝试抓取前 15 条评论
         if (issueData.comments && issueData.comments > 0) {
@@ -513,11 +714,109 @@ async function fetchGithubIssue(
 }
 
 /**
- * Main function: parse URL and fetch README / source file / issue content
- * @param githubUrl GitHub repository URL
- * @returns Content string or null if failed
+ * 通过 GitHub REST API 获取 Pull Request 详情与变更文件列表。
  */
-async function getReadmeFromUrl(githubUrl: string): Promise<string | null> {
+async function fetchGithubPullRequest(
+    owner: string,
+    repo: string,
+    prNumber: string
+): Promise<string | null> {
+    const ownerEnc = encodeURIComponent(owner.trim());
+    const repoEnc = encodeURIComponent(repo.trim());
+    const numEnc = encodeURIComponent(prNumber.trim());
+
+    try {
+        const headers: Record<string, string> = {
+            'User-Agent': 'GitHub-PR-Fetcher/1.0',
+            'Accept': 'application/vnd.github.v3+json',
+            ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
+        };
+
+        const prUrl = `https://api.github.com/repos/${ownerEnc}/${repoEnc}/pulls/${numEnc}`;
+        const prRes = await requestDirectFirst('GET', prUrl, (forceDirect) => ({
+            ...buildAxiosRequestOptions({
+                headers,
+                timeout: 10000,
+                forceDirect
+            })
+        }), 'GitHub Pull Request API');
+
+        if (prRes.status === 404) {
+            return null;
+        }
+
+        const prData = prRes.data as {
+            number: number;
+            title: string;
+            state: string;
+            merged?: boolean;
+            merged_at?: string;
+            user?: { login: string };
+            created_at: string;
+            body?: string;
+            html_url: string;
+            base?: { ref: string };
+            head?: { ref: string };
+            additions?: number;
+            deletions?: number;
+            changed_files?: number;
+        };
+
+        const statusLabel = prData.merged ? 'MERGED' : (prData.state || 'OPEN').toUpperCase();
+        const lines: string[] = [
+            `# Pull Request #${prData.number}: ${prData.title}`,
+            `- **Status**: ${statusLabel}`,
+            `- **Author**: @${prData.user?.login ?? 'unknown'}`,
+            `- **Branch**: \`${prData.head?.ref ?? 'head'}\` -> \`${prData.base?.ref ?? 'base'}\``,
+            `- **Changes**: +${prData.additions ?? 0} -${prData.deletions ?? 0} across ${prData.changed_files ?? 0} files`,
+            `- **Created**: ${prData.created_at}${prData.merged_at ? ` (Merged: ${prData.merged_at})` : ''}`,
+            `- **URL**: ${prData.html_url}`,
+            '',
+            '## Description',
+            prData.body?.trim() || '_No description provided._'
+        ];
+
+        // 尝试获取修改的文件清单
+        try {
+            const filesUrl = `https://api.github.com/repos/${ownerEnc}/${repoEnc}/pulls/${numEnc}/files?per_page=30`;
+            const filesRes = await requestDirectFirst('GET', filesUrl, (forceDirect) => ({
+                ...buildAxiosRequestOptions({
+                    headers,
+                    timeout: 10000,
+                    forceDirect
+                })
+            }), 'GitHub PR Files API');
+
+            const files = filesRes.data as Array<{
+                filename: string;
+                status: string;
+                additions: number;
+                deletions: number;
+            }>;
+
+            if (Array.isArray(files) && files.length > 0) {
+                lines.push('', `## Changed Files (${files.length}${prData.changed_files && prData.changed_files > files.length ? ` of ${prData.changed_files}` : ''})`);
+                for (const f of files) {
+                    lines.push(`- \`${f.filename}\` (+${f.additions}, -${f.deletions}, status: ${f.status})`);
+                }
+            }
+        } catch (filesErr) {
+            console.warn(`Failed to fetch changed files for PR #${prNumber}:`, filesErr instanceof Error ? filesErr.message : String(filesErr));
+        }
+
+        return lines.join('\n');
+    } catch (error) {
+        console.error(`Failed to fetch PR #${prNumber} for ${owner}/${repo}:`, error instanceof Error ? error.message : String(error));
+        return null;
+    }
+}
+
+/**
+ * 全能 GitHub 内容提取入口：根据 URL 路径智能分流（README、源码、目录树、Issue、PR）
+ * @param githubUrl GitHub / Gitee URL
+ * @returns 格式化后的 Markdown 内容字符串，失败或 404 返回 null
+ */
+export async function fetchGithubContent(githubUrl: string): Promise<string | null> {
     console.error(`\n--- Processing URL: ${githubUrl} ---`);
 
     if (!githubUrl?.trim()) {
@@ -538,7 +837,18 @@ async function getReadmeFromUrl(githubUrl: string): Promise<string | null> {
         return fetchGithubBlob(owner, repo, branch, filePath.replace(/[?#].*$/, ''));
     }
 
-    // 2. 匹配 GitHub Issue 链接：https://github.com/{owner}/{repo}/issues/{number}
+    // 2. 匹配 GitHub tree 目录链接：https://github.com/{owner}/{repo}/tree/{branch}(/{path})?
+    const treeMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/tree\/([^\/\s]+)(?:\/(.+))?/i);
+    if (treeMatch && treeMatch[1] && treeMatch[2] && treeMatch[3]) {
+        const owner = treeMatch[1];
+        const repo = treeMatch[2];
+        const ref = treeMatch[3];
+        const dirPath = treeMatch[4]?.replace(/[?#].*$/, '') || undefined;
+        console.error(`✅ Detected GitHub directory tree: ${owner}/${repo} @ ${ref}${dirPath ? ` /${dirPath}` : ''}`);
+        return fetchGithubTree(owner, repo, ref, dirPath);
+    }
+
+    // 3. 匹配 GitHub Issue 链接：https://github.com/{owner}/{repo}/issues/{number}
     const issueMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/issues\/(\d+)/i);
     if (issueMatch && issueMatch[1] && issueMatch[2] && issueMatch[3]) {
         const owner = issueMatch[1];
@@ -548,18 +858,25 @@ async function getReadmeFromUrl(githubUrl: string): Promise<string | null> {
         return fetchGithubIssue(owner, repo, issueNumber);
     }
 
-    // 3. 默认 README 抓取流程
-    const repoInfo = extractOwnerAndRepo(githubUrl);
+    // 4. 匹配 GitHub Pull Request 链接：https://github.com/{owner}/{repo}/pull/{number}
+    const pullMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/pull\/(\d+)/i);
+    if (pullMatch && pullMatch[1] && pullMatch[2] && pullMatch[3]) {
+        const owner = pullMatch[1];
+        const repo = pullMatch[2];
+        const prNumber = pullMatch[3];
+        console.error(`✅ Detected GitHub pull request: ${owner}/${repo} #${prNumber}`);
+        return fetchGithubPullRequest(owner, repo, prNumber);
+    }
 
+    // 5. 默认仓库 README 抓取流程
+    const repoInfo = extractOwnerAndRepo(githubUrl);
     if (!repoInfo) {
         console.error(`Unable to extract owner and repo from URL: ${githubUrl}`);
         return null;
     }
 
     console.error(`✅ Extraction successful: ${repoInfo.owner}/${repoInfo.repo} (${repoInfo.host})`);
-
     const content = await fetchReadme(repoInfo.owner, repoInfo.repo, repoInfo.host);
-
     if (content) {
         console.error(`✅ README fetched successfully (${content.length} characters)`);
         return content;
@@ -570,10 +887,7 @@ async function getReadmeFromUrl(githubUrl: string): Promise<string | null> {
 }
 
 /**
- * Fetch README content, code file, or issue discussion from GitHub repository
- * @param githubUrl GitHub URL (supports repo, /blob/... files, /issues/...)
- * @returns Content string or null if failed
+ * 向后兼容别名：保留 fetchGithubReadme 导出以供现有代码/单测使用
  */
-export async function fetchGithubReadme(githubUrl: string): Promise<string | null> {
-    return getReadmeFromUrl(githubUrl);
-}
+export const fetchGithubReadme = fetchGithubContent;
+

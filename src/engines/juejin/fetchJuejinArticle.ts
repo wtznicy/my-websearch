@@ -14,9 +14,18 @@ function shouldDebug(): boolean {
  */
 export type JuejinArticleOptions = { format?: 'text' | 'markdown' };
 
+export function extractJuejinTitle(html: string): string {
+    if (!html) return '';
+    const $ = cheerio.load(html);
+    return $('.article-title').text().trim() ||
+        $('h1.article-title').text().trim() ||
+        $('h1').first().text().trim() ||
+        $('title').text().replace(/ - 掘金$/, '').trim();
+}
+
 import { MOBILE_IOS_UA } from '../../utils/userAgents.js';
 
-export async function fetchJuejinArticle(url: string, options: JuejinArticleOptions = {}): Promise<{ content: string }> {
+export async function fetchJuejinArticle(url: string, options: JuejinArticleOptions = {}): Promise<{ content: string; title?: string }> {
     try {
         console.error(`🔍 Fetching Juejin article: ${url}`);
 
@@ -113,8 +122,9 @@ export async function fetchJuejinArticle(url: string, options: JuejinArticleOpti
             });
         }
 
+        const title = extractJuejinTitle(response.data);
         console.error(`✅ Successfully extracted ${content.length} characters`);
-        return { content };
+        return { content, title: title || undefined };
 
     } catch (error) {
         console.error('❌ 获取掘金文章失败:', error instanceof Error ? error.message : String(error));

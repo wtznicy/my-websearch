@@ -65,7 +65,8 @@ export function createMyWebSearchRuntime(options: CreateMyWebSearchRuntimeOption
             fetchGithubReadme: createGithubReadmeService(dependencies.fetchGithubReadme ?? fetchGithubReadme),
             fetchWeb: createWebFetchService(dependencies.fetchWebContent ?? fetchWebContent, {
                 fetchCsdn: dependencies.fetchCsdnArticle ?? fetchCsdnArticle,
-                fetchJuejin: dependencies.fetchJuejinArticle ?? fetchJuejinArticle
+                fetchJuejin: dependencies.fetchJuejinArticle ?? fetchJuejinArticle,
+                fetchGithub: dependencies.fetchGithubReadme ?? fetchGithubReadme
             }),
             context7Libraries: context7.libraries,
             context7Docs: context7.docs

@@ -91,6 +91,8 @@ export function flattenConfigFileToEnv(
         if (typeof keys.exa === 'string') flat.EXA_API_KEY = keys.exa.trim();
         if (typeof keys.github === 'string') flat.GITHUB_TOKEN = keys.github.trim();
         if (typeof keys.brave === 'string') flat.BRAVE_API_KEY = keys.brave.trim();
+        if (typeof keys.stackoverflow === 'string') flat.STACKOVERFLOW_API_KEY = keys.stackoverflow.trim();
+        if (typeof keys.stackexchange === 'string') flat.STACKOVERFLOW_API_KEY = keys.stackexchange.trim();
 
         // 扁平大写兜底
         for (const [k, v] of Object.entries(keys)) {

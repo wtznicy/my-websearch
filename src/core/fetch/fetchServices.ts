@@ -7,7 +7,7 @@ import {
 import { AppError } from '../errors.js';
 
 export type ArticleFetchOptions = { format?: 'text' | 'markdown' };
-export type ArticleFetcher = (url: string, options?: ArticleFetchOptions) => Promise<{ content: string }>;
+export type ArticleFetcher = (url: string, options?: ArticleFetchOptions) => Promise<{ content: string; title?: string }>;
 export type GithubReadmeFetcher = (url: string) => Promise<string | null>;
 export type WebFetcher = (url: string, maxChars: number, options?: FetchWebContentOptions) => Promise<FetchWebContentResult>;
 
@@ -54,6 +54,7 @@ export function createWebFetchService(
     options?: {
         fetchCsdn?: ArticleFetcher;
         fetchJuejin?: ArticleFetcher;
+        fetchGithub?: GithubReadmeFetcher;
     }
 ) {
     return {
@@ -85,15 +86,17 @@ export function createWebFetchService(
             }
 
             // 专用站点内部转发（非 raw 模式生效）：
-            // 命中 CSDN/掘金文章时，自动内部转发给专用文章提取器，获得高保真代码排版与广告剥离
+            // 命中 CSDN/掘金/GitHub 等特定技术站点时，自动内部转发给专用提取器，获得高保真代码排版与结构化提纯
             if (!raw) {
                 try {
                     const parsed = new URL(url);
                     const offset = startIndex ?? 0;
 
-                    const forwardToArticle = async (articleFetcher: ArticleFetcher) => {
-                        const article = await articleFetcher(url, { format });
-                        const fullText = article.content;
+                    const formatMarkdownResult = (
+                        fullText: string,
+                        articleTitle: string,
+                        defaultSiteName: string
+                    ): FetchWebContentResult => {
                         let pageContent = '';
                         let hasMore = false;
                         let focused = false;
@@ -126,7 +129,8 @@ export function createWebFetchService(
                             url,
                             finalUrl: url,
                             contentType: 'text/markdown',
-                            title: '',
+                            title: articleTitle,
+                            siteName: defaultSiteName,
                             retrievalMethod: 'request' as const,
                             truncated: hasMore,
                             content: pageContent,
@@ -139,14 +143,31 @@ export function createWebFetchService(
                         };
                     };
 
-                    if (options?.fetchCsdn && parsed.hostname === 'blog.csdn.net' && /^\/[^/]+\/article\/details\/\d+/.test(parsed.pathname)) {
-                        return await forwardToArticle(options.fetchCsdn);
+                    const forwardToArticle = async (articleFetcher: ArticleFetcher, defaultSiteName: string) => {
+                        const article = await articleFetcher(url, { format });
+                        return formatMarkdownResult(article.content, article.title || '', defaultSiteName);
+                    };
+
+                    if (options?.fetchCsdn && validateArticleUrl(url, 'csdn')) {
+                        return await forwardToArticle(options.fetchCsdn, 'CSDN博客');
                     }
 
-                    if (options?.fetchJuejin && (parsed.hostname === 'juejin.cn' || parsed.hostname === 'juejin.im') && /^\/post\/\d+/.test(parsed.pathname)) {
-                        return await forwardToArticle(options.fetchJuejin);
+                    if (options?.fetchJuejin && validateArticleUrl(url, 'juejin')) {
+                        return await forwardToArticle(options.fetchJuejin, '稀土掘金');
                     }
-                } catch {
+
+                    if (options?.fetchGithub && validateGithubRepositoryUrl(url)) {
+                        const ghContent = await options.fetchGithub(url);
+                        if (ghContent) {
+                            const isGitee = parsed.hostname.includes('gitee.com');
+                            const siteName = isGitee ? 'Gitee' : 'GitHub';
+                            return formatMarkdownResult(ghContent, `${siteName} Content`, siteName);
+                        }
+                    }
+                } catch (forwardError) {
+                    if (forwardError instanceof AppError && forwardError.code === 'not_found') {
+                        throw forwardError;
+                    }
                     // 若专有抓取器异常，平滑回退到通用 fetcher
                 }
             }

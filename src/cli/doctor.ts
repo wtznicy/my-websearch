@@ -59,6 +59,7 @@ const RECOGNIZED_ENV_KEYS = [
     'BRAVE_API_KEY',
     'GITHUB_TOKEN',
     'GH_TOKEN',
+    'STACKOVERFLOW_API_KEY',
     'AUTO_ROUTE_EN_ENGINES',
     'AUTO_ROUTE_ZH_ENGINES',
     'BING_IMPERSONATE',
@@ -677,6 +678,7 @@ export type DoctorReport = {
             exa: string | null;
             brave: string | null;
             github: string | null;
+            stackoverflow?: string | null;
         };
     };
     proxy: {
@@ -1226,7 +1228,8 @@ export async function buildDoctorReport(
                 context7: maskSecret(env.CONTEXT7_API_KEY),
                 exa: maskSecret(env.EXA_API_KEY),
                 brave: maskSecret(env.BRAVE_API_KEY),
-                github: maskSecret(env.GITHUB_TOKEN || env.GH_TOKEN)
+                github: maskSecret(env.GITHUB_TOKEN || env.GH_TOKEN),
+                stackoverflow: maskSecret(env.STACKOVERFLOW_API_KEY)
             }
         },
         proxy: {
@@ -1283,7 +1286,7 @@ export function formatDoctorHumanReadable(report: DoctorReport): string {
         `  Search mode:     ${report.effectiveConfig.searchMode}`,
         `  Search deadline: ${report.effectiveConfig.searchDeadlineMs}ms`,
         `  HTTP CORS:       ${report.effectiveConfig.enableCors ? `enabled (${report.effectiveConfig.corsOrigin})` : 'disabled'}`,
-        `  API keys:        context7=${report.effectiveConfig.apiKeys.context7 ?? 'unset'}, exa=${report.effectiveConfig.apiKeys.exa ?? 'unset'}, brave=${report.effectiveConfig.apiKeys.brave ?? 'unset'}, github=${report.effectiveConfig.apiKeys.github ?? 'unset'}`,
+        `  API keys:        context7=${report.effectiveConfig.apiKeys.context7 ?? 'unset'}, exa=${report.effectiveConfig.apiKeys.exa ?? 'unset'}, brave=${report.effectiveConfig.apiKeys.brave ?? 'unset'}, github=${report.effectiveConfig.apiKeys.github ?? 'unset'}, stackoverflow=${report.effectiveConfig.apiKeys.stackoverflow ?? 'unset'}`,
         '',
         'Proxy:',
         `  Enabled:         ${report.proxy.enabled ? 'yes' : 'no'}`,

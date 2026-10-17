@@ -17,18 +17,18 @@ export function registerFetchGithubTool(server: McpServer, runtime: MyWebSearchR
     server.registerTool(
         fetchGithubToolName,
         {
-            description: "Fetch README, source code file (e.g. /blob/main/src/index.ts), or issue discussion (e.g. /issues/123) from a GitHub or Gitee repository URL (github.com or gitee.com URLs only; for other web pages use fetchWebContent)",
+            description: "Fetch comprehensive GitHub/Gitee content: repository README, source code files (/blob/:branch/:path with language-tagged code blocks), directory trees (/tree/:branch/:path with clean ASCII trees), Issue discussions (/issues/:number with top solutions/comments), or Pull Requests (/pull/:number with changed files list). For generic web pages, use fetchWebContent.",
             inputSchema: {
                 url: z.string().min(1).max(2048).refine(
                     (url) => validateGithubRepositoryUrl(url),
-                    "URL must be a valid GitHub or Gitee repository, file, or issue URL (supports HTTPS, SSH formats)"
+                    "URL must be a valid GitHub or Gitee repository, file, directory tree, issue, or pull request URL (supports HTTPS, SSH formats)"
                 )
             },
             annotations: TOOL_ANNOTATION_HINTS
         },
         async ({url}) => {
             try {
-                logTool(`Fetching GitHub README: ${url}`);
+                logTool(`Fetching GitHub content: ${url}`);
                 const result = await runtime.services.fetchGithubReadme.execute({ url });
 
                 if (result) {
@@ -42,19 +42,19 @@ export function registerFetchGithubTool(server: McpServer, runtime: MyWebSearchR
                     return {
                         content: [{
                             type: 'text',
-                            text: 'README not found or repository does not exist'
+                            text: 'Content not found or target repository/item does not exist'
                         }],
                         isError: true
                     };
                 }
             } catch (error) {
-                logSafeError('Failed to fetch GitHub README', error);
+                logSafeError('Failed to fetch GitHub content', error);
                 return {
                     content: [{
                         type: 'text',
                         text: withErrorHint(
-                            `Failed to fetch README: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                            '若仓库存在但抓取失败，可尝试用 fetchWebContent 抓取 raw.githubusercontent.com 镜像或稍后重试。'
+                            `Failed to fetch GitHub content: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            '若资源存在但抓取失败，可确认 URL 拼写，或配置 GITHUB_TOKEN 以提升 API 速率限制。'
                         )
                     }],
                     isError: true

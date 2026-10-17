@@ -1,5 +1,13 @@
-import { describe, it, expect } from 'vitest';
-import { parseBraveResults } from '../../engines/brave/brave.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+    parseBraveResults,
+    parseBraveOfficialResults,
+    cleanBraveApiText,
+    isBraveOfficialApiDisabled,
+    disableBraveOfficialApi,
+    resetBraveOfficialApiCooldown,
+    getBraveOfficialApiCooldownRemainingMs
+} from '../../engines/brave/brave.js';
 
 // Brave 用 SvelteKit SSR：.snippet > .result-content > a(.search-snippet-title + .site-name-wrapper) + .generic-snippet
 const NORMAL_PAGE = `<!DOCTYPE html>
@@ -133,5 +141,135 @@ describe('parseBraveResults 广告过滤', () => {
             source: 'vuejs.org',
             engine: 'brave'
         });
+    });
+});
+
+describe('cleanBraveApiText', () => {
+    it('should strip HTML tags and resolve entities', () => {
+        expect(cleanBraveApiText('<strong>DeepSeek</strong> &amp; <em>V3</em> &quot;AI&quot;')).toBe('DeepSeek & V3 "AI"');
+    });
+
+    it('should collapse multiple whitespaces', () => {
+        expect(cleanBraveApiText('  hello   \n\t world  ')).toBe('hello world');
+    });
+});
+
+describe('parseBraveOfficialResults', () => {
+    it('should parse official Brave API response structure', () => {
+        const mockResponse = {
+            web: {
+                results: [
+                    {
+                        title: '<strong>DeepSeek-V3</strong>',
+                        url: 'https://github.com/deepseek-ai/DeepSeek-V3',
+                        description: 'DeepSeek-V3 achieved a significant milestone.',
+                        page_age: '2026-10-15T00:09:10',
+                        profile: {
+                            name: 'GitHub',
+                            url: 'https://github.com'
+                        },
+                        meta_url: {
+                            hostname: 'github.com'
+                        },
+                        extra_snippets: [
+                            '671B parameters total.'
+                        ]
+                    },
+                    {
+                        title: 'DeepSeek Official Site',
+                        url: 'https://www.deepseek.com',
+                        description: 'Into the unknown.',
+                        age: '2026-01-20'
+                    }
+                ]
+            }
+        };
+
+        const seenUrls = new Set<string>();
+        const results = parseBraveOfficialResults(mockResponse, seenUrls);
+
+        expect(results).toHaveLength(2);
+        expect(results[0]).toEqual({
+            title: 'DeepSeek-V3',
+            url: 'https://github.com/deepseek-ai/DeepSeek-V3',
+            description: 'DeepSeek-V3 achieved a significant milestone. 671B parameters total.',
+            source: 'github.com',
+            engine: 'brave',
+            date: '2026-10-15'
+        });
+
+        expect(results[1]).toEqual({
+            title: 'DeepSeek Official Site',
+            url: 'https://www.deepseek.com',
+            description: 'Into the unknown.',
+            source: 'www.deepseek.com',
+            engine: 'brave',
+            date: '2026-01-20'
+        });
+    });
+
+    it('should dedupe urls using seenUrls', () => {
+        const mockResponse = {
+            web: {
+                results: [
+                    {
+                        title: 'Duplicate URL',
+                        url: 'https://github.com/deepseek-ai/DeepSeek-V3'
+                    }
+                ]
+            }
+        };
+        const seenUrls = new Set<string>(['https://github.com/deepseek-ai/DeepSeek-V3']);
+        const results = parseBraveOfficialResults(mockResponse, seenUrls);
+        expect(results).toHaveLength(0);
+    });
+
+    it('should ignore non-http urls and missing title items', () => {
+        const mockResponse = {
+            web: {
+                results: [
+                    {
+                        title: 'Bad URL',
+                        url: 'javascript:void(0)'
+                    },
+                    {
+                        title: '',
+                        url: 'https://example.com'
+                    }
+                ]
+            }
+        };
+        const seenUrls = new Set<string>();
+        const results = parseBraveOfficialResults(mockResponse, seenUrls);
+        expect(results).toHaveLength(0);
+    });
+});
+
+describe('Brave official API cooldown and fallback state', () => {
+    beforeEach(() => {
+        resetBraveOfficialApiCooldown();
+    });
+
+    it('should be initially active (not disabled)', () => {
+        expect(isBraveOfficialApiDisabled()).toBe(false);
+        expect(getBraveOfficialApiCooldownRemainingMs()).toBe(0);
+    });
+
+    it('should track cooldown when disabled', () => {
+        disableBraveOfficialApi(60000, 'Test reason');
+        expect(isBraveOfficialApiDisabled()).toBe(true);
+        expect(getBraveOfficialApiCooldownRemainingMs()).toBeGreaterThan(0);
+    });
+
+    it('should reset cooldown state when resetBraveOfficialApiCooldown is called', () => {
+        disableBraveOfficialApi(60000, 'Test reason');
+        expect(isBraveOfficialApiDisabled()).toBe(true);
+        resetBraveOfficialApiCooldown();
+        expect(isBraveOfficialApiDisabled()).toBe(false);
+        expect(getBraveOfficialApiCooldownRemainingMs()).toBe(0);
+    });
+
+    it('cleanBraveApiText should handle &apos; and &#x27; entities properly', () => {
+        expect(cleanBraveApiText('It&apos;s a user&#x27;s search')).toBe("It's a user's search");
     });
 });

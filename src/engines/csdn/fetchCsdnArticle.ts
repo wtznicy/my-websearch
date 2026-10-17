@@ -6,7 +6,7 @@ import { buildAxiosRequestOptions, hintProxyConnectionError, isNetworkLayerError
 import { createDomesticDirectAgent, isDomesticHostname, isTlsOrWafResetError, shouldAttemptDomesticDirectRetry } from '../../utils/domesticDirectNetwork.js';
 import { AppError } from '../../core/errors.js';
 
-function normalizeExtractedText(text: string): string {
+export function normalizeExtractedText(text: string): string {
     return text
         .replace(/\r\n/g, '\n')
         .replace(/\u00a0/g, ' ')
@@ -42,13 +42,22 @@ function isPromotionParagraph(paragraph: string): boolean {
     return paragraph.length <= 120 || hits.length >= 2;
 }
 
-function stripPromotionSections(text: string): string {
+export function stripPromotionSections(text: string): string {
     if (!text) {
         return text;
     }
     const paragraphs = text.split('\n\n');
     const kept = paragraphs.filter((paragraph) => !isPromotionParagraph(paragraph));
     return kept.join('\n\n').trim();
+}
+
+export function extractArticleTitle(html: string): string {
+    if (!html) return '';
+    const $ = cheerio.load(html);
+    return $('#articleContentId').text().trim() ||
+        $('h1.title-article').text().trim() ||
+        $('h1').first().text().trim() ||
+        $('title').text().replace(/_.*$/, '').trim();
 }
 
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
@@ -194,7 +203,7 @@ function shouldRetryWithBrowser(html: string, content: string): boolean {
     return !content || (looksLikeBotChallengePage(html) && content.length < 200);
 }
 
-export async function fetchCsdnArticle(url: string): Promise<{ content: string }> {
+export async function fetchCsdnArticle(url: string): Promise<{ content: string; title?: string }> {
     let response: AxiosResponse | undefined;
     let html = '';
     let content = '';
@@ -240,7 +249,7 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
                         throw createCsdnNotFoundError();
                     }
                     if (directContent && !shouldRetryWithBrowser(directHtml, directContent)) {
-                        return { content: directContent };
+                        return { content: directContent, title: extractArticleTitle(directHtml) };
                     }
                 }
             }
@@ -344,5 +353,6 @@ export async function fetchCsdnArticle(url: string): Promise<{ content: string }
         throw createCsdnNotFoundError();
     }
 
-    return { content };
+    const title = extractArticleTitle(html);
+    return { content, title: title || undefined };
 }

@@ -1,4 +1,6 @@
 import * as cheerio from 'cheerio';
+import { extractArticleTitle, stripPromotionSections, isCsdnSoft404, normalizeExtractedText } from '../csdn/fetchCsdnArticle.js';
+import { extractJuejinTitle } from '../juejin/fetchJuejinArticle.js';
 
 export interface SitePurificationResult {
     title?: string;
@@ -107,6 +109,115 @@ export function purifyStackOverflowQuestion(html: string): SitePurificationResul
 }
 
 /**
+ * CSDN 博客文章 (blog.csdn.net/.../article/details/...) 专用正文提纯器：
+ * - 提取文章标题与博主作者
+ * - 提取 #content_views / .article_content 容器
+ * - 剔除工具栏、打赏区、推荐博文及底部推广牛皮癣
+ */
+export function purifyCsdnArticle(html: string): SitePurificationResult | undefined {
+    if (isCsdnSoft404(html)) {
+        return undefined;
+    }
+
+    const $ = cheerio.load(html);
+    const title = extractArticleTitle(html);
+    const author = $('.follow-nickName').first().text().trim() ||
+        $('a.user-name').first().text().trim() ||
+        $('meta[name="author"]').attr('content')?.trim() ||
+        undefined;
+
+    const CSDN_CONTENT_SELECTORS = [
+        '#content_views',
+        '.article_content',
+        '.htmledit_views',
+        '#article_content',
+        '.blog-content-box',
+        'article'
+    ];
+
+    let container: ReturnType<typeof $> | null = null;
+    for (const selector of CSDN_CONTENT_SELECTORS) {
+        const found = $(selector).first();
+        if (found.length > 0 && found.text().trim().length > 0) {
+            container = found;
+            break;
+        }
+    }
+
+    if (!container || container.length === 0) {
+        return undefined;
+    }
+
+    container.find('script, style, noscript, .recommend-box, .toolbar, .reward-user-box, .blog-footer-bottom, .article-info-box').remove();
+
+    const rawText = normalizeExtractedText(container.text());
+    const cleanText = stripPromotionSections(rawText);
+    if (isCsdnSoft404(html, cleanText)) {
+        return undefined;
+    }
+
+    const cleanHtml = container.html()?.trim() || '';
+
+    return {
+        title: title || undefined,
+        html: cleanHtml,
+        text: cleanText,
+        author,
+        siteName: author ? `CSDN博客: ${author}` : 'CSDN博客'
+    };
+}
+
+/**
+ * 稀土掘金文章 (juejin.cn/post/...) 专用正文提纯器：
+ * - 提取文章标题与作者
+ * - 提取 .markdown-body / .article-content 正文容器
+ * - 剔除代码块行号、复制按钮、推荐等噪音
+ */
+export function purifyJuejinArticle(html: string): SitePurificationResult | undefined {
+    const $ = cheerio.load(html);
+    const title = extractJuejinTitle(html);
+    const author = $('.author-name .name').text().trim() ||
+        $('.author-name').text().trim() ||
+        $('meta[name="author"]').attr('content')?.trim() ||
+        undefined;
+
+    const selectors = [
+        '.markdown-body',
+        '.article-content',
+        '.content',
+        '[data-v-md-editor-preview]',
+        '.bytemd-preview',
+        '.article-area .content'
+    ];
+
+    let container: ReturnType<typeof $> | null = null;
+    for (const sel of selectors) {
+        const found = $(sel).first();
+        if (found.length > 0 && found.text().trim().length > 0) {
+            container = found;
+            break;
+        }
+    }
+
+    if (!container || container.length === 0) {
+        return undefined;
+    }
+
+    container.find('script, style, noscript, .code-block-extension, .hljs-ln-numbers, .copy-code-btn').remove();
+
+    const cleanHtml = container.html()?.trim() || '';
+    const cleanText = container.text().replace(/\s+/g, ' ').trim();
+
+    return {
+        title: title || undefined,
+        html: cleanHtml,
+        text: cleanText,
+        author,
+        siteName: author ? `稀土掘金: ${author}` : '稀土掘金'
+    };
+}
+
+/**
  * 专用站点嗅探分发入口：命中特定技术/文章站点时返回提纯结果，否则返回 undefined
  */
 export function purifySiteContent(url: string, html: string): SitePurificationResult | undefined {
@@ -121,6 +232,14 @@ export function purifySiteContent(url: string, html: string): SitePurificationRe
 
         if (host.includes('stackoverflow.com') && /^\/questions\/\d+/.test(pathname)) {
             return purifyStackOverflowQuestion(html);
+        }
+
+        if (host === 'blog.csdn.net' && pathname.includes('/article/details/')) {
+            return purifyCsdnArticle(html);
+        }
+
+        if ((host === 'juejin.cn' || host.endsWith('.juejin.cn') || host === 'juejin.im') && pathname.includes('/post/')) {
+            return purifyJuejinArticle(html);
         }
 
         return undefined;

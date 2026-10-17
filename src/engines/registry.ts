@@ -7,7 +7,7 @@ import { resetBingImpersonateStateForTests } from './bing/impersonate.js';
 import { searchCsdn } from './csdn/csdn.js';
 import { searchDuckDuckGo } from './duckduckgo/index.js';
 import { searchExa } from './exa/index.js';
-import { searchBrave } from './brave/index.js';
+import { searchBrave, resetBraveOfficialApiCooldown } from './brave/index.js';
 import { searchJuejin } from './juejin/index.js';
 import { searchStartpage, resetStartpageCache } from './startpage/startpage.js';
 import { searchSogou, resetSogouState } from './sogou/sogou.js';
@@ -147,7 +147,8 @@ export const ENGINE_REGISTRY: readonly EngineDescriptor[] = [
         supportsPlaywright: false,
         defaultTimeoutMs: 10000,
         probeUrl: 'https://search.brave.com/search?q=mcp',
-        execute: searchBrave
+        execute: searchBrave,
+        resetHealth: resetBraveOfficialApiCooldown
     },
     {
         name: 'juejin',
@@ -192,7 +193,7 @@ export const ENGINE_REGISTRY: readonly EngineDescriptor[] = [
         label: 'GitHub',
         aliases: ['github', 'gh'],
         region: 'overseas',
-        cascade: { enPriority: 35 },
+        cascade: { zhPriority: 75, enPriority: 35 },
         supportsNativeSite: true,
         supportsPlaywright: false,
         defaultTimeoutMs: 10000,
@@ -204,7 +205,7 @@ export const ENGINE_REGISTRY: readonly EngineDescriptor[] = [
         label: 'StackOverflow',
         aliases: ['stackoverflow', 'so'],
         region: 'overseas',
-        cascade: { enPriority: 25 },
+        cascade: { zhPriority: 85, enPriority: 25 },
         supportsNativeSite: true,
         supportsPlaywright: false,
         defaultTimeoutMs: 10000,
@@ -228,7 +229,7 @@ export const ENGINE_REGISTRY: readonly EngineDescriptor[] = [
         label: 'arXiv',
         aliases: ['arxiv'],
         region: 'overseas',
-        cascade: { enPriority: 55 },
+        cascade: { zhPriority: 95, enPriority: 55 },
         supportsNativeSite: true,
         supportsPlaywright: false,
         defaultTimeoutMs: 10000,

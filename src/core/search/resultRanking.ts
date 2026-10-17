@@ -33,6 +33,7 @@ const DEFAULT_AUTHORITY_DOMAINS = [
     'wikipedia.org',
     'wikimedia.org',
     'arxiv.org',
+    'news.ycombinator.com',
     'zhihu.com',
     'juejin.cn',
     'segmentfault.com',

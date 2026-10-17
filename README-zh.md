@@ -100,16 +100,16 @@ flowchart TB
 
 <a id="mcp-tools"></a>
 
-## 🛠️ 6 大 MCP 工具
+## 🛠️ 4 大核心 MCP 工具（极简高效，低 Token 消耗）
 
 | 工具名称 | 功能定位 | 关键特性 |
 | :--- | :--- | :--- |
-| **`search`** | 13 大引擎联合联网检索 | 支持单词 `query` 或并发多词 `queries: string[]`，支持 `minResults` 自动级联补齐 |
-| **`fetchWebContent`** | 通用网页正文与 Markdown 提纯 | 内置**微信公众号**与 **StackOverflow** 专属净化规则，自动分流 CSDN/掘金，长文分页（`startIndex`） |
+| **`search`** | 13 大引擎联合联网检索 | 支持单词 `query` 或并发多词 `queries: string[]`，支持 `minResults` 自动级联补齐；内置 GitHub/StackOverflow/HackerNews/arXiv 等垂直引擎 |
+| **`fetchWebContent`** | 通用网页正文与 Markdown 提纯 | **全能知识提取网关**：内置微信公众号、CSDN、掘金、StackOverflow 与 GitHub 智能分流提纯；支持长文分页（`startIndex`）与精准聚焦（`focus`） |
+| **`fetchGithubReadme`** | 全能 GitHub / Gitee 内容提取网关 | 支持仓库 README、指定分支源码（带语法高亮代码块）、ASCII 目录树（带文件大小）、Issue/PR 讨论上下文（含 Reactions 与变更文件）；Gitee 国内直连秒开 |
 | **`queryDocs`** | 一站式开源框架/库官方文档 | 支持直接输入库名（如 `"next.js"`、`"vue"`）或 Context7 ID，支持 404 自愈、候选评分与相关库推荐 |
-| **`fetchGithubReadme`** | 抓取 GitHub / Gitee 仓库、代码与 Issue | 支持仓库 README、代码单文件（`/blob/...`）及 Issue 完整讨论上下文；Gitee 国内直连秒开 |
-| **`fetchCsdnArticle`** | 抓取 CSDN 技术博客全文 | 精准提取文章主体容器，支持浏览器会话 Cookie 自动续期 |
-| **`fetchJuejinArticle`** | 抓取稀土掘金技术长文 | 直调官方接口，传 `format: "markdown"` 完整保留代码高亮围栏与 GFM 表格 |
+
+> 💡 **向后兼容说明**：原独立的 `fetchCsdnArticle` 与 `fetchJuejinArticle` 已平滑下沉并收口进通用的 `fetchWebContent`（按域名自动采用最佳专有提取引擎）。如需向大模型显式暴露旧版独立工具，可配置 `REGISTER_LEGACY_ARTICLE_TOOLS=true`。
 
 ---
 
@@ -278,7 +278,9 @@ my-websearch doctor --reset-health
 | :--- | :--- | :--- |
 | `CONTEXT7_API_KEY` | 空 | [Context7 API Key](https://context7.com/dashboard)（强烈推荐 TUN/代理用户配置，免受共享 IP 200次/月限额影响） |
 | `EXA_API_KEY` | 空 | [Exa 官方免费 Key](https://dashboard.exa.ai/api-keys)（仅使用 `exa` 语义搜索时需要） |
-| `GITHUB_TOKEN` | 空 | GitHub Personal Access Token（提高 `fetchGithubReadme` 的速率配额，避免频繁调用 403） |
+| `BRAVE_API_KEY` | 空 | [Brave Search API Key](https://api.search.brave.com/app/keys)（选配，配置后优先走官方 API 高可靠检索） |
+| `GITHUB_TOKEN` | 空 | [GitHub Personal Access Token](https://github.com/settings/tokens)（选配，提高 GitHub 搜索与内容抓取的速率配额至 5,000次/小时） |
+| `STACKOVERFLOW_API_KEY` | 空 | [Stack Apps Key](https://stackapps.com/apps/oauth/register)（选配，提高 StackOverflow 检索配额至 10,000次/天） |
 
 #### 4. 🖥️ 服务模式、并发与会话治理
 
@@ -335,7 +337,7 @@ my-websearch doctor --reset-health
 ```bash
 npm install
 npm run build
-npm test              # 执行 Vitest 测试套件（当前基线：40 个文件、341 个测试）
+npm test              # 执行 Vitest 测试套件（当前基线：44 个文件、395 个测试）
 npm run test:live     # 执行外网有界并发实时集成测试
 npm run eval:live     # 执行 22 用例真实 STDIO JSON-RPC 评测套件
 ```

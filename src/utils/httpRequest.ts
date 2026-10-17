@@ -59,6 +59,7 @@ const TRUSTED_INSECURE_HOSTS = new Set([
     'www.bing.com',
     'www.baidu.com',
     'search.brave.com',
+    'api.search.brave.com',
     'duckduckgo.com',
     'html.duckduckgo.com',
     'so.csdn.net',
@@ -72,7 +73,10 @@ const TRUSTED_INSECURE_HOSTS = new Set([
     'api.juejin.cn',
     'www.sogou.com',
     'www.startpage.com',
-    'cdn.jsdelivr.net'
+    'cdn.jsdelivr.net',
+    'api.stackexchange.com',
+    'hn.algolia.com',
+    'export.arxiv.org'
 ]);
 
 const filteringHttpAgents = new Map<string, RequestFilteringHttpAgent>();

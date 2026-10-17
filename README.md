@@ -100,16 +100,16 @@ flowchart TB
 
 <a id="mcp-tools"></a>
 
-## 🛠️ 6 MCP Tools
+## 🛠️ 4 Core MCP Tools (Minimal & Token-Efficient)
 
 | Tool Name | Purpose | Key Highlights |
 | :--- | :--- | :--- |
-| **`search`** | Multi-engine federated search (13 engines) | Supports `query` or parallel `queries: string[]`, `engines`, `limit`, and `minResults` cascading |
-| **`fetchWebContent`** | Web page extraction & Markdown conversion | Dedicated purifiers for **WeChat** and **StackOverflow**; auto-forwards CSDN/Juejin; supports `format: "markdown"` and `startIndex` |
+| **`search`** | Multi-engine federated search (13 engines) | Supports single `query` or parallel `queries: string[]`, `engines`, `limit`, and `minResults` cascading; includes GitHub, StackOverflow, HackerNews & arXiv developer engines |
+| **`fetchWebContent`** | Web page extraction & Markdown conversion | **All-in-one content extractor**: Built-in smart routing for CSDN, Juejin, WeChat, StackOverflow, and GitHub; supports pagination (`startIndex`) and focus snippets (`focus`) |
+| **`fetchGithubReadme`** | Comprehensive GitHub / Gitee content reader | Fetches repository READMEs, branch-specific source files (fenced code blocks with syntax highlighting), ASCII directory trees, and Issue / PR discussions (with reactions & changed files) |
 | **`queryDocs`** | All-in-one official library documentation | Directly resolves library names (e.g. `"next.js"`, `"vue"`), auto-heals 404s, returns alternative libraries & versioned code |
-| **`fetchGithubReadme`** | Fetch GitHub / Gitee repositories & code | Supports repository READMEs, raw code blobs (`/blob/...`), and issue threads (`/issues/...`) |
-| **`fetchCsdnArticle`** | Extract full CSDN blog article | Clean content extraction with automated cookie persistence |
-| **`fetchJuejinArticle`** | Extract full Juejin blog article | Direct official API fetch; pass `format: "markdown"` for formatted code blocks and tables |
+
+> 💡 **Backward Compatibility**: Legacy `fetchCsdnArticle` and `fetchJuejinArticle` are automatically routed under `fetchWebContent`. Set `REGISTER_LEGACY_ARTICLE_TOOLS=true` if your LLM requires them explicitly exposed as separate tools.
 
 ---
 
@@ -278,7 +278,9 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | :--- | :--- | :--- |
 | `CONTEXT7_API_KEY` | empty | [Context7 API Key](https://context7.com/dashboard) (strongly recommended for proxy/TUN users to bypass shared IP quotas) |
 | `EXA_API_KEY` | empty | [Exa Free API Key](https://dashboard.exa.ai/api-keys) (only required if using the `exa` semantic search engine) |
-| `GITHUB_TOKEN` | empty | GitHub Personal Access Token (raises rate limit for `fetchGithubReadme` to avoid 403s) |
+| `BRAVE_API_KEY` | empty | [Brave Search API Key](https://api.search.brave.com/app/keys) (optional; uses official high-reliability API when set) |
+| `GITHUB_TOKEN` | empty | [GitHub Personal Access Token](https://github.com/settings/tokens) (optional; raises rate limit to 5,000 req/hr) |
+| `STACKOVERFLOW_API_KEY` | empty | [Stack Apps Key](https://stackapps.com/apps/oauth/register) (optional; raises quota to 10,000 req/day) |
 
 #### 4. 🖥️ Server Modes, Concurrency & Session Reaper
 
@@ -335,7 +337,7 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run the Vitest suite (40 files, 341 tests at the current baseline)
+npm test              # Run the Vitest suite (44 files, 395 tests at the current baseline)
 npm run test:live     # Run bounded-concurrency live integration tests
 npm run eval:live     # Run 22-case live STDIO JSON-RPC evaluation suite
 ```
