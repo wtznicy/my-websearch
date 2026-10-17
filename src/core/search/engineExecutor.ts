@@ -241,7 +241,13 @@ export async function executePrimaryEngines(
         const engine = executableEngines[index] ?? '';
         const controller = controllers[index];
         const remaining = deadlineAt - Date.now();
-        const wait = Math.max(0, Math.min(remaining, perEngineTimeoutMs));
+        const isSingleEngine = executableEngines.length === 1;
+        const engineBudget = isSingleEngine
+            ? Math.max(perEngineTimeoutMs, remaining - 1000)
+            : (['startpage', 'bing'].includes(engine)
+                ? Math.max(perEngineTimeoutMs, Math.min(remaining - 500, Math.round(perEngineTimeoutMs * 1.5)))
+                : perEngineTimeoutMs);
+        const wait = Math.max(0, Math.min(remaining, engineBudget));
         return new Promise<SearchResult[]>((resolve) => {
             let done = false;
             const timer = setTimeout(() => {

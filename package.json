@@ -75,6 +75,7 @@
     "test:web-content:live": "tsc && node build/test/test-web-content-live.js",
     "test:bing:live": "tsc && node build/test/test-bing-live.js",
     "test:article-fetch:live": "tsc && node build/test/test-article-fetch-live.js",
+    "prepare": "git config core.hooksPath .githooks || true",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

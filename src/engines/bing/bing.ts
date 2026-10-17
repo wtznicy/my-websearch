@@ -640,7 +640,16 @@ async function searchBingWithHttp(query: string, limit: number, signal?: AbortSi
                 ? signal.reason
                 : new AppError({ code: 'aborted', engine: 'bing', message: 'Bing HTTP search aborted', retryable: false });
         }
-        const response = await axios.get(buildBingSearchUrl(query, pageNumber), buildBingAxiosRequestOptions(signal));
+        let response: import('axios').AxiosResponse;
+        try {
+            response = await axios.get(buildBingSearchUrl(query, pageNumber), buildBingAxiosRequestOptions(signal));
+        } catch (pageError) {
+            if (pageNumber > 0 && allResults.length > 0) {
+                console.warn(`Bing pagination page ${pageNumber} failed, gracefully returning ${allResults.length} partial results:`, pageError instanceof Error ? pageError.message : String(pageError));
+                break;
+            }
+            throw pageError;
+        }
         const html = String(response.data || '');
         // 每页只 cheerio.load 一次，analyzeBlockedPage 与正式提取共用同一文档实例
         const $ = cheerio.load(html);

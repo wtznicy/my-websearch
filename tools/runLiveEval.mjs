@@ -180,13 +180,13 @@ function classifyFailureType(tool, sum, text, rpcError) {
     if (/missing_api_key|EXA_API_KEY|CONTEXT7_API_KEY|BRAVE_API_KEY|unauthorized|\b401\b/i.test(combined)) {
         return 'config_failure';
     }
-    if (/invalid_enum_value|invalid_arguments|Invalid arguments|Unsupported search engine|public HTTP|private or local|loopback|not allowed/i.test(combined)) {
-        return 'validation_failure';
-    }
     if (
         /timeout|timed out|ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|socket hang up|overseas_unreachable|proxy|\b50[234]\b/i.test(combined)
     ) {
         return 'network_failure';
+    }
+    if (/invalid_enum_value|invalid_arguments|Invalid arguments|Unsupported search engine|public HTTP|private or local|loopback|not allowed/i.test(combined)) {
+        return 'validation_failure';
     }
     if (
         /engine_parse_error|empty_content|upstream_response_invalid/i.test(combined)
@@ -220,56 +220,74 @@ async function main() {
         const started = Date.now();
         let outcome;
         try {
-            const res = await server.call('tools/call', { name: c.tool, arguments: c.args });
-            const ms = Date.now() - started;
-            const result = res.result;
-            const sum = summarize(c.tool, result, res.error);
-            const text = result?.content?.[0]?.text ?? '';
-            const isBotChallenge = text.includes('bot_challenge') || text.includes('ERR_BOT_CHALLENGE') || text.includes('目标站点触发反爬验证');
+            let res;
+            let ms = 0;
+            let sum;
+            let text = '';
             let ok = false;
             let category = 'failed';
             let failureType = null;
 
-            if (c.expectError) {
-                const errorMessage = res.error
-                    ? (typeof res.error.message === 'string' ? res.error.message : JSON.stringify(res.error))
-                    : text;
-                const patternMatched = !c.expectedErrorPattern || c.expectedErrorPattern.test(errorMessage);
-                ok = sum.isError && patternMatched;
-                category = ok ? 'expected_error_pass' : 'validation_failure';
-                if (!ok) {
-                    failureType = 'validation_failure';
-                }
-                if (sum.isError && !patternMatched) {
-                    sum.note = `unexpected error reason (expected ${c.expectedErrorPattern}): ${errorMessage.slice(0, 80)}`;
-                }
-            } else if (c.tool === 'search') {
-                ok = !sum.isError && typeof sum.results === 'number' && sum.results > 0 && sum.outcome !== 'failed';
-                if (ok) {
-                    category = sum.outcome === 'degraded' ? 'degraded_pass' : 'functional_pass';
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                res = await server.call('tools/call', { name: c.tool, arguments: c.args });
+                ms = Date.now() - started;
+                const result = res.result;
+                sum = summarize(c.tool, result, res.error);
+                text = result?.content?.[0]?.text ?? '';
+                const isBotChallenge = text.includes('bot_challenge') || text.includes('ERR_BOT_CHALLENGE') || text.includes('目标站点触发反爬验证');
+                ok = false;
+                category = 'failed';
+                failureType = null;
+
+                if (c.expectError) {
+                    const errorMessage = res.error
+                        ? (typeof res.error.message === 'string' ? res.error.message : JSON.stringify(res.error))
+                        : text;
+                    const isNetworkErr = /timeout|timed out|ECONNREFUSED|ECONNRESET|socket hang up|ETIMEDOUT|EAI_AGAIN/i.test(errorMessage);
+                    const patternMatched = !c.expectedErrorPattern || c.expectedErrorPattern.test(errorMessage);
+                    ok = sum.isError && patternMatched;
+                    category = ok ? 'expected_error_pass' : (isNetworkErr ? 'network_failure' : 'validation_failure');
+                    if (!ok) {
+                        failureType = isNetworkErr ? 'network_failure' : 'validation_failure';
+                    }
+                    if (sum.isError && !patternMatched) {
+                        sum.note = `unexpected error reason (expected ${c.expectedErrorPattern}): ${errorMessage.slice(0, 80)}`;
+                    }
+                } else if (c.tool === 'search') {
+                    ok = !sum.isError && typeof sum.results === 'number' && sum.results > 0 && sum.outcome !== 'failed';
+                    if (ok) {
+                        category = sum.outcome === 'degraded' ? 'degraded_pass' : 'functional_pass';
+                    } else {
+                        failureType = classifyFailureType(c.tool, sum, text, res.error);
+                        category = failureType;
+                        if (!sum.note) {
+                            sum.note = `search returned results=${sum.results}, outcome=${sum.outcome}`;
+                        }
+                    }
                 } else {
-                    failureType = classifyFailureType(c.tool, sum, text, res.error);
-                    category = failureType;
-                    if (!sum.note) {
-                        sum.note = `search returned results=${sum.results}, outcome=${sum.outcome}`;
+                    const contentValid = !sum.isError && hasSubstantiveFetchedContent(text);
+                    if (contentValid) {
+                        ok = true;
+                        category = 'functional_pass';
+                    } else if (c.allowBotChallenge && isBotChallenge) {
+                        ok = true;
+                        category = 'bot_challenge_detected';
+                        failureType = 'upstream_antibot';
+                        sum.note = 'bot_challenge / ERR_BOT_CHALLENGE (反爬挑战已准确识别并拦截，非正文提取通过)';
+                    } else {
+                        ok = false;
+                        failureType = classifyFailureType(c.tool, sum, text, res.error);
+                        category = failureType;
                     }
                 }
-            } else {
-                const contentValid = !sum.isError && hasSubstantiveFetchedContent(text);
-                if (contentValid) {
-                    ok = true;
-                    category = 'functional_pass';
-                } else if (c.allowBotChallenge && isBotChallenge) {
-                    ok = true;
-                    category = 'bot_challenge_detected';
-                    failureType = 'upstream_antibot';
-                    sum.note = 'bot_challenge / ERR_BOT_CHALLENGE (反爬挑战已准确识别并拦截，非正文提取通过)';
-                } else {
-                    ok = false;
-                    failureType = classifyFailureType(c.tool, sum, text, res.error);
-                    category = failureType;
+
+                if (ok || failureType !== 'network_failure' || attempt === 2) {
+                    break;
                 }
+                // 瞬态网络抖动（socket hang up / proxy drop），休眠 800ms 重试一次
+                await new Promise((resolve) => setTimeout(resolve, 800));
             }
+
             outcome = {
                 id: c.id,
                 expectError: Boolean(c.expectError),

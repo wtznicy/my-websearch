@@ -81,6 +81,8 @@ const RAW_TO_PUBLIC_CODE_MAP: Record<string, PublicErrorCode> = {
     EAI_AGAIN: 'network_error',
     ENOTFOUND: 'network_error',
     EPIPE: 'network_error',
+    ERR_SOCKET_CONNECTION_TIMEOUT: 'network_timeout',
+    UND_ERR_SOCKET: 'network_error',
     ERR_CANCELED: 'aborted',
     ABORT_ERR: 'aborted',
     cascade_aborted: 'aborted'
@@ -333,6 +335,10 @@ export function extractRawErrorCode(error: unknown): string | undefined {
     if (typeof error === 'object' && error !== null && 'code' in error && typeof (error as { code: unknown }).code === 'string') {
         return (error as { code: string }).code;
     }
+    const message = error instanceof Error ? error.message : (typeof error === 'string' ? error : '');
+    if (/socket hang up/i.test(message)) {
+        return 'ECONNRESET';
+    }
     return undefined;
 }
 
@@ -518,6 +524,10 @@ export function classifyFailureRetryable(failure: {
         return false;
     }
     if (failure.code === 'circuit_open') {
+        recordStructuredClassification();
+        return true;
+    }
+    if (/socket hang up|ECONNRESET|ETIMEDOUT|ECONNREFUSED/i.test(failure.message)) {
         recordStructuredClassification();
         return true;
     }

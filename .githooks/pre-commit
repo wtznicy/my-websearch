@@ -1,0 +1,4 @@
+#!/bin/sh
+# Git pre-commit hook: ensure strict typecheck and lint pass before allowing commit
+echo "Running pre-commit quality gate (typecheck:strict && lint)..."
+npm run typecheck:strict && npm run lint

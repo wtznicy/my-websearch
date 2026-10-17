@@ -160,10 +160,12 @@ function getInsecureTrustedStaticHttpsAgent(): https.Agent {
 export function hintProxyConnectionError(error: unknown): Error {
     const message = error instanceof Error ? error.message : String(error);
     if (config.useProxy && /ECONNREFUSED|ECONNRESET|socket hang up|ENETUNREACH/i.test(message)) {
-        return new Error(
-            `${message} | Hint: 请求经代理 ${config.proxyUrl} 失败——请确认代理软件已启动、PROXY_URL 端口正确，或将 PROXY_URL 设为 false 临时直连（国内站点可直连）`,
-            error instanceof Error ? { cause: error } : undefined
-        );
+        return new AppError({
+            code: 'proxy_unreachable',
+            retryable: true,
+            cause: error instanceof Error ? error : undefined,
+            message: `${message} | Hint: 请求经代理 ${config.proxyUrl} 失败——请确认代理软件已启动、PROXY_URL 端口正确，或将 PROXY_URL 设为 false 临时直连（国内站点可直连）`
+        });
     }
     return error instanceof Error ? error : new Error(message);
 }

@@ -69,7 +69,17 @@ export async function paginateSearch<T>(options: PaginateSearchOptions<T>): Prom
             await delayWithSignal(delay, signal);
         }
 
-        const results = await fetchPage(page);
+        let results: T[];
+        try {
+            results = await fetchPage(page);
+        } catch (pageError) {
+            // 如果首页已成功收集到部分结果，后续分页偶发失败时不应抹杀已有结果
+            if (pageIndex > 0 && allResults.length > 0) {
+                console.warn(`Pagination fetchPage failed on page ${page}, gracefully returning ${allResults.length} collected results:`, pageError instanceof Error ? pageError.message : String(pageError));
+                break;
+            }
+            throw pageError;
+        }
         const pageAnswer = (results as { directAnswer?: unknown })?.directAnswer;
         if (!directAnswer && typeof pageAnswer === 'string' && pageAnswer) {
             directAnswer = pageAnswer;

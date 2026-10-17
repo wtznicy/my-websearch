@@ -45,7 +45,7 @@ export function isStackOverflowQuestionUrl(rawUrl: string): boolean {
  */
 export function extractStackOverflowQuestionId(url: string): string | null {
     const match = url.match(/\/questions\/(\d+)/);
-    return match ? match[1] : null;
+    return match?.[1] ?? null;
 }
 
 /**
@@ -95,6 +95,9 @@ export async function fetchStackOverflowQuestion(
         }
 
         const q = qData.items[0];
+        if (!q) {
+            return null;
+        }
         const cleanTitle = cheerio.load(q.title || '').text() || `Stack Overflow Question #${questionId}`;
 
         // 并行或顺序获取前 3 个最高赞回答
