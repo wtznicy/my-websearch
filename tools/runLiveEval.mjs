@@ -116,18 +116,18 @@ const cases = [
     { id: 'search-multi-query', tool: 'search', args: { queries: ['MCP 协议 中文教程', 'model context protocol docs'], limit: 8 } },
     // —— 正文/文档抓取 ——
     { id: 'fetch-web-zhihu', tool: 'fetchWebContent', args: { url: 'https://zhuanlan.zhihu.com/p/669789440', maxChars: 3000 }, allowBotChallenge: true },
-    { id: 'fetch-csdn', tool: 'fetchCsdnArticle', args: { url: 'https://blog.csdn.net/qq_43061290/article/details/126651783' } },
-    { id: 'fetch-juejin', tool: 'fetchJuejinArticle', args: { url: 'https://juejin.cn/post/7115474775136272392' } },
+    { id: 'fetch-csdn', tool: 'fetchWebContent', args: { url: 'https://blog.csdn.net/qq_43061290/article/details/126651783' } },
+    { id: 'fetch-juejin', tool: 'fetchWebContent', args: { url: 'https://juejin.cn/post/7115474775136272392' } },
     { id: 'fetch-github', tool: 'fetchGithubReadme', args: { url: 'https://github.com/modelcontextprotocol/servers' } },
-    { id: 'resolve-lib', tool: 'resolveLibraryId', args: { libraryName: 'react', query: 'hooks' } },
-    { id: 'query-docs', tool: 'queryDocs', args: { libraryId: '/facebook/react', query: 'useState hooks', limit: 3 } },
+    { id: 'query-docs-react', tool: 'queryDocs', args: { library: 'react', query: 'hooks', limit: 3 } },
+    { id: 'query-docs-alias', tool: 'queryDocs', args: { libraryId: '/facebook/react', query: 'useState hooks', limit: 3 } },
     // —— 安全与错误处理 ——
     { id: 'ssrf-loopback', tool: 'fetchWebContent', args: { url: 'http://127.0.0.1:18080/secret', maxChars: 3000 }, expectError: true, expectedErrorPattern: /public HTTP|private or local|loopback|not allowed/i },
     { id: 'ssrf-private-ip', tool: 'fetchWebContent', args: { url: 'http://192.168.1.1/admin', maxChars: 3000 }, expectError: true, expectedErrorPattern: /public HTTP|private or local|not allowed/i },
     { id: 'ssrf-decimal-ip', tool: 'fetchWebContent', args: { url: 'http://2130706433/', maxChars: 3000 }, expectError: true, expectedErrorPattern: /public HTTP|private or local|not allowed/i },
     { id: 'err-invalid-engine', tool: 'search', args: { query: 'test', engines: ['nonexistent-engine'] }, expectError: true, expectedErrorPattern: /invalid_enum_value|Unsupported|invalid.*engine|nonexistent-engine/i },
     { id: 'err-fetch-404', tool: 'fetchWebContent', args: { url: 'https://httpbin.org/status/404', maxChars: 3000 }, expectError: true, expectedErrorPattern: /404|status code/i },
-    { id: 'err-csdn-soft-404', tool: 'fetchCsdnArticle', args: { url: 'https://blog.csdn.net/weixin_43881394/article/details/132572757' }, expectError: true, expectedErrorPattern: /404|不存在|已删除/i },
+    { id: 'err-csdn-soft-404', tool: 'fetchWebContent', args: { url: 'https://blog.csdn.net/weixin_43881394/article/details/132572757' }, expectError: true, expectedErrorPattern: /404|不存在|已删除|not_found|521|status code/i },
 ];
 
 function summarize(tool, result, rpcError) {

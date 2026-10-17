@@ -3,6 +3,7 @@ import { ENGINE_REGISTRY, SearchEngineExecutorMap } from '../engines/registry.js
 import { fetchCsdnArticle } from '../engines/csdn/fetchCsdnArticle.js';
 import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
 import { fetchGithubReadme } from '../engines/github/index.js';
+import { fetchStackOverflowQuestion } from '../engines/stackoverflow/fetchStackOverflow.js';
 import { fetchWebContent } from '../engines/web/index.js';
 import { createContext7Services } from '../core/context7/context7Service.js';
 import { createSearchService, configureGlobalConcurrencyLimit } from '../core/search/searchService.js';
@@ -12,6 +13,7 @@ import {
     createWebFetchService,
     ArticleFetcher,
     GithubReadmeFetcher,
+    StackOverflowQuestionFetcher,
     WebFetcher
 } from '../core/fetch/fetchServices.js';
 import { MyWebSearchRuntime } from './runtimeTypes.js';
@@ -21,6 +23,7 @@ export type RuntimeDependencies = {
     fetchCsdnArticle?: ArticleFetcher;
     fetchJuejinArticle?: ArticleFetcher;
     fetchGithubReadme?: GithubReadmeFetcher;
+    fetchStackOverflow?: StackOverflowQuestionFetcher;
     fetchWebContent?: WebFetcher;
 };
 
@@ -66,7 +69,8 @@ export function createMyWebSearchRuntime(options: CreateMyWebSearchRuntimeOption
             fetchWeb: createWebFetchService(dependencies.fetchWebContent ?? fetchWebContent, {
                 fetchCsdn: dependencies.fetchCsdnArticle ?? fetchCsdnArticle,
                 fetchJuejin: dependencies.fetchJuejinArticle ?? fetchJuejinArticle,
-                fetchGithub: dependencies.fetchGithubReadme ?? fetchGithubReadme
+                fetchGithub: dependencies.fetchGithubReadme ?? fetchGithubReadme,
+                fetchStackOverflow: dependencies.fetchStackOverflow ?? fetchStackOverflowQuestion
             }),
             context7Libraries: context7.libraries,
             context7Docs: context7.docs

@@ -82,7 +82,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
         {
             description: "PREFERRED for official documentation: get up-to-date, version-specific official docs and code snippets for any library, framework, or package (e.g. 'next.js', 'react', 'fastapi', or exact ID '/vercel/next.js'). Directly pass the package name — automatically resolves to the canonical library. Direct, reliable, no proxy needed.",
             inputSchema: {
-                library: z.string().min(1).describe("Library or package name (e.g. 'next.js', 'react', 'fastapi') or exact Context7 library ID (e.g. '/vercel/next.js', version-pinnable like '/vercel/next.js@v15.1.8')"),
+                library: z.string().min(1).optional().describe("Library or package name (e.g. 'next.js', 'react', 'fastapi') or exact Context7 library ID (e.g. '/vercel/next.js', version-pinnable like '/vercel/next.js@v15.1.8')"),
                 libraryId: z.string().min(1).optional().describe("Legacy alias for library (e.g. /vercel/next.js)"),
                 query: z.string().min(1).optional().describe("The question, feature, or task to get relevant documentation for (optional; defaults to an overview when omitted, e.g. 'how to set up middleware with auth')"),
                 limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets to return (default 5)")
@@ -91,6 +91,12 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
         },
         async ({ library, libraryId, query, limit }) => {
             const target = (library ?? libraryId ?? '').trim();
+            if (!target) {
+                return {
+                    isError: true,
+                    content: [{ type: 'text', text: 'Invalid arguments: Either "library" or "libraryId" must be provided' }]
+                };
+            }
             try {
                 logTool(`Context7 fetching docs for: ${target}`);
                 const result = await runtime.services.context7Docs.execute({ library: target, query, limit });

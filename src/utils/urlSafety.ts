@@ -104,7 +104,22 @@ export function isPrivateOrLocalHostname(hostname: string): boolean {
         return false;
     }
     try {
-        return ipaddr.parse(host).range() !== 'unicast';
+        if (ipaddr.IPv4.isIPv4(host)) {
+            const parsed = ipaddr.IPv4.parse(host);
+            const range = parsed.range();
+            return range === 'private' || range === 'loopback' || range === 'linkLocal' || range === 'carrierGradeNat' || range === 'broadcast' || range === 'unspecified';
+        }
+        if (ipaddr.IPv6.isIPv6(host)) {
+            const parsed = ipaddr.IPv6.parse(host);
+            if (parsed.isIPv4MappedAddress()) {
+                const mappedV4 = parsed.toIPv4Address();
+                const v4Range = mappedV4.range();
+                return v4Range === 'private' || v4Range === 'loopback' || v4Range === 'linkLocal' || v4Range === 'carrierGradeNat' || v4Range === 'broadcast' || v4Range === 'unspecified';
+            }
+            const range = parsed.range();
+            return range === 'loopback' || range === 'linkLocal' || range === 'uniqueLocal' || range === 'unspecified' || range === 'multicast';
+        }
+        return false;
     } catch {
         return false;
     }
@@ -120,6 +135,37 @@ export function isBlackholeAddress(address: string): boolean {
     try {
         // 0.0.0.0/8 (RFC 1122: "This host on this network")
         return ipaddr.parse(host).match(ipaddr.parseCIDR('0.0.0.0/8'));
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * 识别典型 DNS 污染/黑洞/过渡前缀地址：
+ * - 0.0.0.0/8 黑洞地址
+ * - 2001::/32 (Teredo 过渡前缀，尤其 2001::1 / 2001:: 常被 GFW 伪造为 AAAA 记录)
+ * - 240.0.0.0/4 (RFC 1112 保留段，常被运营商劫持注入，若不在 fakeIpCidrs 中放行)
+ */
+export function isDnsPollutionAddress(address: string): boolean {
+    const host = stripIpv6Brackets(address.trim().toLowerCase());
+    if (isIP(host) === 0) {
+        return false;
+    }
+    try {
+        if (ipaddr.IPv6.isIPv6(host)) {
+            const parsed = ipaddr.IPv6.parse(host);
+            return parsed.range() === 'teredo';
+        }
+        if (ipaddr.IPv4.isIPv4(host)) {
+            if (isBlackholeAddress(host)) {
+                return true;
+            }
+            const parsed = ipaddr.IPv4.parse(host);
+            if (parsed.match(ipaddr.parseCIDR('240.0.0.0/4')) && !isAllowedFakeIp(host)) {
+                return true;
+            }
+        }
+        return false;
     } catch {
         return false;
     }
@@ -287,5 +333,23 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
             retryable: false,
             message: `${label} resolves to a private or local network target, which is not allowed${hintFakeIpBlockedAddress(blockedEntry.address)}`
         });
+    }
+
+    // 检查典型 DNS 污染/无效过渡地址 (如 Teredo 2001::1)
+    const pollutionHit = resolved.find((entry) => isDnsPollutionAddress(entry.address));
+    if (pollutionHit) {
+        // 代理模式下请求由代理远端处理，本地 DNS 污染放行交由代理
+        if (config.useProxy) {
+            return;
+        }
+        // 直连模式且解析结果全为污染/无效地址时，给出明确可自愈提示而非误报为"内网地址"
+        const allPolluted = resolved.every((entry) => isDnsPollutionAddress(entry.address));
+        if (allPolluted) {
+            throw new AppError({
+                code: 'network_error',
+                retryable: true,
+                message: `${label} resolves to ${pollutionHit.address} (likely DNS pollution or invalid transition address) — check DNS settings or enable a proxy (USE_PROXY=true)`
+            });
+        }
     }
 }

@@ -869,6 +869,26 @@ export async function fetchGithubContent(githubUrl: string): Promise<string | nu
     }
 
     // 5. 默认仓库 README 抓取流程
+    // 注意：仅当 URL 路径恰好为仓库根目录（/:owner/:repo 或 /:owner/:repo/）时，才抓取 README。
+    // 若包含 /releases, /stargazers, /commits 等子路径，返回 null，交由通用网页抓取器提取实际页面正文！
+    const isRepoRoot = (urlStr: string): boolean => {
+        try {
+            if (/^git@(github|gitee)\.com:[^/]+\/[^/]+(?:\.git)?$/i.test(urlStr.trim())) {
+                return true;
+            }
+            const parsed = new URL(urlStr.trim());
+            const parts = parsed.pathname.split('/').filter(Boolean);
+            return parts.length === 2;
+        } catch {
+            return false;
+        }
+    };
+
+    if (!isRepoRoot(trimmed)) {
+        console.error(`Not a repository root or supported subresource (e.g. releases/commits/stargazers), skipping GitHub specialized extractor`);
+        return null;
+    }
+
     const repoInfo = extractOwnerAndRepo(githubUrl);
     if (!repoInfo) {
         console.error(`Unable to extract owner and repo from URL: ${githubUrl}`);

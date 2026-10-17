@@ -5,10 +5,12 @@ import {
     validatePublicWebUrl
 } from '../validation/targetValidation.js';
 import { AppError } from '../errors.js';
+import { isStackOverflowQuestionUrl, fetchStackOverflowQuestion } from '../../engines/stackoverflow/fetchStackOverflow.js';
 
 export type ArticleFetchOptions = { format?: 'text' | 'markdown' };
 export type ArticleFetcher = (url: string, options?: ArticleFetchOptions) => Promise<{ content: string; title?: string }>;
 export type GithubReadmeFetcher = (url: string) => Promise<string | null>;
+export type StackOverflowQuestionFetcher = (url: string) => Promise<{ title: string; content: string } | null>;
 export type WebFetcher = (url: string, maxChars: number, options?: FetchWebContentOptions) => Promise<FetchWebContentResult>;
 
 export function createArticleFetchService(
@@ -55,6 +57,7 @@ export function createWebFetchService(
         fetchCsdn?: ArticleFetcher;
         fetchJuejin?: ArticleFetcher;
         fetchGithub?: GithubReadmeFetcher;
+        fetchStackOverflow?: StackOverflowQuestionFetcher;
     }
 ) {
     return {
@@ -162,6 +165,14 @@ export function createWebFetchService(
                             const isGitee = parsed.hostname.includes('gitee.com');
                             const siteName = isGitee ? 'Gitee' : 'GitHub';
                             return formatMarkdownResult(ghContent, `${siteName} Content`, siteName);
+                        }
+                    }
+
+                    if (isStackOverflowQuestionUrl(url)) {
+                        const soFetcher = options?.fetchStackOverflow ?? fetchStackOverflowQuestion;
+                        const soContent = await soFetcher(url);
+                        if (soContent) {
+                            return formatMarkdownResult(soContent.content, soContent.title, 'Stack Overflow');
                         }
                     }
                 } catch (forwardError) {

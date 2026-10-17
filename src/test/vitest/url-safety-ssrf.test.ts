@@ -112,4 +112,25 @@ describe('assertPublicHttpUrlResolved 代理模式下的私网判定', () => {
         const direct = await loadUrlSafety({ 'example.com': ['93.184.216.34'] });
         await expect(direct.assertPublicHttpUrlResolved('https://example.com/')).resolves.toBeUndefined();
     });
+
+    it('Teredo (2001::1) 不误判为内网地址，代理模式下顺利放行', async () => {
+        setEnv({ USE_PROXY: 'true', PROXY_URL: 'http://127.0.0.1:7890' });
+        const { assertPublicHttpUrlResolved, isPrivateOrLocalHostname } = await loadUrlSafety({
+            'en.wikipedia.org': ['31.13.73.9', '2001::1']
+        });
+
+        expect(isPrivateOrLocalHostname('2001::1')).toBe(false);
+        await expect(assertPublicHttpUrlResolved('https://en.wikipedia.org/wiki/React')).resolves.toBeUndefined();
+    });
+
+    it('全解析为 2001::1 (典型污染/过渡地址) 且未开代理时提示 DNS 污染而非内网错误', async () => {
+        setEnv({ USE_PROXY: undefined });
+        const { assertPublicHttpUrlResolved } = await loadUrlSafety({
+            'en.wikipedia.org': ['2001::1']
+        });
+
+        await expect(assertPublicHttpUrlResolved('https://en.wikipedia.org/wiki/React')).rejects.toThrow(
+            /likely DNS pollution|invalid transition address/i
+        );
+    });
 });

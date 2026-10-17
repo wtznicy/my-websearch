@@ -998,11 +998,14 @@ export async function fetchWebContent(
 
     if (!options.raw) {
         // P0-5 统一出口判定：无论通过直接请求、cookie 重试还是浏览器渲染路径返回，
-        // 若最终内容/标题命中反爬拦截特征且未能获得实质长正文，统一抛出 bot_challenge（兼容保留 legacyCode: ERR_BOT_CHALLENGE）
-        const botDetected = looksLikeBotChallengePage(raw)
-            || looksLikeBotChallengePage(extractedContent)
-            || (Boolean(title) && looksLikeBotChallengePage(title));
-        if (botDetected && extractedContent.length < 350) {
+        // 1. 若标题命中反爬特征（如"你似乎来到了没有知识存在的荒原"、"Just a moment..."等），
+        //    属于权威确定性反爬拦截信号，不受正文长度门槛限制，直接抛出 bot_challenge。
+        // 2. 若原始响应或提取正文命中反爬特征且正文极短（< 350 字符），抛出 bot_challenge。
+        const titleHit = Boolean(title) && looksLikeBotChallengePage(title);
+        const botDetected = titleHit
+            || looksLikeBotChallengePage(raw)
+            || looksLikeBotChallengePage(extractedContent);
+        if (titleHit || (botDetected && extractedContent.length < 350)) {
             throw new AppError({
                 code: 'bot_challenge',
                 retryable: false,

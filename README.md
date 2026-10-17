@@ -109,7 +109,7 @@ flowchart TB
 | **`fetchGithubReadme`** | Comprehensive GitHub / Gitee content reader | Fetches repository READMEs, branch-specific source files (fenced code blocks with syntax highlighting), ASCII directory trees, and Issue / PR discussions (with reactions & changed files) |
 | **`queryDocs`** | All-in-one official library documentation | Directly resolves library names (e.g. `"next.js"`, `"vue"`), auto-heals 404s, returns alternative libraries & versioned code |
 
-> 💡 **Backward Compatibility**: Legacy `fetchCsdnArticle` and `fetchJuejinArticle` are automatically routed under `fetchWebContent`. Set `REGISTER_LEGACY_ARTICLE_TOOLS=true` if your LLM requires them explicitly exposed as separate tools.
+> 💡 **Backward Compatibility**: Legacy `fetchCsdnArticle` and `fetchJuejinArticle` are automatically routed under `fetchWebContent`. Legacy `resolveLibraryId` is merged into `queryDocs` (which supports directly passing `library` name or legacy `libraryId` alias). Set `REGISTER_LEGACY_ARTICLE_TOOLS=true` if your LLM requires `fetchCsdnArticle` / `fetchJuejinArticle` explicitly exposed as separate tools.
 
 ---
 
@@ -337,9 +337,9 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run the Vitest suite (44 files, 395 tests at the current baseline)
+npm test              # Run the Vitest suite (45 files, 401 tests at the current baseline)
 npm run test:live     # Run bounded-concurrency live integration tests
-npm run eval:live     # Run 22-case live STDIO JSON-RPC evaluation suite
+npm run eval:live     # Run 23-case live STDIO JSON-RPC evaluation suite
 ```
 
 ### Acknowledgements

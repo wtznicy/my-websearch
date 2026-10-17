@@ -109,7 +109,7 @@ flowchart TB
 | **`fetchGithubReadme`** | 全能 GitHub / Gitee 内容提取网关 | 支持仓库 README、指定分支源码（带语法高亮代码块）、ASCII 目录树（带文件大小）、Issue/PR 讨论上下文（含 Reactions 与变更文件）；Gitee 国内直连秒开 |
 | **`queryDocs`** | 一站式开源框架/库官方文档 | 支持直接输入库名（如 `"next.js"`、`"vue"`）或 Context7 ID，支持 404 自愈、候选评分与相关库推荐 |
 
-> 💡 **向后兼容说明**：原独立的 `fetchCsdnArticle` 与 `fetchJuejinArticle` 已平滑下沉并收口进通用的 `fetchWebContent`（按域名自动采用最佳专有提取引擎）。如需向大模型显式暴露旧版独立工具，可配置 `REGISTER_LEGACY_ARTICLE_TOOLS=true`。
+> 💡 **向后兼容说明**：原独立的 `fetchCsdnArticle` 与 `fetchJuejinArticle` 已平滑下沉并收口进通用的 `fetchWebContent`（按域名自动采用最佳专有提取引擎）；原 `resolveLibraryId` 已合并入 `queryDocs`（支持直接传 `library` 库名或旧版 `libraryId` 别名自动解析定位）。如需向大模型显式暴露旧版独立工具，可配置 `REGISTER_LEGACY_ARTICLE_TOOLS=true`。
 
 ---
 
@@ -337,9 +337,9 @@ my-websearch doctor --reset-health
 ```bash
 npm install
 npm run build
-npm test              # 执行 Vitest 测试套件（当前基线：44 个文件、395 个测试）
+npm test              # 执行 Vitest 测试套件（当前基线：45 个文件、401 个测试）
 npm run test:live     # 执行外网有界并发实时集成测试
-npm run eval:live     # 执行 22 用例真实 STDIO JSON-RPC 评测套件
+npm run eval:live     # 执行 23 用例真实 STDIO JSON-RPC 评测套件
 ```
 
 ### 致谢
