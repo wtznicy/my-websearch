@@ -62,7 +62,7 @@ flowchart TB
         Wreq["wreq-js Chrome TLS/H2 Fingerprint<br/>+ Automatic Session Cookie Jars"]
         Solvers["Millisecond Challenge Solvers<br/>Startpage PoW | DDG JSA Solver"]
         PW["Playwright Stealth Browser Fallback<br/>(Budget Bounds + Cross-Process Locking)"]
-        Guard["SSRF Guard & Clash Fake-IP Support<br/>(PROXY_ENGINES Split Routing + 198.18.0.0/15)"]
+        Guard["SSRF Guard & Clash Fake-IP Support<br/>(PROXY_URL Split Routing + 198.18.0.0/15)"]
     end
 
     subgraph Engines["🌍 13 Search Engines + 6 Content/Docs Tools"]
@@ -217,6 +217,20 @@ my-websearch doctor --reset-health
 
 The report separates configuration, proxy TCP reachability, HTTP reachability, application parsing, browser launch, and anti-bot challenges. Network mode performs real requests and should not be used as a high-frequency health check.
 
+### 🌐 Proxy Troubleshooting & Upstream IP Risk Control
+
+When configuring or diagnosing proxy connectivity, refer to these common edge cases:
+
+1. **Startup log shows `🌐 Proxy: disabled` even though `proxy.url` is set?**
+   - **Check `useProxy` flag**: In `~/.my-websearch/config.json`, setting `"useProxy": false` takes precedence and **explicitly overrides and disables `url`** (setting `PROXY_URL='false'`). Change `"useProxy": true` or simply omit the field (providing a valid `url` automatically enables the proxy).
+   - **No system proxy active without `PROXY_URL`**: If no system proxy (Clash/v2ray) is running, overseas engines will be blocked by default. Explicitly declare `PROXY_URL` (e.g. `http://127.0.0.1:7897` or `7890`).
+
+2. **Proxy is configured properly, but overseas engines fail or timeout? (Upstream IP Blocking, NOT a Config Error)**
+   - **DuckDuckGo returns HTTP 202 / challenge**: DDG detected excessive traffic from the proxy node's egress IP and served an anti-bot challenge.
+   - **Brave returns HTTP 429 Too Many Requests**: Brave Search rate-limits noisy datacenter IP ranges.
+   - **Startpage times out or Anubis PoW difficulty spikes**: Startpage dynamically raises Anubis PoW difficulty to 6+ for flagged IP addresses, exceeding single-engine execution budgets.
+   - 💡 **Resolution**: These symptoms indicate that **the proxy node's public IP has been flagged by upstream search providers**, not a bug in `my-websearch`. Switch to a cleaner proxy server/node in your proxy client, fallback to domestic/direct engines, or supply an official API key such as `BRAVE_API_KEY` for guaranteed SLA.
+
 <a id="configuration"></a>
 
 ## ⚙️ Configuration & Environment Variables
@@ -233,11 +247,13 @@ To share settings across all MCP clients without duplicate configuration:
   },
   "proxy": {
     "url": "http://127.0.0.1:7897",
-    "useProxy": false,
+    "useProxy": true,
     "engines": ["duckduckgo", "exa", "brave", "startpage"]
   }
 }
 ```
+
+> ⚠️ **Note on `useProxy`**: When `"url"` is configured, proxy is enabled automatically. Setting `"useProxy": false` will **explicitly override and disable `url`**. If you want proxy enabled, set `"useProxy": true` or omit the field entirely.
 
 ### 📋 Exhaustive Environment Variables Reference
 
@@ -247,7 +263,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 
 | Variable | Default | Allowed Values / Description |
 | :--- | :--- | :--- |
-| `DEFAULT_SEARCH_ENGINE` | `auto` | Default engine: `auto` (smart query routing: Chinese `baidu,sogou`, English/foreign `bing,duckduckgo`), `bing`, `baidu`, `csdn`, `juejin`, `sogou`, `duckduckgo`, `brave`, `startpage`, `exa` |
+| `DEFAULT_SEARCH_ENGINE` | `auto` | Default engine: `auto` (smart query routing: Chinese `baidu,sogou`, English/foreign `bing,duckduckgo`). Supports all 13 engines: `auto`, `bing`, `baidu`, `sogou`, `duckduckgo`, `brave`, `csdn`, `juejin`, `startpage`, `exa`, `github`, `stackoverflow`, `hackernews`, `arxiv` (vertical developer engines can be configured as default, though `auto` or general web engines are recommended for global default) |
 | `ALLOWED_SEARCH_ENGINES` | all | Comma-separated whitelist of allowed search engines (e.g. `bing,baidu,duckduckgo`) |
 | `BING_BASE_URL` | `https://cn.bing.com/search` | Base URL for Bing queries. Overseas users or reverse proxy nodes can set to `https://www.bing.com/search` (legacy alias `OPEN_WEBSEARCH_BING_HOST` supported) |
 | `DEFAULT_MIN_RESULTS` | `5` | Cascade threshold: triggers fallback engines when usable results are fewer than this value |
@@ -268,7 +284,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `IMPERSONATE_OS` | `windows` | Operating system platform for fingerprint impersonation (`windows`, `macos`, `linux`) |
 | `BING_IMPERSONATE` | `true` | Toggle Chrome TLS impersonation for Bing HTTP mode (auto-trips circuit breaker after consecutive empty results) |
 | `ANUBIS_MAX_POW_DIFFICULTY` | `5` | Maximum difficulty threshold for Startpage Anubis PoW solver; skips/falls back when difficulty exceeds this |
-| `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `2000` | Timeout in ms for direct-first connection probes before proxy fallback |
+| `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `3500` | Timeout in ms for direct-first connection probes before proxy fallback |
 | `FETCH_WEB_INSECURE_TLS`| `false` | Disable TLS certificate verification for `fetchWebContent` only (for broken legacy site certs) |
 | `GITHUB_README_CDN_FIRST` | `false` | When `true`, forces skipping `raw.githubusercontent.com` direct probe and queries jsDelivr CDN first (domestic network acceleration) |
 

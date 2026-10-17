@@ -62,7 +62,7 @@ flowchart TB
         Wreq["wreq-js 原生 Chrome TLS/H2 指纹<br/>+ 会话级 Cookie 自动持久化"]
         Solvers["内置毫秒挑战求解器<br/>Startpage PoW | DDG JSA Solver"]
         PW["Playwright 隐身浏览器兜底<br/>(严格超时预算 + 跨进程文件锁治理)"]
-        Guard["SSRF 防护 & Clash Fake-IP 兼容<br/>(PROXY_ENGINES 分流 + 198.18.0.0/15)"]
+        Guard["SSRF 防护 & Clash Fake-IP 兼容<br/>(PROXY_URL 分流 + 198.18.0.0/15)"]
     end
 
     subgraph Engines["🌍 13 大引擎 + 6 大内容/文档服务"]
@@ -217,6 +217,20 @@ my-websearch doctor --reset-health
 
 报告会区分配置状态、代理 TCP 连通性、HTTP 连通性、应用层解析、浏览器启动和反爬挑战。网络模式会发起真实请求，不建议高频执行。
 
+### 🌐 代理排障与上游风控辨析
+
+在配置或调试代理时，如果遇到异常表现，请对照以下高频排查点：
+
+1. **启动日志显示 `🌐 Proxy: disabled`，但明明配置了 `proxy.url`？**
+   - **排查 `useProxy` 字段**：在 `~/.my-websearch/config.json` 中，若配置了 `"useProxy": false`，根据配置优先级规则，该参数会**显式覆盖并强制禁用 `url`**（产生 `PROXY_URL='false'`），导致代理被静默关闭。请将 `"useProxy"` 改为 `true` 或直接删除该字段（只要存在有效 `url` 即可自动启用代理）。
+   - **未开启系统代理且未配 `PROXY_URL`**：纯直连网络下（无 Clash/v2ray 系统代理），海外引擎将被安全策略拦截，此时请显式设置 `PROXY_URL`（如 `http://127.0.0.1:7890` 或 `7897`）。
+
+2. **配置了有效代理后，海外引擎依然失败或超时？（上游 IP 风控，非本地配置错误）**
+   - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：DDG 检测到当前代理节点的公网出口 IP 存在大量自动化请求，触发了人机验证挑战。
+   - **Brave 返回 HTTP 429 (Too Many Requests)**：Brave 搜索对高频机房代理 IP 进行了限频，此错误属于出口节点被上游限制。
+   - **Startpage 请求挂满超时或 Anubis PoW 难度过大**：Startpage 针对被风控的 IP 会提升 Anubis 工作量证明（PoW）的哈希计算难度至 6+（单核计算需十数秒），导致请求超时触发保护。
+   - 💡 **解决方案**：上述情况**并非本地客户端或 MCP 服务配置错误**，而是代理出口节点 IP 被上游搜索引擎标记。请在代理客户端（Clash/v2ray）中**切换为较纯净的节点/住宅节点**，或在搜索时使用 `engines: ["bing", "baidu"]` 降级，亦可配置官方 API Key（如 `BRAVE_API_KEY`）直连官方高可用通道。
+
 <a id="configuration"></a>
 
 ## ⚙️ 配置中心与环境变量
@@ -233,11 +247,13 @@ my-websearch doctor --reset-health
   },
   "proxy": {
     "url": "http://127.0.0.1:7897",
-    "useProxy": false,
+    "useProxy": true,
     "engines": ["duckduckgo", "exa", "brave", "startpage"]
   }
 }
 ```
+
+> ⚠️ **关于 `useProxy` 的重要说明**：只要配置了 `"url"`，代理默认就会自动启用。如果显式配置了 `"useProxy": false`，会**强制覆盖并废掉 `url`**。因此若要启用代理，请将该字段设为 `true` 或直接省略不写。
 
 ### 📋 环境变量完整全量参考
 
@@ -247,7 +263,7 @@ my-websearch doctor --reset-health
 
 | 变量名 | 默认值 | 可选值 / 说明 |
 | :--- | :--- | :--- |
-| `DEFAULT_SEARCH_ENGINE` | `auto` | 默认搜索引擎。`auto`（智能感知路由：中文走 `baidu,sogou`，英文走 `bing,duckduckgo`）、`bing`、`baidu`、`csdn`、`juejin`、`sogou`、`duckduckgo`、`brave`、`startpage`、`exa` |
+| `DEFAULT_SEARCH_ENGINE` | `auto` | 默认搜索引擎。`auto`（智能感知路由：中文走 `baidu,sogou`，英文走 `bing,duckduckgo`）。支持全部 13 个引擎：`auto`、`bing`、`baidu`、`sogou`、`duckduckgo`、`brave`、`csdn`、`juejin`、`startpage`、`exa`、`github`、`stackoverflow`、`hackernews`、`arxiv`（垂直开发者引擎可配置为默认，全局默认推荐保持 `auto` 或通用网页引擎） |
 | `ALLOWED_SEARCH_ENGINES` | 全部 | 限制启用的引擎白名单（逗号分隔，如 `bing,baidu,duckduckgo`） |
 | `BING_BASE_URL` | `https://cn.bing.com/search` | Bing 搜索请求基址。海外用户可改为 `https://www.bing.com/search` 或自建反代（兼容旧变量 `OPEN_WEBSEARCH_BING_HOST`） |
 | `DEFAULT_MIN_RESULTS` | `5` | 级联补位阈值：可用结果数不足该值时，自动调度备用引擎补齐 |
@@ -268,7 +284,7 @@ my-websearch doctor --reset-health
 | `IMPERSONATE_OS` | `windows` | 指纹模拟使用的操作系统平台（`windows`, `macos`, `linux`） |
 | `BING_IMPERSONATE` | `true` | 是否启用 Bing 的 Chrome TLS 指纹模拟（连续多次返回 0 条时会自动熔断降级为标准 HTTP） |
 | `ANUBIS_MAX_POW_DIFFICULTY` | `5` | Startpage Anubis 工作量证明（PoW）难度上限，超限时自动绕过或走降级策略 |
-| `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `2000` | 直连优先策略探测超时时间（毫秒） |
+| `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `3500` | 直连优先策略探测超时时间（毫秒） |
 | `FETCH_WEB_INSECURE_TLS`| `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点旧证书链损坏时使用） |
 | `GITHUB_README_CDN_FIRST` | `false` | 为 `true` 时强制跳过 `raw.githubusercontent.com` 直连探测，优先走 jsDelivr CDN 镜像（国内无代理网络加速，免除 3 秒直连探测等待） |
 
