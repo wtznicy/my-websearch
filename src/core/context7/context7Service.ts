@@ -22,6 +22,8 @@ export type Context7DocsInput = {
     libraryName?: string;
     query?: string;
     limit?: number;
+    strict?: boolean;
+    signal?: AbortSignal;
 };
 
 export type Context7DocsService = {
@@ -41,6 +43,7 @@ const RESOLVED_NAME_CACHE_TTL_MS = 30 * 60 * 1000;
 type ResolvedLibraryEntry = {
     bestId: string;
     alternatives: Array<{ id: string; title: string; description?: string }>;
+    confidence: 'high' | 'medium' | 'low';
     expiresAt: number;
 };
 const resolvedNameCache = new Map<string, ResolvedLibraryEntry>();
@@ -105,6 +108,57 @@ export function pickBestLibrary(candidates: Context7Library[], rawInput: string)
     })[0];
 }
 
+/**
+ * 候选库匹配置信度评估：
+ * - high: 库名/别名/完整ID精确匹配
+ * - medium: 包含关系或词干高度接近
+ * - low: 模糊弱相关（避免未知库/拼写错误自信地返回无关文档）
+ */
+export function evaluateLibraryMatchConfidence(
+    candidate: Context7Library,
+    rawInput: string
+): 'high' | 'medium' | 'low' {
+    const target = rawInput.trim().toLowerCase().replace(/^@/, '');
+    const candidateTitle = candidate.title.trim().toLowerCase();
+    const candidateId = candidate.id.trim().toLowerCase().replace(/^\//, '');
+    const candidateSlug = candidateId.split('/').pop()?.split('@')[0] ?? '';
+
+    // 精确匹配：标题、完整ID或尾部slug完全一致
+    if (
+        candidateTitle === target ||
+        candidateSlug === target ||
+        candidateId === target ||
+        candidateId.endsWith(`/${target}`)
+    ) {
+        return 'high';
+    }
+
+    // 去除特殊字符后的精确匹配（如 next.js 与 nextjs）
+    const cleanTarget = target.replace(/[-_.]/g, '');
+    const cleanSlug = candidateSlug.replace(/[-_.]/g, '');
+    const cleanTitle = candidateTitle.replace(/[-_.]/g, '');
+
+    if (
+        cleanTarget.length > 0 &&
+        (cleanSlug === cleanTarget || cleanTitle === cleanTarget)
+    ) {
+        return 'high';
+    }
+
+    // 中等置信度：包含关系（目标包含slug或slug包含目标，且长度差距不大）
+    if (
+        (cleanSlug.includes(cleanTarget) && cleanTarget.length >= 3) ||
+        (cleanTarget.includes(cleanSlug) && cleanSlug.length >= 3 && cleanSlug.length / cleanTarget.length > 0.4) ||
+        (cleanTitle.includes(cleanTarget) && cleanTarget.length >= 3) ||
+        (cleanTarget.includes(cleanTitle) && cleanTitle.length >= 3 && cleanTitle.length / cleanTarget.length > 0.4)
+    ) {
+        return 'medium';
+    }
+
+    // 弱相关或无关匹配
+    return 'low';
+}
+
 export function createContext7Services() {
     return {
         libraries: {
@@ -156,15 +210,25 @@ export function createContext7Services() {
                     libraryName: string,
                     originalRequested?: string
                 ): Promise<Context7DocsResult> {
+                    if (input.signal?.aborted) {
+                        throw new AppError({
+                            code: 'network_timeout',
+                            retryable: true,
+                            engine: 'context7',
+                            message: 'Request aborted by client'
+                        });
+                    }
                     const normalizedKey = libraryName.toLowerCase();
                     const now = Date.now();
                     let bestId: string;
                     let alternatives: Array<{ id: string; title: string; description?: string }> = [];
+                    let confidence: 'high' | 'medium' | 'low' = 'high';
 
                     const cachedResolved = resolvedNameCache.get(normalizedKey);
                     if (cachedResolved && now < cachedResolved.expiresAt) {
                         bestId = cachedResolved.bestId;
                         alternatives = cachedResolved.alternatives;
+                        confidence = cachedResolved.confidence;
                     } else {
                         const searchRes = await searchContext7Libraries(libraryName, input.query, 5);
                         const best = pickBestLibrary(searchRes.results, libraryName);
@@ -177,6 +241,7 @@ export function createContext7Services() {
                             });
                         }
                         bestId = best.id;
+                        confidence = evaluateLibraryMatchConfidence(best, libraryName);
                         alternatives = searchRes.results
                             .filter((r) => r.id !== best.id)
                             .slice(0, 3)
@@ -185,7 +250,29 @@ export function createContext7Services() {
                         resolvedNameCache.set(normalizedKey, {
                             bestId,
                             alternatives,
+                            confidence,
                             expiresAt: now + RESOLVED_NAME_CACHE_TTL_MS
+                        });
+                    }
+
+                    if (input.strict && confidence === 'low') {
+                        const altsDesc = alternatives.length > 0
+                            ? ` Candidates: ${[bestId, ...alternatives.map((a) => a.id)].join(', ')}.`
+                            : ` Closest was "${bestId}".`;
+                        throw new AppError({
+                            code: 'not_found',
+                            retryable: false,
+                            engine: 'context7',
+                            message: `Low confidence match for library "${libraryName}".${altsDesc} Set strict=false to force fetching.`
+                        });
+                    }
+
+                    if (input.signal?.aborted) {
+                        throw new AppError({
+                            code: 'network_timeout',
+                            retryable: true,
+                            engine: 'context7',
+                            message: 'Request aborted by client'
                         });
                     }
 
@@ -193,7 +280,8 @@ export function createContext7Services() {
                     const enriched: Context7DocsResult = {
                         ...docsResult,
                         resolvedFrom: originalRequested ?? libraryName,
-                        alternativeLibraries: alternatives.length > 0 ? alternatives : undefined
+                        alternativeLibraries: alternatives.length > 0 ? alternatives : undefined,
+                        matchConfidence: confidence
                     };
                     return enriched;
                 }

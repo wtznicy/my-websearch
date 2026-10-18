@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+
 /**
  * 启动日志静默前置模块与 libuv 线程池初始化。
  *
@@ -29,8 +31,7 @@ if (isQuietInvocation) {
 if (process.platform === 'win32') {
     let isGbkConsole = false;
     try {
-        // 延迟 require 避免引入额外依赖；chcp 无参数时输出 "活动代码页: 936"
-        const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+        // chcp 无参数时输出 "活动代码页: 936"
         const chcpOutput = execFileSync('chcp', { encoding: 'utf8', windowsHide: true, stdio: 'pipe' }).toString();
         const codePage = Number(/\d+/.exec(chcpOutput)?.[0]);
         isGbkConsole = Number.isFinite(codePage) && codePage !== 65001;

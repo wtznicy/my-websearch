@@ -25,6 +25,15 @@ export function formatContext7DocsAsMarkdown(result: Context7DocsResult): string
     }
     lines.push('');
 
+    if (result.matchConfidence === 'low') {
+        lines.push('> ⚠️ **Warning: Low Match Confidence**');
+        lines.push(`> The query "${result.resolvedFrom ?? result.libraryId}" did not closely match any official library name. The closest candidate found was **\`${result.libraryId}\`**, which may be unrelated.`);
+        if (result.alternativeLibraries && result.alternativeLibraries.length > 0) {
+            lines.push(`> Alternatives: ${result.alternativeLibraries.map((a) => `\`${a.id}\``).join(', ')}`);
+        }
+        lines.push('');
+    }
+
     if (result.infoSnippets && result.infoSnippets.length > 0) {
         for (const info of result.infoSnippets) {
             if (info.content) {
@@ -85,11 +94,12 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 library: z.string().min(1).optional().describe("Library or package name (e.g. 'next.js', 'react', 'fastapi') or exact Context7 library ID (e.g. '/vercel/next.js', version-pinnable like '/vercel/next.js@v15.1.8')"),
                 libraryId: z.string().min(1).optional().describe("Legacy alias for library (e.g. /vercel/next.js)"),
                 query: z.string().min(1).optional().describe("The question, feature, or task to get relevant documentation for (optional; defaults to an overview when omitted, e.g. 'how to set up middleware with auth')"),
-                limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets to return (default 5)")
+                limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets to return (default 5)"),
+                strict: z.boolean().optional().describe("If true, rejects low-confidence library name matches with an error instead of returning loosely matched candidate docs (default false)")
             },
             annotations: TOOL_ANNOTATION_HINTS
         },
-        async ({ library, libraryId, query, limit }) => {
+        async ({ library, libraryId, query, limit, strict }, extra) => {
             const target = (library ?? libraryId ?? '').trim();
             if (!target) {
                 return {
@@ -99,7 +109,13 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
             }
             try {
                 logTool(`Context7 fetching docs for: ${target}`);
-                const result = await runtime.services.context7Docs.execute({ library: target, query, limit });
+                const result = await runtime.services.context7Docs.execute({
+                    library: target,
+                    query,
+                    limit,
+                    strict,
+                    signal: extra?.signal
+                });
                 if (result.resolvedFrom) {
                     logTool(`Context7 resolved "${result.resolvedFrom}" -> ${result.libraryId}`);
                 } else if (result.redirectedFrom) {

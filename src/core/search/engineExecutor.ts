@@ -8,6 +8,7 @@ import {
     SearchEngineExecutorMap,
     SearchExecutionFailure
 } from './searchService.js';
+import { tripEngineCircuit } from './engineCircuitBreaker.js';
 
 /**
  * P1-5：按引擎细粒度并发限流（避免突发并发把 sogou/baidu 等脆弱引擎打满 10s 超时或触发反爬）：
@@ -117,6 +118,7 @@ export interface ExecutePrimaryEnginesOptions {
     engineMap: SearchEngineExecutorMap;
     deadlineAt: number;
     perEngineTimeoutMs: number;
+    signal?: AbortSignal;
 }
 
 export interface ExecutePrimaryEnginesResult {
@@ -136,13 +138,24 @@ export async function executePrimaryEngines(
         effectiveSearchMode,
         engineMap,
         deadlineAt,
-        perEngineTimeoutMs
+        perEngineTimeoutMs,
+        signal: outerSignal
     } = options;
 
     const partialFailures: SearchExecutionFailure[] = [];
     const engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }> = [];
     const startedAtByIndex: number[] = executableEngines.map(() => Date.now());
     const controllers: AbortController[] = executableEngines.map(() => new AbortController());
+
+    if (outerSignal) {
+        if (outerSignal.aborted) {
+            controllers.forEach((c) => c.abort(outerSignal.reason));
+        } else {
+            outerSignal.addEventListener('abort', () => {
+                controllers.forEach((c) => c.abort(outerSignal.reason));
+            }, { once: true });
+        }
+    }
 
     const tasks = executableEngines.map(async (engine, index) => {
         const executor = engineMap[engine];
@@ -223,6 +236,9 @@ export async function executePrimaryEngines(
             const status = extractErrorStatus(lastError);
             const hint = extractErrorHint(lastError);
             const details = extractErrorDetails(lastError);
+            if (status === 429 || errorCode === 'rate_limited') {
+                tripEngineCircuit(engine);
+            }
             partialFailures.push({
                 engine,
                 code: 'engine_error',

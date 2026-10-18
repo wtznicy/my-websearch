@@ -53,10 +53,19 @@ async function resolveBaiduRedirectUrl(linkUrl: string): Promise<string> {
 }
 
 /** 链接解析总预算：预算耗尽后剩余结果保留原中转链接（用户/LLM 仍可用），
- *  避免 N+1 的 HEAD 请求把引擎整体耗时推过单引擎超时上限（实测 10 条结果时
- *  解析阶段可累积数秒，导致 baidu 整体 14.6s 被 6s 上限掐断） */
-const REDIRECT_RESOLVE_BUDGET_MS = 2000;
+ *  避免 N+1 的 HEAD 请求把引擎整体耗时推过单引擎超时上限 */
+const REDIRECT_RESOLVE_BUDGET_MS = 3500;
 const REDIRECT_RESOLVE_CONCURRENCY = 6;
+
+/** 从自然文本或摘要开头提取规范化的日期（YYYY-MM-DD 或 YYYY-MM） */
+export function extractBaiduDate(text: string): string | undefined {
+    const m = text.match(/(20\d{2})[-年/.](\d{1,2})(?:[-月/.](\d{1,2}))?/);
+    if (!m || !m[1] || !m[2]) return undefined;
+    const year = m[1];
+    const month = m[2].padStart(2, '0');
+    const day = m[3] ? m[3].padStart(2, '0') : undefined;
+    return day ? `${year}-${month}-${day}` : `${year}-${month}`;
+}
 
 /** 带预算并发解析一批跳转链接：超预算的保留原链接 */
 async function resolveBaiduRedirectUrls(hrefs: string[]): Promise<string[]> {
@@ -150,12 +159,7 @@ export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>)
         }
 
         const dateText = normalizeWhitespace($(element).find('.c-color-gray2, .c-gap-right').first().text());
-        let date: string | undefined;
-        const dateMatch = dateText.match(/(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/)
-            || description.match(/^(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/);
-        if (dateMatch && dateMatch[1]) {
-            date = dateMatch[1].replace(/[年/.]/g, '-').replace(/[月日]/g, '');
-        }
+        const date = extractBaiduDate(dateText) || extractBaiduDate(description);
 
         collected.push({
             title: normalizeWhitespace(titleElement.text()),

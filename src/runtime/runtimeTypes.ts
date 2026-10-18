@@ -32,6 +32,7 @@ export type FetchWebService = {
         startIndex?: number;
         format?: 'text' | 'markdown';
         focus?: string;
+        signal?: AbortSignal;
     }): Promise<FetchWebContentResult>;
 };
 
@@ -50,6 +51,8 @@ export type Context7DocsService = {
         libraryName?: string;
         query?: string;
         limit?: number;
+        strict?: boolean;
+        signal?: AbortSignal;
     }): Promise<Context7DocsResult>;
 };
 

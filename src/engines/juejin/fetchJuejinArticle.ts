@@ -27,7 +27,9 @@ import { MOBILE_IOS_UA } from '../../utils/userAgents.js';
 
 export async function fetchJuejinArticle(url: string, options: JuejinArticleOptions = {}): Promise<{ content: string; title?: string }> {
     try {
-        console.error(`🔍 Fetching Juejin article: ${url}`);
+        if (shouldDebug()) {
+            console.error(`🔍 Fetching Juejin article: ${url}`);
+        }
 
         // 直连优先、代理兜底：先无代理，网络失败且配置了代理时自动切换
         const response = await requestDirectFirst('GET', url, (forceDirect) => buildAxiosRequestOptions({
@@ -123,14 +125,50 @@ export async function fetchJuejinArticle(url: string, options: JuejinArticleOpti
         }
 
         const title = extractJuejinTitle(response.data);
-        console.error(`✅ Successfully extracted ${content.length} characters`);
+
+        // P1-1: 判定反爬/人机挑战与 soft 404
+        const isChallenge =
+            /please\s+wait/i.test(content) ||
+            /just\s+a\s+moment/i.test(content) ||
+            (content.length < 50 && (!title || title.trim().length === 0));
+
+        if (isChallenge) {
+            throw new AppError({
+                code: 'bot_challenge',
+                retryable: false,
+                status: 403,
+                engine: 'juejin',
+                message: '掘金文章触发反爬验证 (Please wait...)，未能获取有效正文内容'
+            });
+        }
+
+        const isSoft404 =
+            /(?:^|[\s_-])404(?:[\s_-]|$)|页面找不到了|文章不存在|该内容已被删除|你似乎来到了没有知识存在的荒原/i.test(title || '') ||
+            (content.length < 300 && /(?:^|[\s_-])404\s+not\s+found|页面找不到了|文章不存在或已被删除|内容已被删除|没有知识存在的荒原/i.test(content));
+
+        if (isSoft404) {
+            throw new AppError({
+                code: 'not_found',
+                retryable: false,
+                status: 404,
+                engine: 'juejin',
+                message: `掘金文章不存在或已被删除 (404): ${url}`
+            });
+        }
+
+        if (shouldDebug()) {
+            console.error(`✅ Successfully extracted ${content.length} characters`);
+        }
         return { content, title: title || undefined };
 
     } catch (error) {
+        if (isAppError(error)) {
+            throw error;
+        }
         console.error('❌ 获取掘金文章失败:', error instanceof Error ? error.message : String(error));
         throw new AppError({
-            code: isAppError(error) ? error.code : (normalizePublicErrorCode(extractErrorCode(error)) ?? 'network_error'),
-            retryable: isAppError(error) ? error.retryable : isRetryableError(error),
+            code: normalizePublicErrorCode(extractErrorCode(error)) ?? 'network_error',
+            retryable: isRetryableError(error),
             status: extractErrorStatus(error),
             engine: 'juejin',
             cause: error,

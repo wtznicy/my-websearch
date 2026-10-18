@@ -11,7 +11,7 @@ import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { AppConfig } from '../config.js';
-import { ErrorCode } from '../core/errors.js';
+import { ErrorCode, isAppError } from '../core/errors.js';
 import { buildDoctorReport, formatDoctorHumanReadable } from './doctor.js';
 
 export type CliIo = {
@@ -74,7 +74,7 @@ function formatCliHelp(): string {
         '',
         'One-shot action commands:',
         '  my-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--min-results N] [--daemon-url URL] [--spawn] [--json]',
-        '    Search the web. `--search-mode` is request|auto|playwright and currently only affects Bing. `--min-results N` auto-runs additional engines when fewer than N results come back.',
+        '    Search the web. `--search-mode` is request|auto|playwright and affects engines supporting browser rendering (Bing, Startpage). `--min-results N` auto-runs additional engines when fewer than N results come back.',
         '  my-websearch cache-clear [--daemon-url URL] [--spawn] [--json]',
         '    Clear the search TTL cache (engine just recovered, stale results cached, etc.).',
         '  my-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--format text|markdown] [--daemon-url URL] [--spawn] [--json]',
@@ -439,6 +439,15 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
     const url = positional.join(' ').trim();
     if (!url) {
         throw new Error('Target URL is required');
+    }
+    let parsedUrl: URL;
+    try {
+        parsedUrl = new URL(url);
+    } catch {
+        throw new Error('Invalid URL format');
+    }
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        throw new Error(`Only http and https protocols are supported (received: "${parsedUrl.protocol}")`);
     }
     // CLI 下限放宽到 100（MCP 工具 schema 仍保持 1000，这里只影响命令行直接调用，
     // 方便临时抓取小片段文本）；上限与 MCP 保持一致
@@ -1432,11 +1441,13 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : ErrorCode.INVALID_ARGUMENTS,
+                    isDaemonRequestError(error)
+                        ? getDaemonCliErrorCode(error)
+                        : (isAppError(error) ? error.code : ErrorCode.INVALID_ARGUMENTS),
                     message,
                     { hint: isDaemonRequestError(error)
                         ? getDaemonCliErrorHint(error)
-                        : 'Use a public HTTP(S) URL and keep maxChars within the supported range.' }
+                        : (isAppError(error) && error.hint ? error.hint : 'Use a public HTTP(S) URL and keep maxChars within the supported range.') }
                 ), null, 2));
             } else {
                 io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);

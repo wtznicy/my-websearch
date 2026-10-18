@@ -33,6 +33,7 @@ export interface ExecuteCascadeOptions {
     perEngineTimeoutMs: number;
     allowedEngines?: string[];
     siteDomains?: string[];
+    signal?: AbortSignal;
 }
 
 export interface ExecuteCascadeResult {
@@ -222,6 +223,15 @@ export async function executeCascade(
                 : perEngineTimeoutMs;
             const wait = Math.max(0, Math.min(remaining, candidateBudget));
             const controller = new AbortController();
+            if (options.signal) {
+                if (options.signal.aborted) {
+                    controller.abort(options.signal.reason);
+                } else {
+                    options.signal.addEventListener('abort', () => {
+                        controller.abort(options.signal!.reason);
+                    }, { once: true });
+                }
+            }
             batchControllers.set(candidate, controller);
             let cascadeTimedOut = false;
             const timer = setTimeout(() => {

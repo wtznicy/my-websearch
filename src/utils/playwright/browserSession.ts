@@ -2,6 +2,26 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { readdir as readdirAsync, rm as rmAsync, stat as statAsync } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+/**
+ * 校验临时目录是否安全位于系统临时目录下，且符合 mcp-search- 前缀，
+ * 防止元数据篡改导致的任意目录递归删除安全风险。
+ */
+export function isSafeTempDir(tempDir: string | undefined): boolean {
+    if (!tempDir || typeof tempDir !== 'string') {
+        return false;
+    }
+    const resolved = path.resolve(tempDir);
+    const osTmp = path.resolve(tmpdir());
+    const relative = path.relative(osTmp, resolved);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+        return false;
+    }
+    const baseName = path.basename(resolved);
+    return baseName.startsWith('mcp-search-');
+}
 
 /**
  * [P0 修复与增强] 异步删除浏览器 profile 临时目录。
@@ -15,9 +35,10 @@ import { readdir as readdirAsync, rm as rmAsync, stat as statAsync } from 'node:
  * 2. Windows 下进程 taskkill 后可能在毫秒级内仍持有文件句柄（如 LOCK/Cookies），
  *    立即删除容易触发 EBUSY/EPERM 导致删除失败残留（导致 %TEMP% 积累上 GB 孤儿目录）。
  *    因此配置 maxRetries: 5, retryDelay: 300，并在延时后执行，确保锁释放并成功清理。
+ * 3. 严格校验 tempDir 路径必须为系统临时目录下的 mcp-search-* 目录。
  */
 export function removeTempDirInBackground(tempDir: string | undefined, delayMs = 300): void {
-    if (!tempDir) {
+    if (!tempDir || !isSafeTempDir(tempDir)) {
         return;
     }
     const execute = () => {
@@ -35,8 +56,6 @@ export function removeTempDirInBackground(tempDir: string | undefined, delayMs =
 
 const execFileAsync = promisify(execFile);
 import { createHash } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { AppConfig, config } from '../../config.js';
 import {
     acquireNativeFileLock,
@@ -506,7 +525,7 @@ function writeBrowserDomainMetadata(metadata: LocalBrowserSessionMetadata): void
         writeFileSync(
             metadataPath,
             JSON.stringify(serializeBrowserDomainMetadata(metadata), null, 2),
-            'utf8'
+            { encoding: 'utf8', mode: 0o600 }
         );
     } catch {
         // metadata 写入失败只影响跨进程复用，当前进程仍然可以继续使用已连接的浏览器。
@@ -915,9 +934,25 @@ async function doCleanupStaleLocalBrowserSessions(): Promise<void> {
                 ? normalizeActiveClientPids(metadata.clientPids.filter((pid) => pid !== process.pid))
                 : [];
 
-            // P0-3 快速路径：若客户端 PID 全部已死亡，无需慢速枚举，直接强杀与清理
+            // P0-3 & P1-9 快速路径：若客户端 PID 全部已死亡，快速校验 PID 命令行后强杀与清理（防 PID 复用误杀）
             if (shouldTrackLocalBrowserSessionClients(metadata.sessionMode) && activeClients.length === 0 && metadata.clientPids.length > 0) {
-                createForceKill(metadata.browserPid, metadata.tempDir)();
+                let shouldKill = false;
+                const pid = metadata.browserPid;
+                if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0 && pid !== process.pid) {
+                    try {
+                        const cmdLine = await getProcessCommandLine(pid);
+                        if (cmdLine && (!metadata.tempDir || commandLineMatchesLocalBrowserCandidate(cmdLine, metadata.tempDir, metadata.debugPort))) {
+                            shouldKill = true;
+                        }
+                    } catch {
+                        // ignore inspection error
+                    }
+                }
+                if (shouldKill) {
+                    createForceKill(pid, metadata.tempDir)();
+                } else if (metadata.tempDir && isSafeTempDir(metadata.tempDir)) {
+                    removeTempDirInBackground(metadata.tempDir);
+                }
                 clearBrowserDomainMetadataFromPath(metadataPath, metadata.tempDir);
                 continue;
             }
@@ -1269,8 +1304,8 @@ export function createForceKill(browserPid?: number, tempDir?: string, browser?:
             // Ignore disconnect errors.
         }
 
-        if (browserPid) {
-            processCommandLineCache.delete(browserPid);
+        if (Number.isInteger(browserPid) && browserPid! > 0 && browserPid !== process.pid && browserPid !== 4 && browserPid !== 1) {
+            processCommandLineCache.delete(browserPid!);
             if (process.platform === 'win32') {
                 try {
                     const child = spawn('taskkill', ['/F', '/T', '/PID', String(browserPid)], {
@@ -1285,19 +1320,19 @@ export function createForceKill(browserPid?: number, tempDir?: string, browser?:
                 }
             } else {
                 try {
-                    process.kill(-browserPid);
+                    process.kill(-browserPid!);
                 } catch {
                     // Ignore group kill errors.
                 }
                 try {
-                    process.kill(browserPid);
+                    process.kill(browserPid!);
                 } catch {
                     // Ignore direct kill errors.
                 }
             }
         }
 
-        if (tempDir) {
+        if (tempDir && isSafeTempDir(tempDir)) {
             invalidateLocalBrowserCandidatesCache(tempDir);
             try {
                 if (domainKey) {

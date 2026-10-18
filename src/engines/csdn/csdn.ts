@@ -17,6 +17,36 @@ export function stripHighlightTags(value: string): string {
     return String(value).replace(/<\/?em>/g, '').trim();
 }
 
+/** 剥离 CSDN 搜索结果中的 ops_request_misc / request_id / biz_id / spm / utm_* 等追踪参数 */
+export function cleanCsdnUrl(rawUrl: string): string {
+    if (!rawUrl) return '';
+    try {
+        const parsed = new URL(rawUrl);
+        const trackingKeys = ['ops_request_misc', 'request_id', 'biz_id', 'spm', 'utm_medium', 'utm_source', 'utm_campaign', 'utm_term', 'utm_content'];
+        for (const key of trackingKeys) {
+            parsed.searchParams.delete(key);
+        }
+        for (const key of [...parsed.searchParams.keys()]) {
+            if (key.startsWith('utm_')) {
+                parsed.searchParams.delete(key);
+            }
+        }
+        parsed.hash = '';
+        return parsed.toString();
+    } catch {
+        return rawUrl;
+    }
+}
+
+function extractCsdnDate(text: string): string | undefined {
+    const m = text.match(/(20\d{2})[-年/.](\d{1,2})(?:[-月/.](\d{1,2}))?/);
+    if (!m || !m[1] || !m[2]) return undefined;
+    const year = m[1];
+    const month = m[2].padStart(2, '0');
+    const day = m[3] ? m[3].padStart(2, '0') : undefined;
+    return day ? `${year}-${month}-${day}` : `${year}-${month}`;
+}
+
 /**
  * 把 CSDN 搜索 API 的一页 result_vos 映射为 SearchResult（页内按 URL 去重）。
  * 过滤低价值下载资源页（download.csdn.net，正文价值低）与无信息量条目（无标题或无摘要）。
@@ -28,7 +58,7 @@ export function parseCsdnResults(
     const results: SearchResult[] = [];
     for (const re of resultVos) {
         const { digest, title, url_location, nickname } = re;
-        const url = url_location || '';
+        const url = cleanCsdnUrl(url_location || '');
         if (!url || seenUrls.has(url) || /^https?:\/\/download\.csdn\.net\//i.test(url)) {
             continue;
         }
@@ -49,12 +79,10 @@ export function parseCsdnResults(
                 date = new Date(num > 1e11 ? num : num * 1000).toISOString().slice(0, 10);
             }
         } else if (typeof rawTime === 'string' && rawTime) {
-            const m = rawTime.match(/(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/);
-            if (m && m[1]) date = m[1].replace(/[年/.]/g, '-').replace(/[月日]/g, '');
+            date = extractCsdnDate(rawTime);
         }
         if (!date) {
-            const m = cleanDigest.match(/^(20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?)/);
-            if (m && m[1]) date = m[1].replace(/[年/.]/g, '-').replace(/[月日]/g, '');
+            date = extractCsdnDate(cleanDigest);
         }
 
         results.push({

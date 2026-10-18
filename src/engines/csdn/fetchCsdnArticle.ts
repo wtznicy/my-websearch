@@ -19,6 +19,7 @@ export function normalizeExtractedText(text: string): string {
 
 /**
  * CSDN 文章正文尾部常混入社区推广段落（如"九天&菜菜…30+套原创系统教程…扫🐎进入大模型技术社区"）。
+ * 开头也常混入作者名片、个人微信、专栏导航等推广区块。
  * 按段落（\n\n）拆分后剔除命中推广特征词的段落，避免广告噪音进入抓取结果。
  */
 const CSDN_PROMO_KEYWORDS = [
@@ -27,7 +28,16 @@ const CSDN_PROMO_KEYWORDS = [
     '原创系统教程',                       // 教程推广
     '免费公开',                           // 推广句式
     '项目源码包',                         // 源码获取引导
-    '完整视频讲解'                        // 视频推广
+    '完整视频讲解',                       // 视频推广
+    '个人名片',                           // 作者个人名片
+    '个人微信',                           // 微信引导
+    '添加微信',                           // 微信引导
+    '关注公众号',                         // 公众号引导
+    '专栏导航',                           // 专栏导航推广
+    '欢迎关注博主',                       // 博客引导
+    '博主简介',                           // 个人介绍
+    '作者名片',                           // 名片
+    '点击名片关注'                        // 名片关注
 ];
 
 /**
@@ -95,7 +105,7 @@ const CSDN_CONTENT_SELECTORS = [
 
 function extractArticleContent(html: string): string {
     const $ = cheerio.load(html);
-    $('script, style, noscript').remove();
+    $('script, style, noscript, .user-card-box, .article-info-box, .blog-expert-recommend-box, .personal-info-box, .card-user-info, .profile-intro, .recommend-box, .toolbar, .reward-user-box, .blog-footer-bottom, .more-toolbox, .column-group').remove();
 
     let best = '';
     for (const selector of CSDN_CONTENT_SELECTORS) {
@@ -103,6 +113,7 @@ function extractArticleContent(html: string): string {
         if (container.length === 0) {
             continue;
         }
+        container.find('.user-card-box, .article-info-box, .blog-expert-recommend-box, .personal-info-box, .card-user-info, .profile-intro, .recommend-box, .toolbar, .reward-user-box, .blog-footer-bottom, .more-toolbox, .column-group').remove();
         const candidate = normalizeExtractedText(container.text());
         if (candidate.length > best.length) {
             best = candidate;
@@ -115,7 +126,7 @@ function extractArticleContent(html: string): string {
 
     if (best.length < 200) {
         // 所有候选都过短（模板变化/SSR 差异）：退到 body 纯文本，并剔掉常见噪声区块
-        $('nav, header, footer, aside, .comment, .recommend-box, .toolbar').remove();
+        $('nav, header, footer, aside, .comment, .recommend-box, .toolbar, .user-card-box, .article-info-box, .blog-expert-recommend-box, .personal-info-box, .card-user-info, .profile-intro').remove();
         const fallback = normalizeExtractedText($('body').text());
         if (fallback.length > best.length) {
             best = fallback;

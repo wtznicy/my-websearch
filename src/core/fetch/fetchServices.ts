@@ -69,7 +69,8 @@ export function createWebFetchService(
             raw,
             startIndex,
             format,
-            focus
+            focus,
+            signal
         }: {
             url: string;
             maxChars: number;
@@ -79,6 +80,7 @@ export function createWebFetchService(
             startIndex?: number;
             format?: 'text' | 'markdown';
             focus?: string;
+            signal?: AbortSignal;
         }): Promise<FetchWebContentResult> {
             if (!validatePublicWebUrl(url)) {
                 throw new AppError({
@@ -123,6 +125,15 @@ export function createWebFetchService(
                         }
 
                         if (!focused) {
+                            if (effectiveOffset >= fullText.length && fullText.length > 0) {
+                                throw new AppError({
+                                    code: 'start_index_out_of_range',
+                                    retryable: false,
+                                    details: { legacyCode: 'ERR_START_INDEX_OUT_OF_RANGE', totalLength: fullText.length, startIndex: effectiveOffset },
+                                    hint: `当前正文实际总长度为 totalLength=${fullText.length}，请将 startIndex 设为小于 ${fullText.length} 的偏移量（或重置为 0 从头读取）。`,
+                                    message: `startIndex ${effectiveOffset} is beyond content length ${fullText.length}; reset to 0 to read from the beginning`
+                                });
+                            }
                             pageContent = fullText.slice(effectiveOffset, effectiveOffset + maxChars);
                             hasMore = fullText.length > effectiveOffset + maxChars;
                         }
@@ -176,14 +187,19 @@ export function createWebFetchService(
                         }
                     }
                 } catch (forwardError) {
-                    if (forwardError instanceof AppError && forwardError.code === 'not_found') {
+                    if (
+                        forwardError instanceof AppError &&
+                        (forwardError.code === 'not_found' ||
+                            forwardError.code === 'start_index_out_of_range' ||
+                            forwardError.code === 'bot_challenge')
+                    ) {
                         throw forwardError;
                     }
                     // 若专有抓取器异常，平滑回退到通用 fetcher
                 }
             }
 
-            return fetcher(url, maxChars, { readability, includeLinks, raw, startIndex, format, focus });
+            return fetcher(url, maxChars, { readability, includeLinks, raw, startIndex, format, focus, signal });
         }
     };
 }

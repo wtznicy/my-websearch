@@ -679,20 +679,40 @@ export function createBrowserBudget(label: string, budgetMs = FETCH_WEB_BROWSER_
     };
 }
 
+export const FETCH_WEB_TOTAL_BUDGET_MS = 25000;
+
 export async function fetchWebContent(
     url: string,
     maxChars: number = DEFAULT_MAX_CHARS,
     options: FetchWebContentOptions = {}
 ): Promise<FetchWebContentResult> {
-    const { signal } = options;
-    if (signal?.aborted) {
-        throw signal.reason instanceof Error
-            ? signal.reason
+    const callerSignal = options.signal;
+    if (callerSignal?.aborted) {
+        throw callerSignal.reason instanceof Error
+            ? callerSignal.reason
             : new AppError({ code: 'aborted', message: 'fetchWebContent aborted', retryable: false });
     }
 
-    const parsedUrl = new URL(url);
-    await assertPublicHttpUrlResolved(parsedUrl, 'Request URL');
+    const abortController = new AbortController();
+    const totalTimer = setTimeout(() => {
+        abortController.abort(new AppError({
+            code: 'network_timeout',
+            retryable: true,
+            message: `fetchWebContent exceeded overall execution budget (${FETCH_WEB_TOTAL_BUDGET_MS}ms)`
+        }));
+    }, FETCH_WEB_TOTAL_BUDGET_MS);
+
+    const onCallerAbort = () => {
+        abortController.abort(callerSignal?.reason);
+    };
+    if (callerSignal) {
+        callerSignal.addEventListener('abort', onCallerAbort, { once: true });
+    }
+
+    const signal = abortController.signal;
+    try {
+        const parsedUrl = new URL(url);
+        await assertPublicHttpUrlResolved(parsedUrl, 'Request URL');
 
     const withinCookieBudget = createBrowserBudget('fetchWebContent cookie', FETCH_WEB_COOKIE_BUDGET_MS, signal);
     const withinBrowserBudget = createBrowserBudget('fetchWebContent render', FETCH_WEB_BROWSER_BUDGET_MS, signal);
@@ -997,15 +1017,20 @@ export async function fetchWebContent(
     }
 
     if (!options.raw) {
-        // P0-5 统一出口判定：无论通过直接请求、cookie 重试还是浏览器渲染路径返回，
+        // P0-5 & P1-1 统一出口判定：无论通过直接请求、cookie 重试还是浏览器渲染路径返回，
         // 1. 若标题命中反爬特征（如"你似乎来到了没有知识存在的荒原"、"Just a moment..."等），
         //    属于权威确定性反爬拦截信号，不受正文长度门槛限制，直接抛出 bot_challenge。
         // 2. 若原始响应或提取正文命中反爬特征且正文极短（< 350 字符），抛出 bot_challenge。
+        // 3. P1-1: "Please wait..." 等极短等待文案、或正文 < 50 字符且无标题时判定为 bot_challenge。
+        const isPleaseWait = /please\s+wait/i.test(extractedContent) || /just\s+a\s+moment/i.test(extractedContent);
+        const isSuspiciousShortEmpty = extractedContent.length < 50 && (!title || title.trim().length === 0);
         const titleHit = Boolean(title) && looksLikeBotChallengePage(title);
         const botDetected = titleHit
+            || isPleaseWait
+            || isSuspiciousShortEmpty
             || looksLikeBotChallengePage(raw)
             || looksLikeBotChallengePage(extractedContent);
-        if (titleHit || (botDetected && extractedContent.length < 350)) {
+        if (titleHit || isPleaseWait || isSuspiciousShortEmpty || (botDetected && extractedContent.length < 350)) {
             throw new AppError({
                 code: 'bot_challenge',
                 retryable: false,
@@ -1013,6 +1038,22 @@ export async function fetchWebContent(
                 details: { legacyCode: 'ERR_BOT_CHALLENGE' },
                 message: '目标站点触发反爬验证或需要登录（命中反爬拦截特征），未能获取有效正文内容。'
             });
+        }
+
+        // P1-1: soft 404 判定（标题或短正文中明确提示 404 / 页面不存在 / 内容已删除）
+        if (extractedContent.length < 350) {
+            const isSoft404 =
+                /(?:^|[\s_-])404(?:\s+not\s+found)?(?:[\s_-]|$)|页面找不到了|文章不存在|该内容已被删除|你似乎来到了没有知识存在的荒原/i.test(title || '') ||
+                /(?:^|[\s_-])404\s+not\s+found|页面不存在或已删除|文章不存在或已被删除/i.test(extractedContent);
+            if (isSoft404) {
+                throw new AppError({
+                    code: 'not_found',
+                    retryable: false,
+                    status: 404,
+                    details: { legacyCode: 'ERR_PAGE_NOT_FOUND' },
+                    message: `目标页面不存在或已被删除 (404 / soft 404): ${parsedUrl.toString()}`
+                });
+            }
         }
     }
 
@@ -1102,6 +1143,12 @@ export async function fetchWebContent(
         ...(toc && toc.length > 0 ? { toc } : {}),
         ...(focused ? { focused: true, focusMatchOffset } : {})
     };
+    } finally {
+        clearTimeout(totalTimer);
+        if (callerSignal) {
+            callerSignal.removeEventListener('abort', onCallerAbort);
+        }
+    }
 }
 
 export function generateMarkdownToc(markdown: string): string[] {

@@ -70,7 +70,8 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                     .describe("1-4 queries run concurrently and merged (required if 'query' is omitted) — for covering multiple intents in one call (e.g. official docs / Chinese community / English). Response includes 'cached: true' only when all sub-queries hit the TTL cache."),
                 limit: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(1).max(50).optional())
                     .describe("Max results (default: server DEFAULT_SEARCH_LIMIT, usually 10)"),
-                searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
+                searchMode: z.enum(['request', 'auto', 'playwright']).optional()
+                    .describe("Execution mode: 'request' (HTTP only), 'auto' (HTTP with browser fallback), or 'playwright' (headless browser only); applies to engines supporting browser rendering (Bing, Startpage)"),
                 minResults: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(0).max(50).optional())
                     .describe("Auto-run additional engines when fewer than this many USABLE results (relevant, non-entry-page) come back (default: server DEFAULT_MIN_RESULTS, usually 5; max 50 — larger values only burn the search deadline)"),
                 engines: z.preprocess((val) => {
@@ -87,7 +88,8 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
             },
             annotations: TOOL_ANNOTATION_HINTS
         },
-        async ({ query, queries, limit, searchMode, engines, minResults, fetchTop, verbose }) => {
+        async ({ query, queries, limit, searchMode, engines, minResults, fetchTop, verbose }, extra) => {
+            const signal = extra?.signal;
             try {
                 const queryList = (queries && queries.length > 0 ? queries : (query ? [query] : [])).map((q) => q.trim()).filter(Boolean);
                 if (queryList.length === 0) {
@@ -133,7 +135,8 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                         engines: enginesPerQuery[index] ?? ['bing'],
                         limit: perQueryLimit,
                         searchMode,
-                        minResults: effectiveMinResults
+                        minResults: effectiveMinResults,
+                        signal
                     });
                 }));
 
@@ -152,6 +155,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                     : (executed[0]?.results ?? []);
 
                 // fetchTop: 为排名前 N (0~3) 的搜索结果并发拉取正文并注入 fullContent 字段
+                let finalResults = mergedResults;
                 if (fetchTop && fetchTop > 0) {
                     const topN = Math.min(fetchTop, 3, mergedResults.length);
                     if (topN > 0) {
@@ -163,15 +167,22 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                                     url: item.url,
                                     maxChars: 4000,
                                     readability: true,
-                                    format: 'markdown'
+                                    format: 'markdown',
+                                    signal
                                 })
                             )
                         );
-                        fetchTargets.forEach((item, idx) => {
-                            const res = fetchSettled[idx];
-                            if (res && res.status === 'fulfilled' && res.value.content) {
-                                item.fullContent = res.value.content;
+                        finalResults = mergedResults.map((item, idx) => {
+                            if (idx < topN) {
+                                const res = fetchSettled[idx];
+                                if (res && res.status === 'fulfilled' && res.value.content) {
+                                    return {
+                                        ...item,
+                                        fullContent: res.value.content
+                                    };
+                                }
                             }
+                            return { ...item };
                         });
                     }
                 }
@@ -183,15 +194,15 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                 const directAnswer = executed.find((one) => one.directAnswer)?.directAnswer;
                 // 多查询（queries）扇出下仅当所有子查询均命中缓存时才标注 cached: true；部分命中时不输出该字段
                 const allCached = executed.length > 0 && executed.every((one) => one.cached === true);
-                const { outcome, retryable } = computeSearchOutcome(mergedResults.length, failures, directAnswer, {
+                const { outcome, retryable } = computeSearchOutcome(finalResults.length, failures, directAnswer, {
                     requestedLimit: effectiveLimit,
                     minResults: effectiveMinResults,
                     primaryEngines: allEngines
                 });
 
                 const outputResults = verbose
-                    ? mergedResults
-                    : mergedResults.map((item) => {
+                    ? finalResults
+                    : finalResults.map((item) => {
                         const { engine: _omittedEngine, engineHits: _omittedHits, ...rest } = item;
                         if (!rest.source || !rest.url) {
                             return rest;

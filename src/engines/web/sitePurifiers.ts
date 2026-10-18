@@ -148,7 +148,7 @@ export function purifyCsdnArticle(html: string): SitePurificationResult | undefi
         return undefined;
     }
 
-    container.find('script, style, noscript, .recommend-box, .toolbar, .reward-user-box, .blog-footer-bottom, .article-info-box').remove();
+    container.find('script, style, noscript, .recommend-box, .toolbar, .reward-user-box, .blog-footer-bottom, .article-info-box, .user-card-box, .blog-expert-recommend-box, .personal-info-box, .card-user-info, .profile-intro, .more-toolbox, .column-group').remove();
 
     const rawText = normalizeExtractedText(container.text());
     const cleanText = stripPromotionSections(rawText);

@@ -307,6 +307,17 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
             message: `${label} could not be resolved`
         });
     }
+    // 优先执行私网/回环地址全量判定（即使配置了代理且出现黑洞/污染，也不得放行解析到内网的域名）
+    const blockedEntry = resolved.find((entry) => isPrivateOrLocalHostname(entry.address) && !isBlackholeAddress(entry.address) && !isAllowedFakeIp(entry.address));
+    if (blockedEntry) {
+        reportBlocked(parsed, `${label} resolves to ${blockedEntry.address} (private or local)`);
+        throw new AppError({
+            code: isRedirect ? 'redirect_not_allowed' : 'invalid_arguments',
+            retryable: false,
+            message: `${label} resolves to a private or local network target, which is not allowed${hintFakeIpBlockedAddress(blockedEntry.address)}`
+        });
+    }
+
     const blackholeHit = resolved.find((entry) => isBlackholeAddress(entry.address));
     if (blackholeHit) {
         // 0.0.0.0/8 是"本地 DNS 屏蔽/污染"的信号，不是安全信号（原始设计意图）：
@@ -318,20 +329,6 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
             code: 'network_error',
             retryable: true,
             message: `${label} resolves to ${blackholeHit.address} (0.0.0.0/8 blackhole) — likely local DNS blocking/pollution; check DNS or enable a proxy`
-        });
-    }
-
-    // 代理模式同样做本地解析判定（此前这里直接 return，导致 USE_PROXY=true 时
-    // "解析到内网"的域名完全不设防——实测可读出本机服务内容）。
-    // 本地答案虽然不是代理的实际连接依据，但攻击者用的正是"在公网 DNS 上就解析到内网"的域名，
-    // 本地解析能识别出来；fake-ip（Clash TUN 等代理伪造段）仍按配置放行，否则会误杀 TUN 用户的正常抓取。
-    const blockedEntry = resolved.find((entry) => isPrivateOrLocalHostname(entry.address) && !isAllowedFakeIp(entry.address));
-    if (blockedEntry) {
-        reportBlocked(parsed, `${label} resolves to ${blockedEntry.address} (private or local)`);
-        throw new AppError({
-            code: isRedirect ? 'redirect_not_allowed' : 'invalid_arguments',
-            retryable: false,
-            message: `${label} resolves to a private or local network target, which is not allowed${hintFakeIpBlockedAddress(blockedEntry.address)}`
         });
     }
 

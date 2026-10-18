@@ -2,6 +2,7 @@ import axios from 'axios';
 import { buildAxiosRequestOptions } from './httpRequest.js';
 import { mapWithConcurrencyBudget } from './concurrency.js';
 import { DEFAULT_DESKTOP_UA } from './userAgents.js';
+import { assertPublicHttpUrl } from './urlSafety.js';
 
 export type RedirectResolveOptions = {
     engine?: string;
@@ -31,11 +32,11 @@ export async function resolveHttpRedirectUrl(
     } = options;
 
     try {
+        assertPublicHttpUrl(linkUrl, 'Redirect source URL');
         const response = await axios.head(
             linkUrl,
             buildAxiosRequestOptions({
                 engine,
-                trustedStaticHost: true,
                 headers: { 'User-Agent': userAgent },
                 maxRedirects,
                 timeout: timeoutMs,
@@ -48,9 +49,10 @@ export async function resolveHttpRedirectUrl(
             : (typeof response.request?.res?.headers?.location === 'string'
                 ? response.request.res.headers.location
                 : undefined);
-        const finalUrl = response.request?.res?.responseUrl ?? locationHeader;
+        const finalUrl = (response.config?.url ?? response.request?.res?.responseUrl) ?? locationHeader;
 
         if (typeof finalUrl === 'string' && finalUrl.startsWith('http')) {
+            assertPublicHttpUrl(finalUrl, 'Redirect destination URL');
             return finalUrl;
         }
 

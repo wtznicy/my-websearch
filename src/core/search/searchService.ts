@@ -260,6 +260,8 @@ export type SearchExecutionInput = {
     searchMode?: AppConfig['searchMode'];
     /** 当结果数低于此值时，自动用未请求的可用引擎补跑以凑足（默认 0 = 不启用） */
     minResults?: number;
+    /** 可选取消信号：客户端取消/超时时中止在途引擎请求 */
+    signal?: AbortSignal;
 };
 
 function resolveSearchModeOverride(searchMode: AppConfig['searchMode'] | undefined): AppConfig['searchMode'] | undefined {
@@ -273,7 +275,7 @@ function resolveSearchModeOverride(searchMode: AppConfig['searchMode'] | undefin
 
 /**
  * 计算结果的规范化 URL 键，用于跨引擎去重。
- * 兼容常见的无歧义追踪参数（utm_*、fbclid、gclid、msclkid 等）造成的"同页不同 URL"。
+ * 兼容常见的无歧义追踪参数（utm_*、fbclid、gclid、msclkid、ops_request_misc 等）造成的"同页不同 URL"。
  * 注意：不全局剥离 `ref`（可能是 Git 分支/标签或业务路由参数）。
  */
 export function normalizeResultUrl(url: string): string {
@@ -287,7 +289,7 @@ export function normalizeResultUrl(url: string): string {
                 parsed.searchParams.delete(key);
                 continue;
             }
-            if (key === 'spm' && isKnownSpmHost) {
+            if ((key === 'spm' || key === 'ops_request_misc' || key === 'request_id' || key === 'biz_id') && isKnownSpmHost) {
                 parsed.searchParams.delete(key);
                 continue;
             }
@@ -421,8 +423,12 @@ export class SearchTtlCache {
         if (entry.requestedLimit < input.limit && entry.value.results.length < input.limit) {
             return undefined;
         }
+        // LRU touch: 将命中条目移到 Map 尾部，确保真正的 LRU 淘汰序（P2-9）
+        this.cache.delete(key);
+        this.cache.set(key, entry);
+
         if (entry.value.results.length > input.limit) {
-            const truncatedResults = entry.value.results.slice(0, input.limit);
+            const truncatedResults = entry.value.results.slice(0, input.limit).map((r) => ({ ...r }));
             const { outcome } = computeSearchOutcome(
                 truncatedResults.length,
                 entry.value.partialFailures,
@@ -440,7 +446,10 @@ export class SearchTtlCache {
                 outcome
             };
         }
-        return entry.value;
+        return {
+            ...entry.value,
+            results: entry.value.results.map((r) => ({ ...r }))
+        };
     }
 
     set(input: SearchExecutionInput, value: SearchExecutionResult, ttlMs?: number): void {
@@ -463,8 +472,13 @@ export class SearchTtlCache {
             }
             this.cache.delete(oldestKey);
         }
+        // 深拷贝 results，防止外部后续原地修改（如 fetchTop 注入 fullContent）污染缓存对象（P1-2）
+        const clonedValue: SearchExecutionResult = {
+            ...value,
+            results: value.results.map((r) => ({ ...r }))
+        };
         this.cache.set(key, {
-            value,
+            value: clonedValue,
             expiresAt: now + (ttlMs ?? this.defaultTtlMs),
             requestedLimit: input.limit
         });
@@ -503,7 +517,7 @@ export function createSearchService(
     const inflightSearches = new Map<string, Promise<SearchExecutionResult>>();
 
     return {
-        async execute({ query, engines, limit, searchMode, minResults }: SearchExecutionInput): Promise<SearchExecutionResult> {
+        async execute({ query, engines, limit, searchMode, minResults, signal }: SearchExecutionInput): Promise<SearchExecutionResult> {
             const cleanQuery = query.trim();
             if (!cleanQuery) {
                 throw new AppError({
@@ -535,11 +549,11 @@ export function createSearchService(
             const inflightKey = ttlCache.buildInflightKey(cacheInput);
             const existingInflight = inflightSearches.get(inflightKey);
             if (existingInflight) {
-                metrics.recordCacheHit();
+                // 单飞合并（single-flight）：共享在途请求结果，不计入真实缓存命中（P2-9）
                 const shared = await existingInflight;
                 return {
                     ...shared,
-                    results: [...shared.results],
+                    results: shared.results.map((r) => ({ ...r })),
                     partialFailures: [...shared.partialFailures]
                 };
             }
@@ -551,7 +565,7 @@ export function createSearchService(
                 const deadlineAt = Date.now() + deadlineMs;
 
                 if (globalSemaphore) {
-                    await globalSemaphore.acquire(deadlineAt);
+                    await globalSemaphore.acquire(deadlineAt, signal);
                 }
 
                 try {
@@ -586,7 +600,8 @@ export function createSearchService(
                         effectiveSearchMode,
                         engineMap,
                         deadlineAt,
-                        perEngineTimeoutMs
+                        perEngineTimeoutMs,
+                        signal
                     });
 
                     const allFailures: SearchExecutionFailure[] = [...initialFailures, ...primary.partialFailures];
@@ -610,7 +625,8 @@ export function createSearchService(
                         deadlineAt,
                         perEngineTimeoutMs,
                         allowedEngines: appConfig.allowedSearchEngines,
-                        siteDomains
+                        siteDomains,
+                        signal
                     });
 
                     merged = cascade.merged.filter((result) => matchesSiteDomains(result.url, siteDomains));
@@ -653,6 +669,9 @@ export function createSearchService(
                             result,
                             degraded ? DEGRADED_CACHE_TTL_MS : undefined
                         );
+                    } else if (outcome === 'empty' || outcome === 'ok') {
+                        // 空结果短缓存（30s）：避免对明确无结果的相同 query 密集冲击上游（P2-9）
+                        ttlCache.set(cacheInput, result, 30 * 1000);
                     }
 
                     return result;

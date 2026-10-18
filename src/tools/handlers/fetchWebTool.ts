@@ -15,7 +15,9 @@ import {
 const normalizeHttpUrl = (val: unknown): unknown => {
     if (typeof val === 'string') {
         let s = val.trim();
-        if (s && !/^https?:\/\//i.test(s)) {
+        // 仅在无 scheme（如 example.com/path）时补全 https://，已有 scheme（如 file:, ftp:, http:, https:）时不篡改，
+        // 确保非 HTTP 协议（如 file://）能被 schema 校验准确拦截（P2-5）
+        if (s && !/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//i.test(s) && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(s)) {
             s = 'https://' + s;
         }
         return s;
@@ -42,12 +44,26 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
             description: "Fetch high-quality readable content from any public HTTP(S) URL (web pages, technical documentation, Markdown files, and technical articles such as CSDN, Juejin, WeChat, Stack Overflow). Automatically bypasses domestic anti-bot walls, removes promotional noise/watermarks, and preserves code blocks (with programming language) and GFM tables. Defaults to format='markdown'. Supports focus='keyword' for chapter targeting (~5000 chars) and batch 'urls' (1~3 URLs concurrently). When response has truncated=true, inspect 'toc' for heading offsets or pass nextStartIndex as startIndex.",
             inputSchema: {
                 url: z.preprocess(normalizeHttpUrl, z.string().url().refine(
-                    (u) => validatePublicWebUrl(u),
-                    "URL must be a public HTTP(S) address (private/local network targets are blocked)"
+                    (u) => {
+                        try {
+                            const parsed = new URL(u);
+                            return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && validatePublicWebUrl(u);
+                        } catch {
+                            return false;
+                        }
+                    },
+                    "URL must be a public HTTP(S) address (private/local network targets and non-HTTP protocols are blocked)"
                 ).optional()),
                 urls: z.preprocess(normalizeUrlsArray, z.array(
                     z.string().url().refine(
-                        (u) => validatePublicWebUrl(u),
+                        (u) => {
+                            try {
+                                const parsed = new URL(u);
+                                return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && validatePublicWebUrl(u);
+                            } catch {
+                                return false;
+                            }
+                        },
                         "Each URL must be a public HTTP(S) address"
                     )
                 ).min(1).max(3).optional())
@@ -64,7 +80,8 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
             },
             annotations: TOOL_ANNOTATION_HINTS
         },
-        async ({ url, urls, focus, maxChars = 30000, readability, includeLinks, raw, startIndex, format }) => {
+        async ({ url, urls, focus, maxChars = 30000, readability, includeLinks, raw, startIndex, format }, extra) => {
+            const signal = extra?.signal;
             try {
                 const targetUrls = (urls && urls.length > 0 ? urls : (url ? [url] : [])).slice(0, 3);
                 if (targetUrls.length === 0) {
@@ -90,7 +107,8 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                                 raw,
                                 startIndex,
                                 format: effectiveFormat,
-                                focus
+                                focus,
+                                signal
                             })
                         )
                     );
@@ -126,7 +144,8 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                     raw,
                     startIndex,
                     format: effectiveFormat,
-                    focus
+                    focus,
+                    signal
                 });
 
                 return {
