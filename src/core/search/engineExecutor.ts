@@ -109,6 +109,8 @@ function sleepWithSignal(ms: number, signal: AbortSignal): Promise<void> {
     });
 }
 
+import type { RequestContext } from '../requestContext.js';
+
 export interface ExecutePrimaryEnginesOptions {
     query: string;
     searchQuery: string;
@@ -119,6 +121,9 @@ export interface ExecutePrimaryEnginesOptions {
     deadlineAt: number;
     perEngineTimeoutMs: number;
     signal?: AbortSignal;
+    timeRange?: 'day' | 'week' | 'month' | 'year';
+    site?: string[];
+    requestContext?: RequestContext;
 }
 
 export interface ExecutePrimaryEnginesResult {
@@ -139,7 +144,10 @@ export async function executePrimaryEngines(
         engineMap,
         deadlineAt,
         perEngineTimeoutMs,
-        signal: outerSignal
+        signal: outerSignal,
+        timeRange,
+        site,
+        requestContext
     } = options;
 
     const partialFailures: SearchExecutionFailure[] = [];
@@ -188,7 +196,10 @@ export async function executePrimaryEngines(
                 const results = await withEngineConcurrencySlot(engine, deadlineAt, signal, () =>
                     executor(searchQuery, engineLimit, {
                         searchMode: effectiveSearchMode,
-                        signal
+                        signal,
+                        timeRange,
+                        site,
+                        requestContext
                     })
                 );
                 if (signal.aborted) {

@@ -58,6 +58,8 @@ export type PublicErrorCode =
     | 'redirect_not_allowed'
     | 'response_too_large'
     | 'start_index_out_of_range'
+    | 'pdf_no_text_layer'
+    | 'pdf_parse_error'
     | 'engine_error';
 
 export type AppErrorCode = PublicErrorCode;
@@ -72,6 +74,8 @@ const RAW_TO_PUBLIC_CODE_MAP: Record<string, PublicErrorCode> = {
     ERR_BOT_CHALLENGE: 'bot_challenge',
     ERR_RESPONSE_TOO_LARGE: 'response_too_large',
     ERR_START_INDEX_OUT_OF_RANGE: 'start_index_out_of_range',
+    pdf_no_text_layer: 'pdf_no_text_layer',
+    pdf_parse_error: 'pdf_parse_error',
     engine_timeout: 'network_timeout',
     ETIMEDOUT: 'network_timeout',
     ECONNABORTED: 'network_timeout',

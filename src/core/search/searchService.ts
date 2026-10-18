@@ -15,6 +15,9 @@ import {
     truncateMetricError
 } from './engineExecutor.js';
 import { executeCascade } from './cascadeExecutor.js';
+import { normalizePublishedDate, isDateWithinTimeRange, TimeRange } from '../../utils/dateNormalizer.js';
+import { runInlineDiagnostics, InlineDiagnostics } from '../../utils/networkDiagnostics.js';
+import { RequestContext, createRequestContext } from '../requestContext.js';
 
 export {
     isRetryableEngineError,
@@ -144,6 +147,9 @@ export function configureGlobalConcurrencyLimit(maxConcurrent: number, maxQueueS
 export type SearchExecutionContext = {
     searchMode?: AppConfig['searchMode'];
     signal?: AbortSignal;
+    timeRange?: TimeRange;
+    site?: string[];
+    requestContext?: RequestContext;
 };
 
 export type SearchEngineExecutor = (query: string, limit: number, context?: SearchExecutionContext) => Promise<SearchResult[]>;
@@ -251,6 +257,12 @@ export type SearchExecutionResult = {
     /** 每引擎耗时/结果数/错误（可观测性：一眼区分超时与被拒/限流；error 为截断版，完整消息见 partialFailures）
      *  timedOut=true 表示该引擎触发了单引擎超时上限（结果已被丢弃；ms 为超时上限而非墙钟耗时） */
     engineMetrics?: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }>;
+    /** 警告信息集合（如 timeRange 过滤导致的部分剔除、引擎降级等） */
+    warnings?: string[];
+    /** 时间过滤降级指示：'partial' 表示部分结果因无日期字段而被剔除 */
+    filterFallback?: 'partial';
+    /** 失败时内联诊断信息（proxy、dns、suggestion） */
+    diagnostics?: InlineDiagnostics;
 };
 
 export type SearchExecutionInput = {
@@ -260,8 +272,16 @@ export type SearchExecutionInput = {
     searchMode?: AppConfig['searchMode'];
     /** 当结果数低于此值时，自动用未请求的可用引擎补跑以凑足（默认 0 = 不启用） */
     minResults?: number;
+    /** 时间范围过滤（day|week|month|year） */
+    timeRange?: TimeRange;
+    /** 限制特定域名过滤（支持数组或单个字符串） */
+    site?: string[] | string;
+    /** 显式指定的引擎列表（用于约束级联补位范围） */
+    requestedEngines?: string[];
     /** 可选取消信号：客户端取消/超时时中止在途引擎请求 */
     signal?: AbortSignal;
+    /** 请求上下文（包含 traceId, deadlineAt, warnings 收集器） */
+    requestContext?: RequestContext;
 };
 
 function resolveSearchModeOverride(searchMode: AppConfig['searchMode'] | undefined): AppConfig['searchMode'] | undefined {
@@ -395,7 +415,9 @@ export class SearchTtlCache {
             e: [...input.engines].sort(),
             l: normalizeLimitBucket(input.limit),
             m: normalizedSearchMode,
-            r: input.minResults ?? 0
+            r: input.minResults ?? 0,
+            t: input.timeRange,
+            s: Array.isArray(input.site) ? [...input.site].sort() : input.site
         });
     }
 
@@ -406,7 +428,9 @@ export class SearchTtlCache {
             e: [...input.engines].sort(),
             l: input.limit,
             m: normalizedSearchMode,
-            r: input.minResults ?? 0
+            r: input.minResults ?? 0,
+            t: input.timeRange,
+            s: Array.isArray(input.site) ? [...input.site].sort() : input.site
         });
     }
 
@@ -517,7 +541,7 @@ export function createSearchService(
     const inflightSearches = new Map<string, Promise<SearchExecutionResult>>();
 
     return {
-        async execute({ query, engines, limit, searchMode, minResults, signal }: SearchExecutionInput): Promise<SearchExecutionResult> {
+        async execute({ query, engines, limit, searchMode, minResults, timeRange, site, requestedEngines, signal, requestContext }: SearchExecutionInput): Promise<SearchExecutionResult> {
             const cleanQuery = query.trim();
             if (!cleanQuery) {
                 throw new AppError({
@@ -535,7 +559,7 @@ export function createSearchService(
             }
 
             const searchQuery = preprocessSearchQuery(cleanQuery);
-            const cacheInput: SearchExecutionInput = { query: searchQuery, engines, limit, searchMode, minResults };
+            const cacheInput: SearchExecutionInput = { query: searchQuery, engines, limit, searchMode, minResults, timeRange, site, requestedEngines };
 
             const cached = ttlCache.get(cacheInput);
             if (cached) {
@@ -562,10 +586,12 @@ export function createSearchService(
 
             const runPromise = (async (): Promise<SearchExecutionResult> => {
                 const deadlineMs = appConfig.searchDeadlineMs;
-                const deadlineAt = Date.now() + deadlineMs;
+                const rc = requestContext ?? createRequestContext({ signal, timeoutMs: deadlineMs });
+                const deadlineAt = rc.deadlineAt ?? (Date.now() + deadlineMs);
+                const effectiveSignal = rc.signal ?? signal;
 
                 if (globalSemaphore) {
-                    await globalSemaphore.acquire(deadlineAt, signal);
+                    await globalSemaphore.acquire(deadlineAt, effectiveSignal);
                 }
 
                 try {
@@ -589,6 +615,10 @@ export function createSearchService(
                     const limits = distributeLimit(limit, executableEngines.length);
                     const effectiveSearchMode = resolveSearchModeOverride(searchMode);
 
+                    const extractedSites = extractSiteDomains(cleanQuery);
+                    const explicitSites = Array.isArray(site) ? site : (site ? [site] : []);
+                    const siteDomains = [...new Set([...extractedSites, ...explicitSites.map((s) => s.trim().toLowerCase())])].filter(Boolean);
+
                     const perEngineTimeoutMs = Math.min(Math.floor(deadlineMs * 0.5), 10000);
 
                     // 管道第 1 阶段：主引擎并发执行器
@@ -601,12 +631,14 @@ export function createSearchService(
                         engineMap,
                         deadlineAt,
                         perEngineTimeoutMs,
-                        signal
+                        signal: effectiveSignal,
+                        timeRange,
+                        site: siteDomains,
+                        requestContext: rc
                     });
 
                     const allFailures: SearchExecutionFailure[] = [...initialFailures, ...primary.partialFailures];
                     const allMetrics = [...primary.engineMetrics];
-                    const siteDomains = extractSiteDomains(cleanQuery);
 
                     let merged = mergeSearchResults(primary.engineResults)
                         .filter((result) => !isPlaceholderResult(result))
@@ -620,13 +652,16 @@ export function createSearchService(
                         initialMerged: merged,
                         initialEngineResults: primary.engineResults,
                         engines,
+                        requestedEngines,
                         engineMap,
                         effectiveSearchMode,
                         deadlineAt,
                         perEngineTimeoutMs,
                         allowedEngines: appConfig.allowedSearchEngines,
                         siteDomains,
-                        signal
+                        signal: effectiveSignal,
+                        timeRange,
+                        requestContext: rc
                     });
 
                     merged = cascade.merged.filter((result) => matchesSiteDomains(result.url, siteDomains));
@@ -635,6 +670,30 @@ export function createSearchService(
 
                     // 管道第 3 阶段：全局重排与截断
                     merged = rankSearchResults(merged, cleanQuery, { authorityDomains: appConfig.authorityDomains }).slice(0, limit);
+
+                    // 日期归一化（publishedAt）与 timeRange 过滤
+                    const warnings: string[] = [];
+                    let filterFallback: 'partial' | undefined;
+
+                    for (const item of merged) {
+                        if (!item.publishedAt) {
+                            item.publishedAt = normalizePublishedDate(item.date) || normalizePublishedDate(item.title);
+                        }
+                    }
+
+                    if (timeRange) {
+                        const beforeCount = merged.length;
+                        const filtered = merged.filter((item) => item.publishedAt && isDateWithinTimeRange(item.publishedAt, timeRange));
+                        const droppedCount = beforeCount - filtered.length;
+                        if (droppedCount > 0) {
+                            filterFallback = 'partial';
+                            warnings.push(`Under timeRange='${timeRange}', ${droppedCount} results were dropped because their publication date was outside the range or missing.`);
+                            metrics.recordTimeRangeAttempt(true);
+                        } else {
+                            metrics.recordTimeRangeAttempt(false);
+                        }
+                        merged = filtered;
+                    }
 
                     const { outcome, retryable } = computeSearchOutcome(
                         merged.length,
@@ -647,6 +706,17 @@ export function createSearchService(
                         }
                     );
 
+                    let diagnostics: InlineDiagnostics | undefined;
+                    if (outcome === 'failed') {
+                        try {
+                            diagnostics = await runInlineDiagnostics();
+                        } catch {
+                            // ignore diagnostics error
+                        }
+                    }
+
+                    const combinedWarnings = [...new Set([...rc.warnings, ...warnings])];
+
                     const result: SearchExecutionResult = {
                         query: cleanQuery,
                         engines: executableEngines,
@@ -656,6 +726,9 @@ export function createSearchService(
                         outcome,
                         retryable,
                         cached: false,
+                        ...(combinedWarnings.length > 0 ? { warnings: combinedWarnings } : {}),
+                        ...(filterFallback ? { filterFallback } : {}),
+                        ...(diagnostics ? { diagnostics } : {}),
                         ...(cascade.cascadedEngines.length > 0 ? { cascadedEngines: cascade.cascadedEngines } : {}),
                         ...(primary.directAnswer ? { directAnswer: primary.directAnswer } : {}),
                         ...(allMetrics.some(Boolean) ? { engineMetrics: allMetrics.filter(Boolean) } : {})

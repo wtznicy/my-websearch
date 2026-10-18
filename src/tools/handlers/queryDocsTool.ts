@@ -1,7 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { isContext7QuotaExhaustedError, Context7DocsResult } from '../../engines/context7/context7.js';
+import { isContext7QuotaExhaustedError, Context7DocsResult, Context7InfoSnippet, Context7CodeSnippet } from '../../engines/context7/context7.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
+import { fetchPackageDocsFallback, PackageDocsFallbackResult } from '../../core/docs/packageDocsFallback.js';
+import { metrics } from '../../core/metrics.js';
 import {
     logTool,
     logSafeError,
@@ -11,7 +13,22 @@ import {
     capTextResponse
 } from '../toolShared.js';
 
-export function formatContext7DocsAsMarkdown(result: Context7DocsResult): string {
+export type QueryDocsFormattedInput = {
+    libraryId: string;
+    query?: string;
+    source?: 'context7' | 'npm' | 'pypi' | 'github-readme';
+    confidence?: 'high' | 'medium' | 'low';
+    warnings?: string[];
+    resolvedFrom?: string;
+    redirectedFrom?: string;
+    repositoryUrl?: string;
+    readme?: string;
+    infoSnippets?: Context7InfoSnippet[];
+    codeSnippets?: Context7CodeSnippet[];
+    alternativeLibraries?: Array<{ id: string; title: string; description?: string }>;
+};
+
+export function formatQueryDocsMarkdown(result: QueryDocsFormattedInput): string {
     const lines: string[] = [];
     const titleParts = [`# Docs: ${result.libraryId}`];
     if (result.resolvedFrom) {
@@ -20,12 +37,31 @@ export function formatContext7DocsAsMarkdown(result: Context7DocsResult): string
         titleParts.push(`(redirected from "${result.redirectedFrom}")`);
     }
     lines.push(titleParts.join(' '));
+
+    const source = result.source ?? 'context7';
+    const confidence = result.confidence ?? 'high';
+    lines.push(`> Source: ${source} | Confidence: ${confidence}`);
+    if (result.repositoryUrl) {
+        lines.push(`> Repository: ${result.repositoryUrl}`);
+    }
     if (result.query) {
         lines.push(`> Query: ${result.query}`);
     }
     lines.push('');
 
-    if (result.matchConfidence === 'low') {
+    if (result.warnings && result.warnings.length > 0) {
+        for (const warning of result.warnings) {
+            lines.push(`> ⚠️ **Warning:** ${warning}`);
+        }
+        lines.push('');
+    }
+
+    if (result.readme) {
+        lines.push(result.readme);
+        return lines.join('\n').trim();
+    }
+
+    if (confidence === 'low' && (!result.codeSnippets || result.codeSnippets.length === 0)) {
         lines.push('> ⚠️ **Warning: Low Match Confidence**');
         lines.push(`> The query "${result.resolvedFrom ?? result.libraryId}" did not closely match any official library name. The closest candidate found was **\`${result.libraryId}\`**, which may be unrelated.`);
         if (result.alternativeLibraries && result.alternativeLibraries.length > 0) {
@@ -85,21 +121,45 @@ export function formatContext7DocsAsMarkdown(result: Context7DocsResult): string
     return lines.join('\n').trim();
 }
 
+export function formatContext7DocsAsMarkdown(result: Context7DocsResult): string {
+    return formatQueryDocsMarkdown({
+        libraryId: result.libraryId,
+        query: result.query,
+        source: 'context7',
+        confidence: result.matchConfidence ?? 'high',
+        resolvedFrom: result.resolvedFrom,
+        redirectedFrom: result.redirectedFrom,
+        infoSnippets: result.infoSnippets,
+        codeSnippets: result.codeSnippets,
+        alternativeLibraries: result.alternativeLibraries
+    });
+}
+
+import { detectUnknownParameters } from '../../utils/toolValidation.js';
+
 export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRuntime): void {
     server.registerTool(
         "queryDocs",
         {
-            description: "PREFERRED for official documentation: get up-to-date, version-specific official docs and code snippets for any library, framework, or package (e.g. 'next.js', 'react', 'fastapi', or exact ID '/vercel/next.js'). Directly pass the package name — automatically resolves to the canonical library. Direct, reliable, no proxy needed.",
-            inputSchema: {
+            description: "Get official docs, API references, and code snippets for libraries/packages (e.g. 'react', 'fastapi', 'next.js'). Queries Context7 with fallback to npm/PyPI registry and GitHub README. Direct, no proxy needed.",
+            inputSchema: z.object({
                 library: z.string().min(1).optional().describe("Library or package name (e.g. 'next.js', 'react', 'fastapi') or exact Context7 library ID (e.g. '/vercel/next.js', version-pinnable like '/vercel/next.js@v15.1.8')"),
                 libraryId: z.string().min(1).optional().describe("Legacy alias for library (e.g. /vercel/next.js)"),
                 query: z.string().min(1).optional().describe("The question, feature, or task to get relevant documentation for (optional; defaults to an overview when omitted, e.g. 'how to set up middleware with auth')"),
                 limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets to return (default 5)"),
                 strict: z.boolean().optional().describe("If true, rejects low-confidence library name matches with an error instead of returning loosely matched candidate docs (default false)")
-            },
+            }).passthrough(),
             annotations: TOOL_ANNOTATION_HINTS
         },
-        async ({ library, libraryId, query, limit, strict }, extra) => {
+        async (rawArgs, extra) => {
+            const { library, libraryId, query, limit, strict } = rawArgs as {
+                library?: string;
+                libraryId?: string;
+                query?: string;
+                limit?: number;
+                strict?: boolean;
+            } & Record<string, unknown>;
+            const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, ['library', 'libraryId', 'query', 'limit', 'strict']);
             const target = (library ?? libraryId ?? '').trim();
             if (!target) {
                 return {
@@ -107,42 +167,132 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     content: [{ type: 'text', text: 'Invalid arguments: Either "library" or "libraryId" must be provided' }]
                 };
             }
+
+            const signal = extra?.signal;
+
+            // 1. 尝试 Context7 查询
+            let context7Result: Context7DocsResult | null = null;
+            let context7Error: unknown = null;
+
             try {
                 logTool(`Context7 fetching docs for: ${target}`);
-                const result = await runtime.services.context7Docs.execute({
+                context7Result = await runtime.services.context7Docs.execute({
                     library: target,
                     query,
                     limit,
                     strict,
-                    signal: extra?.signal
+                    signal
                 });
-                if (result.resolvedFrom) {
-                    logTool(`Context7 resolved "${result.resolvedFrom}" -> ${result.libraryId}`);
-                } else if (result.redirectedFrom) {
-                    logTool(`Context7 library redirected: ${result.redirectedFrom} -> ${result.libraryId}`);
+                if (context7Result.resolvedFrom) {
+                    logTool(`Context7 resolved "${context7Result.resolvedFrom}" -> ${context7Result.libraryId}`);
+                } else if (context7Result.redirectedFrom) {
+                    logTool(`Context7 library redirected: ${context7Result.redirectedFrom} -> ${context7Result.libraryId}`);
                 }
-
-                return {
-                    content: [{
-                        type: 'text',
-                        text: capTextResponse(formatContext7DocsAsMarkdown(result))
-                    }]
-                };
             } catch (error) {
-                logSafeError('Failed to fetch docs via Context7', error);
-                return {
-                    content: [{
-                        type: 'text',
-                        text: withErrorHint(
-                            `Failed to fetch docs: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                            isContext7QuotaExhaustedError(error)
-                                ? CONTEXT7_QUOTA_HINT
-                                : '可检查库名拼写（如 "next.js" 或 "/vercel/next.js"），或稍后重试。'
-                        )
-                    }],
-                    isError: true
-                };
+                context7Error = error;
             }
+
+            // 2. 检查匹配质量：若高/中置信度命中，直接返回
+            if (context7Result && context7Result.matchConfidence !== 'low') {
+                const confidence = context7Result.matchConfidence ?? 'high';
+                metrics.recordQueryDocsAttempt('context7', false);
+                const text = capTextResponse(formatQueryDocsMarkdown({
+                    libraryId: context7Result.libraryId,
+                    query: context7Result.query,
+                    source: 'context7',
+                    confidence,
+                    resolvedFrom: context7Result.resolvedFrom,
+                    redirectedFrom: context7Result.redirectedFrom,
+                    infoSnippets: context7Result.infoSnippets,
+                    codeSnippets: context7Result.codeSnippets,
+                    alternativeLibraries: context7Result.alternativeLibraries,
+                    warnings: unknownWarnings
+                }));
+                return {
+                    content: [{ type: 'text', text }],
+                    source: 'context7',
+                    confidence,
+                    warnings: unknownWarnings
+                } as unknown as { content: Array<{ type: 'text'; text: string }> };
+            }
+
+            // 3. 低置信度拦截或未命中时，启动兜底链：npm -> PyPI -> GitHub README
+            logTool(`Context7 match confidence is low or failed for "${target}". Attempting npm/PyPI fallback...`);
+            let fallbackResult: PackageDocsFallbackResult | null = null;
+            try {
+                fallbackResult = await fetchPackageDocsFallback({
+                    library: target,
+                    signal,
+                    fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url })
+                });
+            } catch (fbErr) {
+                logSafeError('Fallback package docs resolution failed', fbErr);
+            }
+
+            if (fallbackResult) {
+                logTool(`Fallback succeeded via ${fallbackResult.source}: ${fallbackResult.repositoryUrl}`);
+                metrics.recordQueryDocsAttempt(fallbackResult.source, true);
+                const combinedWarnings = [...new Set([...fallbackResult.warnings, ...unknownWarnings])];
+                const text = capTextResponse(formatQueryDocsMarkdown({
+                    libraryId: fallbackResult.libraryId,
+                    query,
+                    source: fallbackResult.source,
+                    confidence: fallbackResult.confidence,
+                    repositoryUrl: fallbackResult.repositoryUrl,
+                    readme: fallbackResult.readme,
+                    warnings: combinedWarnings
+                }));
+                return {
+                    content: [{ type: 'text', text }],
+                    source: fallbackResult.source,
+                    confidence: fallbackResult.confidence,
+                    warnings: combinedWarnings
+                } as unknown as { content: Array<{ type: 'text'; text: string }> };
+            }
+
+            // 4. 兜底链也未找到包信息
+            // 4a. 如果原本有低置信度 Context7 候选且非 strict 模式
+            if (context7Result && !strict) {
+                metrics.recordQueryDocsAttempt('context7', false);
+                const warnings = [
+                    `Low match confidence: "${target}" did not closely match any official library. Closest Context7 candidate was "${context7Result.libraryId}".`,
+                    ...unknownWarnings
+                ];
+                const text = capTextResponse(formatQueryDocsMarkdown({
+                    libraryId: context7Result.libraryId,
+                    query: context7Result.query,
+                    source: 'context7',
+                    confidence: 'low',
+                    resolvedFrom: context7Result.resolvedFrom,
+                    redirectedFrom: context7Result.redirectedFrom,
+                    infoSnippets: context7Result.infoSnippets,
+                    codeSnippets: context7Result.codeSnippets,
+                    alternativeLibraries: context7Result.alternativeLibraries,
+                    warnings
+                }));
+                return {
+                    content: [{ type: 'text', text }],
+                    source: 'context7',
+                    confidence: 'low',
+                    warnings
+                } as unknown as { content: Array<{ type: 'text'; text: string }> };
+            }
+
+            // 4b. 严格模式或 Context7 报错
+            const finalErr = context7Error || new Error(`No official documentation found for library "${target}" on Context7, npm registry, or PyPI.`);
+            logSafeError('Failed to fetch docs via Context7 and package fallbacks', finalErr);
+            return {
+                content: [{
+                    type: 'text',
+                    text: withErrorHint(
+                        `Failed to fetch docs: ${finalErr instanceof Error ? finalErr.message : 'Unknown error'}`,
+                        isContext7QuotaExhaustedError(finalErr)
+                            ? CONTEXT7_QUOTA_HINT
+                            : '可检查库名拼写（如 "next.js" 或 "/vercel/next.js"），或直接使用 fetchGithubReadme 抓取其 GitHub 仓库。'
+                    )
+                }],
+                isError: true
+            };
         }
     );
 }

@@ -11,22 +11,26 @@ import {
     TOOL_ANNOTATION_HINTS
 } from '../toolShared.js';
 
+import { detectUnknownParameters } from '../../utils/toolValidation.js';
+
 export function registerFetchGithubTool(server: McpServer, runtime: MyWebSearchRuntime): void {
     const fetchGithubToolName = getToolName('MCP_TOOL_FETCH_GITHUB_NAME', 'fetchGithubReadme');
 
     server.registerTool(
         fetchGithubToolName,
         {
-            description: "Fetch comprehensive GitHub/Gitee content: repository README, source code files (/blob/:branch/:path with language-tagged code blocks), directory trees (/tree/:branch/:path with clean ASCII trees), Issue discussions (/issues/:number with top solutions/comments), or Pull Requests (/pull/:number with changed files list). For generic web pages, use fetchWebContent.",
-            inputSchema: {
+            description: "Fetch GitHub/Gitee content: repository README, source files (/blob/), file trees (/tree/), Issues with solutions (/issues/), and Pull Requests (/pull/). For generic web pages, use fetchWebContent.",
+            inputSchema: z.object({
                 url: z.string().min(1).max(2048).refine(
                     (url) => validateGithubRepositoryUrl(url),
                     "URL must be a valid GitHub or Gitee repository, file, directory tree, issue, or pull request URL (supports HTTPS, SSH formats)"
                 )
-            },
+            }).passthrough(),
             annotations: TOOL_ANNOTATION_HINTS
         },
-        async ({url}) => {
+        async (rawArgs) => {
+            const { url } = rawArgs as { url: string } & Record<string, unknown>;
+            const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, ['url']);
             try {
                 logTool(`Fetching GitHub content: ${url}`);
                 const result = await runtime.services.fetchGithubReadme.execute({ url });
@@ -36,8 +40,9 @@ export function registerFetchGithubTool(server: McpServer, runtime: MyWebSearchR
                         content: [{
                             type: 'text',
                             text: capTextResponse(result)
-                        }]
-                    };
+                        }],
+                        warnings: unknownWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
                 } else {
                     return {
                         content: [{

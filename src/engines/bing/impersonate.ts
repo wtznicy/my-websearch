@@ -97,7 +97,7 @@ export function isImpersonateAvailable(): Promise<boolean> {
     return availabilityPromise;
 }
 
-function buildImpersonateSearchUrl(query: string, pageNumber: number): string {
+function buildImpersonateSearchUrl(query: string, pageNumber: number, timeRange?: 'day' | 'week' | 'month' | 'year'): string {
     const baseUrl = config.bingBaseUrl || 'https://cn.bing.com/search';
     const url = new URL(baseUrl);
     url.searchParams.set('q', query);
@@ -106,6 +106,18 @@ function buildImpersonateSearchUrl(query: string, pageNumber: number): string {
         url.searchParams.set('ensearch', '0');
     }
     url.searchParams.set('first', String(1 + pageNumber * 10));
+    if (timeRange) {
+        const bingFilterMap: Record<string, string> = {
+            day: 'ex1:"ez1"',
+            week: 'ex1:"ez2"',
+            month: 'ex1:"ez3"',
+            year: 'ex1:"ez5"'
+        };
+        const filterVal = bingFilterMap[timeRange];
+        if (filterVal) {
+            url.searchParams.set('filters', filterVal);
+        }
+    }
     return url.toString();
 }
 import { isBingAntiBotPage } from '../../core/antiBot/antiBotDetection.js';
@@ -240,7 +252,8 @@ function raceWithSignal<T>(signal: AbortSignal | undefined, fn: () => Promise<T>
 export async function searchBingWithImpersonate(
     query: string,
     limit: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    timeRange?: 'day' | 'week' | 'month' | 'year'
 ): Promise<EngineSearchResponse> {
     if (signal?.aborted) {
         throw createBingAbortError(signal);
@@ -264,7 +277,7 @@ export async function searchBingWithImpersonate(
             if (signal?.aborted) {
                 throw createBingAbortError(signal);
             }
-            const url = buildImpersonateSearchUrl(query, pageNumber);
+            const url = buildImpersonateSearchUrl(query, pageNumber, timeRange);
             const response = await raceWithSignal(signal, () => session.fetch(url, { timeout: 15000 }));
             const html = await raceWithSignal(signal, () => response.text());
 

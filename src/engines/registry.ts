@@ -15,10 +15,16 @@ import { searchGithub } from './github/searchGithub.js';
 import { searchStackOverflow } from './stackoverflow/stackoverflow.js';
 import { searchHackerNews } from './hackernews/hackernews.js';
 import { searchArxiv } from './arxiv/arxiv.js';
+import { searchGrepApp } from './code/grepApp.js';
+
+import type { RequestContext } from '../core/requestContext.js';
 
 export type SearchExecutionContext = {
     searchMode?: AppConfig['searchMode'];
     signal?: AbortSignal;
+    timeRange?: 'day' | 'week' | 'month' | 'year';
+    site?: string[];
+    requestContext?: RequestContext;
 };
 
 export type SearchEngineExecutor = (
@@ -42,7 +48,8 @@ export const SUPPORTED_SEARCH_ENGINES = [
     'github',
     'stackoverflow',
     'hackernews',
-    'arxiv'
+    'arxiv',
+    'code'
 ] as const;
 
 export type SupportedSearchEngine = typeof SUPPORTED_SEARCH_ENGINES[number];
@@ -235,6 +242,18 @@ export const ENGINE_REGISTRY: readonly EngineDescriptor[] = [
         defaultTimeoutMs: 10000,
         probeUrl: 'http://export.arxiv.org/api/query?search_query=all:electron&max_results=1',
         execute: searchArxiv
+    },
+    {
+        name: 'code',
+        label: 'GrepApp(Code)',
+        aliases: ['code', 'grep', 'grepapp'],
+        region: 'overseas',
+        cascade: { enPriority: 60 },
+        supportsNativeSite: false,
+        supportsPlaywright: false,
+        defaultTimeoutMs: 8000,
+        probeUrl: 'https://grep.app',
+        execute: searchGrepApp
     }
 ] as const;
 

@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { SearchResult } from '../../types.js';
 import {
     normalizeEngineName,
     resolveRequestedEngines,
@@ -21,6 +22,8 @@ import {
     withErrorHint,
     TOOL_ANNOTATION_HINTS
 } from '../toolShared.js';
+import { detectUnknownParameters } from '../../utils/toolValidation.js';
+import { createRequestContext } from '../../core/requestContext.js';
 
 export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntime): void {
     const searchToolName = getToolName('MCP_TOOL_SEARCH_NAME', 'search');
@@ -30,16 +33,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
         return isContext7QuotaExhausted() ? '' : DOCS_GUIDANCE;
     };
     const getSearchDescription = () => {
-        const queryRequirement = ' Requires either "query" (single query string) or "queries" (array of 1-4 queries for fan-out).';
-        const routingGuidance = ' Engine guidance: for Chinese queries prefer engines=["baidu","sogou","csdn","juejin"]; for English general/official docs use bing; for bug/issue lookups use github; for developer Q&A use stackoverflow; for tech reviews use hackernews; for papers use arxiv; overseas engines (duckduckgo/brave/startpage/exa/github/stackoverflow/hackernews/arxiv) need a proxy. Omit engines to use server-side auto routing. Cite the relevant result URLs as markdown links in your answer.';
-        const searchModeDescription = ' searchMode: omit/auto = server SEARCH_MODE; request/playwright force that mode.';
-        const docsGuidance = getDocsGuidance();
-        if (runtime.config.allowedSearchEngines.length === 0) {
-            return `Search the web across multiple engines with no API key required.${queryRequirement}${searchModeDescription}${routingGuidance}${docsGuidance}`;
-        } else {
-            const enginesText = runtime.config.allowedSearchEngines.map(getEngineLabel).join(', ');
-            return `Search the web using these engines: ${enginesText} (no API key required).${queryRequirement}${searchModeDescription}${routingGuidance}${docsGuidance}`;
-        }
+        return "Search the web across multiple engines (Chinese/English/Code). Supports multi-query fan-out ('queries'), timeRange filtering, site limits, fetchTop article content, and no API keys required.";
     };
 
     const getEnginesEnum = () => {
@@ -63,35 +57,61 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
         searchToolName,
         {
             description: getSearchDescription(),
-            inputSchema: {
+            inputSchema: z.object({
                 query: z.string().min(1, "Search query must not be empty").max(500, "Search query too long (max 500 characters)").optional()
                     .describe("Single search query (required if 'queries' is omitted; use 'queries' for multi-intent fan-out)"),
                 queries: z.preprocess((val) => (typeof val === 'string' ? [val] : val), z.array(z.string().min(1, "Query must not be empty").max(500)).min(1).max(4).optional())
-                    .describe("1-4 queries run concurrently and merged (required if 'query' is omitted) — for covering multiple intents in one call (e.g. official docs / Chinese community / English). Response includes 'cached: true' only when all sub-queries hit the TTL cache."),
+                    .describe("1-4 queries run concurrently and merged (required if 'query' is omitted)"),
                 limit: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(1).max(50).optional())
                     .describe("Max results (default: server DEFAULT_SEARCH_LIMIT, usually 10)"),
                 searchMode: z.enum(['request', 'auto', 'playwright']).optional()
-                    .describe("Execution mode: 'request' (HTTP only), 'auto' (HTTP with browser fallback), or 'playwright' (headless browser only); applies to engines supporting browser rendering (Bing, Startpage)"),
+                    .describe("Execution mode: 'request' (HTTP only), 'auto' (HTTP with browser fallback), or 'playwright' (headless browser only)"),
                 minResults: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(0).max(50).optional())
-                    .describe("Auto-run additional engines when fewer than this many USABLE results (relevant, non-entry-page) come back (default: server DEFAULT_MIN_RESULTS, usually 5; max 50 — larger values only burn the search deadline)"),
+                    .describe("Auto-run additional engines when fewer usable results come back (default: 5 when engines omitted, 0 when engines explicitly specified)"),
                 engines: z.preprocess((val) => {
                     if (typeof val === 'string') {
                         return val.split(',').map((s) => s.trim()).filter(Boolean);
                     }
                     return val;
                 }, z.array(getEngineInputSchema()).min(1).optional())
-                    .describe("Search engines to use (default: server default, which may auto-route by query language)"),
+                    .describe("Search engines to use (default: auto-routes by query language; explicit engines do not cascade unless minResults is specified)"),
+                timeRange: z.enum(['day', 'week', 'month', 'year']).optional()
+                    .describe("Publication time range filter ('day', 'week', 'month', 'year')"),
+                site: z.preprocess((val) => {
+                    if (typeof val === 'string') {
+                        return val.split(',').map((s) => s.trim()).filter(Boolean);
+                    }
+                    return val;
+                }, z.array(z.string()).min(1).optional())
+                    .describe("Restrict search to specific site domain(s) (e.g. ['github.com', 'developer.mozilla.org'])"),
                 fetchTop: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(0).max(3).optional())
-                    .describe("Two-in-one search & fetch: automatically fetch full readable Markdown content for top N results (0~3) in a single turn (up to 4000 chars per article)"),
+                    .describe("Two-in-one search & fetch: automatically fetch full readable Markdown content for top N results (0~3) in a single turn"),
                 verbose: z.boolean().optional()
                     .describe("Include verbose diagnostic fields (engineMetrics, full failure hints, and redundant source hostnames); default false to save tokens")
-            },
+            }).passthrough(),
             annotations: TOOL_ANNOTATION_HINTS
         },
-        async ({ query, queries, limit, searchMode, engines, minResults, fetchTop, verbose }, extra) => {
+        async (rawArgs, extra) => {
+            const { query, queries, limit, searchMode, engines, minResults, timeRange, site, fetchTop, verbose } = rawArgs as {
+                query?: string;
+                queries?: string[];
+                limit?: number;
+                searchMode?: 'request' | 'auto' | 'playwright';
+                engines?: string[];
+                minResults?: number;
+                timeRange?: 'day' | 'week' | 'month' | 'year';
+                site?: string[];
+                fetchTop?: number;
+                verbose?: boolean;
+            } & Record<string, unknown>;
             const signal = extra?.signal;
+            const requestContext = createRequestContext({ signal, timeoutMs: runtime.config.searchDeadlineMs });
+            const knownSearchKeys = ['query', 'queries', 'limit', 'searchMode', 'engines', 'minResults', 'timeRange', 'site', 'fetchTop', 'verbose'];
+            const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, knownSearchKeys);
+            unknownWarnings.forEach((w) => requestContext.addWarning(w));
+
             try {
-                const queryList = (queries && queries.length > 0 ? queries : (query ? [query] : [])).map((q) => q.trim()).filter(Boolean);
+                const queryList: string[] = (queries && queries.length > 0 ? queries : (query ? [query] : [])).map((q: string) => q.trim()).filter(Boolean);
                 if (queryList.length === 0) {
                     return {
                         content: [{ type: 'text', text: 'Provide either "query" or "queries" (1-4 queries).' }],
@@ -101,7 +121,10 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                 const primaryQuery = queryList[0] ?? '';
 
                 const effectiveLimit = limit ?? runtime.config.defaultSearchLimit;
-                const effectiveMinResults = minResults ?? Math.min(effectiveLimit, runtime.config.defaultMinResults);
+                // 行为变更：显式传 engines 且未传 minResults 时，默认 minResults=0，不再级联；要级联就显式给 minResults
+                const effectiveMinResults = minResults !== undefined
+                    ? minResults
+                    : (engines && engines.length > 0 ? 0 : Math.min(effectiveLimit, runtime.config.defaultMinResults));
 
                 const allowed = runtime.config.allowedSearchEngines;
                 const resolveEnginesForQuery = (queryText: string): SupportedSearchEngine[] => {
@@ -122,21 +145,25 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                     : null;
                 const enginesPerQuery: SupportedSearchEngine[][] = explicitEngines
                     ? queryList.map(() => [...explicitEngines])
-                    : queryList.map((q) => resolveEnginesForQuery(q));
+                    : queryList.map((q: string) => resolveEnginesForQuery(q));
 
-                logTool(`Searching ${queryList.map((q, index) => `"${q}" [${(enginesPerQuery[index] ?? []).join(',')}]`).join(', ')}`);
+                logTool(`Searching ${queryList.map((q: string, index: number) => `"${q}" [${(enginesPerQuery[index] ?? []).join(',')}]`).join(', ')}`);
 
                 const perQueryLimit = queryList.length > 1
                     ? Math.max(3, Math.ceil(effectiveLimit / queryList.length) + 2)
                     : effectiveLimit;
-                const executed = await Promise.all(queryList.map((q, index) => {
+                const executed = await Promise.all(queryList.map((q: string, index: number) => {
                     return runtime.services.search.execute({
                         query: q,
                         engines: enginesPerQuery[index] ?? ['bing'],
                         limit: perQueryLimit,
                         searchMode,
                         minResults: effectiveMinResults,
-                        signal
+                        timeRange,
+                        site,
+                        requestedEngines: explicitEngines ? [...explicitEngines] : undefined,
+                        signal,
+                        requestContext
                     });
                 }));
 
@@ -154,7 +181,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                     )
                     : (executed[0]?.results ?? []);
 
-                // fetchTop: 为排名前 N (0~3) 的搜索结果并发拉取正文并注入 fullContent 字段
+                // fetchTop: 为排名前 N (0~3) 的搜索结果并发拉取正文并注入 fullContent 字段（深拷贝产出新对象，防缓存污染）
                 let finalResults = mergedResults;
                 if (fetchTop && fetchTop > 0) {
                     const topN = Math.min(fetchTop, 3, mergedResults.length);
@@ -162,7 +189,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                         logTool(`Fetching fullContent for top ${topN} search results`);
                         const fetchTargets = mergedResults.slice(0, topN);
                         const fetchSettled = await Promise.allSettled(
-                            fetchTargets.map((item) =>
+                            fetchTargets.map((item: SearchResult) =>
                                 runtime.services.fetchWeb.execute({
                                     url: item.url,
                                     maxChars: 4000,
@@ -172,17 +199,15 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                                 })
                             )
                         );
-                        finalResults = mergedResults.map((item, idx) => {
+                        finalResults = mergedResults.map((item: SearchResult, idx: number) => {
+                            const cloned = { ...item };
                             if (idx < topN) {
                                 const res = fetchSettled[idx];
                                 if (res && res.status === 'fulfilled' && res.value.content) {
-                                    return {
-                                        ...item,
-                                        fullContent: res.value.content
-                                    };
+                                    cloned.fullContent = res.value.content;
                                 }
                             }
-                            return { ...item };
+                            return cloned;
                         });
                     }
                 }
@@ -202,7 +227,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
 
                 const outputResults = verbose
                     ? finalResults
-                    : finalResults.map((item) => {
+                    : finalResults.map((item: SearchResult) => {
                         const { engine: _omittedEngine, engineHits: _omittedHits, ...rest } = item;
                         if (!rest.source || !rest.url) {
                             return rest;
@@ -227,6 +252,10 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                         return { ...f, message: briefMessage };
                     });
 
+                const allWarnings = [...new Set([...requestContext.warnings, ...executed.flatMap((one) => one.warnings ?? [])])];
+                const filterFallback = executed.find((one) => one.filterFallback)?.filterFallback;
+                const diagnostics = executed.find((one) => one.diagnostics)?.diagnostics;
+
                 return {
                     content: [{
                         type: 'text',
@@ -234,7 +263,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                             ...(queryList.length > 1
                                 ? {
                                     queries: queryList,
-                                    queryEngines: queryList.map((q, index) => ({ query: q, engines: executed[index]?.engines ?? [] }))
+                                    queryEngines: queryList.map((q: string, index: number) => ({ query: q, engines: executed[index]?.engines ?? [] }))
                                 }
                                 : { query: queryList[0] ?? '' }),
                             outcome,
@@ -244,6 +273,9 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                             ...(allCascadedEngines.length > 0 ? { cascadedEngines: allCascadedEngines } : {}),
                             totalResults: mergedResults.length,
                             results: outputResults,
+                            ...(allWarnings.length > 0 ? { warnings: allWarnings } : {}),
+                            ...(filterFallback ? { filterFallback } : {}),
+                            ...(diagnostics ? { diagnostics } : {}),
                             ...(outputFailures.length > 0 ? { partialFailures: outputFailures } : {}),
                             ...(directAnswer ? { directAnswer } : {}),
                             ...(verbose && allMetrics.length > 0 ? { engineMetrics: allMetrics } : {})

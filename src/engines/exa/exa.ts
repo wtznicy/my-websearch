@@ -14,7 +14,7 @@ interface ExaResult {
 
 // exa.ai 官方搜索 API（需 EXA_API_KEY）。官方文档: https://docs.exa.ai/reference/search
 // 响应示例: { "results": [{ "id": "...", "url": "...", "title": "...", "publishedDate": "...", "author": "...", "text": "...", "score": 0.99 }] }
-async function searchExaOfficial(query: string, limit: number, apiKey: string, signal?: AbortSignal): Promise<SearchResult[]> {
+async function searchExaOfficial(query: string, limit: number, apiKey: string, signal?: AbortSignal, timeRange?: 'day' | 'week' | 'month' | 'year'): Promise<SearchResult[]> {
     const requestOptions = buildAxiosRequestOptions({ engine: 'exa',
         trustedStaticHost: true,
         signal,
@@ -24,7 +24,7 @@ async function searchExaOfficial(query: string, limit: number, apiKey: string, s
         }
     });
 
-    const data = {
+    const data: Record<string, unknown> = {
         query,
         numResults: limit,
         type: "auto",
@@ -34,6 +34,16 @@ async function searchExaOfficial(query: string, limit: number, apiKey: string, s
             highlights: false
         }
     };
+
+    if (timeRange) {
+        const offsets = {
+            day: 24 * 60 * 60 * 1000,
+            week: 7 * 24 * 60 * 60 * 1000,
+            month: 30 * 24 * 60 * 60 * 1000,
+            year: 365 * 24 * 60 * 60 * 1000
+        };
+        data.startPublishedDate = new Date(Date.now() - offsets[timeRange]).toISOString();
+    }
 
     try {
         const response = await axios.post<{ results: ExaResult[] }>(
@@ -92,7 +102,7 @@ export function parseExaResults(apiResults: ExaResult[], limit: number): SearchR
     }));
 }
 
-export async function searchExa(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
+export async function searchExa(query: string, limit: number, options?: { signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }): Promise<SearchResult[]> {
     const apiKey = process.env.EXA_API_KEY?.trim();
     if (!apiKey) {
         // 旧版免 key 的网页端内部端点（exa.ai/search/api/search-fast）自 2026-08 起已失效（返回 500）。
@@ -109,5 +119,5 @@ export async function searchExa(query: string, limit: number, options?: { signal
                 'or use other engines (bing/baidu/csdn/juejin/sogou/duckduckgo/brave/startpage).'
         });
     }
-    return searchExaOfficial(query, limit, apiKey, options?.signal);
+    return searchExaOfficial(query, limit, apiKey, options?.signal, options?.timeRange);
 }

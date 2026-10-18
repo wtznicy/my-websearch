@@ -359,14 +359,15 @@ export function parseDuckDuckGoHtmlResults(html: string, maxResults: number, see
  * @param limit Maximum number of results
  * @returns Array of search results
  */
-export async function searchDuckDuckGo(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
+export async function searchDuckDuckGo(query: string, limit: number, options?: { signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }): Promise<SearchResult[]> {
   const signal = options?.signal;
+  const timeRange = options?.timeRange;
   // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂 15s 超时拖累整次搜索
   await assertOverseasEngineUsable('duckduckgo');
   let preloadError: unknown = null;
   // Try using the preloaded URL method
   try {
-    const results = await searchDuckDuckGoPreloadUrl(query, limit, signal);
+    const results = await searchDuckDuckGoPreloadUrl(query, limit, signal, timeRange);
     if (results.length > 0) {
       return results;
     }
@@ -385,7 +386,7 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
   }
 
   try {
-    return await searchDuckDuckGoHtml(query, limit, signal);
+    return await searchDuckDuckGoHtml(query, limit, signal, timeRange);
   } catch (htmlError) {
     if (preloadError instanceof Error && htmlError instanceof Error) {
       throw new AppError({
@@ -404,7 +405,7 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
   /**
   * Extract preloaded d.js URL from DuckDuckGo search page and use it directly
   */
-  async function searchDuckDuckGoPreloadUrl(query: string, maxResults = 10, signal?: AbortSignal): Promise<SearchResult[]> {
+  async function searchDuckDuckGoPreloadUrl(query: string, maxResults = 10, signal?: AbortSignal, timeRange?: 'day' | 'week' | 'month' | 'year'): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
     let offset = 0;
 
@@ -432,7 +433,9 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
         }
       });
 
-      const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&t=h_&ia=web`;
+      const dfMap: Record<string, string> = { day: 'd', week: 'w', month: 'm', year: 'y' };
+      const df = timeRange ? dfMap[timeRange] : undefined;
+      const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&t=h_&ia=web${df ? `&df=${df}` : ''}`;
       const response = await axios.get(searchUrl, requestOptions);
 
       // 上游反爬升级：DDG 对非浏览器请求返回 202 挑战页（页面无 d.js preload URL）——
@@ -598,7 +601,7 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
     }
   }
 
-  async function searchDuckDuckGoHtml(query: string, maxResults = 10, signal?: AbortSignal): Promise<SearchResult[]> {
+  async function searchDuckDuckGoHtml(query: string, maxResults = 10, signal?: AbortSignal, timeRange?: 'day' | 'week' | 'month' | 'year'): Promise<SearchResult[]> {
   const requestUrl = 'https://html.duckduckgo.com/html/';
 
     // Configure request options
@@ -620,9 +623,17 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
     let offset = 0;
     let pageCount = 0;
 
+    const bodyParams = new URLSearchParams({ q: query });
+    if (timeRange) {
+      const dfMap: Record<string, string> = { day: 'd', week: 'w', month: 'm', year: 'y' };
+      if (dfMap[timeRange]) {
+        bodyParams.set('df', dfMap[timeRange]);
+      }
+    }
+
     let response = await axios.post(
       requestUrl,
-      new URLSearchParams({ q: query }).toString(),
+      bodyParams.toString(),
       requestOptions
     );
 

@@ -46,6 +46,22 @@ export async function searchHackerNews(
     const targetLimit = Math.max(1, Math.min(limit, 30));
 
     try {
+        const params: Record<string, string | number> = {
+            query: cleanQuery,
+            tags: 'story',
+            hitsPerPage: targetLimit
+        };
+
+        if (context?.timeRange) {
+            const offsets = {
+                day: 24 * 60 * 60,
+                week: 7 * 24 * 60 * 60,
+                month: 30 * 24 * 60 * 60,
+                year: 365 * 24 * 60 * 60
+            };
+            params.numericFilters = `created_at_i>=${Math.floor(Date.now() / 1000) - offsets[context.timeRange]}`;
+        }
+
         const url = 'https://hn.algolia.com/api/v1/search';
         const response = await requestDirectFirst('GET', url, (forceDirect) => ({
             ...buildAxiosRequestOptions({
@@ -55,11 +71,7 @@ export async function searchHackerNews(
                     'User-Agent': 'Mozilla/5.0 (compatible; MyWebSearch/1.0)',
                     'Accept': 'application/json'
                 },
-                params: {
-                    query: cleanQuery,
-                    tags: 'story',
-                    hitsPerPage: targetLimit
-                },
+                params,
                 timeout: 8000,
                 forceDirect
             })

@@ -12,6 +12,10 @@ import {
 import { purifySiteContent } from './sitePurifiers.js';
 import { AppError } from '../../core/errors.js';
 
+import path from 'node:path';
+import { extractPdfText, isPdfResponse, MAX_PDF_DOWNLOAD_BYTES } from './pdfExtractor.js';
+import { metrics } from '../../core/metrics.js';
+
 // jsdom 是 optionalDependencies（仅 readability/链接提取使用）：
 // 延迟加载，缺失时相关功能报明确错误，不拖垮整个模块加载。
 let jsdomModulePromise: Promise<typeof import('jsdom')> | null = null;
@@ -58,6 +62,9 @@ export interface FetchWebContentResult {
     /** 是否命中 focus 关键词靶向抓取 */
     focused?: boolean;
     focusMatchOffset?: number;
+    cached?: boolean;
+    warnings?: string[];
+    pdfPages?: number;
 }
 
 export type ExtractedLink = {
@@ -81,6 +88,8 @@ export type FetchWebContentOptions = {
     format?: 'text' | 'markdown';
     /** 章节靶向关键词：在全文中定位该词并返回前后上下文（前后各约 2500 字），大幅节省 Token */
     focus?: string;
+    /** 缓存策略：'default' 优先读写磁盘 Markdown 缓存；'reload' 强制刷新请求上游 */
+    cache?: 'default' | 'reload';
     /** 可选取消信号：触发时中止在途 HTTP 请求与浏览器页面操作 */
     signal?: AbortSignal;
 };
@@ -420,10 +429,10 @@ async function extractReadableLinks(html: string, finalUrl: string): Promise<Ext
 
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 
-function buildRequestOptions(cookieHeader?: string, forceDirect = false, signal?: AbortSignal): AxiosRequestConfig {
+function buildRequestOptions(cookieHeader?: string, forceDirect = false, signal?: AbortSignal, maxBytes = MAX_DOWNLOAD_BYTES): AxiosRequestConfig {
     const headers: Record<string, string> = {
         'User-Agent': DEFAULT_DESKTOP_UA,
-        'Accept': 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept': 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.8,*/*;q=0.8',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
     };
     // 国内站点（.cn/已知国内域名）直连，不因全局 USE_PROXY 走代理——代理挂掉时国内抓取不受影响
@@ -432,8 +441,8 @@ function buildRequestOptions(cookieHeader?: string, forceDirect = false, signal?
         decompress: true,
         headers,
         forceDirect,
-        maxBodyLength: MAX_DOWNLOAD_BYTES,
-        maxContentLength: MAX_DOWNLOAD_BYTES,
+        maxBodyLength: maxBytes,
+        maxContentLength: maxBytes,
         maxRedirects: 5,
         // arraybuffer 以便按页面声明的 charset 解码（axios 的 text 模式固定按 UTF-8，GBK 中文站会乱码）
         responseType: 'arraybuffer',
@@ -733,20 +742,15 @@ export async function fetchWebContent(
                 validateStatus: (status: number) => status >= 200 && status < 400
             }), 'Request URL');
             const headContentType = String(headResponse.headers['content-type'] || '').toLowerCase();
-            if (headContentType.includes('application/pdf')) {
-                throw new AppError({
-                    code: 'invalid_arguments',
-                    retryable: false,
-                    message: 'PDF binary files (application/pdf) are not supported by fetchWebContent; maxChars only controls extracted text length, not binary download parsing'
-                });
-            }
+            const isPdfPreflight = headContentType.includes('application/pdf') || parsedUrl.pathname.toLowerCase().endsWith('.pdf');
+            const maxAllowedBytes = isPdfPreflight ? MAX_PDF_DOWNLOAD_BYTES : MAX_DOWNLOAD_BYTES;
             const headLength = Number(headResponse.headers['content-length']);
-            if (Number.isFinite(headLength) && headLength > MAX_DOWNLOAD_BYTES) {
+            if (Number.isFinite(headLength) && headLength > maxAllowedBytes) {
                 throw new AppError({
                     code: 'response_too_large',
                     retryable: false,
                     details: { legacyCode: 'ERR_RESPONSE_TOO_LARGE' },
-                    message: `Response body too large (${headLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`
+                    message: `Response body too large (${headLength} bytes). Max allowed is ${maxAllowedBytes} bytes`
                 });
             }
         } catch (error: unknown) {
@@ -772,7 +776,9 @@ export async function fetchWebContent(
 
     try {
         // 直连优先、代理兜底：先无代理（国内站点最优），网络失败且配置了代理时自动切换
-        response = await requestDirectFirst('GET', parsedUrl.toString(), (forceDirect) => buildRequestOptions(undefined, forceDirect, signal), 'Request URL');
+        const isPdfTarget = parsedUrl.pathname.toLowerCase().endsWith('.pdf');
+        const maxDownloadBytes = isPdfTarget ? MAX_PDF_DOWNLOAD_BYTES : MAX_DOWNLOAD_BYTES;
+        response = await requestDirectFirst('GET', parsedUrl.toString(), (forceDirect) => buildRequestOptions(undefined, forceDirect, signal, maxDownloadBytes), 'Request URL');
     } catch (error: unknown) {
         if (signal?.aborted) {
             throw error;
@@ -817,12 +823,83 @@ export async function fetchWebContent(
     assertPublicHttpUrl(finalUrl, 'Final URL');
     let raw = decodeRawResponse(response, contentType);
 
-    if (contentType.includes('application/pdf') || raw.startsWith('%PDF-')) {
-        throw new AppError({
-            code: 'invalid_arguments',
-            retryable: false,
-            message: 'PDF binary files (application/pdf) are not supported by fetchWebContent; maxChars only controls extracted text length, not binary download parsing'
-        });
+    const isPdf = isPdfResponse(contentType, response.data, finalUrl) || raw.startsWith('%PDF-');
+
+    if (isPdf) {
+        let pdfBytes: ArrayBuffer | Uint8Array;
+        if (response.data instanceof ArrayBuffer || response.data instanceof Uint8Array) {
+            pdfBytes = response.data;
+        } else if (typeof response.data === 'string') {
+            pdfBytes = Buffer.from(response.data, 'binary');
+        } else {
+            pdfBytes = Buffer.from(String(response.data));
+        }
+
+        let pdfResult;
+        try {
+            pdfResult = await extractPdfText(pdfBytes, { url: finalUrl });
+            metrics.recordPdfAttempt(true);
+        } catch (pdfErr) {
+            metrics.recordPdfAttempt(false);
+            throw pdfErr;
+        }
+
+        const pdfTitle = pdfResult.title || (path.basename(parsedUrl.pathname).replace(/\.pdf$/i, '') || 'PDF Document');
+        const fullPdfText = pdfResult.text;
+
+        let pageContent = '';
+        let hasMore = false;
+        let focused = false;
+        let effectiveOffset = startIndex;
+
+        if (options.focus && options.focus.trim()) {
+            const focusTerm = options.focus.trim().toLowerCase();
+            const focusIdx = fullPdfText.toLowerCase().indexOf(focusTerm);
+            if (focusIdx !== -1) {
+                focused = true;
+                const windowSize = 2500;
+                const start = Math.max(0, focusIdx - windowSize);
+                const end = Math.min(fullPdfText.length, focusIdx + focusTerm.length + windowSize);
+                const snippet = fullPdfText.slice(start, end);
+                const prefix = start > 0 ? `[... focused on "${options.focus}" at offset ${focusIdx}, showing ${start}-${end} of ${fullPdfText.length} ...]\n\n` : '';
+                const suffix = end < fullPdfText.length ? `\n\n[... truncated; continue with startIndex=${end} or specify another focus ...]` : '';
+                pageContent = `${prefix}${snippet}${suffix}`;
+                effectiveOffset = start;
+                hasMore = start > 0 || end < fullPdfText.length;
+            }
+        }
+
+        if (!focused) {
+            if (effectiveOffset >= fullPdfText.length && fullPdfText.length > 0) {
+                throw new AppError({
+                    code: 'start_index_out_of_range',
+                    retryable: false,
+                    details: { legacyCode: 'ERR_START_INDEX_OUT_OF_RANGE', totalLength: fullPdfText.length, startIndex: effectiveOffset },
+                    hint: `当前正文实际总长度为 totalLength=${fullPdfText.length}，请将 startIndex 设为小于 ${fullPdfText.length} 的偏移量（或重置为 0 从头读取）。`,
+                    message: `startIndex ${effectiveOffset} is beyond content length ${fullPdfText.length}; reset to 0 to read from the beginning`
+                });
+            }
+            pageContent = fullPdfText.slice(effectiveOffset, effectiveOffset + targetMaxChars);
+            hasMore = fullPdfText.length > effectiveOffset + targetMaxChars;
+        }
+
+        const toc = hasMore ? generateMarkdownToc(fullPdfText) : undefined;
+        return {
+            url,
+            finalUrl,
+            contentType: 'application/pdf',
+            title: pdfTitle,
+            retrievalMethod,
+            truncated: hasMore,
+            content: pageContent,
+            totalLength: fullPdfText.length,
+            startIndex: effectiveOffset,
+            hasMore,
+            nextStartIndex: hasMore ? effectiveOffset + targetMaxChars : undefined,
+            pdfPages: pdfResult.totalPages,
+            ...(toc && toc.length > 0 ? { toc } : {}),
+            ...(focused ? { focused: true } : {})
+        };
     }
 
     if (!usedBrowserCookies && looksLikeBotChallengePage(raw)) {

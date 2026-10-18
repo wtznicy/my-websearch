@@ -95,6 +95,7 @@ flowchart TB
 | **`stackoverflow`**| 🌐 需代理 | 免 Key | StackExchange 2.3 官方 API + HTML 实体智能解码 | 编程报错排错、高质量代码问答 |
 | **`hackernews`** | 🌐 需代理 | 免 Key | Algolia HN API，含 points、评论数与作者元信息 | 极客社区讨论、前沿科技热点与观点 |
 | **`arxiv`** | 🌐 需代理 | 免 Key | 官方 Atom XML API 检索论文标题、作者与摘要 | 计算机科学、AI/ML 与自然科学最新论文 |
+| **`code`** | 🇨🇳 直连 | 免 Key | grep.app API 实时检索全球 GitHub 代码，含仓库、文件路径与精确代码行 | 源码实现翻查、API 使用范例、开源语法实战 |
 
 ---
 
@@ -102,12 +103,14 @@ flowchart TB
 
 ## 🛠️ 4 大核心 MCP 工具（极简高效，低 Token 消耗）
 
+> 💡 **Token 预算与瘦身**：所有工具描述均严格控制在 250 字符以内（总描述字符 ≤ 1000），更详细的路由策略已移入 `McpServer({ instructions })`，大幅降低宿主 LLM 的 Context 开销。
+
 | 工具名称 | 功能定位 | 关键特性 |
 | :--- | :--- | :--- |
-| **`search`** | 13 大引擎联合联网检索 | 支持单词 `query` 或并发多词 `queries: string[]`，支持 `minResults` 自动级联补齐；内置 GitHub/StackOverflow/HackerNews/arXiv 等垂直引擎 |
-| **`fetchWebContent`** | 通用网页正文与 Markdown 提纯 | **全能知识提取网关**：内置微信公众号、CSDN、掘金、StackOverflow 与 GitHub 智能分流提纯；支持长文分页（`startIndex`）与精准聚焦（`focus`） |
-| **`fetchGithubReadme`** | 全能 GitHub / Gitee 内容提取网关 | 支持仓库 README、指定分支源码（带语法高亮代码块）、ASCII 目录树（带文件大小）、Issue/PR 讨论上下文（含 Reactions 与变更文件）；Gitee 国内直连秒开 |
-| **`queryDocs`** | 一站式开源框架/库官方文档 | 支持直接输入库名（如 `"next.js"`、`"vue"`）或 Context7 ID，支持 404 自愈、候选评分与相关库推荐 |
+| **`search`** | 14 大引擎联合联网与代码检索 | 支持多词并发、`timeRange: day\|week\|month\|year` 时间过滤、`site: string[]` 域名过滤、`fetchTop` 正文前瞻注入、`code` 代码引擎（grep.app）；显式传 `engines` 默认 `minResults=0` 且仅在候选内级联；失败附带网络内联诊断（`diagnostics: { proxy, dns, suggestion }`） |
+| **`fetchWebContent`** | 通用网页正文、Markdown 与透明 PDF 提取 | **全能知识提取网关**：内置磁盘级 Markdown 缓存（Node 22 `node:sqlite` / 分片 JSON 兜底，200MB LRU，`cache: default\|reload` 强制刷新）；透明解析 PDF（上限 20MB / 50 页，带 `[page N]` 标记，纯扫描版明确报错）；统一分页与 `focus` 章节定位 |
+| **`fetchGithubReadme`** | 全能 GitHub / Gitee 内容提取网关 | 极速提取仓库 README、源码文件（`/blob/`）、目录树（`/tree/`）、Issue 与 PR（带解决方案与变更列表）；支持国内 Gitee 直连；响应返回 `warnings` |
+| **`queryDocs`** | 一站式开源框架/库官方文档 | 直接传入库名或 Context7 ID；内置低置信度保护与自动兜底链（npm registry → PyPI JSON → 官方 GitHub README），响应标注 `source: context7\|npm\|pypi\|github-readme`、`confidence` 与 `warnings` |
 
 > 💡 **向后兼容说明**：原独立的 `fetchCsdnArticle` 与 `fetchJuejinArticle` 已平滑下沉并收口进通用的 `fetchWebContent`（按域名自动采用最佳专有提取引擎）；原 `resolveLibraryId` 已合并入 `queryDocs`（支持直接传 `library` 库名或旧版 `libraryId` 别名自动解析定位）。如需向大模型显式暴露旧版独立工具，可配置 `REGISTER_LEGACY_ARTICLE_TOOLS=true`。
 

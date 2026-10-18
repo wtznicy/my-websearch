@@ -9,8 +9,14 @@ export interface SearchResult {
     engineHits?: number;
     /** 发布/更新日期（如 "2025-11-20"、"2026-02" 等） */
     date?: string;
+    /** 归一化 ISO 发布时间（YYYY-MM-DD） */
+    publishedAt?: string;
     /** 抓取的正文内容（fetchTop 时注入） */
     fullContent?: string;
+    /** 代码搜索（grep.app / code 引擎）相关字段 */
+    repo?: string;
+    path?: string;
+    line?: number;
 }
 
 /**

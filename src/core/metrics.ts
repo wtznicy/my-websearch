@@ -74,6 +74,10 @@ class MetricsCollector {
     private engineSamples = new Map<string, EngineEventSample[]>();
     private recentRoutingSamples = new Map<string, EngineEventSample[]>();
     private cacheMetrics: CacheMetrics = { hits: 0, misses: 0 };
+    private fetchCacheMetrics: CacheMetrics = { hits: 0, misses: 0 };
+    private timeRangeMetrics = { total: 0, fallback: 0 };
+    private pdfMetrics = { total: 0, success: 0, failure: 0 };
+    private queryDocsMetrics = { total: 0, fallback: 0, sources: new Map<string, number>() };
 
     private get logLevel(): LogLevel {
         return (process.env.LOG_LEVEL as LogLevel) || 'info';
@@ -92,7 +96,44 @@ class MetricsCollector {
         this.engineSamples.clear();
         this.recentRoutingSamples.clear();
         this.cacheMetrics = { hits: 0, misses: 0 };
+        this.fetchCacheMetrics = { hits: 0, misses: 0 };
+        this.timeRangeMetrics = { total: 0, fallback: 0 };
+        this.pdfMetrics = { total: 0, success: 0, failure: 0 };
+        this.queryDocsMetrics = { total: 0, fallback: 0, sources: new Map() };
         resetErrorClassificationMetrics();
+    }
+
+    recordFetchCacheHit(): void {
+        this.fetchCacheMetrics.hits += 1;
+    }
+
+    recordFetchCacheMiss(): void {
+        this.fetchCacheMetrics.misses += 1;
+    }
+
+    recordTimeRangeAttempt(isFallback: boolean): void {
+        this.timeRangeMetrics.total += 1;
+        if (isFallback) {
+            this.timeRangeMetrics.fallback += 1;
+        }
+    }
+
+    recordPdfAttempt(success: boolean): void {
+        this.pdfMetrics.total += 1;
+        if (success) {
+            this.pdfMetrics.success += 1;
+        } else {
+            this.pdfMetrics.failure += 1;
+        }
+    }
+
+    recordQueryDocsAttempt(source: string, isFallback: boolean): void {
+        this.queryDocsMetrics.total += 1;
+        if (isFallback) {
+            this.queryDocsMetrics.fallback += 1;
+            const count = this.queryDocsMetrics.sources.get(source) || 0;
+            this.queryDocsMetrics.sources.set(source, count + 1);
+        }
     }
 
     // ─── 日志 ────────────────────────────────────────────────────────────────
@@ -252,6 +293,10 @@ class MetricsCollector {
     getMetrics(): {
         engines: Record<string, { total: number; success: number; failure: number; avgDurationMs: number }>;
         cache: { hits: number; misses: number; hitRate: number };
+        fetchCache: { hits: number; misses: number; hitRate: number };
+        timeRange: { total: number; fallback: number; fallbackRate: number };
+        pdf: { total: number; success: number; failure: number; successRate: number };
+        queryDocs: { total: number; fallback: number; fallbackRate: number };
         windowed?: Record<string, SlidingWindowEngineStats>;
         errorClassification: ErrorClassificationMetrics;
     } {
@@ -267,12 +312,44 @@ class MetricsCollector {
         }
 
         const totalCache = this.cacheMetrics.hits + this.cacheMetrics.misses;
+        const totalFetchCache = this.fetchCacheMetrics.hits + this.fetchCacheMetrics.misses;
+        const timeRangeFallbackRate = this.timeRangeMetrics.total > 0
+            ? Math.round((this.timeRangeMetrics.fallback / this.timeRangeMetrics.total) * 100)
+            : 0;
+        const pdfSuccessRate = this.pdfMetrics.total > 0
+            ? Math.round((this.pdfMetrics.success / this.pdfMetrics.total) * 100)
+            : 0;
+        const queryDocsFallbackRate = this.queryDocsMetrics.total > 0
+            ? Math.round((this.queryDocsMetrics.fallback / this.queryDocsMetrics.total) * 100)
+            : 0;
+
         return {
             engines,
             cache: {
                 hits: this.cacheMetrics.hits,
                 misses: this.cacheMetrics.misses,
                 hitRate: totalCache > 0 ? Math.round((this.cacheMetrics.hits / totalCache) * 100) : 0
+            },
+            fetchCache: {
+                hits: this.fetchCacheMetrics.hits,
+                misses: this.fetchCacheMetrics.misses,
+                hitRate: totalFetchCache > 0 ? Math.round((this.fetchCacheMetrics.hits / totalFetchCache) * 100) : 0
+            },
+            timeRange: {
+                total: this.timeRangeMetrics.total,
+                fallback: this.timeRangeMetrics.fallback,
+                fallbackRate: timeRangeFallbackRate
+            },
+            pdf: {
+                total: this.pdfMetrics.total,
+                success: this.pdfMetrics.success,
+                failure: this.pdfMetrics.failure,
+                successRate: pdfSuccessRate
+            },
+            queryDocs: {
+                total: this.queryDocsMetrics.total,
+                fallback: this.queryDocsMetrics.fallback,
+                fallbackRate: queryDocsFallbackRate
             },
             windowed: this.getWindowedMetrics(),
             errorClassification: getErrorClassificationMetrics()
@@ -321,6 +398,10 @@ class MetricsCollector {
         this.engineSamples.clear();
         this.recentRoutingSamples.clear();
         this.cacheMetrics = { hits: 0, misses: 0 };
+        this.fetchCacheMetrics = { hits: 0, misses: 0 };
+        this.timeRangeMetrics = { total: 0, fallback: 0 };
+        this.pdfMetrics = { total: 0, success: 0, failure: 0 };
+        this.queryDocsMetrics = { total: 0, fallback: 0, sources: new Map() };
         resetErrorClassificationMetrics();
     }
 
@@ -370,6 +451,46 @@ class MetricsCollector {
         push('# HELP mywebsearch_cache_hit_rate_percent Search cache hit rate in percent');
         push('# TYPE mywebsearch_cache_hit_rate_percent gauge');
         push(`mywebsearch_cache_hit_rate_percent ${snapshot.cache.hitRate}`);
+
+        push('# HELP mywebsearch_fetch_cache_hits_total Page markdown cache hits');
+        push('# TYPE mywebsearch_fetch_cache_hits_total counter');
+        push(`mywebsearch_fetch_cache_hits_total ${snapshot.fetchCache.hits}`);
+        push('# HELP mywebsearch_fetch_cache_misses_total Page markdown cache misses');
+        push('# TYPE mywebsearch_fetch_cache_misses_total counter');
+        push(`mywebsearch_fetch_cache_misses_total ${snapshot.fetchCache.misses}`);
+        push('# HELP mywebsearch_fetch_cache_hit_rate_percent Page markdown cache hit rate in percent');
+        push('# TYPE mywebsearch_fetch_cache_hit_rate_percent gauge');
+        push(`mywebsearch_fetch_cache_hit_rate_percent ${snapshot.fetchCache.hitRate}`);
+
+        push('# HELP mywebsearch_timerange_queries_total Total search queries with timeRange filter');
+        push('# TYPE mywebsearch_timerange_queries_total counter');
+        push(`mywebsearch_timerange_queries_total ${snapshot.timeRange.total}`);
+        push('# HELP mywebsearch_timerange_fallbacks_total TimeRange partial fallbacks (due to missing dates)');
+        push('# TYPE mywebsearch_timerange_fallbacks_total counter');
+        push(`mywebsearch_timerange_fallbacks_total ${snapshot.timeRange.fallback}`);
+        push('# HELP mywebsearch_timerange_fallback_rate_percent TimeRange fallback rate in percent');
+        push('# TYPE mywebsearch_timerange_fallback_rate_percent gauge');
+        push(`mywebsearch_timerange_fallback_rate_percent ${snapshot.timeRange.fallbackRate}`);
+
+        push('# HELP mywebsearch_pdf_extractions_total Total PDF document fetch and extraction attempts');
+        push('# TYPE mywebsearch_pdf_extractions_total counter');
+        push(`mywebsearch_pdf_extractions_total ${snapshot.pdf.total}`);
+        push('# HELP mywebsearch_pdf_extractions_success_total Successful PDF document extractions');
+        push('# TYPE mywebsearch_pdf_extractions_success_total counter');
+        push(`mywebsearch_pdf_extractions_success_total ${snapshot.pdf.success}`);
+        push('# HELP mywebsearch_pdf_success_rate_percent PDF extraction success rate in percent');
+        push('# TYPE mywebsearch_pdf_success_rate_percent gauge');
+        push(`mywebsearch_pdf_success_rate_percent ${snapshot.pdf.successRate}`);
+
+        push('# HELP mywebsearch_querydocs_queries_total Total queryDocs executions');
+        push('# TYPE mywebsearch_querydocs_queries_total counter');
+        push(`mywebsearch_querydocs_queries_total ${snapshot.queryDocs.total}`);
+        push('# HELP mywebsearch_querydocs_fallbacks_total queryDocs fallbacks to npm/pypi/github-readme');
+        push('# TYPE mywebsearch_querydocs_fallbacks_total counter');
+        push(`mywebsearch_querydocs_fallbacks_total ${snapshot.queryDocs.fallback}`);
+        push('# HELP mywebsearch_querydocs_fallback_rate_percent queryDocs fallback rate in percent');
+        push('# TYPE mywebsearch_querydocs_fallback_rate_percent gauge');
+        push(`mywebsearch_querydocs_fallback_rate_percent ${snapshot.queryDocs.fallbackRate}`);
 
         push('# HELP mywebsearch_structured_error_rate Structured AppError classification ratio (0 to 1)');
         push('# TYPE mywebsearch_structured_error_rate gauge');

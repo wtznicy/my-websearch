@@ -29,6 +29,19 @@ export async function searchArxiv(
     const targetLimit = Math.max(1, Math.min(limit, 30));
 
     try {
+        let searchQuery = `all:${cleanQuery}`;
+        if (context?.timeRange) {
+            const offsets = {
+                day: 24 * 60 * 60 * 1000,
+                week: 7 * 24 * 60 * 60 * 1000,
+                month: 30 * 24 * 60 * 60 * 1000,
+                year: 365 * 24 * 60 * 60 * 1000
+            };
+            const fromDate = new Date(Date.now() - offsets[context.timeRange]).toISOString().slice(0, 10).replace(/-/g, '');
+            const toDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+            searchQuery = `${searchQuery} AND submittedDate:[${fromDate}0000 TO ${toDate}2359]`;
+        }
+
         const url = 'http://export.arxiv.org/api/query';
         const response = await requestDirectFirst('GET', url, (forceDirect) => ({
             ...buildAxiosRequestOptions({
@@ -39,7 +52,7 @@ export async function searchArxiv(
                     'Accept': 'application/atom+xml, application/xml, text/xml'
                 },
                 params: {
-                    search_query: `all:${cleanQuery}`,
+                    search_query: searchQuery,
                     start: 0,
                     max_results: targetLimit
                 },

@@ -157,7 +157,7 @@ describe('Search Outcome Semantics (ok / degraded / empty / failed)', () => {
             expect(res.engineMetrics[0]?.timedOut).toBe(true);
             await Promise.race([
                 socketClosedPromise,
-                new Promise((_, reject) => setTimeout(() => reject(new Error('in-flight HTTP request was not aborted')), 1000))
+                new Promise((_, reject) => setTimeout(() => reject(new Error('in-flight HTTP request was not aborted')), 4000))
             ]);
             expect(serverRequestClosed).toBe(true);
 

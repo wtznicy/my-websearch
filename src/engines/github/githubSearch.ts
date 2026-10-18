@@ -250,11 +250,23 @@ export async function searchGithub(
         return [];
     }
 
+    let effectiveQuery = cleanQuery;
+    if (context?.timeRange && !/created:[><=]/i.test(cleanQuery)) {
+        const offsets = {
+            day: 24 * 60 * 60 * 1000,
+            week: 7 * 24 * 60 * 60 * 1000,
+            month: 30 * 24 * 60 * 60 * 1000,
+            year: 365 * 24 * 60 * 60 * 1000
+        };
+        const sinceDate = new Date(Date.now() - offsets[context.timeRange]).toISOString().slice(0, 10);
+        effectiveQuery = `${cleanQuery} created:>=${sinceDate}`;
+    }
+
     const targetLimit = Math.max(1, Math.min(limit, 30));
     const userToken = process.env.GITHUB_TOKEN?.trim();
 
     try {
-        const results = await fetchGithubData(cleanQuery, targetLimit, userToken, signal);
+        const results = await fetchGithubData(effectiveQuery, targetLimit, userToken, signal);
         return results.slice(0, limit);
     } catch (error) {
         if (isAbortedError(error, signal)) {

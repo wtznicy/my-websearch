@@ -30,7 +30,8 @@ async function fetchStackOverflowData(
     cleanQuery: string,
     targetLimit: number,
     apiKey?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    timeRange?: 'day' | 'week' | 'month' | 'year'
 ): Promise<StackExchangeResponse> {
     const url = 'https://api.stackexchange.com/2.3/search/advanced';
     const params: Record<string, string | number> = {
@@ -41,6 +42,16 @@ async function fetchStackOverflowData(
         pagesize: targetLimit,
         ...(apiKey ? { key: apiKey } : {})
     };
+
+    if (timeRange) {
+        const offsets = {
+            day: 24 * 60 * 60,
+            week: 7 * 24 * 60 * 60,
+            month: 30 * 24 * 60 * 60,
+            year: 365 * 24 * 60 * 60
+        };
+        params.fromdate = Math.floor(Date.now() / 1000) - offsets[timeRange];
+    }
 
     const response = await requestDirectFirst('GET', url, (forceDirect) => ({
         ...buildAxiosRequestOptions({
@@ -85,12 +96,12 @@ export async function searchStackOverflow(
     const apiKey = (process.env.STACKOVERFLOW_API_KEY || process.env.STACKEXCHANGE_API_KEY)?.trim();
 
     try {
-        let data = await fetchStackOverflowData(cleanQuery, targetLimit, apiKey, signal);
+        let data = await fetchStackOverflowData(cleanQuery, targetLimit, apiKey, signal, context?.timeRange);
 
         // 如果配置了 Key 但 API 报错（例如 Key 输错 400 bad_parameter / 401 / 403），自动回退为匿名请求
         if (apiKey && data.error_id && (data.error_id === 400 || data.error_id === 401 || data.error_id === 403 || /key/i.test(data.error_message || ''))) {
             console.warn(`⚠️ [StackOverflow] STACKOVERFLOW_API_KEY invalid (${data.error_message || `error_id ${data.error_id}`}), falling back to anonymous quota...`);
-            data = await fetchStackOverflowData(cleanQuery, targetLimit, undefined, signal);
+            data = await fetchStackOverflowData(cleanQuery, targetLimit, undefined, signal, context?.timeRange);
         }
 
         if (data.error_id) {

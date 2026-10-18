@@ -26,6 +26,7 @@ export type FetchWebService = {
     execute(input: {
         url: string;
         maxChars: number;
+        cache?: 'default' | 'reload';
         readability?: boolean;
         includeLinks?: boolean;
         raw?: boolean;

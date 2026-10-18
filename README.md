@@ -95,6 +95,7 @@ flowchart TB
 | **`stackoverflow`**| 🌐 Proxy in CN | None | Official StackExchange 2.3 API with HTML entity decoding | Developer troubleshooting, stack traces & answers |
 | **`hackernews`** | 🌐 Proxy in CN | None | Algolia HN Search API with points, comments & author metadata | Tech discussions, startup launches & engineering news |
 | **`arxiv`** | 🌐 Proxy in CN | None | Official arXiv Atom XML API parsing titles, authors & abstracts | Scientific papers, machine learning & AI research |
+| **`code`** | 🇨🇳 Direct | None | grep.app API search across global GitHub code with repo, path & exact line numbers | Source code implementations, API usage patterns |
 
 ---
 
@@ -102,12 +103,14 @@ flowchart TB
 
 ## 🛠️ 4 Core MCP Tools (Minimal & Token-Efficient)
 
+> 💡 **Token Budget & Slimming**: All tool descriptions are strictly kept within 250 characters (total description characters ≤ 1000). Detailed routing guidance is delegated to `McpServer({ instructions })`, significantly reducing LLM context consumption.
+
 | Tool Name | Purpose | Key Highlights |
 | :--- | :--- | :--- |
-| **`search`** | Multi-engine federated search (13 engines) | Supports single `query` or parallel `queries: string[]`, `engines`, `limit`, and `minResults` cascading; includes GitHub, StackOverflow, HackerNews & arXiv developer engines |
-| **`fetchWebContent`** | Web page extraction & Markdown conversion | **All-in-one content extractor**: Built-in smart routing for CSDN, Juejin, WeChat, StackOverflow, and GitHub; supports pagination (`startIndex`) and focus snippets (`focus`) |
-| **`fetchGithubReadme`** | Comprehensive GitHub / Gitee content reader | Fetches repository READMEs, branch-specific source files (fenced code blocks with syntax highlighting), ASCII directory trees, and Issue / PR discussions (with reactions & changed files) |
-| **`queryDocs`** | All-in-one official library documentation | Directly resolves library names (e.g. `"next.js"`, `"vue"`), auto-heals 404s, returns alternative libraries & versioned code |
+| **`search`** | Federated web & code search (14 engines) | Supports parallel queries, `timeRange: day\|week\|month\|year` date filter, `site: string[]` filter, `fetchTop` preview injection, `code` engine (grep.app); explicit `engines` defaults to `minResults=0` (no unconstrained cascade); returns inline `diagnostics` on failure |
+| **`fetchWebContent`** | Web page extraction, Markdown & transparent PDF parsing | **All-in-one content extractor**: Built-in disk-level Markdown cache (Node 22 `node:sqlite` / partitioned JSON fallback, 200MB LRU, `cache: default\|reload`); transparent PDF parsing (up to 20MB / 50 pages, `[page N]` tags, scanned doc detection); pagination & `focus` keyword targeting |
+| **`fetchGithubReadme`** | Comprehensive GitHub / Gitee content reader | Fetches repository READMEs, source files (`/blob/`), directory trees (`/tree/`), and Issue / PR discussions (with solutions & changed files); direct Gitee support; returns `warnings` |
+| **`queryDocs`** | All-in-one official library documentation | Directly resolves library names or Context7 IDs; includes low-confidence protection and automatic fallback chain (npm registry → PyPI JSON → GitHub README); returns `source: context7\|npm\|pypi\|github-readme`, `confidence`, and `warnings` |
 
 > 💡 **Backward Compatibility**: Legacy `fetchCsdnArticle` and `fetchJuejinArticle` are automatically routed under `fetchWebContent`. Legacy `resolveLibraryId` is merged into `queryDocs` (which supports directly passing `library` name or legacy `libraryId` alias). Set `REGISTER_LEGACY_ARTICLE_TOOLS=true` if your LLM requires `fetchCsdnArticle` / `fetchJuejinArticle` explicitly exposed as separate tools.
 

@@ -251,10 +251,13 @@ export async function searchBraveOfficial(
     query: string,
     limit: number,
     apiKey: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    timeRange?: 'day' | 'week' | 'month' | 'year'
 ): Promise<SearchResult[]> {
     const seenUrls = new Set<string>();
     const encodedQuery = encodeURIComponent(query);
+    const freshnessMap: Record<string, string> = { day: 'pd', week: 'pw', month: 'pm', year: 'py' };
+    const freshness = timeRange ? freshnessMap[timeRange] : undefined;
 
     return paginateSearch({
         limit,
@@ -283,7 +286,7 @@ export async function searchBraveOfficial(
 
             try {
                 const response = await axios.get<BraveApiResponse>(
-                    `https://api.search.brave.com/res/v1/web/search?q=${encodedQuery}&count=${pageSize}&offset=${pageIndex}&text_decorations=0`,
+                    `https://api.search.brave.com/res/v1/web/search?q=${encodedQuery}&count=${pageSize}&offset=${pageIndex}&text_decorations=0${freshness ? `&freshness=${freshness}` : ''}`,
                     requestOptions
                 );
                 return parseBraveOfficialResults(response.data, seenUrls);
@@ -325,9 +328,12 @@ export async function searchBraveOfficial(
 export async function searchBraveWeb(
     query: string,
     limit: number,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }
 ): Promise<SearchResult[]> {
     const signal = options?.signal;
+    const timeRange = options?.timeRange;
+    const freshnessMap: Record<string, string> = { day: 'pd', week: 'pw', month: 'pm', year: 'py' };
+    const freshness = timeRange ? freshnessMap[timeRange] : undefined;
     const seenUrls = new Set<string>();
     const encodedQuery = encodeURIComponent(query);
     const requestOptions = buildAxiosRequestOptions({
@@ -358,7 +364,7 @@ export async function searchBraveWeb(
         fetchPage: async (pageIndex) => {
             let response;
             try {
-                response = await braveHttpGet(`https://search.brave.com/search?q=${encodedQuery}&source=web&offset=${pageIndex}`, requestOptions);
+                response = await braveHttpGet(`https://search.brave.com/search?q=${encodedQuery}&source=web&offset=${pageIndex}${freshness ? `&freshness=${freshness}` : ''}`, requestOptions);
             } catch (error) {
                 throw buildBraveErrorMessage(error);
             }
@@ -381,7 +387,7 @@ export async function searchBraveWeb(
     });
 }
 
-export async function searchBrave(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
+export async function searchBrave(query: string, limit: number, options?: { signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }): Promise<SearchResult[]> {
     const signal = options?.signal;
     // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂超时拖累整次搜索
     await assertOverseasEngineUsable('brave');
@@ -390,7 +396,7 @@ export async function searchBrave(query: string, limit: number, options?: { sign
     if (apiKey) {
         if (!isBraveOfficialApiDisabled()) {
             try {
-                return await searchBraveOfficial(query, limit, apiKey, signal);
+                return await searchBraveOfficial(query, limit, apiKey, signal, options?.timeRange);
             } catch (error: unknown) {
                 // 用户显式取消操作时直接透传其中断信号，不降级重试
                 if (signal?.aborted) {

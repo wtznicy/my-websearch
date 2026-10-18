@@ -169,7 +169,7 @@ export function shouldSuggestRemovingSiteOperator(query: string, error: unknown)
     return message.includes('waitforselector') || message.includes('timeout');
 }
 
-function buildBingSearchUrl(query: string, pageNumber: number): string {
+export function buildBingSearchUrl(query: string, pageNumber: number, timeRange?: 'day' | 'week' | 'month' | 'year'): string {
     const baseUrl = config.bingBaseUrl;
     const url = new URL(baseUrl);
     url.searchParams.set('q', query);
@@ -179,6 +179,18 @@ function buildBingSearchUrl(query: string, pageNumber: number): string {
         url.searchParams.set('ensearch', '0');
     }
     url.searchParams.set('first', String(1 + pageNumber * 10));
+    if (timeRange) {
+        const bingFilterMap: Record<string, string> = {
+            day: 'ex1:"ez1"',
+            week: 'ex1:"ez2"',
+            month: 'ex1:"ez3"',
+            year: 'ex1:"ez5"'
+        };
+        const filterVal = bingFilterMap[timeRange];
+        if (filterVal) {
+            url.searchParams.set('filters', filterVal);
+        }
+    }
     return url.toString();
 }
 
@@ -604,7 +616,7 @@ function applySiteDomainFilter(results: EngineSearchResponse, query: string): En
     return filtered;
 }
 
-async function searchBingWithHttp(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
+async function searchBingWithHttp(query: string, limit: number, signal?: AbortSignal, timeRange?: 'day' | 'week' | 'month' | 'year'): Promise<SearchResult[]> {
     if (signal?.aborted) {
         throw signal.reason instanceof Error
             ? signal.reason
@@ -615,7 +627,7 @@ async function searchBingWithHttp(query: string, limit: number, signal?: AbortSi
     let impersonateResults: EngineSearchResponse | undefined;
     if (!isBingImpersonateCircuitOpen() && await isImpersonateAvailable()) {
         try {
-            impersonateResults = await searchBingWithImpersonate(query, limit, signal);
+            impersonateResults = await searchBingWithImpersonate(query, limit, signal, timeRange);
         } catch (error) {
             if (signal?.aborted || isAbortedError(error)) {
                 if (isCascadeAbortedError(error)) {
@@ -642,7 +654,7 @@ async function searchBingWithHttp(query: string, limit: number, signal?: AbortSi
         }
         let response: import('axios').AxiosResponse;
         try {
-            response = await axios.get(buildBingSearchUrl(query, pageNumber), buildBingAxiosRequestOptions(signal));
+            response = await axios.get(buildBingSearchUrl(query, pageNumber, timeRange), buildBingAxiosRequestOptions(signal));
         } catch (pageError) {
             if (pageNumber > 0 && allResults.length > 0) {
                 console.warn(`Bing pagination page ${pageNumber} failed, gracefully returning ${allResults.length} partial results:`, pageError instanceof Error ? pageError.message : String(pageError));
@@ -851,13 +863,14 @@ async function searchBingWithPlaywright(query: string, limit: number, signal?: A
 export async function searchBing(
     query: string,
     limit: number,
-    options?: { searchMode?: 'request' | 'auto' | 'playwright'; signal?: AbortSignal }
+    options?: { searchMode?: 'request' | 'auto' | 'playwright'; signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }
 ): Promise<SearchResult[]> {
     const effectiveSearchMode = options?.searchMode ?? getEngineSearchMode('bing', config);
     const signal = options?.signal;
+    const timeRange = options?.timeRange;
 
     if (effectiveSearchMode === 'request') {
-        return searchBingWithHttp(query, limit, signal);
+        return searchBingWithHttp(query, limit, signal, timeRange);
     }
 
     if (effectiveSearchMode === 'playwright') {
@@ -865,7 +878,7 @@ export async function searchBing(
     }
 
     try {
-        const httpResults = await searchBingWithHttp(query, limit, signal);
+        const httpResults = await searchBingWithHttp(query, limit, signal, timeRange);
         // P0-2：cn.bing HTTP 对英文多词 query 常发生"首词漂移"（只按第一个词匹配，后续词全丢），
         // auto 模式下检测到首词漂移时同样触发 Playwright 交互回退。
         if (hasFirstTokenDrift(httpResults, query) && config.bingPlaywrightFallback && !signal?.aborted) {

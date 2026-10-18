@@ -27,6 +27,7 @@ export interface ExecuteCascadeOptions {
     initialMerged: SearchResult[];
     initialEngineResults: SearchResult[][];
     engines: string[];
+    requestedEngines?: string[];
     engineMap: SearchEngineExecutorMap;
     effectiveSearchMode?: AppConfig['searchMode'];
     deadlineAt: number;
@@ -34,6 +35,8 @@ export interface ExecuteCascadeOptions {
     allowedEngines?: string[];
     siteDomains?: string[];
     signal?: AbortSignal;
+    timeRange?: 'day' | 'week' | 'month' | 'year';
+    requestContext?: import('../requestContext.js').RequestContext;
 }
 
 export interface ExecuteCascadeResult {
@@ -110,11 +113,13 @@ export function pickCascadeCandidates(
     usedEngines: Set<string>,
     engineMap: SearchEngineExecutorMap,
     hasExaKey: boolean,
-    allowedEngines?: string[]
+    allowedEngines?: string[],
+    requestedEngines?: string[]
 ): string[] {
     const isEligible = (engine: string): boolean => (
         !usedEngines.has(engine)
         && typeof engineMap[engine] === 'function'
+        && (!requestedEngines || requestedEngines.length === 0 || requestedEngines.includes(engine))
         && (!allowedEngines || allowedEngines.length === 0 || allowedEngines.includes(engine))
         && !isEngineCircuitOpen(engine)
         && !isKnownUnreachableOverseasEngine(engine)
@@ -134,6 +139,7 @@ export function pickCascadeCandidates(
     // 刻意权衡：只要 engineMap 注册过任一全球引擎（真实运行环境），英文查询在无可用全球候选时直接返回 []，绝不跨语言回落中文引擎
     const hasAnyGlobalEngineRegistered = EN_CASCADE_PRIORITY.some((engine) =>
         typeof engineMap[engine] === 'function'
+        && (!requestedEngines || requestedEngines.length === 0 || requestedEngines.includes(engine))
         && (!allowedEngines || allowedEngines.length === 0 || allowedEngines.includes(engine))
     );
     if (hasAnyGlobalEngineRegistered) {
@@ -153,6 +159,7 @@ export async function executeCascade(
         initialMerged,
         initialEngineResults,
         engines,
+        requestedEngines,
         engineMap,
         effectiveSearchMode,
         deadlineAt,
@@ -183,7 +190,14 @@ export async function executeCascade(
 
     const usedEngines = new Set(engines);
     const hasExaKey = Boolean(process.env.EXA_API_KEY?.trim());
-    const initialCandidates = pickCascadeCandidates(cleanQuery, usedEngines, engineMap, hasExaKey, allowedEngines);
+    const initialCandidates = pickCascadeCandidates(
+        cleanQuery,
+        usedEngines,
+        engineMap,
+        hasExaKey,
+        allowedEngines,
+        requestedEngines
+    );
 
     let cascadeBatches = 0;
     let remainingCandidates = [...initialCandidates];
@@ -259,7 +273,10 @@ export async function executeCascade(
                 const results = await withEngineConcurrencySlot(candidate, deadlineAt, controller.signal, () =>
                     engineMap[candidate]!(searchQuery, gap, {
                         searchMode: effectiveSearchMode,
-                        signal: controller.signal
+                        signal: controller.signal,
+                        timeRange: options.timeRange,
+                        site: options.siteDomains,
+                        requestContext: options.requestContext
                     })
                 );
                 if (!done) {

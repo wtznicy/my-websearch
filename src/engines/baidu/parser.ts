@@ -59,12 +59,26 @@ const REDIRECT_RESOLVE_CONCURRENCY = 6;
 
 /** 从自然文本或摘要开头提取规范化的日期（YYYY-MM-DD 或 YYYY-MM） */
 export function extractBaiduDate(text: string): string | undefined {
-    const m = text.match(/(20\d{2})[-年/.](\d{1,2})(?:[-月/.](\d{1,2}))?/);
-    if (!m || !m[1] || !m[2]) return undefined;
-    const year = m[1];
-    const month = m[2].padStart(2, '0');
-    const day = m[3] ? m[3].padStart(2, '0') : undefined;
-    return day ? `${year}-${month}-${day}` : `${year}-${month}`;
+    // 优先完整年月日 YYYY-MM-DD 或 YYYY年MM月DD日
+    const fullMatch = text.match(/(20\d{2})[-年/.](\d{1,2})[-月/.](\d{1,2})/);
+    if (fullMatch && fullMatch[1] && fullMatch[2] && fullMatch[3]) {
+        const year = fullMatch[1];
+        const monthNum = Number(fullMatch[2]);
+        const dayNum = Number(fullMatch[3]);
+        if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) {
+            return `${year}-${String(monthNum).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+        }
+    }
+    // 年月 YYYY-MM 或 YYYY年MM月（必须有明确的月字或分隔符，不能是无分隔纯数字）
+    const yearMonthMatch = text.match(/(20\d{2})[-年/.](\d{1,2})(?:月|[-/.]|$|\s)/);
+    if (yearMonthMatch && yearMonthMatch[1] && yearMonthMatch[2]) {
+        const year = yearMonthMatch[1];
+        const monthNum = Number(yearMonthMatch[2]);
+        if (monthNum >= 1 && monthNum <= 12) {
+            return `${year}-${String(monthNum).padStart(2, '0')}`;
+        }
+    }
+    return undefined;
 }
 
 /** 带预算并发解析一批跳转链接：超预算的保留原链接 */

@@ -19,7 +19,7 @@ export interface ParsedSearchMode {
 export interface AppConfig {
     // Search engine configuration
     // 'auto'：按查询特征（中英文/技术词）自动选择默认引擎，见 queryEngineRouting.ts
-    defaultSearchEngine: 'auto' | 'bing' | 'duckduckgo' | 'exa' | 'brave' | 'baidu' | 'csdn' | 'juejin' | 'startpage' | 'sogou' | 'github' | 'stackoverflow' | 'hackernews' | 'arxiv';
+    defaultSearchEngine: 'auto' | 'bing' | 'duckduckgo' | 'exa' | 'brave' | 'baidu' | 'csdn' | 'juejin' | 'startpage' | 'sogou' | 'github' | 'stackoverflow' | 'hackernews' | 'arxiv' | 'code';
     // List of allowed search engines (if empty, all engines are available)
     allowedSearchEngines: string[];
     // Search mode: request only, auto request then fallback, or force Playwright
@@ -71,7 +71,7 @@ export interface AppConfig {
     corsOrigin?: string;
 }
 
-const validSearchEngines = ['auto', 'bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'juejin', 'startpage', 'sogou', 'github', 'stackoverflow', 'hackernews', 'arxiv'];
+const validSearchEngines = ['auto', 'bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'juejin', 'startpage', 'sogou', 'github', 'stackoverflow', 'hackernews', 'arxiv', 'code'];
 
 export interface CreateConfigOptions {
     quiet?: boolean;
