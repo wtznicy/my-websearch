@@ -389,6 +389,7 @@ export function rankSearchResults(
             + relevanceWeight * relevance
             + authorityWeight * authority
             + consensusWeight * consensus
+            + (result.rankBoost ?? 0)
             - entryPagePenalty
             + freshnessAdjustment;
         return { result, score, index };

@@ -91,7 +91,7 @@ flowchart TB
 | **`startpage`** | 🌐 Proxy in CN | None | **Multi-worker Anubis SHA-256 PoW solver** (difficulty ≤ 6) + cookie session (no browser needed) | Google-backed high-privacy results |
 | **`brave`** | 🌐 Proxy in CN | None | Native TLS fingerprinting + strict sponsored ad stripping | Independent English index & technical blogs |
 | **`exa`** | 🌐 Direct API | Optional Free Key | Official semantic search API (skipped if key is unset) | Semantic similarity, AI research & papers |
-| **`github`** | 🌐 Proxy in CN | None | Official GitHub Search REST API for issues & repositories | GitHub issues, bug reports, and repositories |
+| **`github`** | 🌐 Proxy in CN | None | Official GitHub Search REST API + **exact owner/repo fast path** (issues & repositories) | GitHub issues, bug reports, repositories, and exact repo lookup |
 | **`stackoverflow`**| 🌐 Proxy in CN | None | Official StackExchange 2.3 API with HTML entity decoding | Developer troubleshooting, stack traces & answers |
 | **`hackernews`** | 🌐 Proxy in CN | None | Algolia HN Search API with points, comments & author metadata | Tech discussions, startup launches & engineering news |
 | **`arxiv`** | 🌐 Proxy in CN | None | Official arXiv Atom XML API parsing titles, authors & abstracts | Scientific papers, machine learning & AI research |
@@ -360,7 +360,7 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run the Vitest suite (54 files, 450 tests at the current baseline)
+npm test              # Run the Vitest suite (55 files, 459 tests at the current baseline)
 npm run test:live     # Run bounded-concurrency live integration tests
 npm run eval:live     # Run 23-case live STDIO JSON-RPC evaluation suite
 ```

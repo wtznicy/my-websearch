@@ -37,6 +37,49 @@ export interface GitHubSearchReposResponse {
     items: GitHubRepoItem[];
 }
 
+export interface GitHubRepoSpec {
+    owner: string;
+    repo: string;
+}
+
+const GITHUB_OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const GITHUB_REPO_PATTERN = /^[A-Za-z0-9._-]{1,100}$/;
+
+/**
+ * 识别精确仓库查询：
+ * - facebook/react
+ * - https://github.com/facebook/react
+ * - github.com/facebook/react/tree/main
+ * 只接受单个 owner/repo，不把普通搜索词误判为仓库。
+ */
+export function parseGitHubRepoSpec(query: string): GitHubRepoSpec | null {
+    const raw = query.trim();
+    if (!raw) {
+        return null;
+    }
+
+    let owner: string | undefined;
+    let repo: string | undefined;
+    const urlMatch = raw.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/?#\s]+)\/([^/?#\s]+)/i);
+    if (urlMatch) {
+        owner = urlMatch[1];
+        repo = urlMatch[2];
+    } else {
+        const pairMatch = raw.match(/^([^/\s]+)\/([^/\s]+)$/);
+        if (!pairMatch) {
+            return null;
+        }
+        owner = pairMatch[1];
+        repo = pairMatch[2];
+    }
+
+    repo = repo?.replace(/\.git$/i, '');
+    if (!owner || !repo || !GITHUB_OWNER_PATTERN.test(owner) || !GITHUB_REPO_PATTERN.test(repo)) {
+        return null;
+    }
+    return { owner, repo };
+}
+
 /**
  * 格式化 Star 数量，如 1234 -> 1.2k
  */
@@ -176,18 +219,39 @@ async function searchRepos(
     return results;
 }
 
+function buildGithubHeaders(token?: string): Record<string, string> {
+    return {
+        'User-Agent': 'GitHub-Search-Agent/1.0',
+        'Accept': 'application/vnd.github.v3+json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+    };
+}
+
+async function fetchExactRepo(
+    spec: GitHubRepoSpec,
+    headers: Record<string, string>,
+    signal?: AbortSignal
+): Promise<SearchResult> {
+    const repoUrl = `https://api.github.com/repos/${encodeURIComponent(spec.owner)}/${encodeURIComponent(spec.repo)}`;
+    const res = await requestDirectFirst('GET', repoUrl, (forceDirect) => ({
+        ...buildAxiosRequestOptions({
+            engine: 'github',
+            signal,
+            headers,
+            timeout: 8000,
+            forceDirect
+        })
+    }), 'GitHub repository API');
+    return { ...formatRepoItem(res.data as GitHubRepoItem), rankBoost: 100 };
+}
+
 async function fetchGithubData(
     cleanQuery: string,
     targetLimit: number,
     token?: string,
     signal?: AbortSignal
 ): Promise<SearchResult[]> {
-    const headers: Record<string, string> = {
-        'User-Agent': 'GitHub-Search-Agent/1.0',
-        'Accept': 'application/vnd.github.v3+json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
-    };
-
+    const headers = buildGithubHeaders(token);
     const isIssueFirst = isGithubIssueIntent(cleanQuery);
     const results: SearchResult[] = [];
 
@@ -246,7 +310,7 @@ export async function searchGithub(
     }
 
     const cleanQuery = query.trim();
-    if (!cleanQuery) {
+    if (!cleanQuery || limit <= 0) {
         return [];
     }
 
@@ -264,6 +328,52 @@ export async function searchGithub(
 
     const targetLimit = Math.max(1, Math.min(limit, 30));
     const userToken = process.env.GITHUB_TOKEN?.trim();
+
+    // P0：精确 owner/repo（或 GitHub URL）直接查 /repos，避免被 Search API 的相关性排序带偏。
+    // timeRange 需要过滤，仍走普通搜索路径。
+    const exactSpec = !context?.timeRange ? parseGitHubRepoSpec(cleanQuery) : null;
+    if (exactSpec) {
+        let exactResult: SearchResult | undefined;
+        try {
+            exactResult = await fetchExactRepo(exactSpec, buildGithubHeaders(userToken), signal);
+        } catch (error) {
+            if (isAbortedError(error, signal)) {
+                throw error;
+            }
+            // Token 失效/额度耗尽时，用匿名配额重试一次精确仓库查询
+            const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+            if (userToken && (status === 401 || status === 403)) {
+                try {
+                    exactResult = await fetchExactRepo(exactSpec, buildGithubHeaders(), signal);
+                } catch (fallbackError) {
+                    if (isAbortedError(fallbackError, signal)) {
+                        throw fallbackError;
+                    }
+                    metrics.debug(`[github] exact repo anonymous retry skipped: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+                }
+            } else {
+                metrics.debug(`[github] exact repo lookup skipped: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+
+        if (exactResult) {
+            // limit=1 时无需再打 Search API，直接确定性返回，省一次配额。
+            if (targetLimit <= 1) {
+                return [exactResult];
+            }
+            try {
+                const related = await fetchGithubData(effectiveQuery, targetLimit, userToken, signal);
+                const exactKey = exactResult.url.replace(/\/$/, '').toLowerCase();
+                return [exactResult, ...related.filter((item) => item.url.replace(/\/$/, '').toLowerCase() !== exactKey)].slice(0, limit);
+            } catch (error) {
+                if (isAbortedError(error, signal)) {
+                    throw error;
+                }
+                metrics.debug(`[github] exact repo related search skipped: ${error instanceof Error ? error.message : String(error)}`);
+                return [exactResult].slice(0, limit);
+            }
+        }
+    }
 
     try {
         const results = await fetchGithubData(effectiveQuery, targetLimit, userToken, signal);

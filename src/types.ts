@@ -7,6 +7,8 @@ export interface SearchResult {
     engine: string;
     /** 跨引擎融合后该结果被几个引擎命中（仅多引擎搜索时出现，帮助 LLM 判断可信度） */
     engineHits?: number;
+    /** 内部排序权重（如精确仓库命中）；返回给调用方前会被剥离，不进入公共 JSON */
+    rankBoost?: number;
     /** 发布/更新日期（如 "2025-11-20"、"2026-02" 等） */
     date?: string;
     /** 归一化 ISO 发布时间（YYYY-MM-DD） */

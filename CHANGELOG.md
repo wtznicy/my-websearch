@@ -2,6 +2,13 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
+## [Unreleased]
+
+### GitHub Exact Repository Lookup
+- The `github` engine now recognizes `owner/repo` and GitHub URLs, calls `/repos/{owner}/{repo}` first, and places the canonical repository at the top with an internal ranking boost.
+- `limit=1` returns the exact repository without a Search API call, saving quota; 404 falls back to normal search, and 401/403 retries anonymously when a token is invalid or exhausted.
+- Added parser, exact-lookup, and ranking-boost tests.
+
 ## [1.3.3] - 2026-10-19
 
 ### Search Engine Reliability (Bing / Startpage / DuckDuckGo)

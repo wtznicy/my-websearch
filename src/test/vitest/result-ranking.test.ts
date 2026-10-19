@@ -170,6 +170,27 @@ describe('rankSearchResults', () => {
         expect(rankSearchResults(single, 'anything')).toBe(single);
     });
 
+    it('should honor an internal rankBoost for exact matches', () => {
+        const results = [
+            makeResult({
+                title: 'fbsamples/f8app',
+                url: 'https://github.com/fbsamples/f8app',
+                description: 'Source code of the official F8 app, powered by React Native and Facebook open source projects.'
+            }),
+            {
+                ...makeResult({
+                    title: 'react/react',
+                    url: 'https://github.com/react/react',
+                    description: 'The library for web and native user interfaces.'
+                }),
+                rankBoost: 100
+            }
+        ];
+
+        const ranked = rankSearchResults(results, 'facebook/react');
+        expect(ranked[0].title).toBe('react/react');
+    });
+
     it('should demote site entry pages for non-navigational queries', () => {
         const results = [
             makeResult({ title: 'GitHub', url: 'https://github.com/', description: 'github' }),

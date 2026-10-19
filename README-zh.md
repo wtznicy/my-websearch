@@ -91,7 +91,7 @@ flowchart TB
 | **`startpage`** | 🌐 需代理 | 无 | **多 Worker Anubis SHA-256 PoW 求解器**（难度 ≤ 6）+ 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
 | **`brave`** | 🌐 需代理 | 无 | 原生指纹直连 + 赞助商商业推广深度剥离 | 独立海外英文索引、技术博客 |
 | **`exa`** | 🌐 API直连 | 选配 Key | 官方语义搜索 API（未配置时自动跳过，不阻断级联） | 深度语义相似搜索、学术与技术前沿 |
-| **`github`** | 🌐 需代理 | 无 | 官方 REST API 检索仓库与 Issue 问答 | 开源项目源码、开源库 Issues 排查 |
+| **`github`** | 🌐 需代理 | 无 | 官方 REST API 检索仓库与 Issue；**精确 owner/repo 直取** | 开源项目源码、开源库 Issues 排查、已知仓库查看 |
 | **`stackoverflow`**| 🌐 需代理 | 无 | StackExchange 2.3 官方 API + HTML 实体智能解码 | 编程报错排错、高质量代码问答 |
 | **`hackernews`** | 🌐 需代理 | 无 | Algolia HN API，含 points、评论数与作者元信息 | 极客社区讨论、前沿科技热点与观点 |
 | **`arxiv`** | 🌐 需代理 | 无 | 官方 Atom XML API 检索论文标题、作者与摘要 | 计算机科学、AI/ML 与自然科学最新论文 |
@@ -360,7 +360,7 @@ my-websearch doctor --reset-health
 ```bash
 npm install
 npm run build
-npm test              # 执行 Vitest 测试套件（当前基线：54 个文件、450 个测试）
+npm test              # 执行 Vitest 测试套件（当前基线：55 个文件、459 个测试）
 npm run test:live     # 执行实时网络集成测试
 npm run eval:live     # 执行 23 用例真实 STDIO JSON-RPC 评测套件
 ```

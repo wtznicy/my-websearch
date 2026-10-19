@@ -458,8 +458,14 @@ export function createSearchService(
                     allFailures.push(...cascade.cascadeFailures);
                     allMetrics.push(...cascade.cascadeMetrics);
 
-                    // 管道第 3 阶段：全局重排与截断
-                    merged = rankSearchResults(merged, cleanQuery, { authorityDomains: appConfig.authorityDomains }).slice(0, limit);
+                    // 管道第 3 阶段：全局重排与截断；剥离内部 rankBoost，避免泄漏到公共 JSON
+                    merged = rankSearchResults(merged, cleanQuery, { authorityDomains: appConfig.authorityDomains })
+                        .map((result) => {
+                            const cleaned = { ...result };
+                            delete cleaned.rankBoost;
+                            return cleaned;
+                        })
+                        .slice(0, limit);
 
                     // 日期归一化（publishedAt）与 timeRange 过滤
                     const warnings: string[] = [];
