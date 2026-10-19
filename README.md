@@ -35,8 +35,8 @@
   Directly query official documentation with natural package names (e.g. `"next.js"`, `"vue"`) or Context7 IDs without needing a separate resolve step. Includes automatic candidate ranking, blind-guess 404 self-healing, and related alternatives discovery.
 - 🐙 **Extended GitHub / Gitee Resource Fetcher**  
   `fetchGithubContent` (formerly `fetchGithubReadme`) supports both GitHub and Gitee: repository READMEs, any source file (`/blob/...`), directory trees (`/tree/...`), and complete issue / PR discussions.
-- 🌏 **Zero-Config Network Detection & Clash Fake-IP Ready**  
-  Auto-detects OS system proxies (Windows Registry / macOS scutil / Linux env). Automatically routes overseas engines through proxy while keeping domestic engines on fast direct lines. Pre-whitelists `198.18.0.0/15` for Clash TUN / Fake-IP compatibility while enforcing strict SSRF security bounds.
+- 🌏 **Zero-Config Network Detection & Fake-IP Ready**  
+  Auto-detects OS system proxies (Windows Registry / macOS scutil / Linux env). Automatically routes overseas engines through proxy while keeping domestic engines on fast direct lines. Pre-whitelists `198.18.0.0/15` for TUN / Fake-IP compatibility while enforcing strict SSRF security bounds.
 - 🔌 **Versatile Deployment Modes**  
   Works seamlessly across **MCP STDIO** (Claude Desktop/Cursor), **Streamable HTTP / SSE** (Cherry Studio/remote clients), **CLI one-shot commands**, and a **Local HTTP Daemon** with connection pool reuse and Prometheus `/metrics` monitoring.
 
@@ -62,7 +62,7 @@ flowchart TB
         Wreq["wreq-js Chrome TLS/H2 Fingerprint<br/>+ Automatic Session Cookie Jars"]
         Solvers["Millisecond Challenge Solvers<br/>Startpage PoW | DDG JSA Solver"]
         PW["Playwright Stealth Browser Fallback<br/>(Budget Bounds + Cross-Process Locking)"]
-        Guard["SSRF Guard & Clash Fake-IP Support<br/>(PROXY_URL Split Routing + 198.18.0.0/15)"]
+        Guard["SSRF Guard & Fake-IP Support<br/>(PROXY_URL Split Routing + 198.18.0.0/15)"]
     end
 
     subgraph Engines["🌍 13 Search Engines + 6 Content/Docs Tools"]
@@ -128,7 +128,7 @@ No installation required:
 npx -y my-websearch@latest
 ```
 
-> 💡 **Automated Proxy Discovery**: The server automatically detects your operating system's proxy settings. If a local proxy (Clash, v2ray, Surge) is active, overseas engines automatically use the proxy while domestic engines stay on fast direct lines. `198.18.0.0/15` is whitelisted out of the box for Clash Fake-IP.
+> 💡 **Automated Proxy Discovery**: The server automatically detects your operating system's proxy settings. If a local proxy or VPN client is active, overseas engines automatically use the proxy while domestic engines stay on fast direct lines. `198.18.0.0/15` is whitelisted out of the box for Fake-IP environments.
 
 ### 2. Configure in AI Clients
 
@@ -226,7 +226,7 @@ When configuring or diagnosing proxy connectivity, refer to these common edge ca
 
 1. **Startup log shows `🌐 Proxy: disabled` even though `proxy.url` is set?**
    - **Check `useProxy` flag**: In `~/.my-websearch/config.json`, setting `"useProxy": false` takes precedence and **explicitly overrides and disables `url`** (setting `PROXY_URL='false'`). Change `"useProxy": true` or simply omit the field (providing a valid `url` automatically enables the proxy).
-   - **No system proxy active without `PROXY_URL`**: If no system proxy (Clash/v2ray) is running, overseas engines will be blocked by default. Explicitly declare `PROXY_URL` (e.g. `http://127.0.0.1:7897` or `7890`).
+   - **No system proxy active without `PROXY_URL`**: If no system proxy or local proxy client is running, overseas engines will be blocked by default. Explicitly declare `PROXY_URL` (e.g. `http://127.0.0.1:7897` or `7890`).
 
 2. **Proxy is configured properly, but overseas engines fail or timeout? (Upstream IP Blocking, NOT a Config Error)**
    - **DuckDuckGo returns HTTP 202 / challenge**: DDG rate-limits the proxy node's egress IP. The first query may succeed and later ones return `anomalyDetectionBlock`; cookie warming does not bypass this. Rotate to a cleaner node or wait for cooldown.
@@ -284,8 +284,8 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 
 | Variable | Default | Allowed Values / Description |
 | :--- | :--- | :--- |
-| `PROXY_URL` | empty (off) | Consolidated upstream proxy configuration (merges previous `USE_PROXY` and `PROXY_ENGINES`). Not needed in TUN mode.<br/>• **Default proxy**: passing empty `PROXY_URL=""` or `PROXY_URL=true` activates default `http://127.0.0.1:7897` (common port for Clash Verge; use `10809` for v2rayN or `7890` for legacy Clash; overseas engines use proxy, domestic engines stay direct)<br/>• **Custom address**: `PROXY_URL=http://127.0.0.1:10809`<br/>• **Custom engines**: `PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` or all engines `PROXY_URL=";all"` |
-| `FAKE_IP_CIDRS` | `198.18.0.0/15` | Whitelisted CIDRs for Clash Fake-IP mode to avoid SSRF false-positive blocking |
+| `PROXY_URL` | empty (off) | Consolidated upstream proxy configuration (merges previous `USE_PROXY` and `PROXY_ENGINES`). Not needed in TUN mode.<br/>• **Default proxy**: passing empty `PROXY_URL=""` or `PROXY_URL=true` activates default `http://127.0.0.1:7897` (common local proxy ports include 7897, 7890, or 10809 for v2rayN; overseas engines use proxy, domestic engines stay direct)<br/>• **Custom address**: `PROXY_URL=http://127.0.0.1:10809`<br/>• **Custom engines**: `PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` or all engines `PROXY_URL=";all"` |
+| `FAKE_IP_CIDRS` | `198.18.0.0/15` | Whitelisted CIDRs for Fake-IP / TUN mode to avoid SSRF false-positive blocking |
 | `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` browser TLS/H2 fingerprint profile (e.g. `chrome_149`, `safari_18`) |
 | `IMPERSONATE_OS` | `windows` | Operating system platform for fingerprint impersonation (`windows`, `macos`, `linux`) |
 | `BING_IMPERSONATE` | `true` | Toggle Chrome TLS impersonation for Bing HTTP mode (auto-trips circuit breaker after consecutive empty results) |

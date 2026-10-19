@@ -4,6 +4,7 @@ import {
     generateMarkdownToc,
     fetchWebContent
 } from '../../engines/web/fetchWebContent.js';
+import { sliceMarkdownContent } from '../../engines/web/pagination.js';
 import {
     validateArticleUrl,
     validateGithubRepositoryUrl,
@@ -45,89 +46,7 @@ export interface DedicatedFetchers {
     genericFetcher?: WebFetcher;
 }
 
-/**
- * 从完整的 Markdown 字符串中执行统一的切片/聚焦/目录生成
- */
-export function sliceMarkdownContent(
-    fullText: string,
-    options: {
-        url: string;
-        finalUrl?: string;
-        title: string;
-        siteName?: string;
-        contentType?: string;
-        startIndex?: number;
-        maxChars: number;
-        focus?: string;
-        cached?: boolean;
-        warnings?: string[];
-        pdfPages?: number;
-    }
-): FetchWebContentResult {
-    const offset = Math.max(0, Math.floor(options.startIndex ?? 0));
-    let pageContent = '';
-    let hasMore = false;
-    let focused = false;
-    let effectiveOffset = offset;
-    let focusMatchOffset: number | undefined;
-
-    if (options.focus && options.focus.trim()) {
-        const focusTerm = options.focus.trim().toLowerCase();
-        const focusIdx = fullText.toLowerCase().indexOf(focusTerm);
-        if (focusIdx !== -1) {
-            focused = true;
-            focusMatchOffset = focusIdx;
-            const windowSize = 2500;
-            const start = Math.max(0, focusIdx - windowSize);
-            const end = Math.min(fullText.length, focusIdx + focusTerm.length + windowSize);
-            const snippet = fullText.slice(start, end);
-            const prefix = start > 0
-                ? `[... focused on "${options.focus}" at offset ${focusIdx}, showing ${start}-${end} of ${fullText.length} ...]\n\n`
-                : '';
-            const suffix = end < fullText.length
-                ? `\n\n[... truncated; continue with startIndex=${end} or specify another focus ...]`
-                : '';
-            pageContent = `${prefix}${snippet}${suffix}`;
-            effectiveOffset = start;
-            hasMore = start > 0 || end < fullText.length;
-        }
-    }
-
-    if (!focused) {
-        if (effectiveOffset >= fullText.length && fullText.length > 0) {
-            throw new AppError({
-                code: 'start_index_out_of_range',
-                retryable: false,
-                details: { legacyCode: 'ERR_START_INDEX_OUT_OF_RANGE', totalLength: fullText.length, startIndex: effectiveOffset },
-                hint: `当前正文实际总长度为 totalLength=${fullText.length}，请将 startIndex 设为小于 ${fullText.length} 的偏移量（或重置为 0 从头读取）。`,
-                message: `startIndex ${effectiveOffset} is beyond content length ${fullText.length}; reset to 0 to read from the beginning`
-            });
-        }
-        pageContent = fullText.slice(effectiveOffset, effectiveOffset + options.maxChars);
-        hasMore = fullText.length > effectiveOffset + options.maxChars;
-    }
-
-    const toc = hasMore ? generateMarkdownToc(fullText) : undefined;
-    return {
-        url: options.url,
-        finalUrl: options.finalUrl || options.url,
-        contentType: options.contentType || 'text/markdown',
-        title: options.title,
-        siteName: options.siteName,
-        retrievalMethod: 'request',
-        truncated: hasMore,
-        content: pageContent,
-        totalLength: fullText.length,
-        startIndex: effectiveOffset,
-        hasMore,
-        nextStartIndex: hasMore ? effectiveOffset + options.maxChars : undefined,
-        cached: options.cached ?? false,
-        ...(options.warnings && options.warnings.length > 0 ? { warnings: options.warnings } : {}),
-        ...(options.pdfPages ? { pdfPages: options.pdfPages } : {}),
-        ...(toc && toc.length > 0 ? { toc } : {}),
-        ...(focused ? { focused: true, focusMatchOffset } : {})
-    };
-}
+export { sliceMarkdownContent };
 
 /**
  * 单一 FetchPolicy 执行管线：

@@ -52,10 +52,21 @@ export function looksLikeScannedPdf(text: string): boolean {
     return cleaned.length < 10;
 }
 
+let customPdfExtractor: ((buffer: ArrayBuffer | Uint8Array, options?: { maxPages?: number; url?: string }) => Promise<PdfExtractionResult>) | null = null;
+
+export function __setPdfExtractorForTests(
+    fn: ((buffer: ArrayBuffer | Uint8Array, options?: { maxPages?: number; url?: string }) => Promise<PdfExtractionResult>) | null
+): void {
+    customPdfExtractor = fn;
+}
+
 export async function extractPdfText(
     buffer: ArrayBuffer | Uint8Array,
     options: { maxPages?: number; url?: string } = {}
 ): Promise<PdfExtractionResult> {
+    if (customPdfExtractor) {
+        return customPdfExtractor(buffer, options);
+    }
     const maxPages = options.maxPages ?? MAX_PDF_PAGES;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let unpdfModule: any;

@@ -35,8 +35,8 @@
   直接输入技术库名（如 `"next.js"`, `"vue"`）或 Context7 ID，内部自动多候选排序、404 自愈重搜并返回相似替代库，免去额外调用 ID 解析步骤。
 - 🐙 **全面升级的 GitHub / Gitee 资源抓取**  
   `fetchGithubContent`（原 `fetchGithubReadme`）同时支持 GitHub 与 Gitee：仓库 README、任意源码单文件（`/blob/...`）、目录树（`/tree/...`）及 Issue / PR 完整讨论。
-- 🌏 **零配置网络感知（Clash TUN / Fake-IP 完美适配）**  
-  自动嗅探系统代理（Windows 注册表 / macOS scutil / Linux 环境变量），海外引擎走代理、国内引擎直连；原生支持 `198.18.0.0/15` 放行，无缝兼容 Clash TUN 虚拟网卡，严守内网 SSRF 安全边界。
+- 🌏 **零配置网络感知（TUN / Fake-IP 完美适配）**  
+  自动嗅探系统代理（Windows 注册表 / macOS scutil / Linux 环境变量），海外引擎走代理、国内引擎直连；原生支持 `198.18.0.0/15` 放行，无缝兼容 TUN / 虚拟网卡，严守内网 SSRF 安全边界。
 - 🔌 **全形态接入支持**  
   支持 **MCP STDIO**（Claude/Cursor 极简接入）、**Streamable HTTP / SSE**（Cherry Studio 等远程客户端）、**终端 CLI** 一次性工具，以及**本地常驻 Daemon**（支持连接池复用与 `/metrics` Prometheus 监控）。
 
@@ -62,7 +62,7 @@ flowchart TB
         Wreq["wreq-js 原生 Chrome TLS/H2 指纹<br/>+ 会话级 Cookie 自动持久化"]
         Solvers["内置毫秒挑战求解器<br/>Startpage PoW | DDG JSA Solver"]
         PW["Playwright 隐身浏览器兜底<br/>(严格超时预算 + 跨进程文件锁治理)"]
-        Guard["SSRF 防护 & Clash Fake-IP 兼容<br/>(PROXY_URL 分流 + 198.18.0.0/15)"]
+        Guard["SSRF 防护 & Fake-IP 兼容<br/>(PROXY_URL 分流 + 198.18.0.0/15)"]
     end
 
     subgraph Engines["🌍 13 大引擎 + 6 大内容/文档服务"]
@@ -128,7 +128,7 @@ flowchart TB
 npx -y my-websearch@latest
 ```
 
-> 💡 **全自动网络感知**：项目默认自动探测操作系统的系统代理。只要本地运行了 Clash / v2ray / Surge 等工具，海外引擎自动走代理，国内引擎自动走高速直连；Clash Fake-IP（`198.18.0.0/15`）已内置放行。
+> 💡 **全自动网络感知**：项目默认自动探测操作系统的系统代理。只要本地运行了系统代理工具（如 v2ray、Surge 等），海外引擎自动走代理，国内引擎自动走高速直连；Fake-IP（`198.18.0.0/15`）已内置放行。
 
 ### 2. 主流 AI 客户端配置
 
@@ -226,14 +226,14 @@ my-websearch doctor --reset-health
 
 1. **启动日志显示 `🌐 Proxy: disabled`，但明明配置了 `proxy.url`？**
    - **排查 `useProxy` 字段**：在 `~/.my-websearch/config.json` 中，若配置了 `"useProxy": false`，根据配置优先级规则，该参数会**显式覆盖并强制禁用 `url`**（产生 `PROXY_URL='false'`），导致代理被静默关闭。请将 `"useProxy"` 改为 `true` 或直接删除该字段（只要存在有效 `url` 即可自动启用代理）。
-   - **未开启系统代理且未配 `PROXY_URL`**：纯直连网络下（无 Clash/v2ray 系统代理），海外引擎将被安全策略拦截，此时请显式设置 `PROXY_URL`（如 `http://127.0.0.1:7890` 或 `7897`）。
+   - **未开启系统代理且未配 `PROXY_URL`**：纯直连网络下（未开启本地代理客户端），海外引擎将被安全策略拦截，此时请显式设置 `PROXY_URL`（如 `http://127.0.0.1:7890` 或 `7897`）。
 
 2. **配置了有效代理后，海外引擎依然失败或超时？（上游 IP 风控，非本地配置错误）**
    - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：DDG 对当前代理节点的公网出口 IP 做了限流；可能第一条查询成功、后续返回 `anomalyDetectionBlock`，Cookie 预热无法绕过。请换更干净的节点或等待冷却。
    - **Bing 返回 HTTP 200 但 0 条结果**：wreq 指纹路径解析为空时会自动回退到 axios SERP 路径；若两条路径都为空，通常是查询或 IP 被软风控。
    - **Brave 返回 HTTP 429 (Too Many Requests)**：Brave 搜索对高频机房代理 IP 进行了限频，此错误属于出口节点被上游限制。
    - **Startpage 请求挂满超时或 Anubis PoW 难度过大**：难度 6 现由最多 4 个 Worker 并行求解（约 3–12s）；难度 >6 会自动跳过；pass-challenge 的 socket 错误/瞬时 5xx 会自动重试。
-   - 💡 **解决方案**：上述情况**并非本地客户端或 MCP 服务配置错误**，而是代理出口节点 IP 被上游搜索引擎标记。请在代理客户端（Clash/v2ray）中**切换为较纯净的节点/住宅节点**，或在搜索时使用 `engines: ["bing", "baidu"]` 降级，亦可配置官方 API Key（如 `BRAVE_API_KEY`）直连官方高可用通道。
+   - 💡 **解决方案**：上述情况**并非本地客户端或 MCP 服务配置错误**，而是代理出口节点 IP 被上游搜索引擎标记。请在代理客户端（如 v2rayN 等）中**切换为较纯净的节点/住宅节点**，或在搜索时使用 `engines: ["bing", "baidu"]` 降级，亦可配置官方 API Key（如 `BRAVE_API_KEY`）直连官方高可用通道。
 
 <a id="configuration"></a>
 
@@ -284,8 +284,8 @@ my-websearch doctor --reset-health
 
 | 变量名 | 默认值 | 可选值 / 说明 |
 | :--- | :--- | :--- |
-| `PROXY_URL` | 空（关闭） | 统一上游代理配置（已合并原 `USE_PROXY` 与 `PROXY_ENGINES`，TUN 模式无需配置保持直连）。<br/>• **开启默认代理**：传空值 `PROXY_URL=""` 或 `PROXY_URL=true` 即可启用默认 `http://127.0.0.1:7897`（默认端口常用于 Clash Verge；若使用 v2rayN 可配 `10809`，原版 Clash 可配 `7890`；默认仅海外引擎走代理，国内引擎直连）<br/>• **自定义地址**：`PROXY_URL=http://127.0.0.1:10809`<br/>• **自选引擎**：`PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` 或全部引擎走代理 `PROXY_URL=";all"` |
-| `FAKE_IP_CIDRS` | `198.18.0.0/15` | Clash Fake-IP 虚拟网段白名单，避免误触发 SSRF 本地私网地址拦截 |
+| `PROXY_URL` | 空（关闭） | 统一上游代理配置（已合并原 `USE_PROXY` 与 `PROXY_ENGINES`，TUN 模式无需配置保持直连）。<br/>• **开启默认代理**：传空值 `PROXY_URL=""` 或 `PROXY_URL=true` 即可启用默认 `http://127.0.0.1:7897`（常见本地代理端口如 7897、7890，若使用 v2rayN 可配 `10809`；默认仅海外引擎走代理，国内引擎直连）<br/>• **自定义地址**：`PROXY_URL=http://127.0.0.1:10809`<br/>• **自选引擎**：`PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` 或全部引擎走代理 `PROXY_URL=";all"` |
+| `FAKE_IP_CIDRS` | `198.18.0.0/15` | Fake-IP 虚拟网段白名单，避免误触发 SSRF 本地私网地址拦截 |
 | `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` 模拟的现代浏览器 TLS/H2 指纹（如 `chrome_149`, `safari_18`） |
 | `IMPERSONATE_OS` | `windows` | 指纹模拟使用的操作系统平台（`windows`, `macos`, `linux`） |
 | `BING_IMPERSONATE` | `true` | 是否启用 Bing 的 Chrome TLS 指纹模拟（连续多次返回 0 条时会自动熔断降级为标准 HTTP） |
