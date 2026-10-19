@@ -3,11 +3,8 @@ import { SearchResult } from '../../types.js';
 import { AppConfig } from '../../config.js';
 import { metrics } from '../metrics.js';
 import { AppError, isRetryableError, extractErrorStatus, extractErrorCode, extractErrorHint, extractErrorDetails } from '../errors.js';
-import {
-    Semaphore,
-    SearchEngineExecutorMap,
-    SearchExecutionFailure
-} from './searchService.js';
+import { Semaphore } from '../../utils/concurrency.js';
+import type { SearchEngineExecutorMap, SearchExecutionFailure } from './searchTypes.js';
 import { recordEngineSuccess, tripEngineCircuit } from './engineCircuitBreaker.js';
 
 /**

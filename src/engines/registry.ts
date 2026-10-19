@@ -17,23 +17,13 @@ import { searchHackerNews } from './hackernews/hackernews.js';
 import { searchArxiv } from './arxiv/arxiv.js';
 import { searchGrepApp } from './code/grepApp.js';
 
-import type { RequestContext } from '../core/requestContext.js';
+import type {
+    SearchExecutionContext,
+    SearchEngineExecutor,
+    SearchEngineExecutorMap
+} from '../core/search/searchTypes.js';
 
-export type SearchExecutionContext = {
-    searchMode?: AppConfig['searchMode'];
-    signal?: AbortSignal;
-    timeRange?: 'day' | 'week' | 'month' | 'year';
-    site?: string[];
-    requestContext?: RequestContext;
-};
-
-export type SearchEngineExecutor = (
-    query: string,
-    limit: number,
-    context?: SearchExecutionContext
-) => Promise<SearchResult[]>;
-
-export type SearchEngineExecutorMap = Partial<Record<string, SearchEngineExecutor>>;
+export type { SearchExecutionContext, SearchEngineExecutor, SearchEngineExecutorMap };
 
 export const SUPPORTED_SEARCH_ENGINES = [
     'baidu',

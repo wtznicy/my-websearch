@@ -6,12 +6,8 @@ import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { metrics } from '../metrics.js';
 import { AppError, extractErrorCode, extractErrorDetails, extractErrorStatus, isAppError } from '../errors.js';
 import { SUPPORTED_SEARCH_ENGINES, ENGINE_REGISTRY } from './searchEngines.js';
-import {
-    SearchEngineExecutorMap,
-    SearchExecutionFailure,
-    mergeSearchResults,
-    isPlaceholderResult
-} from './searchService.js';
+import type { SearchEngineExecutorMap, SearchExecutionFailure } from './searchTypes.js';
+import { mergeSearchResults, isPlaceholderResult } from './mergeResults.js';
 import { matchesSiteDomains } from '../../engines/bing/bing.js';
 import {
     buildHintedMessage,

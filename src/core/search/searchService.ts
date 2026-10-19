@@ -18,6 +18,17 @@ import { executeCascade } from './cascadeExecutor.js';
 import { normalizePublishedDate, isDateWithinTimeRange, TimeRange } from '../../utils/dateNormalizer.js';
 import { runInlineDiagnostics, InlineDiagnostics } from '../../utils/networkDiagnostics.js';
 import { RequestContext, createRequestContext } from '../requestContext.js';
+import { Semaphore } from '../../utils/concurrency.js';
+import type {
+    SearchExecutionContext,
+    SearchEngineExecutor,
+    SearchEngineExecutorMap,
+    SearchExecutionFailure
+} from './searchTypes.js';
+import { normalizeResultUrl, isPlaceholderResult, mergeSearchResults } from './mergeResults.js';
+
+export { Semaphore, normalizeResultUrl, isPlaceholderResult, mergeSearchResults };
+export type { SearchExecutionContext, SearchEngineExecutor, SearchEngineExecutorMap, SearchExecutionFailure };
 
 export {
     isRetryableEngineError,
@@ -28,143 +39,12 @@ export {
     matchesSiteDomains
 };
 
-// ---------------------------------------------------------------------------
-// 简单信号量：限制并发搜索数（支持队列上限、排队超时与 AbortSignal 取消）
-// ---------------------------------------------------------------------------
-
-type SemaphoreWaiter = {
-    resolve: () => void;
-    reject: (error: Error) => void;
-    timer?: ReturnType<typeof setTimeout>;
-    cleanupAbort?: () => void;
-};
-
-export class Semaphore {
-    private permits: number;
-    private readonly maxQueueSize: number;
-    private waitQueue: SemaphoreWaiter[] = [];
-
-    constructor(permits: number, maxQueueSize = Math.max(16, permits * 4)) {
-        this.permits = permits;
-        this.maxQueueSize = maxQueueSize;
-    }
-
-    async acquire(deadlineAt?: number, signal?: AbortSignal): Promise<void> {
-        if (signal?.aborted) {
-            throw signal.reason instanceof Error
-                ? signal.reason
-                : new AppError({ code: 'aborted', retryable: false, message: 'Aborted while acquiring concurrency slot' });
-        }
-        if (this.permits > 0) {
-            this.permits -= 1;
-            return;
-        }
-        if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
-            throw new AppError({
-                code: 'network_timeout',
-                retryable: true,
-                message: 'Search deadline exhausted before acquiring concurrency slot'
-            });
-        }
-        if (this.waitQueue.length >= this.maxQueueSize) {
-            throw new AppError({
-                code: 'queue_full',
-                retryable: true,
-                message: `Search concurrency queue is full (max ${this.maxQueueSize} waiting requests)`
-            });
-        }
-
-        return new Promise<void>((resolve, reject) => {
-            const waiter: SemaphoreWaiter = {
-                resolve: () => {
-                    if (waiter.timer) {
-                        clearTimeout(waiter.timer);
-                    }
-                    waiter.cleanupAbort?.();
-                    resolve();
-                },
-                reject: (err: Error) => {
-                    if (waiter.timer) {
-                        clearTimeout(waiter.timer);
-                    }
-                    waiter.cleanupAbort?.();
-                    reject(err);
-                }
-            };
-
-            if (signal) {
-                const onAbort = () => {
-                    const idx = this.waitQueue.indexOf(waiter);
-                    if (idx !== -1) {
-                        this.waitQueue.splice(idx, 1);
-                    }
-                    waiter.reject(
-                        signal.reason instanceof Error
-                            ? signal.reason
-                            : new AppError({ code: 'aborted', retryable: false, message: 'Aborted while waiting in concurrency queue' })
-                    );
-                };
-                signal.addEventListener('abort', onAbort, { once: true });
-                waiter.cleanupAbort = () => signal.removeEventListener('abort', onAbort);
-            }
-
-            if (deadlineAt !== undefined) {
-                const remainingMs = Math.max(0, deadlineAt - Date.now());
-                waiter.timer = setTimeout(() => {
-                    const idx = this.waitQueue.indexOf(waiter);
-                    if (idx !== -1) {
-                        this.waitQueue.splice(idx, 1);
-                    }
-                    waiter.reject(new AppError({
-                        code: 'network_timeout',
-                        retryable: true,
-                        message: `Search timed out after waiting ${remainingMs}ms in concurrency queue`
-                    }));
-                }, remainingMs);
-            }
-
-            this.waitQueue.push(waiter);
-        });
-    }
-
-    release(): void {
-        const next = this.waitQueue.shift();
-        if (next) {
-            next.resolve();
-        } else {
-            this.permits += 1;
-        }
-    }
-}
-
 // 全局并发限制（0 = 不限制）
 let globalSemaphore: Semaphore | null = null;
 
 export function configureGlobalConcurrencyLimit(maxConcurrent: number, maxQueueSize?: number): void {
     globalSemaphore = maxConcurrent > 0 ? new Semaphore(maxConcurrent, maxQueueSize) : null;
 }
-
-export type SearchExecutionContext = {
-    searchMode?: AppConfig['searchMode'];
-    signal?: AbortSignal;
-    timeRange?: TimeRange;
-    site?: string[];
-    requestContext?: RequestContext;
-};
-
-export type SearchEngineExecutor = (query: string, limit: number, context?: SearchExecutionContext) => Promise<SearchResult[]>;
-export type SearchEngineExecutorMap = Partial<Record<string, SearchEngineExecutor>>;
-
-export type SearchExecutionFailure = {
-    engine: string;
-    code: 'engine_error' | 'unsupported_engine' | 'no_results' | 'circuit_open';
-    errorCode?: string;
-    status?: number;
-    hint?: string;
-    details?: Record<string, unknown>;
-    message: string;
-    retryable?: boolean;
-};
 
 export type SearchOutcome = 'ok' | 'degraded' | 'empty' | 'failed';
 
@@ -289,96 +169,6 @@ function resolveSearchModeOverride(searchMode: AppConfig['searchMode'] | undefin
     return searchMode === 'auto' ? undefined : searchMode;
 }
 
-// ---------------------------------------------------------------------------
-// 跨引擎结果融合
-// ---------------------------------------------------------------------------
-
-/**
- * 计算结果的规范化 URL 键，用于跨引擎去重。
- * 兼容常见的无歧义追踪参数（utm_*、fbclid、gclid、msclkid、ops_request_misc 等）造成的"同页不同 URL"。
- * 注意：不全局剥离 `ref`（可能是 Git 分支/标签或业务路由参数）。
- */
-export function normalizeResultUrl(url: string): string {
-    try {
-        const parsed = new URL(url);
-        parsed.hash = '';
-        const host = parsed.hostname.toLowerCase();
-        const isKnownSpmHost = /(^|\.)(csdn\.net|juejin\.cn|bilibili\.com|aliyun\.com|github\.com|gitee\.com|zhihu\.com)$/i.test(host);
-        for (const key of [...parsed.searchParams.keys()]) {
-            if (key.startsWith('utm_') || key === 'fbclid' || key === 'gclid' || key === 'msclkid') {
-                parsed.searchParams.delete(key);
-                continue;
-            }
-            if ((key === 'spm' || key === 'ops_request_misc' || key === 'request_id' || key === 'biz_id') && isKnownSpmHost) {
-                parsed.searchParams.delete(key);
-                continue;
-            }
-            if (key === 'tab' && (host === 'github.com' || host === 'gitee.com')) {
-                parsed.searchParams.delete(key);
-            }
-        }
-        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-            parsed.protocol = 'https:';
-            parsed.hostname = host.startsWith('www.') ? host.slice(4) : host;
-            if (parsed.pathname === '/') {
-                parsed.pathname = '';
-            }
-        }
-        return parsed.toString();
-    } catch {
-        return url.trim();
-    }
-}
-
-/**
- * 空描述占位结果：description 无实质内容（空串或纯占位符号 "..." / "…" / "-"）
- * 且 title 过短（<10 字符）时，对 LLM 没有信息量（如 "YouTube" + "..." 这类卡片占位），
- * 属于噪音，融合后过滤掉。
- */
-export function isPlaceholderResult(result: SearchResult): boolean {
-    const description = (result.description ?? '').trim();
-    const hasSubstantiveDescription = description.length > 0 && !/^[\s.…·-]*$/.test(description);
-    if (hasSubstantiveDescription) {
-        return false;
-    }
-    const title = (result.title ?? '').trim();
-    const hasSubstantiveTitle = title.length > 0 && !/^[\s.…·-]*$/.test(title);
-    if (!hasSubstantiveTitle) {
-        return true;
-    }
-    return title.length < 10;
-}
-
-/**
- * 跨引擎融合：按规范化 URL 去重，并按"被多少个引擎命中"加权排序。
- * - 命中引擎数越多，排名越靠前（多数引擎认为相关 => 更可信）
- * - 同引擎内的重复 URL 只计一次引擎（engineHits 是跨引擎共识，不是出现次数）
- * - 同分时保留先到的引擎结果（保持原始顺序稳定）
- * - 去重结果保留先到的引擎（source / engine 字段），不合并多引擎来源
- */
-export function mergeSearchResults(engineResults: SearchResult[][]): SearchResult[] {
-    const seen = new Map<string, { result: SearchResult; engines: Set<string>; order: number }>();
-    let order = 0;
-
-    for (const results of engineResults) {
-        for (const result of results) {
-            const key = normalizeResultUrl(result.url);
-            const existing = seen.get(key);
-            if (existing) {
-                existing.engines.add(result.engine);
-            } else {
-                seen.set(key, { result, engines: new Set([result.engine]), order });
-                order += 1;
-            }
-        }
-    }
-
-    return [...seen.values()]
-        .sort((a, b) => b.engines.size - a.engines.size || a.order - b.order)
-        .map(({ result, engines }) => (engines.size > 1 ? { ...result, engineHits: engines.size } : result));
-}
-
-// ---------------------------------------------------------------------------
 // TTL 缓存
 // ---------------------------------------------------------------------------
 

@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { SearchResult } from '../../types.js';
-import { SearchExecutionContext } from '../registry.js';
+import type { SearchExecutionContext } from '../../core/search/searchTypes.js';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 import { AppError, isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';

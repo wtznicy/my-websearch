@@ -71,6 +71,15 @@ describe('assertPublicHttpUrlResolved 代理模式下的私网判定', () => {
         await expect(assertPublicHttpUrlResolved('http://internal.example.com/secret')).rejects.toThrow(/private or local network/i);
     });
 
+    it('USE_PROXY=true 时同时解析到 0.0.0.0 与 127.0.0.1 仍应拦截（黑洞早退回归）', async () => {
+        setEnv({ USE_PROXY: 'true', PROXY_URL: 'http://127.0.0.1:7890', FAKE_IP_CIDRS: '' });
+        const { assertPublicHttpUrlResolved } = await loadUrlSafety({
+            'mixed.example.com': ['0.0.0.0', '127.0.0.1']
+        });
+
+        await expect(assertPublicHttpUrlResolved('http://mixed.example.com/secret')).rejects.toThrow(/private or local network/i);
+    });
+
     it('USE_PROXY=true 时解析到内网段（10.x / 169.254）同样拦截', async () => {
         setEnv({ USE_PROXY: 'true', PROXY_URL: 'http://127.0.0.1:7890', FAKE_IP_CIDRS: '' });
         const { assertPublicHttpUrlResolved } = await loadUrlSafety({
