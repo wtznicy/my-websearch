@@ -6,7 +6,7 @@ version_note: Prefer local CLI/daemon onboarding and retrieval when available, w
 allowed-tools:
   - search
   - fetchWebContent
-  - fetchGithubReadme
+  - fetchGithubContent
 ---
 
 # Open WebSearch
@@ -15,7 +15,7 @@ Use this as the single user-facing entry skill for `my-websearch`.
 
 Assumption:
 - The preferred low-friction path is a working local `my-websearch` CLI/daemon setup.
-- A workspace that already exposes the `my-websearch` MCP tools such as `search`, `fetchWebContent`, and `fetchGithubReadme` is also a valid path and should continue to work.
+- A workspace that already exposes the `my-websearch` MCP tools such as `search`, `fetchWebContent`, and `fetchGithubContent` is also a valid path and should continue to work.
 - If neither path is available, treat that as a missing `my-websearch` capability in the current workspace, not as a broken skill.
 - If the workspace tool exposure or current MCP configuration differs from this skill, trust the actually available tools and current workspace configuration.
 
@@ -73,7 +73,7 @@ When capability is missing, follow this order:
 - First priority: if the user gives a specific public URL, fetch that URL directly instead of searching first.
 - Second priority: if the user asks for current information, broad discovery, or comparisons, start with a single focused `search`.
 - Third priority: if a search result looks promising but the snippet is insufficient, use `fetchWebContent` on that result URL.
-- Repository priority: if the target is a GitHub repository, prefer `fetchGithubReadme` over generic page fetching.
+- Repository priority: if the target is a GitHub repository, prefer `fetchGithubContent` over generic page fetching.
 - Escalation rule: only move to multi-engine cross-checking when one focused pass is insufficient.
 
 ## Engine selection

@@ -1,8 +1,9 @@
 import * as crypto from 'node:crypto';
 import { Worker } from 'node:worker_threads';
+import { cpus } from 'node:os';
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { config, engineShouldUseProxy } from '../../config.js';
-import { buildAxiosRequestOptions, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { buildAxiosRequestOptions, isNetworkLayerError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { getSystemProxyFallbackUrl } from '../../utils/systemProxy.js';
 
 /**
@@ -26,9 +27,13 @@ import { getSystemProxyFallbackUrl } from '../../utils/systemProxy.js';
 const STARTPAGE_BASE_URL = 'https://www.startpage.com';
 const ANUBIS_PASS_PATH = '/.within.website/x/cmd/anubis/api/pass-challenge';
 /** PoW 迭代上限（difficulty 正常为 4~5；被标记 IP 升至 6+ 时直接跳过） */
-const POW_MAX_NONCE = 20_000_000;
-/** 默认内联求解的最大 difficulty（difficulty=6 期望 16.7M 次哈希 ≈ 16s，超出单引擎预算） */
-export const ANUBIS_DEFAULT_MAX_POW_DIFFICULTY = 5;
+const POW_MAX_NONCE = 48_000_000;
+/**
+ * 默认内联求解的最大 difficulty。
+ * difficulty=6 期望约 16.7M 次哈希；单核约 16s，多 Worker 分片后约 4–6s，
+ * 因此默认放宽到 6（>=7 的期望成本仍在数十秒级，继续跳过）。
+ */
+export const ANUBIS_DEFAULT_MAX_POW_DIFFICULTY = 6;
 
 export function getMaxAnubisPowDifficulty(): number {
     const raw = process.env.ANUBIS_MAX_POW_DIFFICULTY?.trim();
@@ -66,10 +71,10 @@ export function solveAnubisPow(randomData: string, difficulty: number): { nonce:
 const ANUBIS_POW_WORKER_SCRIPT = `
 const { parentPort, workerData } = require('node:worker_threads');
 const crypto = require('node:crypto');
-const { randomData, difficulty, maxNonce } = workerData;
+const { randomData, difficulty, maxNonce, start = 0, stride = 1 } = workerData;
 const prefix = '0'.repeat(Math.max(1, Math.min(Math.floor(difficulty) || 1, 8)));
 let found = null;
-for (let nonce = 0; nonce < maxNonce; nonce += 1) {
+for (let nonce = start; nonce < maxNonce; nonce += stride) {
     const hash = crypto.createHash('sha256').update(randomData + nonce).digest('hex');
     if (hash.startsWith(prefix)) {
         found = { nonce, hash };
@@ -92,9 +97,22 @@ export function solveAnubisPowAsync(
     if (signal?.aborted) {
         return Promise.resolve(null);
     }
+
+    // difficulty 6 期望 16.7M 次哈希；单核约 16s（超出单引擎预算）。
+    // 把 nonce 空间按 stride 分给多个 Worker，4 核约 4–6s 即可完成。
+    const workerCount = Math.max(1, Math.min(4, cpus().length));
+
     return new Promise((resolve) => {
         let settled = false;
-        let worker: Worker | undefined;
+        let expected = 0;
+        let completed = 0;
+        const workers: Worker[] = [];
+
+        const terminateAll = () => {
+            for (const worker of workers) {
+                void worker.terminate().catch(() => undefined);
+            }
+        };
         const finish = (result: { nonce: number; hash: string } | null) => {
             if (settled) {
                 return;
@@ -103,43 +121,58 @@ export function solveAnubisPowAsync(
             if (signal && onAbort) {
                 signal.removeEventListener('abort', onAbort);
             }
+            terminateAll();
             resolve(result);
         };
-        const onAbort = () => {
-            if (worker) {
-                void worker.terminate().catch(() => undefined);
-            }
-            finish(null);
-        };
+        const onAbort = () => finish(null);
 
         try {
-            worker = new Worker(ANUBIS_POW_WORKER_SCRIPT, {
-                eval: true,
-                workerData: {
-                    randomData,
-                    difficulty,
-                    maxNonce: POW_MAX_NONCE
-                }
-            });
+            for (let index = 0; index < workerCount; index += 1) {
+                const worker = new Worker(ANUBIS_POW_WORKER_SCRIPT, {
+                    eval: true,
+                    workerData: {
+                        randomData,
+                        difficulty,
+                        maxNonce: POW_MAX_NONCE,
+                        start: index,
+                        stride: workerCount
+                    }
+                });
+                workers.push(worker);
+                expected += 1;
+                let workerDone = false;
+                const noteDone = () => {
+                    if (workerDone || settled) {
+                        return;
+                    }
+                    workerDone = true;
+                    completed += 1;
+                    if (completed >= expected) {
+                        finish(null);
+                    }
+                };
+                worker.once('message', (msg: { nonce: number; hash: string } | null) => {
+                    if (msg) {
+                        finish(msg);
+                    } else {
+                        noteDone();
+                    }
+                });
+                worker.once('error', noteDone);
+                worker.once('exit', noteDone);
+            }
         } catch {
             // 极端受限环境无法创建 Worker 时回退同步求解（仅在 <= maxDifficulty 时调用）
-            finish(solveAnubisPow(randomData, difficulty));
-            return;
+            terminateAll();
+            if (workers.length === 0) {
+                finish(solveAnubisPow(randomData, difficulty));
+                return;
+            }
         }
 
         if (signal) {
             signal.addEventListener('abort', onAbort, { once: true });
         }
-
-        worker.once('message', (msg: { nonce: number; hash: string } | null) => {
-            finish(msg ?? null);
-        });
-        worker.once('error', () => {
-            finish(null);
-        });
-        worker.once('exit', () => {
-            finish(null);
-        });
     });
 }
 
@@ -204,10 +237,35 @@ async function requestStartpageAnubisStep(
 ): Promise<AxiosResponse> {
     const shouldUseProxy = (config.useProxy && Boolean(config.proxyUrl) && engineShouldUseProxy('startpage'))
         || Boolean(getSystemProxyFallbackUrl('startpage'));
-    if (shouldUseProxy) {
-        return requestWithSafeRedirects('GET', url, buildOptions(false), label);
+    const call = (useProxy: boolean): Promise<AxiosResponse> => useProxy
+        ? requestWithSafeRedirects('GET', url, buildOptions(false), label)
+        : requestDirectFirst('GET', url, buildOptions, label);
+
+    const isRetryable = (error: unknown): boolean => {
+        const message = error instanceof Error ? error.message : String(error);
+        const status = (error as { response?: { status?: number } })?.response?.status;
+        // socket hang up / 超时 + Anubis 偶发 5xx，都值得在同一步重试；
+        // 5xx 往往是上游瞬态（挑战已算完却提交失败），不应让整条 PoW 白算。
+        return isNetworkLayerError(message) || (typeof status === 'number' && status >= 500);
+    };
+
+    try {
+        return await call(shouldUseProxy);
+    } catch (error) {
+        if (!isRetryable(error)) {
+            throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        try {
+            return await call(shouldUseProxy);
+        } catch (retryError) {
+            if (!shouldUseProxy || !isRetryable(retryError)) {
+                throw retryError;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            return await call(false);
+        }
     }
-    return requestDirectFirst('GET', url, buildOptions, label);
 }
 
 let inflightAnubisWarmup: Promise<AnubisSession | null> | null = null;

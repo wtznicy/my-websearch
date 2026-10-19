@@ -32,6 +32,7 @@ function readServerVersion(): string {
 const COMMANDS_REQUIRING_RUNTIME = new Set([
     'search',
     'fetch-web',
+    'fetch-github-content',
     'fetch-github-readme',
     'fetch-csdn',
     'fetch-juejin',
@@ -44,6 +45,7 @@ const COMMANDS_REQUIRING_RUNTIME = new Set([
 
 const MCP_TO_CLI_COMMAND_HINTS: Record<string, string> = {
     fetchWebContent: 'fetch-web',
+    fetchGithubContent: 'fetch-github-content',
     fetchGithubReadme: 'fetch-github-readme',
     fetchCsdnArticle: 'fetch-csdn',
     fetchJuejinArticle: 'fetch-juejin',
@@ -79,7 +81,8 @@ function formatCliHelp(): string {
         '    Clear the search TTL cache (engine just recovered, stale results cached, etc.).',
         '  my-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--format text|markdown] [--daemon-url URL] [--spawn] [--json]',
         '    Fetch readable page content. `--readability` enables Mozilla Readability extraction; `--include-links` returns preserved article links; `--raw` returns the raw response body; `--start-index N` continues reading from character offset N; `--format` selects output format (text or markdown).',
-        '  my-websearch fetch-github-readme <url> [--daemon-url URL] [--spawn] [--json]',
+        '  my-websearch fetch-github-content <url> [--daemon-url URL] [--spawn] [--json]',
+        '    Read GitHub/Gitee README, one source file (/blob/), directory tree (/tree/), Issue, or PR. Alias: fetch-github-readme.',
         '  my-websearch fetch-csdn <url> [--daemon-url URL] [--spawn] [--json]',
         '  my-websearch fetch-juejin <url> [--daemon-url URL] [--spawn] [--json]',
         '  my-websearch resolve-library-id <name> [--query QUERY] [--limit N] [--daemon-url URL] [--spawn] [--json]',
@@ -104,7 +107,7 @@ function formatCliHelp(): string {
         '  - Bare `my-websearch` starts the MCP server compatibility path, not the recommended daemon path.',
         '  - MCP tool names differ from CLI commands. For example:',
         '      fetchWebContent -> fetch-web',
-        '      fetchGithubReadme -> fetch-github-readme',
+        '      fetchGithubContent -> fetch-github-content (alias: fetch-github-readme)',
         '      resolveLibraryId -> resolve-library-id',
         '      queryDocs -> query-docs'
     ].join('\n');
@@ -1456,7 +1459,7 @@ export async function runCli(
         }
     }
 
-    if (command === 'fetch-github-readme') {
+    if (command === 'fetch-github-readme' || command === 'fetch-github-content') {
         let transport: DaemonTransportArgs;
         let parsed: ParsedFetchGithubArgs;
         try {
@@ -1468,11 +1471,11 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     ErrorCode.INVALID_ARGUMENTS,
                     message,
-                    { hint: 'Use `my-websearch fetch-github-readme <repository-url> [--json]`.' }
+                    { hint: 'Use `my-websearch fetch-github-content <repository-url> [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: my-websearch fetch-github-readme <repository-url> [--json]');
+                io.stderr('Usage: my-websearch fetch-github-content <repository-url> [--json]');
             }
             return 1;
         }
@@ -1503,11 +1506,11 @@ export async function runCli(
                 if (parsed.json) {
                     io.stdout(JSON.stringify(createErrorEnvelope(
                         ErrorCode.NOT_FOUND,
-                        'README not found or repository does not exist',
-                        { hint: 'Verify the repository URL and default branch contents.' }
+                        'Content not found or repository/item does not exist',
+                        { hint: 'Use /blob/<ref>/<path> for a file, /tree/<ref>/<path> for a directory, /issues/<n>, or /pull/<n>; ref may be a branch, tag, or commit.' }
                     ), null, 2));
                 } else {
-                    io.stderr('README not found or repository does not exist');
+                    io.stderr('Content not found or repository/item does not exist');
                 }
                 return 1;
             }
@@ -1525,11 +1528,15 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : ErrorCode.INVALID_ARGUMENTS,
+                    isDaemonRequestError(error)
+                        ? getDaemonCliErrorCode(error)
+                        : (isAppError(error) ? error.code : ErrorCode.INVALID_ARGUMENTS),
                     message,
                     { hint: isDaemonRequestError(error)
                         ? getDaemonCliErrorHint(error)
-                        : 'Use a valid GitHub repository URL in HTTPS or SSH form.' }
+                        : (isAppError(error) && error.hint
+                            ? error.hint
+                            : 'Use a valid GitHub repository URL in HTTPS or SSH form.') }
                 ), null, 2));
             } else {
                 io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);

@@ -2,6 +2,36 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
+## [1.3.3] - 2026-10-19
+
+### Search Engine Reliability (Bing / Startpage / DuckDuckGo)
+- **Bing**: when the wreq impersonation path returns an empty array (HTTP 200 but no parsed results), it no longer short-circuits; it falls back to the axios SERP path. Five technical queries that previously returned 0 now all return results.
+- **Startpage**: Anubis PoW is split across up to 4 worker threads (difficulty 6 ≈ 3–12s), default max difficulty raised from 5 to 6, nonce cap raised from 20M to 48M, and Anubis steps retry on socket errors or transient 5xx. Two live runs succeeded in 8.8s / 11.9s without launching Playwright.
+- **DuckDuckGo**: root cause confirmed as exit-IP rate limiting (`anomalyDetectionBlock` from `d.js`); the engine now returns an actionable hint to rotate the proxy node / wait. No client-side bypass is available for this upstream IP ban.
+- **Adaptive circuit breaker**: HTTP 429 / 202 / `bot_challenge` now trip the engine circuit with a **30s base cooldown**; consecutive failures back off 60s → 120s → 240s → 300s and any successful call resets the counter. Configurable via `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` / `ENGINE_CIRCUIT_MAX_COOLDOWN_MS`. Replaces the previous fixed 5-minute block, which made a transient DDG 202 prohibitively expensive.
+
+### First-Use Discoverability & GitHub 404 Guidance
+- **Tool rename**: default MCP tool name changed from `fetchGithubReadme` to `fetchGithubContent`. Restore the old name with `MCP_TOOL_FETCH_GITHUB_NAME=fetchGithubReadme`; CLI adds `fetch-github-content` (alias: `fetch-github-readme`); daemon serves both endpoints.
+- **Tool description**: now includes a concrete `/blob/` example, ref semantics (branch/tag/commit), and the "one file or directory per call, not a repo clone" boundary — still within the 250-character budget.
+- **Teaching 404**: missing `/blob/` paths now return sibling file candidates from the GitHub Contents API plus a ready-to-use `/blob/...` example; missing `/tree/` paths return a ref/path hint. The hint is surfaced by MCP, `fetchWebContent`, CLI, and daemon.
+- **Tests**: the description-budget test asserts the new name and discoverability phrases; added a missing-blob sibling-candidate test.
+
+### Gitee Content Parity (Blob / Tree / Issue / PR)
+- `fetchGithubContent` now supports Gitee beyond README: source files (`/blob/<ref>/<path>`), directory trees (`/tree/<ref>/<path>`), issues (`/issues/<id>`, including alphanumeric IDs such as `IDLSUI`), and pull requests (`/pulls/<n>`).
+- Gitee files use the Contents API (base64) with a raw-download fallback for large files; trees reuse the same ASCII renderer and 150-item cap; issues include labels/comments; PRs include branch, change totals, and changed files.
+- Added optional `GITEE_TOKEN` (higher API limits / private repos). Missing Gitee files return sibling candidates, matching the GitHub teaching-404 behavior.
+- Shared formatters moved to `engines/github/format.ts` (re-exported from `github.ts`) to avoid host-adapter cycles; fixed the self-referencing subtree entry and directory size rendering for both GitHub and Gitee.
+- Tests: 4 new Gitee parity cases (blob/tree/issue/PR).
+
+### Code Search Engine (grep.app) Anti-Bot & SSRF Fix
+- **maxRedirects: 0 & Checkpoint Detection**: Configured `maxRedirects: 0` and `stopOnRedirect: true` for grep.app requests to prevent following 3xx redirects to `www.google.com/sorry/index`.
+- **SSRF False-Positive Prevention**: Avoids resolving `www.google.com` (which previously triggered `DNS lookup 2001::1 is not allowed` in IPv6/TUN environments).
+- **Accurate Error Mapping**: Identifies 3xx/Google sorry redirects as non-retryable `bot_challenge` structured errors rather than crashing with network/SSRF errors.
+- **Vercel 429 Challenge Split**: Reads `x-vercel-mitigated: challenge`; challenge responses map to non-retryable `bot_challenge`, plain 429 to retryable `rate_limited`, each with an actionable hint.
+- **TLS Fingerprint Bypass**: grep.app/Vercel rejects plain Node/axios requests (429) even with correct headers; the engine now prefers the existing wreq-js Chrome TLS/HTTP2 session, falling back to the SSRF-guarded direct/proxy request only on network-layer failures. Added the `Accept-Language` browser header as well.
+- **Current API Schema**: Parses grep.app's flat `repo`/`path`/`branch` fields and turns the HTML `highlight-table` snippet into line-numbered plain text (old `{ raw }` shape still supported); result URLs now use the real branch.
+- **Cleanup**: Removed the redundant `trustedStaticHost` flag and the unused `grep.app` entry in `TRUSTED_INSECURE_HOSTS`; `maxRedirects: 0` remains explicit.
+
 ## [1.3.2] - 2026-10-18
 
 ### 🚀 Major Improvements & New Features

@@ -5,6 +5,10 @@ import { config } from '../../config.js';
 import { buildAxiosRequestOptions, isNetworkLayerError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { detectSystemProxy } from '../../utils/systemProxy.js';
 import { AppError } from '../../core/errors.js';
+import { detectLanguageFromPath, formatSourceFile, renderAsciiTree } from './format.js';
+import { fetchGiteeBlob, fetchGiteeIssue, fetchGiteePullRequest, fetchGiteeTree } from './gitee.js';
+
+export { detectLanguageFromPath, formatSourceFile, renderAsciiTree };
 
 // Avoid the GitHub README API here because anonymous API requests in this
 // environment hit rate limits quickly; raw URLs are more stable for this tool.
@@ -90,7 +94,7 @@ type ReadmeFetchOutcome =
     // 'invalid' 是**内容级**失败（HTTP 200 但内容为空/无效）：不能当作"域名不可达"，
     // 否则同一 host 下的后续候选文件名（README.markdown 等）会被整轮跳过
     | { status: 'invalid'; message: string }
-    | { status: 'error'; message: string };
+    | { status: 'error'; message: string; httpStatus?: number };
 
 /** 构造 README 抓取请求选项；forceDirect=true 时直连（raw 直连额外用可信 host 语义） */
 function buildReadmeOptions(label: string, forceDirect: boolean, timeout: number) {
@@ -200,7 +204,7 @@ async function fetchReadmeSource(url: string, label: string, timeout: number): P
             console.error(`Network error fetching README from ${label}: ${url}:`, message);
         }
 
-        return { status: 'error', message };
+        return { status: 'error', message, ...(status !== undefined ? { httpStatus: status } : {}) };
     }
 }
 
@@ -384,80 +388,23 @@ async function fetchReadme(owner: string, repo: string, host: RepoHost): Promise
     return null;
 }
 
-/**
- * 从文件路径推断 Markdown 围栏代码块语言标识
- */
-export function detectLanguageFromPath(filePath: string): string {
-    const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-    const map: Record<string, string> = {
-        ts: 'typescript',
-        tsx: 'typescript',
-        js: 'javascript',
-        jsx: 'javascript',
-        mjs: 'javascript',
-        cjs: 'javascript',
-        json: 'json',
-        jsonc: 'json',
-        py: 'python',
-        rs: 'rust',
-        go: 'go',
-        java: 'java',
-        c: 'c',
-        cpp: 'cpp',
-        cc: 'cpp',
-        h: 'c',
-        hpp: 'cpp',
-        cs: 'csharp',
-        rb: 'ruby',
-        php: 'php',
-        swift: 'swift',
-        kt: 'kotlin',
-        kts: 'kotlin',
-        sh: 'bash',
-        bash: 'bash',
-        zsh: 'bash',
-        yaml: 'yaml',
-        yml: 'yaml',
-        md: 'markdown',
-        markdown: 'markdown',
-        mdx: 'mdx',
-        toml: 'toml',
-        sql: 'sql',
-        html: 'html',
-        css: 'css',
-        scss: 'scss',
-        less: 'less',
-        vue: 'vue',
-        svelte: 'svelte',
-        graphql: 'graphql',
-        gql: 'graphql',
-        proto: 'protobuf',
-        xml: 'xml',
-        dockerfile: 'dockerfile',
-        makefile: 'makefile'
-    };
-    return map[ext] || '';
-}
-
-function formatSourceFile(owner: string, repo: string, branch: string, filePath: string, content: string): string {
-    const isMd = /\.mdx?$/i.test(filePath) || /\.markdown$/i.test(filePath);
-    if (isMd) {
-        return `# File: \`${filePath}\` (${owner}/${repo} @ ${branch})\n\n${content}`;
-    }
-    const lang = detectLanguageFromPath(filePath);
-    return `# File: \`${filePath}\` (${owner}/${repo} @ ${branch})\n\n\`\`\`${lang}\n${content}\n\`\`\``;
-}
+type BlobFetchOutcome =
+    | { status: 'ok'; content: string }
+    | { status: 'notfound' }
+    | { status: 'error'; message: string };
 
 /**
  * 从 GitHub 仓库抓取指定源码文件（支持 blob 链接）。
  * 优先 raw.githubusercontent.com，不可达时通过 jsDelivr CDN 兜底。
+ * 区分 404 与网络错误：404 时上层可返回“该目录下有哪些文件”的教学式提示，
+ * 避免模型在路径/ref 写错时只拿到一句无法行动的 "Content not found"。
  */
 async function fetchGithubBlob(
     owner: string,
     repo: string,
     branch: string,
     filePath: string
-): Promise<string | null> {
+): Promise<BlobFetchOutcome> {
     const ownerEnc = encodeURIComponent(owner.trim());
     const repoEnc = encodeURIComponent(repo.trim());
     const cleanPath = filePath.split('/').map(encodeURIComponent).join('/');
@@ -466,78 +413,128 @@ async function fetchGithubBlob(
     const rawUrl = `${RAW_GITHUB_BASE}/${ownerEnc}/${repoEnc}/${branchEnc}/${cleanPath}`;
     const rawResult = await fetchReadmeSource(rawUrl, 'raw', 15000);
     if (rawResult.status === 'ok') {
-        return formatSourceFile(owner, repo, branch, filePath, rawResult.content);
+        return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, rawResult.content) };
     }
 
     // jsDelivr 兜底
     const cdnUrl = `${JSDELIVR_CDN_BASE}/${ownerEnc}/${repoEnc}@${branchEnc}/${cleanPath}`;
     const cdnResult = await fetchReadmeSource(cdnUrl, 'jsDelivr', 15000);
     if (cdnResult.status === 'ok') {
-        return formatSourceFile(owner, repo, branch, filePath, cdnResult.content);
+        return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, cdnResult.content) };
     }
 
-    return null;
+    const rawNotFound = rawResult.status === 'notfound'
+        || (rawResult.status === 'error' && rawResult.httpStatus === 404);
+    const cdnNotFound = cdnResult.status === 'notfound'
+        || (cdnResult.status === 'error' && cdnResult.httpStatus === 404);
+    if (rawNotFound || cdnNotFound) {
+        return { status: 'notfound' };
+    }
+
+    const message = rawResult.status === 'error'
+        ? rawResult.message
+        : (cdnResult.status === 'error' ? cdnResult.message : 'empty or invalid response');
+    return { status: 'error', message };
 }
 
 /**
- * 渲染小巧精美的 ASCII 目录树
+ * 列出目标文件所在目录下的文件名（best-effort）。
+ * 只在 404 教学提示路径调用；GitHub Contents API 匿名额度有限，失败时静默返回空数组。
  */
-export function renderAsciiTree(items: Array<{ path: string; type: 'blob' | 'tree'; size?: number }>): string {
-    interface TreeNode {
-        name: string;
-        type: 'blob' | 'tree';
-        size?: number;
-        children: Map<string, TreeNode>;
-    }
-    const root: TreeNode = { name: '', type: 'tree', children: new Map() };
+async function fetchSiblingFileNames(
+    owner: string,
+    repo: string,
+    ref: string,
+    filePath: string
+): Promise<string[]> {
+    const dirPath = filePath.includes('/') ? filePath.slice(0, filePath.lastIndexOf('/')) : '';
+    const ownerEnc = encodeURIComponent(owner.trim());
+    const repoEnc = encodeURIComponent(repo.trim());
+    const refParam = encodeURIComponent(ref.trim());
+    const contentsPath = dirPath
+        ? `${dirPath.split('/').map(encodeURIComponent).join('/')}/`
+        : '';
+    const apiUrl = `https://api.github.com/repos/${ownerEnc}/${repoEnc}/contents/${contentsPath}?ref=${refParam}`;
 
-    for (const item of items) {
-        const parts = item.path.split('/').filter(Boolean);
-        let current = root;
-        for (let i = 0; i < parts.length; i++) {
-            const part = parts[i]!;
-            const isLast = i === parts.length - 1;
-            if (!current.children.has(part)) {
-                current.children.set(part, {
-                    name: part,
-                    type: isLast ? item.type : 'tree',
-                    size: isLast ? item.size : undefined,
-                    children: new Map()
-                });
-            }
-            current = current.children.get(part)!;
+    try {
+        const headers: Record<string, string> = {
+            'User-Agent': 'GitHub-Content-Fetcher/1.0',
+            'Accept': 'application/vnd.github.v3+json',
+            ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
+        };
+        const res = await requestDirectFirst('GET', apiUrl, (forceDirect) => ({
+            ...buildAxiosRequestOptions({ headers, timeout: 8000, forceDirect })
+        }), 'GitHub contents API');
+        if (res.status !== 200 || !Array.isArray(res.data)) {
+            return [];
         }
+        return (res.data as Array<{ name?: unknown; type?: unknown }>)
+            .filter((item) => item?.type === 'file' && typeof item.name === 'string')
+            .map((item) => item.name as string)
+            .slice(0, 12);
+    } catch {
+        return [];
     }
-
-    const lines: string[] = [];
-    function formatSize(bytes?: number): string {
-        if (typeof bytes !== 'number') return '';
-        if (bytes < 1024) return ` (${bytes} B)`;
-        if (bytes < 1024 * 1024) return ` (${(bytes / 1024).toFixed(1)} KB)`;
-        return ` (${(bytes / (1024 * 1024)).toFixed(1)} MB)`;
-    }
-
-    function traverse(node: TreeNode, prefix: string, isTail: boolean, isRoot: boolean) {
-        if (!isRoot) {
-            const icon = node.type === 'tree' ? '📁 ' : '📄 ';
-            const connector = isTail ? '└── ' : '├── ';
-            lines.push(`${prefix}${connector}${icon}${node.name}${formatSize(node.size)}`);
-        }
-        const children = Array.from(node.children.values());
-        children.sort((a, b) => {
-            if (a.type !== b.type) return a.type === 'tree' ? -1 : 1;
-            return a.name.localeCompare(b.name);
-        });
-
-        const newPrefix = isRoot ? '' : prefix + (isTail ? '    ' : '│   ');
-        for (let i = 0; i < children.length; i++) {
-            traverse(children[i]!, newPrefix, i === children.length - 1, false);
-        }
-    }
-
-    traverse(root, '', true, true);
-    return lines.join('\n');
 }
+
+/**
+ * 构造“文件不存在”的教学式错误：给出同目录候选文件，模型可直接改 URL 重试，
+ * 不必再猜路径或额外调用一次 tree。
+ */
+async function createMissingBlobError(
+    owner: string,
+    repo: string,
+    ref: string,
+    filePath: string
+): Promise<AppError> {
+    const dirPath = filePath.includes('/') ? filePath.slice(0, filePath.lastIndexOf('/')) : '';
+    const dirSuffix = dirPath ? `/${dirPath}` : '';
+    const treeUrl = `https://github.com/${owner}/${repo}/tree/${ref}${dirSuffix}`;
+    const siblings = await fetchSiblingFileNames(owner, repo, ref, filePath);
+
+    const requestedBase = filePath.split('/').pop() ?? filePath;
+    const pickClosestSibling = (names: string[]): string => {
+        const requested = requestedBase.toLowerCase();
+        let best = names[0]!;
+        let bestScore = Number.NEGATIVE_INFINITY;
+        for (const name of names) {
+            const lower = name.toLowerCase();
+            let prefix = 0;
+            while (prefix < lower.length && prefix < requested.length && lower[prefix] === requested[prefix]) {
+                prefix += 1;
+            }
+            const score = prefix * 10 - Math.abs(lower.length - requested.length);
+            if (score > bestScore) {
+                bestScore = score;
+                best = name;
+            }
+        }
+        return best;
+    };
+
+    let hint: string;
+    if (siblings.length > 0) {
+        const shown = siblings.slice(0, 8);
+        const exampleUrl = `https://github.com/${owner}/${repo}/blob/${ref}${dirSuffix}/${pickClosestSibling(siblings)}`;
+        hint = `文件不存在：${owner}/${repo}@${ref}${dirSuffix}/${filePath.split('/').pop() ?? filePath}。该目录下可读文件：${shown.join(', ')}${siblings.length > shown.length ? ` 等 ${siblings.length} 个` : ''}。示例 URL：${exampleUrl}；或先看目录：${treeUrl}。`;
+    } else {
+        hint = `文件不存在：${owner}/${repo}@${ref}${dirSuffix}/${filePath.split('/').pop() ?? filePath}。请确认 ref（分支/tag/commit）与路径；可先读取目录：${treeUrl}。`;
+    }
+
+    return new AppError({
+        code: 'not_found',
+        retryable: false,
+        status: 404,
+        engine: 'github',
+        message: `GitHub file not found: ${owner}/${repo}@${ref}/${filePath}`,
+        hint
+    });
+}
+
+type TreeFetchOutcome =
+    | { status: 'ok'; content: string }
+    | { status: 'notfound' }
+    | { status: 'error'; message: string };
 
 /**
  * 通过 GitHub Git Trees API 获取仓库目录树结构。
@@ -548,7 +545,7 @@ async function fetchGithubTree(
     repo: string,
     ref: string,
     dirPath?: string
-): Promise<string | null> {
+): Promise<TreeFetchOutcome> {
     const ownerEnc = encodeURIComponent(owner.trim());
     const repoEnc = encodeURIComponent(repo.trim());
     const refEnc = encodeURIComponent(ref.trim());
@@ -570,7 +567,7 @@ async function fetchGithubTree(
         }), 'GitHub Trees API');
 
         if (res.status === 404) {
-            return null;
+            return { status: 'notfound' };
         }
 
         const data = res.data as {
@@ -580,7 +577,7 @@ async function fetchGithubTree(
         };
 
         if (!data?.tree || !Array.isArray(data.tree) || data.tree.length === 0) {
-            return `# Directory Tree: ${owner}/${repo} @ ${ref}\n\n_Empty directory or no files found._`;
+            return { status: 'ok', content: `# Directory Tree: ${owner}/${repo} @ ${ref}\n\n_Empty directory or no files found._` };
         }
 
         let items = data.tree;
@@ -588,12 +585,19 @@ async function fetchGithubTree(
         if (normalizedDirPath) {
             const prefix = `${normalizedDirPath}/`;
             items = items
-                .filter((item) => item.path === normalizedDirPath || item.path.startsWith(prefix))
+                .filter((item) => item.path !== normalizedDirPath && item.path.startsWith(prefix))
                 .map((item) => ({
                     ...item,
-                    path: item.path.startsWith(prefix) ? item.path.slice(prefix.length) : item.path
+                    path: item.path.slice(prefix.length),
+                    size: item.type === 'blob' ? item.size : undefined
                 }))
                 .filter((item) => item.path.length > 0);
+        }
+
+        // 指定子目录在完整树里找不到，通常意味着路径写错（git 不跟踪空目录）；
+        // 返回 notfound 让上层给出 ref/路径提示。超大仓库返回 truncated 时不做此判断。
+        if (normalizedDirPath && items.length === 0 && !data.truncated) {
+            return { status: 'notfound' };
         }
 
         const totalItemsCount = items.length;
@@ -605,10 +609,11 @@ async function fetchGithubTree(
         const header = `# Directory Tree: ${owner}/${repo} @ ${ref}${normalizedDirPath ? ` (subpath: /${normalizedDirPath})` : ''}\n\nTotal items: ${totalItemsCount}${isCapped ? ` (showing first ${maxTreeItems})` : ''}\n\n`;
         const truncationNotice = isCapped ? `\n\n... and ${totalItemsCount - maxTreeItems} more items.` : '';
 
-        return `${header}\`\`\`\n${renderedTree}\n\`\`\`${truncationNotice}`;
+        return { status: 'ok', content: `${header}\`\`\`\n${renderedTree}\n\`\`\`${truncationNotice}` };
     } catch (error) {
-        console.error(`Failed to fetch tree for ${owner}/${repo} @ ${ref}:`, error instanceof Error ? error.message : String(error));
-        return null;
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`Failed to fetch tree for ${owner}/${repo} @ ${ref}:`, message);
+        return { status: 'error', message };
     }
 }
 
@@ -826,15 +831,66 @@ export async function fetchGithubContent(githubUrl: string): Promise<string | nu
 
     const trimmed = githubUrl.trim();
 
+    // 0. Gitee 与 GitHub 同款资源（blob / tree / issue / pull request）
+    const giteeBlobMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?gitee\.com\/([^\/\s]+)\/([^\/\s]+)\/blob\/([^\/\s]+)\/(.+)/i);
+    if (giteeBlobMatch && giteeBlobMatch[1] && giteeBlobMatch[2] && giteeBlobMatch[3] && giteeBlobMatch[4]) {
+        const owner = giteeBlobMatch[1];
+        const repo = giteeBlobMatch[2];
+        const ref = giteeBlobMatch[3];
+        const filePath = giteeBlobMatch[4].replace(/[?#].*$/, '');
+        console.error(`✅ Detected Gitee source file: ${owner}/${repo} @ ${ref}:${filePath}`);
+        return fetchGiteeBlob(owner, repo, ref, filePath);
+    }
+
+    const giteeTreeMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?gitee\.com\/([^\/\s]+)\/([^\/\s]+)\/tree\/([^\/\s]+)(?:\/(.+))?/i);
+    if (giteeTreeMatch && giteeTreeMatch[1] && giteeTreeMatch[2] && giteeTreeMatch[3]) {
+        const owner = giteeTreeMatch[1];
+        const repo = giteeTreeMatch[2];
+        const ref = giteeTreeMatch[3];
+        const dirPath = giteeTreeMatch[4]?.replace(/[?#].*$/, '') || undefined;
+        console.error(`✅ Detected Gitee directory tree: ${owner}/${repo} @ ${ref}${dirPath ? ` /${dirPath}` : ''}`);
+        return fetchGiteeTree(owner, repo, ref, dirPath);
+    }
+
+    const giteeIssueMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?gitee\.com\/([^\/\s]+)\/([^\/\s]+)\/issues\/([^\/?#\s]+)/i);
+    if (giteeIssueMatch && giteeIssueMatch[1] && giteeIssueMatch[2] && giteeIssueMatch[3]) {
+        const owner = giteeIssueMatch[1];
+        const repo = giteeIssueMatch[2];
+        const issueNumber = giteeIssueMatch[3];
+        console.error(`✅ Detected Gitee issue: ${owner}/${repo} #${issueNumber}`);
+        return fetchGiteeIssue(owner, repo, issueNumber);
+    }
+
+    const giteePullMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?gitee\.com\/([^\/\s]+)\/([^\/\s]+)\/pulls?\/(\d+)/i);
+    if (giteePullMatch && giteePullMatch[1] && giteePullMatch[2] && giteePullMatch[3]) {
+        const owner = giteePullMatch[1];
+        const repo = giteePullMatch[2];
+        const prNumber = giteePullMatch[3];
+        console.error(`✅ Detected Gitee pull request: ${owner}/${repo} #${prNumber}`);
+        return fetchGiteePullRequest(owner, repo, prNumber);
+    }
+
     // 1. 匹配 GitHub blob 源码文件链接：https://github.com/{owner}/{repo}/blob/{branch}/{path}
     const blobMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/blob\/([^\/\s]+)\/(.+)/i);
     if (blobMatch && blobMatch[1] && blobMatch[2] && blobMatch[3] && blobMatch[4]) {
         const owner = blobMatch[1];
         const repo = blobMatch[2];
         const branch = blobMatch[3];
-        const filePath = blobMatch[4];
+        const filePath = blobMatch[4].replace(/[?#].*$/, '');
         console.error(`✅ Detected GitHub source file: ${owner}/${repo} @ ${branch}:${filePath}`);
-        return fetchGithubBlob(owner, repo, branch, filePath.replace(/[?#].*$/, ''));
+        const blobOutcome = await fetchGithubBlob(owner, repo, branch, filePath);
+        if (blobOutcome.status === 'ok') {
+            return blobOutcome.content;
+        }
+        if (blobOutcome.status === 'notfound') {
+            throw await createMissingBlobError(owner, repo, branch, filePath);
+        }
+        throw new AppError({
+            code: 'network_error',
+            retryable: true,
+            engine: 'github',
+            message: `Failed to fetch GitHub file ${owner}/${repo}@${branch}/${filePath}: ${blobOutcome.message}`
+        });
     }
 
     // 2. 匹配 GitHub tree 目录链接：https://github.com/{owner}/{repo}/tree/{branch}(/{path})?
@@ -845,7 +901,26 @@ export async function fetchGithubContent(githubUrl: string): Promise<string | nu
         const ref = treeMatch[3];
         const dirPath = treeMatch[4]?.replace(/[?#].*$/, '') || undefined;
         console.error(`✅ Detected GitHub directory tree: ${owner}/${repo} @ ${ref}${dirPath ? ` /${dirPath}` : ''}`);
-        return fetchGithubTree(owner, repo, ref, dirPath);
+        const treeOutcome = await fetchGithubTree(owner, repo, ref, dirPath);
+        if (treeOutcome.status === 'ok') {
+            return treeOutcome.content;
+        }
+        if (treeOutcome.status === 'notfound') {
+            throw new AppError({
+                code: 'not_found',
+                retryable: false,
+                status: 404,
+                engine: 'github',
+                message: `GitHub tree not found: ${owner}/${repo}@${ref}${dirPath ? `/${dirPath}` : ''}`,
+                hint: `目录或 ref 不存在：${owner}/${repo}@${ref}${dirPath ? `/${dirPath}` : ''}。请确认 ref 是分支/tag/commit；可先抓 https://github.com/${owner}/${repo}/tree/${ref} 查看实际目录。`
+            });
+        }
+        throw new AppError({
+            code: 'network_error',
+            retryable: true,
+            engine: 'github',
+            message: `Failed to fetch GitHub tree ${owner}/${repo}@${ref}: ${treeOutcome.message}`
+        });
     }
 
     // 3. 匹配 GitHub Issue 链接：https://github.com/{owner}/{repo}/issues/{number}

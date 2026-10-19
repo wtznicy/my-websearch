@@ -14,7 +14,7 @@ Returns:
 
 Good follow-up actions:
 - fetch one or more result URLs with `fetchWebContent`
-- fetch a repository with `fetchGithubReadme`
+- fetch a repository with `fetchGithubContent`
 - if Bing Playwright mode returns no results for a `site:` query, retry once without the `site:` prefix before assuming the search target is empty
 
 ## `fetchWebContent`
@@ -33,10 +33,15 @@ Notes:
 - do not jump to TLS or environment explanations for an ordinary fetch failure; first try a better source URL, a more stable result, or a clearer page target
 - do not assume arbitrary homepages or JS-heavy landing pages will yield readable article text; often it is better to search first and then fetch a more specific result page
 
-## `fetchGithubReadme`
+## `fetchGithubContent` (formerly `fetchGithubReadme`)
 
 Use for:
-- GitHub repository URLs
+- a repository README, any single source file (`/blob/<ref>/<path>`), a directory tree (`/tree/<ref>/<path>`), an Issue, or a PR
 - fast repository understanding before reading source files
+
+Notes:
+- pass a full GitHub/Gitee URL; `ref` may be a branch, tag, or commit
+- one file or directory per call; this is not a whole-repo clone
+- if a file path is wrong, the error lists sibling files and a ready-to-use `/blob/...` URL
 
 Prefer this over `fetchWebContent` when the input is clearly a repository URL.

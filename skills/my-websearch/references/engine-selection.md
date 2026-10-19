@@ -15,7 +15,7 @@ Engine choice is heuristic, not mandatory. If a preferred engine is unavailable,
 
 ## Source-specific retrieval
 
-- Use `fetchGithubReadme` for GitHub repositories.
+- Use `fetchGithubContent` for GitHub repositories, files, trees, issues, and PRs.
 - Use `fetchWebContent` for a specific article, doc page, or Markdown URL.
 
 ## Failure handling

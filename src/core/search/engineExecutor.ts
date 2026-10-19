@@ -8,7 +8,7 @@ import {
     SearchEngineExecutorMap,
     SearchExecutionFailure
 } from './searchService.js';
-import { tripEngineCircuit } from './engineCircuitBreaker.js';
+import { recordEngineSuccess, tripEngineCircuit } from './engineCircuitBreaker.js';
 
 /**
  * P1-5：按引擎细粒度并发限流（避免突发并发把 sogou/baidu 等脆弱引擎打满 10s 超时或触发反爬）：
@@ -208,6 +208,8 @@ export async function executePrimaryEngines(
                 if (attempt > 0) {
                     console.error(`✅ Engine ${engine} recovered after ${attempt} retries`);
                 }
+                // 成功即清零连续失败计数，避免一次瞬时 202/429 让后续冷却一直指数级放大
+                recordEngineSuccess(engine);
                 resultCount = results.length;
                 if (!engineMetrics[index]?.timedOut) {
                     engineMetrics[index] = { engine, ms: Date.now() - startedAt, count: resultCount };
@@ -247,7 +249,7 @@ export async function executePrimaryEngines(
             const status = extractErrorStatus(lastError);
             const hint = extractErrorHint(lastError);
             const details = extractErrorDetails(lastError);
-            if (status === 429 || errorCode === 'rate_limited') {
+            if (status === 429 || errorCode === 'rate_limited' || status === 202 || errorCode === 'bot_challenge') {
                 tripEngineCircuit(engine);
             }
             partialFailures.push({

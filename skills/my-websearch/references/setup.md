@@ -111,7 +111,7 @@ Use when:
 Stage script:
 1. Collect prerequisites.
    - First distinguish ordinary search/fetch setup from browser-assisted setup.
-   - Do not suggest Playwright installation for ordinary search, `fetchWebContent`, or `fetchGithubReadme` unless browser assistance is actually needed.
+   - Do not suggest Playwright installation for ordinary search, `fetchWebContent`, or `fetchGithubContent` unless browser assistance is actually needed.
    - Confirm whether the user already has a Playwright client, a browser binary, or a remote browser endpoint.
 2. Confirm risky actions.
    - Ask before installing Playwright packages, downloading browser binaries, or changing browser endpoint configuration.
@@ -130,7 +130,7 @@ Stage script:
 
 After any setup path:
 - check whether the runtime exposes a usable `my-websearch` path
-- check whether core tools such as `search`, `fetchWebContent`, and `fetchGithubReadme` are available
+- check whether core tools such as `search`, `fetchWebContent`, and `fetchGithubContent` are available
 - if using a local daemon path, confirm `status` or an equivalent readiness check first
 - if possible, run a minimal smoke check
 

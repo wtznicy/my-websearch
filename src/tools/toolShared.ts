@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { FetchWebContentResult } from '../engines/web/fetchWebContent.js';
-import { extractErrorStatus } from '../core/errors.js';
+import { extractErrorStatus, isAppError } from '../core/errors.js';
 
 export { extractErrorStatus };
 
@@ -40,6 +40,12 @@ export const CONTEXT7_QUOTA_HINT =
 export function buildFetchWebErrorHint(error: unknown): string {
     const message = error instanceof Error ? error.message : String(error);
     const status = extractErrorStatus(error);
+
+    // 结构化错误自带的 hint 优先（例如 GitHub 文件 404 时给出的同目录候选文件），
+    // 避免被下面按 message 猜测的通用提示覆盖。
+    if (isAppError(error) && error.hint) {
+        return error.hint;
+    }
 
     // 安全拦截放在最前：私网拦截的文案里含 "network" 一词，若先走网络分支会把
     // "已被安全策略拒绝"提示成"开启代理重试"——等于引导调用方绕过防护（测评报告 P1-6）

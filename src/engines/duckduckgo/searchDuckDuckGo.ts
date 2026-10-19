@@ -14,6 +14,7 @@ import {
 } from '../../core/errors.js';
 
 const CHROME_133_SEC_CH_UA = '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"';
+const DDG_BLOCK_HINT = '当前出口 IP 被 DuckDuckGo 风控/限流（HTTP 202）；换一个代理节点、稍后重试，或改用 bing/brave 等引擎。';
 
 export function isTrustedDuckDuckGoPreloadUrl(value: string): boolean {
   try {
@@ -389,11 +390,13 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
     return await searchDuckDuckGoHtml(query, limit, signal, timeRange);
   } catch (htmlError) {
     if (preloadError instanceof Error && htmlError instanceof Error) {
+      const publicCode = isAppError(htmlError) ? htmlError.code : (normalizePublicErrorCode(extractErrorCode(htmlError)) ?? 'network_error');
       throw new AppError({
-        code: isAppError(htmlError) ? htmlError.code : (normalizePublicErrorCode(extractErrorCode(htmlError)) ?? 'network_error'),
+        code: publicCode,
         retryable: isAppError(htmlError) ? htmlError.retryable : isRetryableError(htmlError),
         status: extractErrorStatus(htmlError),
         engine: 'duckduckgo',
+        ...(publicCode === 'bot_challenge' ? { hint: DDG_BLOCK_HINT } : {}),
         cause: htmlError,
         message: `${htmlError.message} (preload path: ${preloadError.message})`
       });
@@ -446,6 +449,7 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
           retryable: false,
           status: 202,
           engine: 'duckduckgo',
+          hint: DDG_BLOCK_HINT,
           message: 'DuckDuckGo returned a challenge page (HTTP 202) — upstream anti-bot; retry later or use another engine'
         });
       }
@@ -551,6 +555,7 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
               retryable: false,
               status: 202,
               engine: 'duckduckgo',
+              hint: DDG_BLOCK_HINT,
               message: 'DuckDuckGo returned a challenge page (jsa challenge could not be solved statically)'
             });
           }
@@ -562,6 +567,7 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
             retryable: false,
             status: 202,
             engine: 'duckduckgo',
+            hint: DDG_BLOCK_HINT,
             message: 'DuckDuckGo d.js returned anomalyDetectionBlock (HTTP 202) — exit IP rate-limited'
           });
         }
@@ -643,6 +649,7 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
         retryable: false,
         status: 202,
         engine: 'duckduckgo',
+        hint: DDG_BLOCK_HINT,
         message: 'DuckDuckGo returned a challenge page (HTTP 202) — upstream anti-bot; retry later or use another engine'
       });
     }

@@ -33,7 +33,7 @@ describe('solveAnubisPow & solveAnubisPowAsync', () => {
         controller.abort();
         const abortedResult = await solveAnubisPowAsync('worker-test-seed', 5, controller.signal);
         expect(abortedResult).toBeNull();
-        expect(getMaxAnubisPowDifficulty()).toBe(5);
+        expect(getMaxAnubisPowDifficulty()).toBe(6);
     });
 });
 

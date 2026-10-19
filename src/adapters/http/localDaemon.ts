@@ -8,7 +8,7 @@ import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } f
 import { pickDefaultEnginesForQuery } from '../../core/search/queryEngineRouting.js';
 import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
-import { ErrorCode, extractErrorCode, extractErrorStatus } from '../../core/errors.js';
+import { ErrorCode, extractErrorCode, extractErrorStatus, isAppError } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
 import { isContext7QuotaExhaustedError } from '../../engines/context7/context7.js';
 
@@ -52,6 +52,7 @@ function getCapabilities(): string[] {
         'fetch-web',
         'fetch-csdn',
         'fetch-juejin',
+        'fetch-github-content',
         'fetch-github-readme',
         'resolve-library-id',
         'query-docs',
@@ -418,14 +419,14 @@ export async function startLocalDaemon(
         }
     });
 
-    app.post('/fetch-github-readme', async (req, res) => {
+    app.post(['/fetch-github-readme', '/fetch-github-content'], async (req, res) => {
         try {
             const url = parseUrl(req.body?.url);
             const result = await runtime.services.fetchGithubReadme.execute({ url });
 
             if (!result) {
-                sendError(res, 404, ErrorCode.NOT_FOUND, 'README not found or repository does not exist', {
-                    hint: 'Verify the repository URL and default branch contents.'
+                sendError(res, 404, ErrorCode.NOT_FOUND, 'Content not found or repository/item does not exist', {
+                    hint: 'Use /blob/<ref>/<path> for a file, /tree/<ref>/<path> for a directory, /issues/<n>, or /pull/<n>; ref may be a branch, tag, or commit.'
                 });
                 return;
             }
@@ -438,7 +439,9 @@ export async function startLocalDaemon(
             const classification = classifyFetchError(error);
             sendError(res, classification.statusCode, classification.code, classification.message, {
                 retryable: classification.retryable,
-                hint: 'Use a valid GitHub repository URL in HTTPS or SSH form.'
+                hint: isAppError(error) && error.hint
+                    ? error.hint
+                    : 'Use a valid GitHub repository URL in HTTPS or SSH form.'
             });
         }
     });

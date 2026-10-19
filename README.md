@@ -33,8 +33,8 @@
   Combines Mozilla Readability with intelligent chrome noise stripping. Features dedicated purification rules for **WeChat Official Accounts** (`mp.weixin.qq.com`), **StackOverflow questions & accepted answers**, and transparent internal routing for **CSDN & Juejin**. Removes `<nav>`, `<aside>`, `<footer>`, and breadcrumbs while faithfully preserving article titles, code blocks, and GFM tables. Supports seamless pagination (`startIndex`).
 - 📚 **Unified Context7 Library Docs Lookup (`queryDocs`)**  
   Directly query official documentation with natural package names (e.g. `"next.js"`, `"vue"`) or Context7 IDs without needing a separate resolve step. Includes automatic candidate ranking, blind-guess 404 self-healing, and related alternatives discovery.
-- 🐙 **Extended GitHub Resource Fetcher**  
-  `fetchGithubReadme` supports GitHub/Gitee repository READMEs, raw code blob files (`/blob/...`), and complete issue discussions with comments (`/issues/...`).
+- 🐙 **Extended GitHub / Gitee Resource Fetcher**  
+  `fetchGithubContent` (formerly `fetchGithubReadme`) supports both GitHub and Gitee: repository READMEs, any source file (`/blob/...`), directory trees (`/tree/...`), and complete issue / PR discussions.
 - 🌏 **Zero-Config Network Detection & Clash Fake-IP Ready**  
   Auto-detects OS system proxies (Windows Registry / macOS scutil / Linux env). Automatically routes overseas engines through proxy while keeping domestic engines on fast direct lines. Pre-whitelists `198.18.0.0/15` for Clash TUN / Fake-IP compatibility while enforcing strict SSRF security bounds.
 - 🔌 **Versatile Deployment Modes**  
@@ -54,7 +54,7 @@ flowchart TB
 
     subgraph Core["🧠 Search & Fetch Orchestrator"]
         Router["Language-Aware Auto Router<br/>ZH → Baidu/Sogou | EN/Tech → Bing + DuckDuckGo"]
-        Cascade["minResults Cascade & Circuit Breaker<br/>(Auto Fallback + 5min TTL LRU Cache)"]
+        Cascade["minResults Cascade & Circuit Breaker<br/>(Adaptive 30s→5m + 5min TTL Cache)"]
         Ranker["Cross-Engine URL Deduplication & BM25 Relevance Ranking"]
     end
 
@@ -87,8 +87,8 @@ flowchart TB
 | **`csdn`** | 🇨🇳 Direct | None | WAF cookie jar persistence + empty response auto-retry | Chinese error logs, debugging tutorials |
 | **`juejin`** | 🇨🇳 Direct | None | Direct official API querying for clean long-form articles | Modern frontend/backend technical blogs |
 | **`sogou`** | 🇨🇳 Direct | None | Desktop & mobile dual parsing + redirect link decoding + ad removal | WeChat ecosystem links & long-tail queries |
-| **`duckduckgo`** | 🌐 Proxy in CN | None | Preload `d.js` + **built-in `isJsaChallenge` JS solver** | English technical search & open-source discussions |
-| **`startpage`** | 🌐 Proxy in CN | None | **Built-in Anubis SHA-256 PoW solver** + cookie session (no browser needed) | Google-backed high-privacy results |
+| **`duckduckgo`** | 🌐 Proxy in CN | None | Preload `d.js` + **built-in `isJsaChallenge` JS solver** (HTTP 202 = exit-IP rate limit) | English technical search & open-source discussions |
+| **`startpage`** | 🌐 Proxy in CN | None | **Multi-worker Anubis SHA-256 PoW solver** (difficulty ≤ 6) + cookie session (no browser needed) | Google-backed high-privacy results |
 | **`brave`** | 🌐 Proxy in CN | None | Native TLS fingerprinting + strict sponsored ad stripping | Independent English index & technical blogs |
 | **`exa`** | 🌐 Direct API | Optional Free Key | Official semantic search API (skipped if key is unset) | Semantic similarity, AI research & papers |
 | **`github`** | 🌐 Proxy in CN | None | Official GitHub Search REST API for issues & repositories | GitHub issues, bug reports, and repositories |
@@ -109,7 +109,7 @@ flowchart TB
 | :--- | :--- | :--- |
 | **`search`** | Federated web & code search (14 engines) | Supports parallel queries, `timeRange: day\|week\|month\|year` date filter, `site: string[]` filter, `fetchTop` preview injection, `code` engine (grep.app); explicit `engines` defaults to `minResults=0` (no unconstrained cascade); returns inline `diagnostics` on failure |
 | **`fetchWebContent`** | Web page extraction, Markdown & transparent PDF parsing | **All-in-one content extractor**: Built-in disk-level Markdown cache (Node 22 `node:sqlite` / partitioned JSON fallback, 200MB LRU, `cache: default\|reload`); transparent PDF parsing (up to 20MB / 50 pages, `[page N]` tags, scanned doc detection); pagination & `focus` keyword targeting |
-| **`fetchGithubReadme`** | Comprehensive GitHub / Gitee content reader | Fetches repository READMEs, source files (`/blob/`), directory trees (`/tree/`), and Issue / PR discussions (with solutions & changed files); direct Gitee support; returns `warnings` |
+| **`fetchGithubContent`** | Comprehensive GitHub / Gitee content reader | Fetches README, **one source file** (`/blob/<ref>/<path>`), directory trees (`/tree/`), and Issue / PR discussions; `ref` may be a branch, tag, or commit; not a repo clone; Gitee parity via API (file/tree/issue/PR, optional `GITEE_TOKEN`); returns `warnings` |
 | **`queryDocs`** | All-in-one official library documentation | Directly resolves library names or Context7 IDs; includes low-confidence protection and automatic fallback chain (npm registry → PyPI JSON → GitHub README); returns `source: context7\|npm\|pypi\|github-readme`, `confidence`, and `warnings` |
 
 > 💡 **Backward Compatibility**: Legacy `fetchCsdnArticle` and `fetchJuejinArticle` are automatically routed under `fetchWebContent`. Legacy `resolveLibraryId` is merged into `queryDocs` (which supports directly passing `library` name or legacy `libraryId` alias). Set `REGISTER_LEGACY_ARTICLE_TOOLS=true` if your LLM requires `fetchCsdnArticle` / `fetchJuejinArticle` explicitly exposed as separate tools.
@@ -229,9 +229,10 @@ When configuring or diagnosing proxy connectivity, refer to these common edge ca
    - **No system proxy active without `PROXY_URL`**: If no system proxy (Clash/v2ray) is running, overseas engines will be blocked by default. Explicitly declare `PROXY_URL` (e.g. `http://127.0.0.1:7897` or `7890`).
 
 2. **Proxy is configured properly, but overseas engines fail or timeout? (Upstream IP Blocking, NOT a Config Error)**
-   - **DuckDuckGo returns HTTP 202 / challenge**: DDG detected excessive traffic from the proxy node's egress IP and served an anti-bot challenge.
+   - **DuckDuckGo returns HTTP 202 / challenge**: DDG rate-limits the proxy node's egress IP. The first query may succeed and later ones return `anomalyDetectionBlock`; cookie warming does not bypass this. Rotate to a cleaner node or wait for cooldown.
+   - **Bing returns HTTP 200 but 0 results**: the wreq impersonation path now falls back to the axios SERP path automatically when it parses an empty page. If both paths stay empty, the query/IP is likely soft-blocked.
    - **Brave returns HTTP 429 Too Many Requests**: Brave Search rate-limits noisy datacenter IP ranges.
-   - **Startpage times out or Anubis PoW difficulty spikes**: Startpage dynamically raises Anubis PoW difficulty to 6+ for flagged IP addresses, exceeding single-engine execution budgets.
+   - **Startpage times out or Anubis PoW difficulty spikes**: difficulty 6 is now solved inline by up to 4 worker threads (~3–12s); >6 is skipped. Pass-challenge socket errors / transient 5xx are retried automatically.
    - 💡 **Resolution**: These symptoms indicate that **the proxy node's public IP has been flagged by upstream search providers**, not a bug in `my-websearch`. Switch to a cleaner proxy server/node in your proxy client, fallback to domestic/direct engines, or supply an official API key such as `BRAVE_API_KEY` for guaranteed SLA.
 
 <a id="configuration"></a>
@@ -272,6 +273,8 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `DEFAULT_MIN_RESULTS` | `5` | Cascade threshold: triggers fallback engines when usable results are fewer than this value |
 | `DEFAULT_SEARCH_LIMIT` | `10` | Default result limit when not explicitly specified in tool calls (max 50) |
 | `SEARCH_DEADLINE_MS` | `30000` | Global hard deadline for multi-engine search execution (milliseconds) |
+| `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | First circuit-breaker cooldown for an engine (429 / 202 / bot_challenge). Repeated failures back off exponentially (30s → 60s → 120s…). |
+| `ENGINE_CIRCUIT_MAX_COOLDOWN_MS` | `300000` | Upper bound for the exponential circuit-breaker backoff (default 5 minutes). |
 | `SEARCH_AUTHORITY_DOMAINS` | empty | Additional authority domain whitelist for result re-ranking (comma-separated, appended to built-in list) |
 | `SEARCH_MODE` | `auto` | Search mode and browser policy. Supports single mode, multi-engine per mode, and compound multi-mode combinations:<br/>• **Global mode**: `auto` (default fallback), `request`/`none` (pure HTTP), `playwright` (force browser)<br/>• **Single mode, multiple engines**: `playwright:bing,startpage`, `auto:bing,startpage`, `bing,startpage`<br/>• **Compound multiple modes**: `playwright:bing;auto:startpage` (bing forces browser, startpage uses auto fallback), `auto;request:startpage` (global auto but startpage uses pure HTTP) |
 | `AUTO_ROUTE_EN_ENGINES` | `bing,duckduckgo` | Comma-separated engines for default English auto-routing |
@@ -286,7 +289,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` browser TLS/H2 fingerprint profile (e.g. `chrome_149`, `safari_18`) |
 | `IMPERSONATE_OS` | `windows` | Operating system platform for fingerprint impersonation (`windows`, `macos`, `linux`) |
 | `BING_IMPERSONATE` | `true` | Toggle Chrome TLS impersonation for Bing HTTP mode (auto-trips circuit breaker after consecutive empty results) |
-| `ANUBIS_MAX_POW_DIFFICULTY` | `5` | Maximum difficulty threshold for Startpage Anubis PoW solver; skips/falls back when difficulty exceeds this |
+| `ANUBIS_MAX_POW_DIFFICULTY` | `6` | Maximum difficulty threshold for Startpage Anubis PoW solver; skips/falls back when difficulty exceeds this |
 | `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `3500` | Timeout in ms for direct-first connection probes before proxy fallback |
 | `FETCH_WEB_INSECURE_TLS`| `false` | Disable TLS certificate verification for `fetchWebContent` only (for broken legacy site certs) |
 | `GITHUB_README_CDN_FIRST` | `false` | When `true`, forces skipping `raw.githubusercontent.com` direct probe and queries jsDelivr CDN first (domestic network acceleration) |
@@ -299,6 +302,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `EXA_API_KEY` | empty | [Exa Free API Key](https://dashboard.exa.ai/api-keys) (only required if using the `exa` semantic search engine) |
 | `BRAVE_API_KEY` | empty | [Brave Search API Key](https://api.search.brave.com/app/keys) (optional; uses official high-reliability API when set) |
 | `GITHUB_TOKEN` | empty | [GitHub Personal Access Token](https://github.com/settings/tokens) (optional; raises rate limit to 5,000 req/hr) |
+| `GITEE_TOKEN` | empty | [Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens) (optional; raises Gitee API rate limits and enables private repos) |
 | `STACKOVERFLOW_API_KEY` | empty | [Stack Apps Key](https://stackapps.com/apps/oauth/register) (optional; raises quota to 10,000 req/day) |
 
 #### 4. 🖥️ Server Modes, Concurrency & Session Reaper
@@ -335,7 +339,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `OPEN_WEBSEARCH_RESPONSE_CAP_BYTES`| `60000` | Maximum character limit returned to LLMs to prevent prompt context explosion |
 | `MCP_TOOL_SEARCH_NAME` | `search` | Custom registration name for the search tool in MCP |
 | `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | Custom registration name for the content extraction tool |
-| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | Custom registration name for the GitHub README tool |
+| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubContent` | Custom registration name for the GitHub/Gitee content tool (set to `fetchGithubReadme` for backward compatibility) |
 
 > 💡 **Zero-Config Upgrades (Redundant Variables Removed)**:
 > - **CORS Switches** (`ENABLE_CORS`/`CORS_ORIGIN`): CORS is **disabled by default**; enable it explicitly and restrict origins when browser clients need cross-origin access.
@@ -356,7 +360,7 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run the Vitest suite (45 files, 401 tests at the current baseline)
+npm test              # Run the Vitest suite (54 files, 450 tests at the current baseline)
 npm run test:live     # Run bounded-concurrency live integration tests
 npm run eval:live     # Run 23-case live STDIO JSON-RPC evaluation suite
 ```

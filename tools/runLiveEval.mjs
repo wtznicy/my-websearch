@@ -118,7 +118,7 @@ const cases = [
     { id: 'fetch-web-zhihu', tool: 'fetchWebContent', args: { url: 'https://zhuanlan.zhihu.com/p/669789440', maxChars: 3000 }, allowBotChallenge: true },
     { id: 'fetch-csdn', tool: 'fetchWebContent', args: { url: 'https://blog.csdn.net/qq_43061290/article/details/126651783' } },
     { id: 'fetch-juejin', tool: 'fetchWebContent', args: { url: 'https://juejin.cn/post/7115474775136272392' } },
-    { id: 'fetch-github', tool: 'fetchGithubReadme', args: { url: 'https://github.com/modelcontextprotocol/servers' } },
+    { id: 'fetch-github', tool: 'fetchGithubContent', args: { url: 'https://github.com/modelcontextprotocol/servers' } },
     { id: 'query-docs-react', tool: 'queryDocs', args: { library: 'react', query: 'hooks', limit: 3 } },
     { id: 'query-docs-alias', tool: 'queryDocs', args: { libraryId: '/facebook/react', query: 'useState hooks', limit: 3 } },
     // —— 安全与错误处理 ——

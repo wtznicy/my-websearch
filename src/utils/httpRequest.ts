@@ -520,9 +520,9 @@ export async function requestWithSafeRedirects(
             : undefined;
 
         if (location) {
-            // stopOnRedirect：调用方需要读取 3xx 响应本身（如 Set-Cookie 在 302 上、
-            // 跟随会丢失的场景，见 startpage Anubis 通关流程）
-            if ((options as { stopOnRedirect?: boolean }).stopOnRedirect) {
+            // stopOnRedirect 或 maxRedirects === 0：调用方需要读取 3xx 响应本身（如 Set-Cookie 在 302 上、
+            // 或禁止跟随重定向以将 3xx 识别为拦截/反爬检查点，避免跟随外部重定向触发不必要的 SSRF 拦截）
+            if ((options as { stopOnRedirect?: boolean }).stopOnRedirect || maxRedirects === 0) {
                 return response;
             }
             currentUrl = new URL(String(location), currentUrl).toString();

@@ -10,16 +10,17 @@ import {
     capTextResponse,
     TOOL_ANNOTATION_HINTS
 } from '../toolShared.js';
+import { isAppError } from '../../core/errors.js';
 
 import { detectUnknownParameters } from '../../utils/toolValidation.js';
 
 export function registerFetchGithubTool(server: McpServer, runtime: MyWebSearchRuntime): void {
-    const fetchGithubToolName = getToolName('MCP_TOOL_FETCH_GITHUB_NAME', 'fetchGithubReadme');
+    const fetchGithubToolName = getToolName('MCP_TOOL_FETCH_GITHUB_NAME', 'fetchGithubContent');
 
     server.registerTool(
         fetchGithubToolName,
         {
-            description: "Fetch GitHub/Gitee content: repository README, source files (/blob/), file trees (/tree/), Issues with solutions (/issues/), and Pull Requests (/pull/). For generic web pages, use fetchWebContent.",
+            description: "Fetch GitHub/Gitee by URL: README, one source file (/blob/), dir tree (/tree/), Issue, or PR. Example: https://github.com/o/r/blob/main/src/index.ts — ref can be branch/tag/commit; one file or dir per call, not a repo clone.",
             inputSchema: z.object({
                 url: z.string().min(1).max(2048).refine(
                     (url) => validateGithubRepositoryUrl(url),
@@ -47,7 +48,10 @@ export function registerFetchGithubTool(server: McpServer, runtime: MyWebSearchR
                     return {
                         content: [{
                             type: 'text',
-                            text: 'Content not found or target repository/item does not exist'
+                            text: withErrorHint(
+                                'Content not found or target repository/item does not exist',
+                                '读取单个文件用 /blob/<ref>/<path>；列目录用 /tree/<ref>/<path>；Issue 用 /issues/<n>；PR 用 /pull/<n>。ref 可为分支、tag 或 commit。'
+                            )
                         }],
                         isError: true
                     };
@@ -59,7 +63,9 @@ export function registerFetchGithubTool(server: McpServer, runtime: MyWebSearchR
                         type: 'text',
                         text: withErrorHint(
                             `Failed to fetch GitHub content: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                            '若资源存在但抓取失败，可确认 URL 拼写，或配置 GITHUB_TOKEN 以提升 API 速率限制。'
+                            isAppError(error) && error.hint
+                                ? error.hint
+                                : '若资源存在但抓取失败，可确认 URL 拼写，或配置 GITHUB_TOKEN 以提升 API 速率限制。'
                         )
                     }],
                     isError: true

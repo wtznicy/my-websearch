@@ -64,7 +64,7 @@ Current `GET /status` success payload includes:
 - `POST /fetch-web`
 - `POST /fetch-csdn`
 - `POST /fetch-juejin`
-- `POST /fetch-github-readme`
+- `POST /fetch-github-readme` (alias: `POST /fetch-github-content`)
 - `POST /resolve-library-id`
 - `POST /query-docs`
 

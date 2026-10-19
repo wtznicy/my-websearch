@@ -638,8 +638,13 @@ async function searchBingWithHttp(query: string, limit: number, signal?: AbortSi
             console.warn('Bing impersonate request failed, falling back to axios:', error instanceof Error ? error.message : String(error));
         }
     }
-    if (impersonateResults) {
+    if (impersonateResults && impersonateResults.length > 0) {
         return applySiteDomainFilter(impersonateResults, query);
+    }
+    if (impersonateResults && impersonateResults.length === 0) {
+        // impersonate 路径返回空数组（非抛错）时不要直接短路：axios 路径在同一网络下
+        // 往往还能拿到完整 SERP；否则会出现“HTTP 200 但 0 条”的假成功。
+        console.warn('Bing impersonate returned 0 results; falling back to axios HTTP path');
     }
 
     let allResults: SearchResult[] = [];

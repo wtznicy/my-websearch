@@ -132,7 +132,7 @@ describe('P2 & P3 Optimizations', () => {
             expect(registered).toBeDefined();
             expect(registered['search']).toBeDefined();
             expect(registered['fetchWebContent']).toBeDefined();
-            expect(registered['fetchGithubReadme']).toBeDefined();
+            expect(registered['fetchGithubContent']).toBeDefined();
             expect(registered['fetchCsdnArticle']).toBeDefined();
             expect(registered['fetchJuejinArticle']).toBeDefined();
             expect(registered['resolveLibraryId']).toBeDefined();

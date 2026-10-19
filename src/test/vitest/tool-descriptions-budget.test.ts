@@ -16,7 +16,7 @@ describe('Tool Description Token Budget & Length Limit', () => {
 
         // 必须严格是 4 个工具
         expect(toolNames.sort()).toEqual([
-            'fetchGithubReadme',
+            'fetchGithubContent',
             'fetchWebContent',
             'queryDocs',
             'search'
@@ -31,5 +31,11 @@ describe('Tool Description Token Budget & Length Limit', () => {
 
         // 总字符数 <= 1000 字符（约 200-250 tokens，远低于 1.5k token 预算）
         expect(totalLength, `Total tool descriptions length (${totalLength}) must be <= 1000`).toBeLessThanOrEqual(1000);
+
+        // 首次使用可发现性：名称不能再暗示"只能读 README"，描述必须给出 /blob/ 示例与"非整仓 clone"边界
+        const githubDesc = registeredTools['fetchGithubContent']?.description || '';
+        expect(githubDesc).toContain('/blob/');
+        expect(githubDesc).toContain('Example:');
+        expect(githubDesc).toContain('not a repo clone');
     });
 });

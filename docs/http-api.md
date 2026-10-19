@@ -113,6 +113,7 @@ Example response:
       "fetch-web",
       "fetch-csdn",
       "fetch-juejin",
+      "fetch-github-content",
       "fetch-github-readme",
       "resolve-library-id",
       "query-docs",
@@ -185,7 +186,7 @@ curl --noproxy '*' -X POST http://127.0.0.1:3210/fetch-web \
   -d '{"url":"https://awiki.ai","maxChars":3000}'
 ```
 
-### `POST /fetch-github-readme`
+### `POST /fetch-github-readme` (alias: `POST /fetch-github-content`)
 
 Request body:
 

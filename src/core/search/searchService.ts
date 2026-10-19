@@ -607,7 +607,7 @@ export function createSearchService(
                                 engine,
                                 code: 'circuit_open',
                                 retryable: true,
-                                message: `Engine circuit open (recent HTTP 429 rate limiting, ~${Math.ceil(getEngineCircuitRemainingMs(engine) / 1000)}s cooldown left) — quota reallocated to other engines`
+                                message: `Engine circuit open (recent rate-limit / anti-bot response: 429, 202 or bot_challenge; ~${Math.ceil(getEngineCircuitRemainingMs(engine) / 1000)}s cooldown left) — quota reallocated to other engines`
                             });
                         }
                     }

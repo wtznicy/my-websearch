@@ -288,7 +288,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                         `Failed to fetch docs: ${finalErr instanceof Error ? finalErr.message : 'Unknown error'}`,
                         isContext7QuotaExhaustedError(finalErr)
                             ? CONTEXT7_QUOTA_HINT
-                            : '可检查库名拼写（如 "next.js" 或 "/vercel/next.js"），或直接使用 fetchGithubReadme 抓取其 GitHub 仓库。'
+                            : '可检查库名拼写（如 "next.js" 或 "/vercel/next.js"），或用 fetchGithubContent 直接读取其 GitHub 仓库 README/源码。'
                     )
                 }],
                 isError: true

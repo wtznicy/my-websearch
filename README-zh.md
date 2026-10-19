@@ -33,8 +33,8 @@
   整合 Mozilla Readability 与容器级智能降噪，为**微信公众号**（`#js_content` 深度清洗）、**StackOverflow**（问答主体与采纳答案精准提纯）定制专属净化器，针对 **CSDN 与掘金** 自动走专用提取链路；精准保留文章主标题、代码围栏及 GFM 表格；支持长文无缝分页（`startIndex`）。
 - 📚 **统一 Context7 官方框架/库文档直查（`queryDocs` 一站式合体）**  
   直接输入技术库名（如 `"next.js"`, `"vue"`）或 Context7 ID，内部自动多候选排序、404 自愈重搜并返回相似替代库，免去额外调用 ID 解析步骤。
-- 🐙 **全面升级的 GitHub 资源抓取**  
-  `fetchGithubReadme` 扩展支持 GitHub/Gitee 仓库 README、代码单文件（`/blob/...`）及 Issue 完整讨论上下文（`/issues/...`）。
+- 🐙 **全面升级的 GitHub / Gitee 资源抓取**  
+  `fetchGithubContent`（原 `fetchGithubReadme`）同时支持 GitHub 与 Gitee：仓库 README、任意源码单文件（`/blob/...`）、目录树（`/tree/...`）及 Issue / PR 完整讨论。
 - 🌏 **零配置网络感知（Clash TUN / Fake-IP 完美适配）**  
   自动嗅探系统代理（Windows 注册表 / macOS scutil / Linux 环境变量），海外引擎走代理、国内引擎直连；原生支持 `198.18.0.0/15` 放行，无缝兼容 Clash TUN 虚拟网卡，严守内网 SSRF 安全边界。
 - 🔌 **全形态接入支持**  
@@ -54,7 +54,7 @@ flowchart TB
 
     subgraph Core["🧠 核心编排层 (Search & Fetch Orchestrator)"]
         Router["语言感知自动路由 (Auto Router)<br/>中文 → Baidu/Sogou | 英文/代码 → Bing + DuckDuckGo"]
-        Cascade["minResults 级联补位 & 熔断器<br/>(Circuit Breaker + 5min TTL LRU 缓存)"]
+        Cascade["minResults 级联补位 & 熔断器<br/>(自适应 30s→5m + 5min TTL 缓存)"]
         Ranker["跨引擎 URL 归一化去重 & BM25 相关性重排"]
     end
 
@@ -87,8 +87,8 @@ flowchart TB
 | **`csdn`** | 🇨🇳 直连 | 免 Key | 自动持久化阿里云 WAF Cookie + 空壳响应智能重试 | 中文报错排查、开发踩坑笔记 |
 | **`juejin`** | 🇨🇳 直连 | 免 Key | 掘金官方接口直调，极速提取干净长文 | 前端/后端现代中文高质量技术博文 |
 | **`sogou`** | 🇨🇳 直连 | 免 Key | 桌面/移动双栈解析 + 跳转页快速还原 + 自动去推广 | 微信公众号外链、中文长尾问答 |
-| **`duckduckgo`** | 🌐 需代理 | 免 Key | Preload `d.js` + **内置 `isJsaChallenge` 求解器** | 英文技术检索、海外开源讨论 |
-| **`startpage`** | 🌐 需代理 | 免 Key | **内置 Anubis SHA-256 PoW 算力求解器** + 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
+| **`duckduckgo`** | 🌐 需代理 | 免 Key | Preload `d.js` + **内置 `isJsaChallenge` 求解器**（HTTP 202 = 出口 IP 限流） | 英文技术检索、海外开源讨论 |
+| **`startpage`** | 🌐 需代理 | 免 Key | **多 Worker Anubis SHA-256 PoW 求解器**（难度 ≤ 6）+ 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
 | **`brave`** | 🌐 需代理 | 免 Key | 原生指纹直连 + 赞助商商业推广深度剥离 | 独立海外英文索引、技术博客 |
 | **`exa`** | 🌐 API直连 | 选配免费 Key | 官方语义搜索 API（未配置时自动跳过，不阻断级联） | 深度语义相似搜索、学术与技术前沿 |
 | **`github`** | 🌐 需代理 | 免 Key | 官方 REST API 检索仓库与 Issue 问答 | 开源项目源码、开源库 Issues 排查 |
@@ -109,7 +109,7 @@ flowchart TB
 | :--- | :--- | :--- |
 | **`search`** | 14 大引擎联合联网与代码检索 | 支持多词并发、`timeRange: day\|week\|month\|year` 时间过滤、`site: string[]` 域名过滤、`fetchTop` 正文前瞻注入、`code` 代码引擎（grep.app）；显式传 `engines` 默认 `minResults=0` 且仅在候选内级联；失败附带网络内联诊断（`diagnostics: { proxy, dns, suggestion }`） |
 | **`fetchWebContent`** | 通用网页正文、Markdown 与透明 PDF 提取 | **全能知识提取网关**：内置磁盘级 Markdown 缓存（Node 22 `node:sqlite` / 分片 JSON 兜底，200MB LRU，`cache: default\|reload` 强制刷新）；透明解析 PDF（上限 20MB / 50 页，带 `[page N]` 标记，纯扫描版明确报错）；统一分页与 `focus` 章节定位 |
-| **`fetchGithubReadme`** | 全能 GitHub / Gitee 内容提取网关 | 极速提取仓库 README、源码文件（`/blob/`）、目录树（`/tree/`）、Issue 与 PR（带解决方案与变更列表）；支持国内 Gitee 直连；响应返回 `warnings` |
+| **`fetchGithubContent`** | 全能 GitHub / Gitee 内容提取网关 | 提取 README、**单个源码文件**（`/blob/<ref>/<path>`）、目录树（`/tree/`）、Issue 与 PR；`ref` 可为分支/tag/commit；不是整仓 clone；Gitee 已与 GitHub 对齐（文件/目录/Issue/PR，可选 `GITEE_TOKEN`）；返回 `warnings` |
 | **`queryDocs`** | 一站式开源框架/库官方文档 | 直接传入库名或 Context7 ID；内置低置信度保护与自动兜底链（npm registry → PyPI JSON → 官方 GitHub README），响应标注 `source: context7\|npm\|pypi\|github-readme`、`confidence` 与 `warnings` |
 
 > 💡 **向后兼容说明**：原独立的 `fetchCsdnArticle` 与 `fetchJuejinArticle` 已平滑下沉并收口进通用的 `fetchWebContent`（按域名自动采用最佳专有提取引擎）；原 `resolveLibraryId` 已合并入 `queryDocs`（支持直接传 `library` 库名或旧版 `libraryId` 别名自动解析定位）。如需向大模型显式暴露旧版独立工具，可配置 `REGISTER_LEGACY_ARTICLE_TOOLS=true`。
@@ -229,9 +229,10 @@ my-websearch doctor --reset-health
    - **未开启系统代理且未配 `PROXY_URL`**：纯直连网络下（无 Clash/v2ray 系统代理），海外引擎将被安全策略拦截，此时请显式设置 `PROXY_URL`（如 `http://127.0.0.1:7890` 或 `7897`）。
 
 2. **配置了有效代理后，海外引擎依然失败或超时？（上游 IP 风控，非本地配置错误）**
-   - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：DDG 检测到当前代理节点的公网出口 IP 存在大量自动化请求，触发了人机验证挑战。
+   - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：DDG 对当前代理节点的公网出口 IP 做了限流；可能第一条查询成功、后续返回 `anomalyDetectionBlock`，Cookie 预热无法绕过。请换更干净的节点或等待冷却。
+   - **Bing 返回 HTTP 200 但 0 条结果**：wreq 指纹路径解析为空时会自动回退到 axios SERP 路径；若两条路径都为空，通常是查询或 IP 被软风控。
    - **Brave 返回 HTTP 429 (Too Many Requests)**：Brave 搜索对高频机房代理 IP 进行了限频，此错误属于出口节点被上游限制。
-   - **Startpage 请求挂满超时或 Anubis PoW 难度过大**：Startpage 针对被风控的 IP 会提升 Anubis 工作量证明（PoW）的哈希计算难度至 6+（单核计算需十数秒），导致请求超时触发保护。
+   - **Startpage 请求挂满超时或 Anubis PoW 难度过大**：难度 6 现由最多 4 个 Worker 并行求解（约 3–12s）；难度 >6 会自动跳过；pass-challenge 的 socket 错误/瞬时 5xx 会自动重试。
    - 💡 **解决方案**：上述情况**并非本地客户端或 MCP 服务配置错误**，而是代理出口节点 IP 被上游搜索引擎标记。请在代理客户端（Clash/v2ray）中**切换为较纯净的节点/住宅节点**，或在搜索时使用 `engines: ["bing", "baidu"]` 降级，亦可配置官方 API Key（如 `BRAVE_API_KEY`）直连官方高可用通道。
 
 <a id="configuration"></a>
@@ -272,6 +273,8 @@ my-websearch doctor --reset-health
 | `DEFAULT_MIN_RESULTS` | `5` | 级联补位阈值：可用结果数不足该值时，自动调度备用引擎补齐 |
 | `DEFAULT_SEARCH_LIMIT` | `10` | 工具调用未显式传 `limit` 时的单次返回上限（最大 50） |
 | `SEARCH_DEADLINE_MS` | `30000` | 搜索任务全局超时硬预算（毫秒） |
+| `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | 引擎首次熔断冷却（429 / 202 / bot_challenge）。连续失败指数退避（30s → 60s → 120s…）。 |
+| `ENGINE_CIRCUIT_MAX_COOLDOWN_MS` | `300000` | 熔断指数退避上限（默认 5 分钟）。 |
 | `SEARCH_AUTHORITY_DOMAINS` | 空 | 结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单） |
 | `SEARCH_MODE` | `auto` | 检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`playwright`（全强走浏览器）<br/>• **一种方式多选引擎**：`playwright:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`playwright:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP） |
 | `AUTO_ROUTE_EN_ENGINES` | `bing,duckduckgo` | 英文查询默认自动路由引擎列表（逗号分隔） |
@@ -286,7 +289,7 @@ my-websearch doctor --reset-health
 | `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` 模拟的现代浏览器 TLS/H2 指纹（如 `chrome_149`, `safari_18`） |
 | `IMPERSONATE_OS` | `windows` | 指纹模拟使用的操作系统平台（`windows`, `macos`, `linux`） |
 | `BING_IMPERSONATE` | `true` | 是否启用 Bing 的 Chrome TLS 指纹模拟（连续多次返回 0 条时会自动熔断降级为标准 HTTP） |
-| `ANUBIS_MAX_POW_DIFFICULTY` | `5` | Startpage Anubis 工作量证明（PoW）难度上限，超限时自动绕过或走降级策略 |
+| `ANUBIS_MAX_POW_DIFFICULTY` | `6` | Startpage Anubis 工作量证明（PoW）难度上限，超限时自动绕过或走降级策略 |
 | `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `3500` | 直连优先策略探测超时时间（毫秒） |
 | `FETCH_WEB_INSECURE_TLS`| `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点旧证书链损坏时使用） |
 | `GITHUB_README_CDN_FIRST` | `false` | 为 `true` 时强制跳过 `raw.githubusercontent.com` 直连探测，优先走 jsDelivr CDN 镜像（国内无代理网络加速，免除 3 秒直连探测等待） |
@@ -299,6 +302,7 @@ my-websearch doctor --reset-health
 | `EXA_API_KEY` | 空 | [Exa 官方免费 Key](https://dashboard.exa.ai/api-keys)（仅使用 `exa` 语义搜索时需要） |
 | `BRAVE_API_KEY` | 空 | [Brave Search API Key](https://api.search.brave.com/app/keys)（选配，配置后优先走官方 API 高可靠检索） |
 | `GITHUB_TOKEN` | 空 | [GitHub Personal Access Token](https://github.com/settings/tokens)（选配，提高 GitHub 搜索与内容抓取的速率配额至 5,000次/小时） |
+| `GITEE_TOKEN` | 空 | [Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens)（选配，提高 Gitee API 配额并支持私有仓库） |
 | `STACKOVERFLOW_API_KEY` | 空 | [Stack Apps Key](https://stackapps.com/apps/oauth/register)（选配，提高 StackOverflow 检索配额至 10,000次/天） |
 
 #### 4. 🖥️ 服务模式、并发与会话治理
@@ -335,7 +339,7 @@ my-websearch doctor --reset-health
 | `OPEN_WEBSEARCH_RESPONSE_CAP_BYTES`| `60000` | MCP 工具返回给大模型的最大字符上限，防止超长上下文撑爆模型窗口 |
 | `MCP_TOOL_SEARCH_NAME` | `search` | 自定义搜索工具在 MCP 中的注册名称 |
 | `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | 自定义正文抓取工具在 MCP 中的注册名称 |
-| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | 自定义 GitHub README 工具在 MCP 中的注册名称 |
+| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubContent` | 自定义 GitHub/Gitee 内容工具在 MCP 中的注册名称（设为 `fetchGithubReadme` 可保持旧名） |
 
 > 💡 **零配置升级说明（已精简移除的冗余变量）**：
 > - **CORS 跨域开关**（`ENABLE_CORS`/`CORS_ORIGIN`）：默认**关闭 CORS**；仅在浏览器跨域调用时显式开启，并限制允许来源。
@@ -356,7 +360,7 @@ my-websearch doctor --reset-health
 ```bash
 npm install
 npm run build
-npm test              # 执行 Vitest 测试套件（当前基线：45 个文件、401 个测试）
+npm test              # 执行 Vitest 测试套件（当前基线：54 个文件、450 个测试）
 npm run test:live     # 执行外网有界并发实时集成测试
 npm run eval:live     # 执行 23 用例真实 STDIO JSON-RPC 评测套件
 ```

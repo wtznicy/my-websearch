@@ -32,6 +32,57 @@ describe('fetchGithubContent / fetchGithubReadme extended capabilities', () => {
         expect(calledUrl).toContain('raw.githubusercontent.com/mock-owner/mock-repo/main/packages/core/index.js');
     });
 
+    it('returns sibling file candidates when a blob path is missing', async () => {
+        // 探测可达性（axios.get）成功；raw 与 jsDelivr 均 404；Contents API 返回同目录文件
+        vi.spyOn(axios, 'get').mockResolvedValue({ status: 200, data: '', headers: {} });
+        vi.spyOn(axios, 'request')
+            .mockResolvedValueOnce({ status: 404, data: '', headers: {} })
+            .mockResolvedValueOnce({ status: 404, data: '', headers: {} })
+            .mockResolvedValueOnce({
+                status: 200,
+                data: [
+                    { name: 'index.ts', type: 'file' },
+                    { name: 'helpers.ts', type: 'file' },
+                    { name: 'nested', type: 'dir' }
+                ],
+                headers: {}
+            });
+
+        const error = await fetchGithubContent(
+            'https://github.com/mock-owner/mock-repo/blob/main/src/index2.ts'
+        ).catch((err: unknown) => err) as { code?: string; hint?: string; message?: string };
+
+        expect(error.code).toBe('not_found');
+        expect(error.message).toContain('GitHub file not found');
+        expect(error.hint).toContain('index.ts');
+        expect(error.hint).toContain('helpers.ts');
+        expect(error.hint).toContain('/blob/main/src/index.ts');
+        expect(error.hint).not.toContain('nested');
+    });
+
+    it('treats an axios 404 rejection as not_found and still returns candidates', async () => {
+        vi.spyOn(axios, 'get').mockResolvedValue({ status: 200, data: '', headers: {} });
+        const notFound = Object.assign(new Error('Request failed with status code 404'), {
+            response: { status: 404 }
+        });
+        vi.spyOn(axios, 'request')
+            .mockRejectedValueOnce(notFound)
+            .mockRejectedValueOnce(notFound)
+            .mockResolvedValueOnce({
+                status: 200,
+                data: [{ name: 'index.ts', type: 'file' }],
+                headers: {}
+            });
+
+        const error = await fetchGithubContent(
+            'https://github.com/mock-owner/mock-repo/blob/main/src/missing2.ts'
+        ).catch((err: unknown) => err) as { code?: string; hint?: string };
+
+        expect(error.code).toBe('not_found');
+        expect(error.hint).toContain('index.ts');
+        expect(error.hint).toContain('/blob/main/src/index.ts');
+    });
+
     it('identifies issue URL and formats title, status, description, reactions, and comments', async () => {
         vi.spyOn(axios, 'request')
             // Issue detail response
