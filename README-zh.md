@@ -23,12 +23,12 @@
 
 ## ✨ 核心特性
 
-`my-websearch` 是专为 AI Agent（Claude Desktop、Cursor、Cherry Studio、Windsurf、Cline、ZCode 等）打造的**全栈联网检索与技术文档基础设施**。无需付费 API Key，开箱即用：
+`my-websearch` 是专为 AI Agent（Claude Desktop、Cursor、Cherry Studio、Windsurf、Cline、ZCode 等）打造的**全栈联网检索与技术文档基础设施**。开箱即用，具备全引擎自适应路由与高质量正文提纯能力：
 
 - 🌐 **13 大引擎融合与自适应路由**  
   聚合国内直连（**Bing、百度、CSDN、掘金、搜狗**）、海外通用（**DuckDuckGo、Brave、Startpage、Exa**）与垂直开发者平台（**GitHub、StackOverflow、Hacker News、arXiv**）。支持中文/英文按语种自动路由（`auto`）、多词并发检索（`queries`）、跨引擎去重排序与 `minResults` 自动级联补位。
-- ⚡ **原生级反爬与算力求解（零浏览器毫秒直通）**  
-  基于 `wreq-js` 原生模拟现代 Chrome TLS/HTTP2 指纹；内置轻量算法秒解 **Startpage Anubis SHA-256 PoW 算力挑战** 与 **DuckDuckGo `d.js` (`isJsaChallenge`) HTML5/算术挑战**；真实 URL 深度解密（搜狗跳转页快速还原、百度 `Location` 直取、Bing Base64 解码）；无需拉起 400MB 浏览器即可稳定穿透风控。
+- ⚡ **现代 Web 协议栈与前端算力求解（零浏览器轻量直通）**  
+  基于 `wreq-js` 原生模拟现代浏览器 TLS/HTTP2 协议握手与长效会话机制；内置算法解析 **Startpage Anubis SHA-256 PoW 算力挑战** 与 **DuckDuckGo `d.js` (`isJsaChallenge`) 动态前端挑战**；真实 URL 快速解析（搜狗跳转页还原、百度 `Location` 直取、Bing Base64 解码）；无需拉起 400MB 浏览器即可稳定高效获取正文。
 - 📄 **高纯度 Markdown 正文提纯与特色站点规则**  
   整合 Mozilla Readability 与容器级智能降噪，为**微信公众号**（`#js_content` 深度清洗）、**StackOverflow**（问答主体与采纳答案精准提纯）定制专属净化器，针对 **CSDN 与掘金** 自动走专用提取链路；精准保留文章主标题、代码围栏及 GFM 表格；支持长文无缝分页（`startIndex`）。
 - 📚 **统一 Context7 官方框架/库文档直查（`queryDocs` 一站式合体）**  
@@ -58,7 +58,7 @@ flowchart TB
         Ranker["跨引擎 URL 归一化去重 & BM25 相关性重排"]
     end
 
-    subgraph Transport["🛡️ 反爬对抗与安全传输 (Anti-Bot & Security)"]
+    subgraph Transport["🛡️ 传输协议与安全防护 (Transport & Security)"]
         Wreq["wreq-js 原生 Chrome TLS/H2 指纹<br/>+ 会话级 Cookie 自动持久化"]
         Solvers["内置毫秒挑战求解器<br/>Startpage PoW | DDG JSA Solver"]
         PW["Playwright 隐身浏览器兜底<br/>(严格超时预算 + 跨进程文件锁治理)"]
@@ -82,20 +82,20 @@ flowchart TB
 
 | 引擎标识 | 网络要求 | API Key | 核心技术与优势 | 最擅长场景 |
 | :--- | :---: | :---: | :--- | :--- |
-| **`bing`** | 🇨🇳 直连 | 免 Key | Chrome TLS 指纹 + Base64 真实链接解码 + 隐身兜底 | 综合技术检索、中英文混合查询 |
-| **`baidu`** | 🇨🇳 直连 | 免 Key | 并发 `Location` 跳转直取 + 反爬验证页精准识别 | 中文资讯、本土百科、国内论坛 |
-| **`csdn`** | 🇨🇳 直连 | 免 Key | 自动持久化阿里云 WAF Cookie + 空壳响应智能重试 | 中文报错排查、开发踩坑笔记 |
-| **`juejin`** | 🇨🇳 直连 | 免 Key | 掘金官方接口直调，极速提取干净长文 | 前端/后端现代中文高质量技术博文 |
-| **`sogou`** | 🇨🇳 直连 | 免 Key | 桌面/移动双栈解析 + 跳转页快速还原 + 自动去推广 | 微信公众号外链、中文长尾问答 |
-| **`duckduckgo`** | 🌐 需代理 | 免 Key | Preload `d.js` + **内置 `isJsaChallenge` 求解器**（HTTP 202 = 出口 IP 限流） | 英文技术检索、海外开源讨论 |
-| **`startpage`** | 🌐 需代理 | 免 Key | **多 Worker Anubis SHA-256 PoW 求解器**（难度 ≤ 6）+ 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
-| **`brave`** | 🌐 需代理 | 免 Key | 原生指纹直连 + 赞助商商业推广深度剥离 | 独立海外英文索引、技术博客 |
-| **`exa`** | 🌐 API直连 | 选配免费 Key | 官方语义搜索 API（未配置时自动跳过，不阻断级联） | 深度语义相似搜索、学术与技术前沿 |
-| **`github`** | 🌐 需代理 | 免 Key | 官方 REST API 检索仓库与 Issue 问答 | 开源项目源码、开源库 Issues 排查 |
-| **`stackoverflow`**| 🌐 需代理 | 免 Key | StackExchange 2.3 官方 API + HTML 实体智能解码 | 编程报错排错、高质量代码问答 |
-| **`hackernews`** | 🌐 需代理 | 免 Key | Algolia HN API，含 points、评论数与作者元信息 | 极客社区讨论、前沿科技热点与观点 |
-| **`arxiv`** | 🌐 需代理 | 免 Key | 官方 Atom XML API 检索论文标题、作者与摘要 | 计算机科学、AI/ML 与自然科学最新论文 |
-| **`code`** | 🇨🇳 直连 | 免 Key | grep.app API 实时检索全球 GitHub 代码，含仓库、文件路径与精确代码行 | 源码实现翻查、API 使用范例、开源语法实战 |
+| **`bing`** | 🇨🇳 直连 | 无 | Chrome TLS 指纹 + Base64 真实链接解码 + 隐身兜底 | 综合技术检索、中英文混合查询 |
+| **`baidu`** | 🇨🇳 直连 | 无 | 并发 `Location` 跳转直取 + 验证拦截状态精准识别 | 中文资讯、本土百科、国内论坛 |
+| **`csdn`** | 🇨🇳 直连 | 无 | 自动持久化阿里云 WAF Cookie + 空壳响应智能重试 | 中文报错排查、开发踩坑笔记 |
+| **`juejin`** | 🇨🇳 直连 | 无 | 掘金官方接口直调，极速提取干净长文 | 前端/后端现代中文高质量技术博文 |
+| **`sogou`** | 🇨🇳 直连 | 无 | 桌面/移动双栈解析 + 跳转页快速还原 + 自动去推广 | 微信公众号外链、中文长尾问答 |
+| **`duckduckgo`** | 🌐 需代理 | 无 | Preload `d.js` + **内置 `isJsaChallenge` 求解器**（HTTP 202 = 出口 IP 限流） | 英文技术检索、海外开源讨论 |
+| **`startpage`** | 🌐 需代理 | 无 | **多 Worker Anubis SHA-256 PoW 求解器**（难度 ≤ 6）+ 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
+| **`brave`** | 🌐 需代理 | 无 | 原生指纹直连 + 赞助商商业推广深度剥离 | 独立海外英文索引、技术博客 |
+| **`exa`** | 🌐 API直连 | 选配 Key | 官方语义搜索 API（未配置时自动跳过，不阻断级联） | 深度语义相似搜索、学术与技术前沿 |
+| **`github`** | 🌐 需代理 | 无 | 官方 REST API 检索仓库与 Issue 问答 | 开源项目源码、开源库 Issues 排查 |
+| **`stackoverflow`**| 🌐 需代理 | 无 | StackExchange 2.3 官方 API + HTML 实体智能解码 | 编程报错排错、高质量代码问答 |
+| **`hackernews`** | 🌐 需代理 | 无 | Algolia HN API，含 points、评论数与作者元信息 | 极客社区讨论、前沿科技热点与观点 |
+| **`arxiv`** | 🌐 需代理 | 无 | 官方 Atom XML API 检索论文标题、作者与摘要 | 计算机科学、AI/ML 与自然科学最新论文 |
+| **`code`** | 🇨🇳 直连 | 无 | grep.app API 实时检索全球 GitHub 代码，含仓库、文件路径与精确代码行 | 源码实现翻查、API 使用范例、开源语法实战 |
 
 ---
 
@@ -128,7 +128,7 @@ flowchart TB
 npx -y my-websearch@latest
 ```
 
-> 💡 **全自动网络感知**：项目默认自动探测操作系统的系统代理。只要本地运行了系统代理工具（如 v2ray、Surge 等），海外引擎自动走代理，国内引擎自动走高速直连；Fake-IP（`198.18.0.0/15`）已内置放行。
+> 💡 **全自动网络感知**：项目默认自动探测操作系统的系统代理。只要本地开启了网络代理环境，国际引擎自动走代理通道，国内引擎自动走高速直连；Fake-IP（`198.18.0.0/15`）已内置放行。
 
 ### 2. 主流 AI 客户端配置
 
@@ -218,22 +218,22 @@ my-websearch doctor --network --engine bing,duckduckgo --json
 my-websearch doctor --reset-health
 ```
 
-报告会区分配置状态、代理 TCP 连通性、HTTP 连通性、应用层解析、浏览器启动和反爬挑战。网络模式会发起真实请求，不建议高频执行。
+报告会区分配置状态、代理 TCP 连通性、HTTP 连通性、应用层解析、浏览器启动和交互验证状态。网络模式会发起真实请求，不建议高频执行。
 
-### 🌐 代理排障与上游风控辨析
+### 🌐 代理排障与上游频控辨析
 
 在配置或调试代理时，如果遇到异常表现，请对照以下高频排查点：
 
 1. **启动日志显示 `🌐 Proxy: disabled`，但明明配置了 `proxy.url`？**
    - **排查 `useProxy` 字段**：在 `~/.my-websearch/config.json` 中，若配置了 `"useProxy": false`，根据配置优先级规则，该参数会**显式覆盖并强制禁用 `url`**（产生 `PROXY_URL='false'`），导致代理被静默关闭。请将 `"useProxy"` 改为 `true` 或直接删除该字段（只要存在有效 `url` 即可自动启用代理）。
-   - **未开启系统代理且未配 `PROXY_URL`**：纯直连网络下（未开启本地代理客户端），海外引擎将被安全策略拦截，此时请显式设置 `PROXY_URL`（如 `http://127.0.0.1:7890` 或 `7897`）。
+   - **未开启系统代理且未配 `PROXY_URL`**：纯直连网络下（未开启本地网络代理环境），国际引擎无法直接连通，此时请显式设置 `PROXY_URL`（如 `http://127.0.0.1:7890` 或 `7897`）。
 
-2. **配置了有效代理后，海外引擎依然失败或超时？（上游 IP 风控，非本地配置错误）**
-   - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：DDG 对当前代理节点的公网出口 IP 做了限流；可能第一条查询成功、后续返回 `anomalyDetectionBlock`，Cookie 预热无法绕过。请换更干净的节点或等待冷却。
-   - **Bing 返回 HTTP 200 但 0 条结果**：wreq 指纹路径解析为空时会自动回退到 axios SERP 路径；若两条路径都为空，通常是查询或 IP 被软风控。
-   - **Brave 返回 HTTP 429 (Too Many Requests)**：Brave 搜索对高频机房代理 IP 进行了限频，此错误属于出口节点被上游限制。
+2. **配置了有效代理后，国际引擎依然失败或超时？（上游 IP 频控限流，非本地配置错误）**
+   - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：DDG 对当前公网出口 IP 触发了频控限制；可能首条查询成功、后续返回 `anomalyDetectionBlock`，Cookie 机制无法解除上游限流。请更换网络出口 IP 或等待频控冷却。
+   - **Bing 返回 HTTP 200 但 0 条结果**：wreq 协议路径解析为空时会自动回退到 axios 网页路径；若两条路径都为空，通常是查询词或 IP 受到频控策略限制。
+   - **Brave 返回 HTTP 429 (Too Many Requests)**：Brave 搜索对高频共享出口 IP 进行了速率限制，此错误属于出口 IP 请求过频。
    - **Startpage 请求挂满超时或 Anubis PoW 难度过大**：难度 6 现由最多 4 个 Worker 并行求解（约 3–12s）；难度 >6 会自动跳过；pass-challenge 的 socket 错误/瞬时 5xx 会自动重试。
-   - 💡 **解决方案**：上述情况**并非本地客户端或 MCP 服务配置错误**，而是代理出口节点 IP 被上游搜索引擎标记。请在代理客户端（如 v2rayN 等）中**切换为较纯净的节点/住宅节点**，或在搜索时使用 `engines: ["bing", "baidu"]` 降级，亦可配置官方 API Key（如 `BRAVE_API_KEY`）直连官方高可用通道。
+   - 💡 **解决方案**：上述情况**并非本地客户端或 MCP 服务配置错误**，而是公网出口 IP 触发了上游搜索引擎的访问频控。请**更换代理服务出口 IP**，或在搜索时使用 `engines: ["bing", "baidu"]` 降级，亦可配置官方 API Key（如 `BRAVE_API_KEY`）直连官方高可用通道。
 
 <a id="configuration"></a>
 
@@ -269,11 +269,11 @@ my-websearch doctor --reset-health
 | :--- | :--- | :--- |
 | `DEFAULT_SEARCH_ENGINE` | `auto` | 默认搜索引擎。`auto`（智能感知路由：中文走 `baidu,sogou`，英文走 `bing,duckduckgo`）。支持全部 13 个引擎：`auto`、`bing`、`baidu`、`sogou`、`duckduckgo`、`brave`、`csdn`、`juejin`、`startpage`、`exa`、`github`、`stackoverflow`、`hackernews`、`arxiv`（垂直开发者引擎可配置为默认，全局默认推荐保持 `auto` 或通用网页引擎） |
 | `ALLOWED_SEARCH_ENGINES` | 全部 | 限制启用的引擎白名单（逗号分隔，如 `bing,baidu,duckduckgo`） |
-| `BING_BASE_URL` | `https://cn.bing.com/search` | Bing 搜索请求基址。海外用户可改为 `https://www.bing.com/search` 或自建反代（兼容旧变量 `OPEN_WEBSEARCH_BING_HOST`） |
+| `BING_BASE_URL` | `https://cn.bing.com/search` | Bing 搜索请求基址。国际用户可改为 `https://www.bing.com/search` 或自定义中转域名（兼容旧变量 `OPEN_WEBSEARCH_BING_HOST`） |
 | `DEFAULT_MIN_RESULTS` | `5` | 级联补位阈值：可用结果数不足该值时，自动调度备用引擎补齐 |
 | `DEFAULT_SEARCH_LIMIT` | `10` | 工具调用未显式传 `limit` 时的单次返回上限（最大 50） |
 | `SEARCH_DEADLINE_MS` | `30000` | 搜索任务全局超时硬预算（毫秒） |
-| `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | 引擎首次熔断冷却（429 / 202 / bot_challenge）。连续失败指数退避（30s → 60s → 120s…）。 |
+| `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | 引擎首次熔断冷却（429 / 202 / 验证状态）。连续失败指数退避（30s → 60s → 120s…）。 |
 | `ENGINE_CIRCUIT_MAX_COOLDOWN_MS` | `300000` | 熔断指数退避上限（默认 5 分钟）。 |
 | `SEARCH_AUTHORITY_DOMAINS` | 空 | 结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单） |
 | `SEARCH_MODE` | `auto` | 检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`playwright`（全强走浏览器）<br/>• **一种方式多选引擎**：`playwright:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`playwright:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP） |
@@ -284,12 +284,12 @@ my-websearch doctor --reset-health
 
 | 变量名 | 默认值 | 可选值 / 说明 |
 | :--- | :--- | :--- |
-| `PROXY_URL` | 空（关闭） | 统一上游代理配置（已合并原 `USE_PROXY` 与 `PROXY_ENGINES`，TUN 模式无需配置保持直连）。<br/>• **开启默认代理**：传空值 `PROXY_URL=""` 或 `PROXY_URL=true` 即可启用默认 `http://127.0.0.1:7897`（常见本地代理端口如 7897、7890，若使用 v2rayN 可配 `10809`；默认仅海外引擎走代理，国内引擎直连）<br/>• **自定义地址**：`PROXY_URL=http://127.0.0.1:10809`<br/>• **自选引擎**：`PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` 或全部引擎走代理 `PROXY_URL=";all"` |
+| `PROXY_URL` | 空（关闭） | 统一上游代理配置（已合并原 `USE_PROXY` 与 `PROXY_ENGINES`，TUN 模式无需配置保持直连）。<br/>• **开启默认代理**：传空值 `PROXY_URL=""` 或 `PROXY_URL=true` 即可启用默认 `http://127.0.0.1:7897`（常见本地代理端口如 7897、7890、10809；默认仅国际引擎走代理，国内引擎直连）<br/>• **自定义地址**：`PROXY_URL=http://127.0.0.1:10809`<br/>• **自选引擎**：`PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` 或全部引擎走代理 `PROXY_URL=";all"` |
 | `FAKE_IP_CIDRS` | `198.18.0.0/15` | Fake-IP 虚拟网段白名单，避免误触发 SSRF 本地私网地址拦截 |
 | `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` 模拟的现代浏览器 TLS/H2 指纹（如 `chrome_149`, `safari_18`） |
 | `IMPERSONATE_OS` | `windows` | 指纹模拟使用的操作系统平台（`windows`, `macos`, `linux`） |
 | `BING_IMPERSONATE` | `true` | 是否启用 Bing 的 Chrome TLS 指纹模拟（连续多次返回 0 条时会自动熔断降级为标准 HTTP） |
-| `ANUBIS_MAX_POW_DIFFICULTY` | `6` | Startpage Anubis 工作量证明（PoW）难度上限，超限时自动绕过或走降级策略 |
+| `ANUBIS_MAX_POW_DIFFICULTY` | `6` | Startpage Anubis 工作量证明（PoW）难度上限，超限时自动跳过或走降级策略 |
 | `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `3500` | 直连优先策略探测超时时间（毫秒） |
 | `FETCH_WEB_INSECURE_TLS`| `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点旧证书链损坏时使用） |
 | `GITHUB_README_CDN_FIRST` | `false` | 为 `true` 时强制跳过 `raw.githubusercontent.com` 直连探测，优先走 jsDelivr CDN 镜像（国内无代理网络加速，免除 3 秒直连探测等待） |
@@ -361,7 +361,7 @@ my-websearch doctor --reset-health
 npm install
 npm run build
 npm test              # 执行 Vitest 测试套件（当前基线：54 个文件、450 个测试）
-npm run test:live     # 执行外网有界并发实时集成测试
+npm run test:live     # 执行实时网络集成测试
 npm run eval:live     # 执行 23 用例真实 STDIO JSON-RPC 评测套件
 ```
 

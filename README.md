@@ -23,12 +23,12 @@
 
 ## ✨ Features
 
-`my-websearch` is a full-stack search and technical documentation engine built specifically for AI coding agents (**Claude Desktop, Cursor, Cherry Studio, Windsurf, Cline, ZCode**, etc.). It requires **zero paid API keys**:
+`my-websearch` is a full-stack search and technical documentation engine built specifically for AI coding agents (**Claude Desktop, Cursor, Cherry Studio, Windsurf, Cline, ZCode**, etc.). Out of the box, ready for multiple mainstream AI clients:
 
 - 🌐 **13-Engine Federated Search & Smart Routing**  
   Aggregates direct domestic engines (**Bing, Baidu, CSDN, Juejin, Sogou**), global engines (**DuckDuckGo, Brave, Startpage, Exa**), and specialized developer platforms (**GitHub, StackOverflow, Hacker News, arXiv**). Features automatic language-aware routing (`auto`), parallel multi-query execution (`queries: string[]`), URL deduplication, and automatic `minResults` cascading fallback.
-- ⚡ **Native Anti-Bot & Proof-of-Work Solvers (Zero-Browser Fast Path)**  
-  Built on `wreq-js` with native Chrome TLS/HTTP2 handshake emulation and persistent session cookies. Includes pure-JS/Rust solvers for **Startpage's Anubis SHA-256 PoW challenge** and **DuckDuckGo's `d.js` (`isJsaChallenge`) HTML5/arithmetic challenge**, bypassing anti-bot walls in milliseconds without launching a 400MB browser. Real URL decryption for Sogou redirect links, Baidu `Location`, and Bing Base64 links.
+- ⚡ **Native Web Protocol & Proof-of-Work Solvers (Zero-Browser Fast Path)**  
+  Built on `wreq-js` with native modern TLS/HTTP2 handshake emulation and persistent session cookies. Includes pure-JS/Rust solvers for **Startpage's Anubis SHA-256 PoW challenge** and **DuckDuckGo's `d.js` (`isJsaChallenge`) HTML5/arithmetic challenge**, resolving structured challenge responses in milliseconds without launching a 400MB browser. Real URL resolution for Sogou redirect links, Baidu `Location`, and Bing Base64 links.
 - 📄 **High-Purity Markdown Article Extraction & Dedicated Site Purifiers**  
   Combines Mozilla Readability with intelligent chrome noise stripping. Features dedicated purification rules for **WeChat Official Accounts** (`mp.weixin.qq.com`), **StackOverflow questions & accepted answers**, and transparent internal routing for **CSDN & Juejin**. Removes `<nav>`, `<aside>`, `<footer>`, and breadcrumbs while faithfully preserving article titles, code blocks, and GFM tables. Supports seamless pagination (`startIndex`).
 - 📚 **Unified Context7 Library Docs Lookup (`queryDocs`)**  
@@ -58,7 +58,7 @@ flowchart TB
         Ranker["Cross-Engine URL Deduplication & BM25 Relevance Ranking"]
     end
 
-    subgraph Transport["🛡️ Anti-Bot & Security Transport"]
+    subgraph Transport["🛡️ Transport & Security Architecture"]
         Wreq["wreq-js Chrome TLS/H2 Fingerprint<br/>+ Automatic Session Cookie Jars"]
         Solvers["Millisecond Challenge Solvers<br/>Startpage PoW | DDG JSA Solver"]
         PW["Playwright Stealth Browser Fallback<br/>(Budget Bounds + Cross-Process Locking)"]
@@ -83,7 +83,7 @@ flowchart TB
 | Engine | Mainland China Connectivity | API Key | Core Technology | Best For |
 | :--- | :---: | :---: | :--- | :--- |
 | **`bing`** | 🇨🇳 Direct | None | Chrome TLS impersonation + Base64 real URL resolution + stealth fallback | General technical search, mixed EN/ZH queries |
-| **`baidu`** | 🇨🇳 Direct | None | Concurrent `Location` redirect resolution + anti-bot detection | Chinese news, documentation, domestic forums |
+| **`baidu`** | 🇨🇳 Direct | None | Concurrent `Location` redirect resolution + challenge detection | Chinese news, documentation, domestic forums |
 | **`csdn`** | 🇨🇳 Direct | None | WAF cookie jar persistence + empty response auto-retry | Chinese error logs, debugging tutorials |
 | **`juejin`** | 🇨🇳 Direct | None | Direct official API querying for clean long-form articles | Modern frontend/backend technical blogs |
 | **`sogou`** | 🇨🇳 Direct | None | Desktop & mobile dual parsing + redirect link decoding + ad removal | WeChat ecosystem links & long-tail queries |
@@ -128,7 +128,7 @@ No installation required:
 npx -y my-websearch@latest
 ```
 
-> 💡 **Automated Proxy Discovery**: The server automatically detects your operating system's proxy settings. If a local proxy or VPN client is active, overseas engines automatically use the proxy while domestic engines stay on fast direct lines. `198.18.0.0/15` is whitelisted out of the box for Fake-IP environments.
+> 💡 **Automated Proxy Discovery**: The server automatically detects your operating system's proxy settings. If a local proxy environment is active, overseas engines automatically use the proxy while domestic engines stay on fast direct lines. `198.18.0.0/15` is whitelisted out of the box for Fake-IP environments.
 
 ### 2. Configure in AI Clients
 
@@ -218,9 +218,9 @@ my-websearch doctor --network --engine bing,duckduckgo --json
 my-websearch doctor --reset-health
 ```
 
-The report separates configuration, proxy TCP reachability, HTTP reachability, application parsing, browser launch, and anti-bot challenges. Network mode performs real requests and should not be used as a high-frequency health check.
+The report separates configuration, proxy TCP reachability, HTTP reachability, application parsing, browser launch, and challenge verification status. Network mode performs real requests and should not be used as a high-frequency health check.
 
-### 🌐 Proxy Troubleshooting & Upstream IP Risk Control
+### 🌐 Proxy Troubleshooting & Upstream Rate Limiting
 
 When configuring or diagnosing proxy connectivity, refer to these common edge cases:
 
@@ -228,12 +228,12 @@ When configuring or diagnosing proxy connectivity, refer to these common edge ca
    - **Check `useProxy` flag**: In `~/.my-websearch/config.json`, setting `"useProxy": false` takes precedence and **explicitly overrides and disables `url`** (setting `PROXY_URL='false'`). Change `"useProxy": true` or simply omit the field (providing a valid `url` automatically enables the proxy).
    - **No system proxy active without `PROXY_URL`**: If no system proxy or local proxy client is running, overseas engines will be blocked by default. Explicitly declare `PROXY_URL` (e.g. `http://127.0.0.1:7897` or `7890`).
 
-2. **Proxy is configured properly, but overseas engines fail or timeout? (Upstream IP Blocking, NOT a Config Error)**
-   - **DuckDuckGo returns HTTP 202 / challenge**: DDG rate-limits the proxy node's egress IP. The first query may succeed and later ones return `anomalyDetectionBlock`; cookie warming does not bypass this. Rotate to a cleaner node or wait for cooldown.
-   - **Bing returns HTTP 200 but 0 results**: the wreq impersonation path now falls back to the axios SERP path automatically when it parses an empty page. If both paths stay empty, the query/IP is likely soft-blocked.
+2. **Proxy is configured properly, but overseas engines fail or timeout? (Upstream IP Rate Limiting, NOT a Config Error)**
+   - **DuckDuckGo returns HTTP 202 / challenge**: DDG rate-limits the egress IP. The first query may succeed and later ones return `anomalyDetectionBlock`; cookie warming cannot resolve this upstream rate limit. Change the egress IP or wait for cooldown.
+   - **Bing returns HTTP 200 but 0 results**: the wreq impersonation path now falls back to the axios SERP path automatically when it parses an empty page. If both paths stay empty, the query/IP is likely rate-limited.
    - **Brave returns HTTP 429 Too Many Requests**: Brave Search rate-limits noisy datacenter IP ranges.
    - **Startpage times out or Anubis PoW difficulty spikes**: difficulty 6 is now solved inline by up to 4 worker threads (~3–12s); >6 is skipped. Pass-challenge socket errors / transient 5xx are retried automatically.
-   - 💡 **Resolution**: These symptoms indicate that **the proxy node's public IP has been flagged by upstream search providers**, not a bug in `my-websearch`. Switch to a cleaner proxy server/node in your proxy client, fallback to domestic/direct engines, or supply an official API key such as `BRAVE_API_KEY` for guaranteed SLA.
+   - 💡 **Resolution**: These symptoms indicate that **the public egress IP has triggered upstream rate limiting**, not a bug in `my-websearch`. Switch to a different proxy server IP, fallback to domestic/direct engines, or supply an official API key such as `BRAVE_API_KEY` for guaranteed SLA.
 
 <a id="configuration"></a>
 
@@ -284,7 +284,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 
 | Variable | Default | Allowed Values / Description |
 | :--- | :--- | :--- |
-| `PROXY_URL` | empty (off) | Consolidated upstream proxy configuration (merges previous `USE_PROXY` and `PROXY_ENGINES`). Not needed in TUN mode.<br/>• **Default proxy**: passing empty `PROXY_URL=""` or `PROXY_URL=true` activates default `http://127.0.0.1:7897` (common local proxy ports include 7897, 7890, or 10809 for v2rayN; overseas engines use proxy, domestic engines stay direct)<br/>• **Custom address**: `PROXY_URL=http://127.0.0.1:10809`<br/>• **Custom engines**: `PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` or all engines `PROXY_URL=";all"` |
+| `PROXY_URL` | empty (off) | Consolidated upstream proxy configuration (merges previous `USE_PROXY` and `PROXY_ENGINES`). Not needed in TUN mode.<br/>• **Default proxy**: passing empty `PROXY_URL=""` or `PROXY_URL=true` activates default `http://127.0.0.1:7897` (common local proxy ports include 7897, 7890, 10809; overseas engines use proxy, domestic engines stay direct)<br/>• **Custom address**: `PROXY_URL=http://127.0.0.1:10809`<br/>• **Custom engines**: `PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` or all engines `PROXY_URL=";all"` |
 | `FAKE_IP_CIDRS` | `198.18.0.0/15` | Whitelisted CIDRs for Fake-IP / TUN mode to avoid SSRF false-positive blocking |
 | `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` browser TLS/H2 fingerprint profile (e.g. `chrome_149`, `safari_18`) |
 | `IMPERSONATE_OS` | `windows` | Operating system platform for fingerprint impersonation (`windows`, `macos`, `linux`) |
@@ -298,7 +298,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 
 | Variable | Default | Allowed Values / Description |
 | :--- | :--- | :--- |
-| `CONTEXT7_API_KEY` | empty | [Context7 API Key](https://context7.com/dashboard) (strongly recommended for proxy/TUN users to bypass shared IP quotas) |
+| `CONTEXT7_API_KEY` | empty | [Context7 API Key](https://context7.com/dashboard) (strongly recommended for proxy/TUN users to avoid shared IP quotas) |
 | `EXA_API_KEY` | empty | [Exa Free API Key](https://dashboard.exa.ai/api-keys) (only required if using the `exa` semantic search engine) |
 | `BRAVE_API_KEY` | empty | [Brave Search API Key](https://api.search.brave.com/app/keys) (optional; uses official high-reliability API when set) |
 | `GITHUB_TOKEN` | empty | [GitHub Personal Access Token](https://github.com/settings/tokens) (optional; raises rate limit to 5,000 req/hr) |
