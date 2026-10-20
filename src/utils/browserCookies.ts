@@ -3,7 +3,14 @@ import { config, getProxyUrl } from '../config.js';
 import { prepareStealthPage, getStealthUserAgent } from './browserStealth.js';
 import { openPlaywrightBrowser, loadPlaywrightClient } from './playwrightClient.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from './urlSafety.js';
+import {
+    installBrowserResourceBlocker,
+    isBlockedBrowserSubresource,
+    RESOURCE_BLOCKER_INSTALLED
+} from './browserResourceBlocker.js';
 import { AppError } from '../core/errors.js';
+
+export { isBlockedBrowserSubresource } from './browserResourceBlocker.js';
 
 import { DEFAULT_DESKTOP_UA } from './userAgents.js';
 
@@ -119,9 +126,13 @@ export function __getBrowserSubresourceClassificationForTests(hostname: string):
 }
 
 type CookieRoute = {
-    request(): { url(): string; isNavigationRequest(): boolean };
+    request(): {
+        url(): string;
+        isNavigationRequest(): boolean;
+        resourceType?(): string;
+    };
     continue(): Promise<void>;
-    abort(): Promise<void>;
+    abort(errorCode?: string): Promise<void>;
 };
 
 type CookiePage = {
@@ -153,8 +164,10 @@ type BrowserWithContexts = {
 // aborts ones whose target is private/loopback at either the literal or
 // DNS-resolved level. Navigation hits DNS fresh every time to keep the
 // rebinding window tight; sub-resources go through a hostname TTL cache.
+// 同时整合 Scrapling 式激进无用资源拦截（图片、音视频、外部字体、分析追踪脚本），大幅提速并削减带宽。
 async function installNavigationGuard(page: CookiePage): Promise<void> {
-    if (typeof page.route !== 'function') {
+    const pageWithFlag = page as CookiePage & { [RESOURCE_BLOCKER_INSTALLED]?: boolean };
+    if (pageWithFlag[RESOURCE_BLOCKER_INSTALLED] || typeof page.route !== 'function') {
         return;
     }
     try {
@@ -165,6 +178,10 @@ async function installNavigationGuard(page: CookiePage): Promise<void> {
                 if (request.isNavigationRequest()) {
                     await assertPublicHttpUrlResolved(targetUrl, 'Browser navigation URL');
                 } else {
+                    if (isBlockedBrowserSubresource(request)) {
+                        await route.abort('blockedbyclient').catch(() => route.abort().catch(() => undefined));
+                        return;
+                    }
                     await classifyBrowserSubresourceUrl(targetUrl);
                 }
                 await route.continue();
@@ -172,6 +189,7 @@ async function installNavigationGuard(page: CookiePage): Promise<void> {
                 await route.abort().catch(() => undefined);
             }
         });
+        pageWithFlag[RESOURCE_BLOCKER_INSTALLED] = true;
     } catch {
         // Some connected browsers (e.g., certain CDP setups) may not support route
         // interception. Pre-navigation validation still gates the initial URL.

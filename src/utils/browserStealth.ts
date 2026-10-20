@@ -7,6 +7,7 @@
  */
 
 import { DEFAULT_DESKTOP_UA } from './userAgents.js';
+import { installBrowserResourceBlocker } from './browserResourceBlocker.js';
 
 const STEALTH_BROWSER_USER_AGENT = DEFAULT_DESKTOP_UA;
 
@@ -16,6 +17,7 @@ type StealthPage = {
     addInitScript(script: () => void): Promise<void>;
     setViewportSize?(size: { width: number; height: number }): Promise<void>;
     setExtraHTTPHeaders(headers: Record<string, string>): Promise<void>;
+    route?(url: string | RegExp | ((url: URL) => boolean), handler: (route: unknown) => Promise<void> | void): Promise<void>;
 };
 
 /**
@@ -204,7 +206,7 @@ export function getStealthViewport(): { width: number; height: number } {
 }
 
 /**
- * 通用页面伪装准备：注入 stealth 脚本 + 视口 + Accept-Language。
+ * 通用页面伪装准备：注入 stealth 脚本 + 视口 + Accept-Language + 无用资源拦截。
  * 供 bing 搜索和通用网页抓取复用。
  */
 export async function prepareStealthPage(page: StealthPage): Promise<void> {
@@ -215,4 +217,6 @@ export async function prepareStealthPage(page: StealthPage): Promise<void> {
     await page.setExtraHTTPHeaders({
         'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
     });
+    // 借鉴 Scrapling 思想：若该页面尚未由 installNavigationGuard 安装过拦截，则在此安装激进无用资源拦截
+    await installBrowserResourceBlocker(page);
 }
