@@ -4,6 +4,22 @@ All notable changes to `my-websearch` are documented in this file.
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-10-20
+
+### Behavior changes (read before upgrading)
+- **`focus` now defaults to BM25 block selection.** Callers that rely on the previous output must pass `focusMode: 'window'`. This is a patch-version release but the default output of `focus` changed, so pin `focusMode` if you depend on byte-stable results.
+- **`REGISTER_LEGACY_ARTICLE_TOOLS` removed.** The `fetchCsdnArticle` / `fetchJuejinArticle` legacy tools can no longer be exposed; CSDN/Juejin URLs are routed through `fetchWebContent` by domain.
+- **`readableHtml` removed** from the fetch result (and `includeReadableHtml` from the internal options). It was never reachable from the MCP schema or the CLI.
+- **`readability: true` / `includeLinks: true` / `selector` requests no longer read or write the page cache.** The cache key is `(url, format)` and does not record *how* the page was extracted, so a cache hit could previously return a body produced by a different extraction mode (and lose `links` / `scoped` metadata).
+
+### Playwright fallback: useless subresources are blocked
+- New `utils/browserResourceBlocker.ts` aborts image / media / font / stylesheet requests inside the browser fallback path (borrowed from Scrapling's approach), which cuts page-load time on heavy sites. Cookie handling and stealth flags were adjusted around it, and the behaviour is covered by `browser-resource-blocking.test.ts` (11 cases).
+
+### Internal refactors (no behaviour change)
+- The 1,252-line `fetchWebContent` god function is split into an explicit stage pipeline (`validateAndFetchPrimary` → `tryHandlePdfFetch` → `fetchAndExtractHtmlWithBrowserFallback` → `validateFetchOutcome` → `assembleFetchResult`) with dedicated `transport.ts` / `types.ts` / `pagination.ts`. PDF paging and focus contract tests were extended alongside the split.
+- The engine registry no longer imports from core search (`engines/meta.ts` added), breaking the engine ↔ search circular dependency; blackhole mixed-response regression coverage added.
+- Removed a fragile architecture diagram from both READMEs (it failed to load often and reflowed badly).
+
 ### Removed dead surface (no behaviour change)
 - **Removed `src/types/playwright.d.ts`**: it declared `module 'playwright'`, but nothing imports `playwright` (everything uses `playwright-core`, which ships its own types). Deleting it leaves `tsc` clean.
 - **Removed three unreferenced sponsor images** under `docs/assets/sponsors/` (429 KB total) — no README, manifest or doc referenced them.
