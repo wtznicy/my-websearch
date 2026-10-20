@@ -42,42 +42,6 @@
 
 ---
 
-## 🏗️ Architecture
-
-```mermaid
-flowchart TB
-    subgraph Clients["🤖 Entrypoints"]
-        MCP["MCP Server<br/>(STDIO / Streamable HTTP / SSE)"]
-        CLI["CLI Commands<br/>(my-websearch search / fetch-*)"]
-        Daemon["Local Daemon<br/>(127.0.0.1:3210 · /health · /metrics)"]
-    end
-
-    subgraph Core["🧠 Search & Fetch Orchestrator"]
-        Router["Language-Aware Auto Router<br/>ZH → Baidu/Sogou | EN/Tech → Bing + DuckDuckGo"]
-        Cascade["minResults Cascade & Circuit Breaker<br/>(Adaptive 30s→5m + 5min TTL Cache)"]
-        Ranker["Cross-Engine URL Deduplication & BM25 Relevance Ranking"]
-    end
-
-    subgraph Transport["🛡️ Transport & Security Architecture"]
-        Wreq["wreq-js Chrome TLS/H2 Fingerprint<br/>+ Automatic Session Cookie Jars"]
-        Solvers["Millisecond Challenge Solvers<br/>Startpage PoW | DDG JSA Solver"]
-        PW["Playwright Stealth Browser Fallback<br/>(Budget Bounds + Cross-Process Locking)"]
-        Guard["SSRF Guard & Fake-IP Support<br/>(PROXY_URL Split Routing + 198.18.0.0/15)"]
-    end
-
-    subgraph Engines["🌍 13 Search Engines + 6 Content/Docs Tools"]
-        CN["🇨🇳 Direct Domestic Engines<br/>Bing · Baidu · CSDN · Juejin · Sogou"]
-        INTL["🌐 Global & Tech Engines<br/>DuckDuckGo · Brave · Startpage · Exa<br/>GitHub · StackOverflow · HackerNews · arXiv"]
-        Docs["📚 Content & Official Docs<br/>fetchWebContent · queryDocs · GitHub/Gitee · CSDN/Juejin"]
-    end
-
-    Clients --> Core
-    Core --> Transport
-    Transport --> Engines
-```
-
----
-
 ## 🌍 13 Search Engines
 
 | Engine | Mainland China Connectivity | API Key | Core Technology | Best For |

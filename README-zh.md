@@ -42,42 +42,6 @@
 
 ---
 
-## 🏗️ 系统架构
-
-```mermaid
-flowchart TB
-    subgraph Clients["🤖 调用入口 (Entrypoints)"]
-        MCP["MCP 协议服务<br/>(STDIO / Streamable HTTP / SSE)"]
-        CLI["CLI 命令行<br/>(my-websearch search / fetch-*)"]
-        Daemon["本地常驻 Daemon<br/>(127.0.0.1:3210 · /health · /metrics)"]
-    end
-
-    subgraph Core["🧠 核心编排层 (Search & Fetch Orchestrator)"]
-        Router["语言感知自动路由 (Auto Router)<br/>中文 → Baidu/Sogou | 英文/代码 → Bing + DuckDuckGo"]
-        Cascade["minResults 级联补位 & 熔断器<br/>(自适应 30s→5m + 5min TTL 缓存)"]
-        Ranker["跨引擎 URL 归一化去重 & BM25 相关性重排"]
-    end
-
-    subgraph Transport["🛡️ 传输协议与安全防护 (Transport & Security)"]
-        Wreq["wreq-js 原生 Chrome TLS/H2 指纹<br/>+ 会话级 Cookie 自动持久化"]
-        Solvers["内置毫秒挑战求解器<br/>Startpage PoW | DDG JSA Solver"]
-        PW["Playwright 隐身浏览器兜底<br/>(严格超时预算 + 跨进程文件锁治理)"]
-        Guard["SSRF 防护 & Fake-IP 兼容<br/>(PROXY_URL 分流 + 198.18.0.0/15)"]
-    end
-
-    subgraph Engines["🌍 13 大引擎 + 6 大内容/文档服务"]
-        CN["🇨🇳 国内直连引擎<br/>Bing · 百度 · CSDN · 掘金 · 搜狗"]
-        INTL["🌐 海外与垂直引擎<br/>DuckDuckGo · Brave · Startpage · Exa<br/>GitHub · StackOverflow · HackerNews · arXiv"]
-        Docs["📚 内容抓取与文档<br/>fetchWebContent · queryDocs · GitHub/Gitee · CSDN/掘金全文"]
-    end
-
-    Clients --> Core
-    Core --> Transport
-    Transport --> Engines
-```
-
----
-
 ## 🌍 13 大搜索引擎一览
 
 | 引擎标识 | 网络要求 | API Key | 核心技术与优势 | 最擅长场景 |
