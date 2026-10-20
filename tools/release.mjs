@@ -127,15 +127,34 @@ const git = (args) => execFileSync('git', args, {
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
 }).trim();
 
-/** @returns {{state:'exists'}|{state:'missing'}|{state:'error',detail:string}} */
-function remoteTagState(remote, version) {
+/** @returns {Promise<{state:'exists'}|{state:'missing'}|{state:'error',detail:string}>} */
+async function remoteTagState(remote, version, tokens = {}) {
     try {
         const out = git(['ls-remote', '--tags', remote, `refs/tags/${version}`]);
         return out.length > 0 ? { state: 'exists' } : { state: 'missing' };
     } catch (error) {
         const detail = (error.killed || error.signal)
-            ? `查询超时（15s），检查网络或设置 HTTPS_PROXY`
+            ? `git ls-remote 超时（15s）`
             : String(error.message).split('\n')[0];
+
+        // git 协议可能被网络掐断，但 API 往往仍然可用——用 API 复核一次再下结论
+        if (remote === 'github' && tokens.github) {
+            try {
+                const response = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/git/ref/tags/${version}`, {
+                    headers: { Authorization: `Bearer ${tokens.github}`, Accept: 'application/vnd.github+json', 'User-Agent': 'my-websearch-release-script' },
+                    signal: AbortSignal.timeout(15000)
+                });
+                if (response.status === 200) {
+                    warn(`git ls-remote 失败（${detail}），但 API 确认 tag 存在`);
+                    return { state: 'exists' };
+                }
+                if (response.status === 404) {
+                    return { state: 'missing' };
+                }
+            } catch {
+                // 继续走 error 分支
+            }
+        }
         return { state: 'error', detail };
     }
 }
@@ -173,16 +192,18 @@ const isAlreadyExists = (status, body, text) => (
     status === 422 && /already_exists|already exists/i.test(text)
 ) || (status === 400 && /already exists|已经存在|已存在/i.test(text));
 
-/** 查已存在的 Release 地址（幂等分支用；查不到就返回 undefined，不影响主流程） */
+const giteeReleaseUrl = (version) => `https://gitee.com/${OWNER}/${REPO}/releases/tag/${version}`;
+
+/** 查已存在的 Release 地址（幂等分支用；查不到就返回构造出来的页面地址） */
 async function lookupReleaseUrl({ provider, version, token }) {
+    if (provider === 'gitee') {
+        return giteeReleaseUrl(version);
+    }
     try {
-        const url = provider === 'gitee'
-            ? `https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/tags/${version}?access_token=${encodeURIComponent(token)}`
-            : `https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${version}`;
-        const headers = provider === 'gitee'
-            ? { Accept: 'application/json' }
-            : { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'my-websearch-release-script' };
-        const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+        const response = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${version}`, {
+            headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'my-websearch-release-script' },
+            signal: AbortSignal.timeout(10000)
+        });
         if (!response.ok) {
             return undefined;
         }
@@ -227,7 +248,8 @@ async function createGiteeRelease({ version, body, token, dryRun }) {
 
     const { body: json, text } = await readJsonResponse(response);
     if (response.ok && json) {
-        return { status: 'created', url: json.html_url ?? json.url };
+        // gitee 的 release 响应里没有 html_url/url 字段，只能按约定拼页面地址
+        return { status: 'created', url: giteeReleaseUrl(version) };
     }
     if (isAlreadyExists(response.status, json, text)) {
         return { status: 'exists', url: await lookupReleaseUrl({ provider: 'gitee', version, token }) };
@@ -250,6 +272,9 @@ function createGiteeReleaseViaCurl({ url, payload }) {
         const json = JSON.parse(out);
         if (json?.html_url) {
             return { status: 'created', url: json.html_url };
+        }
+        if (json?.id) {
+            return { status: 'created', url: 'https://gitee.com/' + OWNER + '/' + REPO + '/releases/tag/' + payload.tag_name };
         }
         if (isAlreadyExists(200, json, out)) {
             return { status: 'exists' };
@@ -399,7 +424,7 @@ async function commandRelease({ positional, flags }) {
             warn(`--skip-tag-check：未校验 ${remote} 上的 tag ${version}`);
             continue;
         }
-        const state = remoteTagState(remote, version);
+        const state = await remoteTagState(remote, version, tokens);
         if (state.state === 'missing') {
             fail(`${remote} 上没有 tag ${version}，先执行：git push ${remote} ${version}`);
         }
@@ -443,7 +468,7 @@ async function commandVerify({ positional, flags }) {
     const rows = [];
 
     for (const remote of ['gitee', 'github']) {
-        const state = remoteTagState(remote, version);
+        const state = await remoteTagState(remote, version, resolveTokens());
         const label = state.state === 'exists'
             ? '✅ 存在'
             : state.state === 'missing'
