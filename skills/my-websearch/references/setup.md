@@ -57,6 +57,8 @@ Stage script:
 2. Confirm risky actions.
    - Ask before changing MCP/client config or reconnecting a running client in a way that changes the user's environment.
 3. Perform.
+   - Prefer `my-websearch init --dry-run` to show the exact config path and entry that would change, then run `my-websearch init` (optionally `--client claude-desktop,cursor,vscode`) only after the user approves.
+   - `init` covers Claude Desktop, Cursor, and the workspace `.vscode/mcp.json`; it refuses to touch invalid JSON, never overwrites a differing entry without `--force`, and keeps a `.bak` backup. Do not hand-edit those files when `init` supports the client.
    - Reconnect, reload, or update the relevant client config only as needed.
 4. Validate.
    - Confirm that the runtime now exposes the core tools.

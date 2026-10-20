@@ -11,6 +11,7 @@ import { handleDoctorCommand } from './commands/doctor.js';
 import { handleCacheClearCommand } from './commands/cache.js';
 import { handleServeCommand } from './commands/serve.js';
 import { handleStatusCommand } from './commands/status.js';
+import { handleInitCommand } from './commands/init.js';
 
 // Re-export shared types and parsers for backward compatibility
 export type { CliIo, RunCliOptions };
@@ -21,6 +22,7 @@ export { parseFetchGithubArgs, type ParsedFetchGithubArgs } from './commands/fet
 export { parseResolveLibraryArgs, type ParsedResolveLibraryArgs, parseQueryDocsArgs, type ParsedQueryDocsArgs } from './commands/docs.js';
 export { parseStatusArgs, type ParsedStatusArgs } from './commands/status.js';
 export { parseServeArgs, type ParsedServeArgs } from './commands/serve.js';
+export { parseInitArgs, type ParsedInitArgs } from './commands/init.js';
 
 const COMMANDS_REQUIRING_RUNTIME = new Set([
     'search',
@@ -59,6 +61,11 @@ function formatCliHelp(): string {
     return [
         'my-websearch CLI',
         '',
+        'Setup:',
+        '  my-websearch init [--client claude-desktop,cursor,vscode|all] [--dry-run] [--force] [--json] [--home DIR]',
+        '    Detect installed MCP clients and write the server entry into their config files.',
+        '    Auto-detects by default; --dry-run prints the diff without writing, --force overwrites a differing existing entry (a .bak backup is kept).',
+        '',
         'Daemon control & diagnostics:',
         '  my-websearch serve [--host HOST] [--port PORT]',
         '    Start the local daemon in the foreground.',
@@ -72,8 +79,9 @@ function formatCliHelp(): string {
         '    Search the web. `--search-mode` is request|auto|playwright and affects engines supporting browser rendering (Bing, Startpage). `--min-results N` auto-runs additional engines when fewer than N results come back.',
         '  my-websearch cache-clear [--daemon-url URL] [--spawn] [--json]',
         '    Clear the search TTL cache (engine just recovered, stale results cached, etc.).',
-        '  my-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--format text|markdown] [--daemon-url URL] [--spawn] [--json]',
+        '  my-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--format text|markdown] [--selector CSS] [--retain-links all|none|text] [--focus KW] [--focus-mode bm25|window] [--citations] [--extract JSON] [--daemon-url URL] [--spawn] [--json]',
         '    Fetch readable page content. `--readability` enables Mozilla Readability extraction; `--include-links` returns preserved article links; `--raw` returns the raw response body; `--start-index N` continues reading from character offset N; `--format` selects output format (text or markdown).',
+        '    `--selector CSS` scopes extraction to the matched subtree (keeps code/tables, errors if nothing matches); `--retain-links` drops URLs to save tokens on index pages; `--focus KW` targets a section (bm25 ranks paragraphs by relevance by default; `--focus-mode window` keeps the old fixed window). `--citations` rewrites links to numbered references. `--extract JSON` takes a CSS-selector schema and returns structured JSON instead of markdown.',
         '  my-websearch fetch-github-content <url> [--daemon-url URL] [--spawn] [--json]',
         '    Read GitHub/Gitee README, one source file (/blob/), directory tree (/tree/), Issue, or PR. Alias: fetch-github-readme.',
         '  my-websearch fetch-csdn <url> [--daemon-url URL] [--spawn] [--json]',
@@ -140,6 +148,8 @@ export async function runCli(
     };
 
     switch (command) {
+        case 'init':
+            return handleInitCommand(ctx);
         case 'search':
             return handleSearchCommand(ctx);
         case 'doctor':

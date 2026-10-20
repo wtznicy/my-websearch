@@ -1,9 +1,7 @@
-import {
-    FetchWebContentOptions,
-    FetchWebContentResult,
-    generateMarkdownToc,
-    fetchWebContent
-} from '../../engines/web/fetchWebContent.js';
+import { FetchWebContentOptions, FetchWebContentResult, generateMarkdownToc, fetchWebContent } from '../../engines/web/fetchWebContent.js';
+import type { ExtractSchema } from '../../engines/web/extract.js';
+import type { FocusMode } from '../../engines/web/types.js';
+import type { LinkRetentionMode } from '../../utils/linkRetention.js';
 import { sliceMarkdownContent } from '../../engines/web/pagination.js';
 import {
     validateArticleUrl,
@@ -34,6 +32,15 @@ export interface FetchPipelineOptions {
     startIndex?: number;
     format?: 'text' | 'markdown';
     focus?: string;
+    focusMode?: FocusMode;
+    /** 把正文行内链接改写成编号引用 + References 列表 */
+    citations?: boolean;
+    /** 行内链接保留策略（all/text/none）；与 citations 互斥 */
+    retainLinks?: LinkRetentionMode;
+    /** CSS 选择器收窄：只提取命中子树（与 extract、raw 互斥） */
+    selector?: string;
+    /** CSS schema 结构化提取（命中时返回 JSON，跳过缓存与分页） */
+    extract?: ExtractSchema;
     signal?: AbortSignal;
     requestContext?: RequestContext;
 }
@@ -47,6 +54,37 @@ export interface DedicatedFetchers {
 }
 
 export { sliceMarkdownContent };
+
+/**
+ * 跨字段校验。放在管线入口而不是各个 adapter 里，
+ * 这样 MCP / CLI / daemon 三条路径的行为自动一致。
+ */
+function validateFetchOptionCombinations(params: FetchPipelineOptions): void {
+    if (params.selector && params.extract) {
+        throw new AppError({
+            code: 'invalid_arguments',
+            retryable: false,
+            message: 'selector cannot be combined with extract',
+            hint: 'selector returns scoped markdown (keeps code blocks and tables); extract returns JSON via its own baseSelector. Pick one.'
+        });
+    }
+    if (params.selector && params.raw) {
+        throw new AppError({
+            code: 'invalid_arguments',
+            retryable: false,
+            message: 'selector cannot be combined with raw',
+            hint: 'raw returns the response body untouched, so there is nothing to scope.'
+        });
+    }
+    if (params.citations && params.retainLinks && params.retainLinks !== 'all') {
+        throw new AppError({
+            code: 'invalid_arguments',
+            retryable: false,
+            message: `citations cannot be combined with retainLinks "${params.retainLinks}"`,
+            hint: 'citations needs the URLs it is supposed to list; retainLinks "text"/"none" strips them.'
+        });
+    }
+}
 
 /**
  * 单一 FetchPolicy 执行管线：
@@ -66,9 +104,16 @@ export async function executeFetchPipeline(
         startIndex,
         format = 'markdown',
         focus,
+        focusMode,
+        citations,
+        retainLinks,
+        selector,
+        extract,
         signal,
         requestContext
     } = params;
+
+    validateFetchOptionCombinations(params);
 
     const warnings: string[] = requestContext?.warnings ? [...requestContext.warnings] : [];
 
@@ -83,9 +128,19 @@ export async function executeFetchPipeline(
 
     const pageCache = getGlobalPageCache();
     const effectiveFormat = format ?? 'markdown';
+    // 结构化提取需要 HTML，而缓存里只有 Markdown —— 因此 extract 请求既不读缓存也不写缓存。
+    // readability / includeLinks / selector 同理：缓存键只有 (url, format)，不含这些「提取方式」开关，
+    // 命中缓存会返回另一种提取方式的正文（并丢掉 links / scoped 等元数据），因此一并绕过缓存。
+    // retainLinks / focus / citations 是**切片之后**的纯变换，不受影响，仍可走缓存。
+    const cacheEligible = cacheMode !== 'reload'
+        && !raw
+        && !extract
+        && !readability
+        && !includeLinks
+        && !selector;
 
     // Step 2 & 3: 磁盘级 Markdown 缓存检查（非 reload 模式生效）
-    if (cacheMode !== 'reload' && !raw) {
+    if (cacheEligible) {
         const cachedRecord = pageCache.get(url, effectiveFormat);
         if (cachedRecord) {
             // 负缓存命中（404 记录）
@@ -110,6 +165,9 @@ export async function executeFetchPipeline(
                     startIndex,
                     maxChars,
                     focus,
+                    focusMode,
+                    citations,
+                    retainLinks,
                     cached: true,
                     warnings,
                     pdfPages: cachedRecord.pdfPages
@@ -167,9 +225,17 @@ export async function executeFetchPipeline(
     let lastModified: string | undefined;
     let isPdf = false;
     let pdfPages: number | undefined;
+    // 上游提取阶段的元数据需要一路带到最终切片结果，否则会被 sliceMarkdownContent 重建时丢掉
+    let delegateLinks: FetchWebContentResult['links'];
+    let delegateByline: string | undefined;
+    let delegateExcerpt: string | undefined;
+    let delegateReadabilityApplied: boolean | undefined;
+    let delegateDegraded: string[] | undefined;
+    let delegateScoped: FetchWebContentResult['scoped'];
 
     // 专有站点内部转发（CSDN / 掘金 / GitHub / Stack Overflow）
-    if (!raw) {
+    // 请求了 extract 时跳过这些转发：它们只产出文本/Markdown，拿不到可选择的 HTML DOM
+    if (!raw && !extract) {
         try {
             const parsed = new URL(url);
 
@@ -227,6 +293,8 @@ export async function executeFetchPipeline(
                 raw,
                 startIndex: 0,
                 format: effectiveFormat,
+                ...(extract ? { extract } : {}),
+                ...(selector ? { selector } : {}),
                 signal
             });
 
@@ -236,6 +304,20 @@ export async function executeFetchPipeline(
             finalUrl = fetchResult.finalUrl || url;
             isPdf = fetchResult.contentType.includes('application/pdf');
             pdfPages = fetchResult.pdfPages;
+            delegateLinks = fetchResult.links;
+            delegateByline = fetchResult.byline;
+            delegateExcerpt = fetchResult.excerpt;
+            delegateReadabilityApplied = fetchResult.readabilityApplied;
+            delegateDegraded = fetchResult.degraded;
+            delegateScoped = fetchResult.scoped;
+
+            // 结构化提取结果已是最终形态：不再切片/分页，也不写缓存
+            if (fetchResult.extracted !== undefined) {
+                return {
+                    ...fetchResult,
+                    warnings: [...new Set([...(fetchResult.warnings ?? []), ...warnings])]
+                };
+            }
         } catch (fetchError) {
             if (fetchError instanceof AppError && fetchError.code === 'not_found') {
                 pageCache.set(url, '', effectiveFormat, { isNotFound: true, ttlMs: 60 * 1000 });
@@ -245,7 +327,7 @@ export async function executeFetchPipeline(
     }
 
     // Step 5: 质量门禁与回写缓存（深拷贝存储）
-    if (!raw && fullMarkdown && passesQualityGate(fullMarkdown, pageTitle)) {
+    if (cacheEligible && fullMarkdown && passesQualityGate(fullMarkdown, pageTitle)) {
         pageCache.set(url, fullMarkdown, effectiveFormat, {
             title: pageTitle,
             siteName,
@@ -266,8 +348,17 @@ export async function executeFetchPipeline(
         startIndex,
         maxChars,
         focus,
+        focusMode,
+        citations,
+        retainLinks,
         cached: false,
         warnings,
-        pdfPages
+        pdfPages,
+        ...(delegateLinks ? { links: delegateLinks } : {}),
+        ...(delegateByline ? { byline: delegateByline } : {}),
+        ...(delegateExcerpt ? { excerpt: delegateExcerpt } : {}),
+        ...(delegateReadabilityApplied !== undefined ? { readabilityApplied: delegateReadabilityApplied } : {}),
+        ...(delegateDegraded ? { degraded: delegateDegraded } : {}),
+        ...(delegateScoped ? { scoped: delegateScoped } : {})
     });
 }

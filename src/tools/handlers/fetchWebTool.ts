@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { validatePublicWebUrl } from '../../core/validation/targetValidation.js';
+import { validateExtractSchema } from '../../engines/web/extract.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import {
     getToolName,
@@ -37,13 +38,23 @@ const normalizeUrlsArray = (val: unknown): unknown => {
 
 import { detectUnknownParameters } from '../../utils/toolValidation.js';
 
+/** 结构化提取的字段定义（深层结构由 validateExtractSchema 在运行时递归校验） */
+const extractFieldInput = z.object({
+    name: z.string().min(1),
+    selector: z.string().min(1).optional(),
+    type: z.enum(['text', 'html', 'markdown', 'attribute', 'list']).optional(),
+    attribute: z.string().min(1).optional(),
+    fields: z.array(z.unknown()).optional(),
+    all: z.boolean().optional()
+}).passthrough();
+
 export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRuntime): void {
     const fetchWebToolName = getToolName('MCP_TOOL_FETCH_WEB_NAME', 'fetchWebContent');
 
     server.registerTool(
         fetchWebToolName,
         {
-            description: "Fetch readable web content/docs/PDFs from public URLs. Auto-cleans ads, preserves code blocks/tables, defaults to markdown. Supports batch urls (1-3), focus keyword, cache control, and pagination via startIndex.",
+            description: "Fetch readable web content/docs/PDFs from public URLs. Auto-cleans ads, keeps code/tables. Batch urls (1-3), CSS selector scoping, bm25 focus, startIndex paging, cache, schema extract to JSON, citations, link retention.",
             inputSchema: z.object({
                 url: z.preprocess(normalizeHttpUrl, z.string().url().refine(
                     (u) => {
@@ -72,6 +83,19 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                     .describe("Batch URLs (1~3 URLs run concurrently, splitting maxChars budget; ideal for comparing search results)"),
                 focus: z.string().min(1).optional()
                     .describe("Keyword or section name to target (e.g. 'Auth', 'Config'); returns targeted window (~5000 chars) instead of burning tokens on full document"),
+                focusMode: z.enum(['bm25', 'window']).optional()
+                    .describe("How focus selects text: 'bm25' (default) ranks paragraphs by relevance and keeps the best ones; 'window' keeps the old ±2500-char window around the first match"),
+                citations: z.boolean().optional()
+                    .describe("Rewrite inline links as numbered citations and append a '## References' list, so the answer can cite sources"),
+                retainLinks: z.enum(['all', 'none', 'text']).optional()
+                    .describe("Inline link retention: 'all' (default) keeps [label](url); 'text' keeps only the label (strips URLs, big win on index/list pages); 'none' removes the link entirely. Ignored inside code blocks"),
+                selector: z.string().min(1).optional()
+                    .describe("CSS selector: return only the matched subtree, keeping code blocks and tables. Use when auto-extraction grabs the wrong container. Errors instead of silently returning the whole page when nothing matches"),
+                extract: z.object({
+                    baseSelector: z.string().min(1).optional(),
+                    fields: z.array(extractFieldInput).min(1).max(50)
+                }).passthrough().optional()
+                    .describe("Extract structured JSON instead of markdown, using CSS selectors — no LLM needed. fields: [{name, selector, type: text|html|markdown|attribute|list, attribute?, fields?, all?}]; selector '@attr' reads an attribute of the current node"),
                 maxChars: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(1000).max(200000).default(30000)),
                 cache: z.enum(['default', 'reload']).optional()
                     .describe("Cache mode: 'default' uses disk Markdown cache; 'reload' forces re-fetching upstream"),
@@ -85,10 +109,15 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
             annotations: TOOL_ANNOTATION_HINTS
         },
         async (rawArgs, extra) => {
-            const { url, urls, focus, maxChars = 30000, cache, readability, includeLinks, raw, startIndex, format } = rawArgs as {
+            const { url, urls, focus, focusMode, citations, retainLinks, selector, extract, maxChars = 30000, cache, readability, includeLinks, raw, startIndex, format } = rawArgs as {
                 url?: string;
                 urls?: string[];
                 focus?: string;
+                focusMode?: 'bm25' | 'window';
+                citations?: boolean;
+                retainLinks?: 'all' | 'none' | 'text';
+                selector?: string;
+                extract?: unknown;
                 maxChars?: number;
                 cache?: 'default' | 'reload';
                 readability?: boolean;
@@ -98,10 +127,11 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                 format?: 'markdown' | 'text';
             } & Record<string, unknown>;
             const signal = extra?.signal;
-            const knownKeys = ['url', 'urls', 'focus', 'maxChars', 'cache', 'readability', 'includeLinks', 'raw', 'startIndex', 'format'];
+            const knownKeys = ['url', 'urls', 'focus', 'focusMode', 'citations', 'retainLinks', 'selector', 'extract', 'maxChars', 'cache', 'readability', 'includeLinks', 'raw', 'startIndex', 'format'];
             const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, knownKeys);
 
             try {
+                const extractSchema = extract === undefined ? undefined : validateExtractSchema(extract);
                 const targetUrls: string[] = (urls && urls.length > 0 ? urls : (url ? [url] : [])).slice(0, 3);
                 if (targetUrls.length === 0) {
                     return {
@@ -128,6 +158,11 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                                 startIndex,
                                 format: effectiveFormat,
                                 focus,
+                                focusMode,
+                                citations,
+                                retainLinks,
+                                ...(selector ? { selector } : {}),
+                                ...(extractSchema ? { extract: extractSchema } : {}),
                                 signal
                             })
                         )
@@ -171,6 +206,11 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                     startIndex,
                     format: effectiveFormat,
                     focus,
+                    focusMode,
+                    citations,
+                    retainLinks,
+                    ...(selector ? { selector } : {}),
+                    ...(extractSchema ? { extract: extractSchema } : {}),
                     signal
                 });
 

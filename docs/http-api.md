@@ -176,6 +176,11 @@ Request body:
 Notes:
 - `url` is required
 - `maxChars` is optional, integer `1000-200000`, default `30000`
+- optional `focus` (string) + `focusMode` (`bm25` default | `window`) target a section instead of returning the whole page
+- optional `citations: true` rewrites inline links into numbered `[n]` markers plus a `## References` list
+- optional `retainLinks: "all" | "text" | "none"` controls whether inline links keep their URLs (`text` strips them; not combinable with `citations`)
+- optional `selector` (CSS) scopes extraction to the matched subtree and returns `scoped: {selector, matched}`; it returns `selector_not_found` when nothing matches rather than falling back to the whole page
+- optional `extract` takes a CSS-selector schema and returns structured JSON instead of markdown; it bypasses the page cache and the site-specific forwarders
 - returns the full structured web-fetch payload
 
 Example:
@@ -184,6 +189,14 @@ Example:
 curl --noproxy '*' -X POST http://127.0.0.1:3210/fetch-web \
   -H "Content-Type: application/json" \
   -d '{"url":"https://awiki.ai","maxChars":3000}'
+```
+
+Structured extraction example:
+
+```bash
+curl --noproxy '*' -X POST http://127.0.0.1:3210/fetch-web \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://quotes.toscrape.com/","extract":{"baseSelector":"div.quote","fields":[{"name":"text","selector":"span.text"},{"name":"author","selector":"small.author"}]}}'
 ```
 
 ### `POST /fetch-github-readme` (alias: `POST /fetch-github-content`)

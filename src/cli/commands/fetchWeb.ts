@@ -1,6 +1,7 @@
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../protocol.js';
 import { ErrorCode, isAppError } from '../../core/errors.js';
+import { validateExtractSchema, type ExtractSchema } from '../../engines/web/extract.js';
 import {
     CommandContext,
     DaemonTransportArgs,
@@ -23,6 +24,12 @@ export type ParsedFetchWebArgs = {
     raw: boolean;
     startIndex: number;
     format?: 'text' | 'markdown';
+    focus?: string;
+    focusMode?: 'bm25' | 'window';
+    citations: boolean;
+    retainLinks?: 'all' | 'none' | 'text';
+    selector?: string;
+    extract?: ExtractSchema;
     json: boolean;
 };
 
@@ -34,6 +41,12 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
     let raw = false;
     let startIndex = 0;
     let format: 'text' | 'markdown' | undefined;
+    let focus: string | undefined;
+    let focusMode: 'bm25' | 'window' | undefined;
+    let citations = false;
+    let retainLinks: 'all' | 'none' | 'text' | undefined;
+    let selector: string | undefined;
+    let extract: ExtractSchema | undefined;
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -84,6 +97,64 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
             continue;
         }
 
+        if (arg === '--focus') {
+            const next = requireFlagValue(argv, index, '--focus').trim();
+            if (!next) {
+                throw new Error('focus must be a non-empty string');
+            }
+            focus = next;
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--focus-mode') {
+            const next = requireFlagValue(argv, index, '--focus-mode');
+            if (next !== 'bm25' && next !== 'window') {
+                throw new Error('focusMode must be one of: bm25, window');
+            }
+            focusMode = next;
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--citations') {
+            citations = true;
+            continue;
+        }
+
+        if (arg === '--retain-links') {
+            const next = requireFlagValue(argv, index, '--retain-links');
+            if (next !== 'all' && next !== 'none' && next !== 'text') {
+                throw new Error('retainLinks must be one of: all, none, text');
+            }
+            retainLinks = next;
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--selector') {
+            const next = requireFlagValue(argv, index, '--selector').trim();
+            if (!next) {
+                throw new Error('selector must be a non-empty CSS selector');
+            }
+            selector = next;
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--extract') {
+            const next = requireFlagValue(argv, index, '--extract');
+            let parsedSchema: unknown;
+            try {
+                parsedSchema = JSON.parse(next);
+            } catch {
+                throw new Error('--extract must be a JSON object, e.g. \'{"baseSelector":"div.item","fields":[{"name":"title","selector":"h2"}]}\'');
+            }
+            extract = validateExtractSchema(parsedSchema);
+            index += 1;
+            continue;
+        }
+
         if (isFlag(arg)) {
             throw new Error(`Unknown argument: ${arg}`);
         }
@@ -121,6 +192,12 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
         raw,
         startIndex,
         format,
+        ...(focus ? { focus } : {}),
+        ...(focusMode ? { focusMode } : {}),
+        citations,
+        ...(retainLinks ? { retainLinks } : {}),
+        ...(selector ? { selector } : {}),
+        ...(extract ? { extract } : {}),
         json
     };
 }
@@ -158,11 +235,11 @@ export async function handleFetchWebCommand(ctx: CommandContext): Promise<number
             io.stdout(JSON.stringify(createErrorEnvelope(
                 ErrorCode.INVALID_ARGUMENTS,
                 message,
-                { hint: 'Use `my-websearch fetch-web <url> [--max-chars N] [--format text|markdown] [--json]`.' }
+                { hint: 'Use `my-websearch fetch-web <url> [--max-chars N] [--format text|markdown] [--focus KW] [--citations] [--extract JSON] [--json]`.' }
             ), null, 2));
         } else {
             io.stderr(message);
-            io.stderr('Usage: my-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--format text|markdown] [--json]');
+            io.stderr('Usage: my-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--raw] [--start-index N] [--format text|markdown] [--selector CSS] [--retain-links all|none|text] [--focus KW] [--focus-mode bm25|window] [--citations] [--extract JSON] [--json]');
         }
         return 1;
     }
@@ -178,7 +255,13 @@ export async function handleFetchWebCommand(ctx: CommandContext): Promise<number
                 includeLinks: parsed.includeLinks,
                 raw: parsed.raw,
                 startIndex: parsed.startIndex,
-                format: parsed.format
+                format: parsed.format,
+                ...(parsed.focus ? { focus: parsed.focus } : {}),
+                ...(parsed.focusMode ? { focusMode: parsed.focusMode } : {}),
+                ...(parsed.citations ? { citations: true } : {}),
+                ...(parsed.retainLinks ? { retainLinks: parsed.retainLinks } : {}),
+                ...(parsed.selector ? { selector: parsed.selector } : {}),
+                ...(parsed.extract ? { extract: parsed.extract } : {})
             },
             options
         );
@@ -203,7 +286,13 @@ export async function handleFetchWebCommand(ctx: CommandContext): Promise<number
             includeLinks: parsed.includeLinks,
             raw: parsed.raw,
             startIndex: parsed.startIndex,
-            format: parsed.format
+            format: parsed.format,
+            ...(parsed.focus ? { focus: parsed.focus } : {}),
+            ...(parsed.focusMode ? { focusMode: parsed.focusMode } : {}),
+            ...(parsed.citations ? { citations: true } : {}),
+            ...(parsed.retainLinks ? { retainLinks: parsed.retainLinks } : {}),
+            ...(parsed.selector ? { selector: parsed.selector } : {}),
+            ...(parsed.extract ? { extract: parsed.extract } : {})
         });
 
         if (parsed.json) {

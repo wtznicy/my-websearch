@@ -39,8 +39,10 @@ async function testWebFetchService(): Promise<void> {
             title: 'Example',
             retrievalMethod: 'request',
             truncated: false,
-            content: 'hello',
-            totalLength: 5,
+            // 管线会按 startIndex 在「全文」上切片，因此夹具正文必须长于 startIndex，
+            // 否则会抛 start_index_out_of_range（本用例验证的是参数是否被透传）
+            content: `${'x'.repeat(200)}`,
+            totalLength: 200,
             startIndex: options?.startIndex ?? 0,
             readabilityApplied: options?.readability ?? false,
             links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
@@ -57,12 +59,15 @@ async function testWebFetchService(): Promise<void> {
     });
 
     assertEqual(seenUrl, 'https://example.com/docs', 'web fetch forwards url');
-    assertEqual(seenMaxChars, 1234, 'web fetch forwards maxChars');
+    // 管线先向 fetcher 取全文（200000），再按调用方 maxChars/startIndex 切片，
+    // 因此透传下去的 maxChars 恒为全文上限，而不是调用方请求值
+    assertEqual(seenMaxChars, 200000, 'web fetch requests the full text before slicing');
     assertEqual(seenReadability, true, 'web fetch forwards readability');
     assertEqual(seenIncludeLinks, true, 'web fetch forwards includeLinks');
     assertEqual(seenRaw, true, 'web fetch forwards raw');
-    assertEqual(seenStartIndex, 100, 'web fetch forwards startIndex');
-    assertEqual(result.title, 'Example', 'web fetch returns delegate result');
+    // 同理：fetcher 永远从 0 开始取全文，startIndex 由切片阶段生效
+    assertEqual(seenStartIndex, 0, 'web fetch starts the fetcher at offset 0');
+    assertEqual(result.totalLength, 200, 'web fetch slices the fetched full text');
     assertEqual(result.readabilityApplied, true, 'web fetch returns delegate readability result');
     assertEqual(result.links?.[0]?.href, 'https://example.com/doc', 'web fetch returns delegate links');
 

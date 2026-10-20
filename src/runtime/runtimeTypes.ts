@@ -1,6 +1,9 @@
 import { AppConfig } from '../config.js';
 import { SearchExecutionInput, SearchExecutionResult } from '../core/search/searchService.js';
 import { FetchWebContentResult } from '../engines/web/fetchWebContent.js';
+import type { FocusMode } from '../engines/web/types.js';
+import type { LinkRetentionMode } from '../utils/linkRetention.js';
+import type { ExtractSchema } from '../engines/web/extract.js';
 import { Context7DocsResult, Context7Library } from '../engines/context7/context7.js';
 
 export type SearchService = {
@@ -33,6 +36,11 @@ export type FetchWebService = {
         startIndex?: number;
         format?: 'text' | 'markdown';
         focus?: string;
+        focusMode?: FocusMode;
+        citations?: boolean;
+        retainLinks?: LinkRetentionMode;
+        selector?: string;
+        extract?: ExtractSchema;
         signal?: AbortSignal;
     }): Promise<FetchWebContentResult>;
 };

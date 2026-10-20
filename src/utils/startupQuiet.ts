@@ -16,6 +16,8 @@ const isQuietInvocation =
     // 约 10 行启动配置日志只会变成 stderr 噪音，默认静默（诊断时可设 LOG_LEVEL=normal）
     argv.length === 0
     || command === '--help' || command === '-h' || command === 'help' || command === 'status'
+    // init 的全部价值就是一段干净的、可复制的配置报告；前面叠十几行 [proxy]/[playwright] 只会让人怀疑它改了什么
+    || command === 'init'
     || argv.includes('--json')
     || (process.env.LOG_LEVEL ?? '').toLowerCase() === 'quiet';
 

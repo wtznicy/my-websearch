@@ -1,4 +1,6 @@
 import { AppError } from '../../core/errors.js';
+import type { ExtractSchema } from './extract.js';
+import type { LinkRetentionMode } from '../../utils/linkRetention.js';
 
 export interface FetchWebContentResult {
     url: string;
@@ -21,7 +23,6 @@ export interface FetchWebContentResult {
     readabilityApplied?: boolean;
     /** 请求了 readability 但降级为普通提取时的原因（显式告知调用方，避免静默降级） */
     degraded?: string[];
-    readableHtml?: string;
     links?: ExtractedLink[];
     byline?: string;
     excerpt?: string;
@@ -31,11 +32,27 @@ export interface FetchWebContentResult {
     /** 是否命中 focus 关键词靶向抓取 */
     focused?: boolean;
     focusMatchOffset?: number;
+    /** focus 的实际模式：bm25（按相关性选块，默认）或 window（旧的固定窗口） */
+    focusMode?: FocusMode;
+    /** bm25 模式下命中的块数 / 全文块数，便于调用方判断聚焦是否有效 */
+    focusBlocks?: { selected: number; total: number };
+    /** 结构化提取结果（仅在请求了 extract 时出现），content 同时为这段 JSON 文本 */
+    extracted?: unknown;
+    extraction?: { count: number; matchedBase: number; baseSelector?: string };
+    /** selector 收窄生效时的回显：命中节点数与选择器本身 */
+    scoped?: { selector: string; matched: number };
+    /** 请求了 retainLinks 且不是 all 时：被改写的链接数量 */
+    retainLinks?: { mode: LinkRetentionMode; links: number };
+    /** 请求了 citations 时：正文链接被编号的数量 */
+    citations?: { references: number; uncited: number };
     cached?: boolean;
     warnings?: string[];
     pdfPages?: number;
-    format?: 'markdown';
+    format?: 'markdown' | 'json';
 }
+
+/** focus 模式：bm25 = 按段落相关性选块（默认）；window = 旧的固定窗口 */
+export type FocusMode = 'bm25' | 'window';
 
 export type ExtractedLink = {
     text: string;
@@ -49,15 +66,19 @@ export type FetchWebContentOptions = {
     raw?: boolean;
     /** Start reading at this character offset (for paging through long content). */
     startIndex?: number;
-    /** Include the full Readability DOM HTML in the response (default off — it can be tens of KB of tokens). */
-    includeReadableHtml?: boolean;
     /**
      * 正文输出格式（默认 text）。'markdown' 时用 turndown 把 Readability 抽取的 DOM
      * 转为 Markdown——保留围栏代码块语言与 GFM 表格，更适合技术文档与 LLM。
      */
     format?: 'text' | 'markdown';
-    /** 章节靶向关键词：在全文中定位该词并返回前后上下文（前后各约 2500 字），大幅节省 Token */
+    /** 章节靶向关键词：在全文中定位该词并返回相关上下文，大幅节省 Token */
     focus?: string;
+    /** focus 模式：默认 bm25（按段落相关性选块）；window 保留旧的「首次命中 ±2500 字」行为 */
+    focusMode?: FocusMode;
+    /** CSS 选择器 schema 结构化提取：命中时返回 JSON 而不是正文 Markdown */
+    extract?: ExtractSchema;
+    /** CSS 选择器收窄：只提取命中子树，保留代码块与表格（与 extract 互斥） */
+    selector?: string;
     /** 缓存策略：'default' 优先读写磁盘 Markdown 缓存；'reload' 强制刷新请求上游 */
     cache?: 'default' | 'reload';
     /** 可选取消信号：触发时中止在途 HTTP 请求与浏览器页面操作 */

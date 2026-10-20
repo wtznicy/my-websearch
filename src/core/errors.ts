@@ -54,6 +54,8 @@ export type PublicErrorCode =
     | 'queue_full'
     | 'engine_parse_error'
     | 'empty_content'
+    | 'extraction_failed'
+    | 'selector_not_found'
     | 'upstream_response_invalid'
     | 'redirect_not_allowed'
     | 'response_too_large'

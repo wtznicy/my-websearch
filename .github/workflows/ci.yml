@@ -30,3 +30,8 @@ jobs:
       - run: npm run build
 
       - run: npm run test:vitest
+
+      # 自校验脚本（src/test/test-*.ts）覆盖了 vitest 没有触碰的工具模块
+      # （utils/text、utils/queryPreprocess、utils/dnsCache、core/validation/targetValidation 等）。
+      # 这里只跑白名单里的确定性脚本；live 网络测试仍然只在本地手动跑 `npm run test:live`。
+      - run: npm run test:deterministic

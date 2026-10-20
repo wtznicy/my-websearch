@@ -1,6 +1,6 @@
 import express from 'express';
 import http from 'node:http';
-import { hostHeaderValidation } from '@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js';
+import { applyHostValidation, applyJsonBody } from './sharedMiddleware.js';
 import { AppConfig } from '../../config.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
@@ -10,6 +10,7 @@ import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
 import { ErrorCode, extractErrorCode, extractErrorStatus, isAppError } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
+import { validateExtractSchema } from '../../engines/web/extract.js';
 import { isContext7QuotaExhaustedError } from '../../engines/context7/context7.js';
 
 export type LocalDaemonOptions = {
@@ -188,6 +189,46 @@ function parseFormat(value: unknown): 'text' | 'markdown' | undefined {
     return value;
 }
 
+function parseFocusMode(value: unknown): 'bm25' | 'window' | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value !== 'bm25' && value !== 'window') {
+        throw new Error('focusMode must be one of: bm25, window');
+    }
+    return value;
+}
+
+function parseFocus(value: unknown): string | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (typeof value !== 'string' || !value.trim()) {
+        throw new Error('focus must be a non-empty string');
+    }
+    return value.trim();
+}
+
+function parseSelector(value: unknown): string | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (typeof value !== 'string' || !value.trim()) {
+        throw new Error('selector must be a non-empty CSS selector');
+    }
+    return value.trim();
+}
+
+function parseRetainLinks(value: unknown): 'all' | 'none' | 'text' | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value !== 'all' && value !== 'none' && value !== 'text') {
+        throw new Error('retainLinks must be one of: all, none, text');
+    }
+    return value;
+}
+
 function parseStartIndex(value: unknown): number | undefined {
     if (value === undefined) {
         return undefined;
@@ -231,6 +272,9 @@ function classifyFetchError(error: unknown): FetchErrorClassification {
     }
 
     // 明确的参数/越界错误 → 400，不可重试
+    if (code === 'invalid_arguments') {
+        return { statusCode: 400, code: ErrorCode.INVALID_ARGUMENTS, message, retryable: false };
+    }
     if (code === 'ERR_START_INDEX_OUT_OF_RANGE') {
         return { statusCode: 400, code: ErrorCode.INVALID_ARGUMENTS, message, retryable: false };
     }
@@ -264,7 +308,7 @@ export async function startLocalDaemon(
     const version = options.version ?? 'unknown';
 
     const app = express();
-    app.use(express.json());
+    applyJsonBody(app);
 
     let baseUrl = '';
 
@@ -290,16 +334,10 @@ export async function startLocalDaemon(
         }));
     });
 
-    // P0-6：DNS rebinding 防护（与 index.ts MCP HTTP server 口径对齐）
+    // P0-6：DNS rebinding 防护（与 index.ts MCP HTTP server 共用 adapters/http/sharedMiddleware 的白名单解析）
     // 放在 /health 之后，默认仅放行本地回环（127.0.0.1 / localhost / [::1] 及绑定 host），
     // 支持 OPEN_WEBSEARCH_ALLOWED_HOSTS 环境变量扩展白名单。
-    const allowedHostnames = process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS
-        ? process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS.split(',').map((item) => item.trim()).filter(Boolean)
-        : ['127.0.0.1', 'localhost', '[::1]'];
-    if (host && !allowedHostnames.includes(host)) {
-        allowedHostnames.push(host);
-    }
-    app.use(hostHeaderValidation(allowedHostnames));
+    applyHostValidation(app, [host]);
 
     app.get('/status', (_req, res) => {
         res.json(createSuccessEnvelope(getStatus()));
@@ -408,13 +446,33 @@ export async function startLocalDaemon(
             const raw = parseBooleanFlag(req.body?.raw, 'raw');
             const startIndex = parseStartIndex(req.body?.startIndex);
             const format = parseFormat(req.body?.format);
-            const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, raw, startIndex, format });
+            const focus = parseFocus(req.body?.focus);
+            const focusMode = parseFocusMode(req.body?.focusMode);
+            const citations = parseBooleanFlag(req.body?.citations, 'citations');
+            const retainLinks = parseRetainLinks(req.body?.retainLinks);
+            const selector = parseSelector(req.body?.selector);
+            const extract = req.body?.extract === undefined ? undefined : validateExtractSchema(req.body.extract);
+            const result = await runtime.services.fetchWeb.execute({
+                url,
+                maxChars,
+                readability,
+                includeLinks,
+                raw,
+                startIndex,
+                format,
+                ...(focus ? { focus } : {}),
+                ...(focusMode ? { focusMode } : {}),
+                ...(citations === undefined ? {} : { citations }),
+                ...(retainLinks ? { retainLinks } : {}),
+                ...(selector ? { selector } : {}),
+                ...(extract ? { extract } : {})
+            });
             res.json(createSuccessEnvelope(result));
         } catch (error) {
             const classification = classifyFetchError(error);
             sendError(res, classification.statusCode, classification.code, classification.message, {
                 retryable: classification.retryable,
-                hint: 'Use a public HTTP(S) URL, keep maxChars within the supported range, and pass readability/includeLinks/raw only as booleans and startIndex as a non-negative integer.'
+                hint: 'Use a public HTTP(S) URL, keep maxChars within the supported range, and pass readability/includeLinks/raw/citations as booleans, startIndex as a non-negative integer, focusMode as bm25|window, and extract as a JSON object with a non-empty fields array.'
             });
         }
     });

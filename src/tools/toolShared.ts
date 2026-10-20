@@ -164,7 +164,7 @@ export function serializeFetchWebResult(result: FetchWebContentResult): string {
         return full;
     }
 
-    const { readableHtml, raw, ...core } = result as unknown as Record<string, unknown> & {
+    const { raw, ...core } = result as unknown as Record<string, unknown> & {
         content?: string;
         startIndex?: number;
         totalLength?: number;

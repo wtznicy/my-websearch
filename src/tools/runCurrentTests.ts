@@ -40,12 +40,8 @@ function getTestNames(directory: string, extension: string): string[] {
 
 const sourceTestNames = getTestNames(sourceTestDir, '.ts');
 const sourceTestNameSet = new Set(sourceTestNames);
-const excludedFromFullTestNames = new Set([
-    // 该测试依赖调用者显式配置 PLAYWRIGHT_MODULE_PATH、PLAYWRIGHT_PACKAGE、PLAYWRIGHT_EXECUTABLE_PATH 等环境变量，
-    // 并且会启动真实浏览器做跨重启并发验证；全量测试排除它，避免普通 npm test 因本机 Playwright 环境缺失失败。
-    // 需要验证时请单独运行 build/test/test-bing-playwright-cross-restart-concurrency.js。
-    'test-bing-playwright-cross-restart-concurrency'
-]);
+// 目前没有需要从全量里排除的脚本；保留这个集合以备将来出现「依赖调用者本机环境」的用例
+const excludedFromFullTestNames = new Set<string>([]);
 const runnableTestNames = sourceTestNames.filter((name) => !excludedFromFullTestNames.has(name));
 const staleCompiledTestNames = getTestNames(compiledTestDir, '.js')
     .filter((name) => !sourceTestNameSet.has(name));

@@ -11,9 +11,6 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerSearchTool } from '../../tools/handlers/searchTool.js';
 import { registerFetchWebTool } from '../../tools/handlers/fetchWebTool.js';
 import { registerFetchGithubTool } from '../../tools/handlers/fetchGithubTool.js';
-import { registerFetchCsdnTool } from '../../tools/handlers/fetchCsdnTool.js';
-import { registerFetchJuejinTool } from '../../tools/handlers/fetchJuejinTool.js';
-import { registerResolveLibraryTool } from '../../tools/handlers/resolveLibraryTool.js';
 import { registerQueryDocsTool } from '../../tools/handlers/queryDocsTool.js';
 import { createMyWebSearchRuntime } from '../../runtime/createRuntime.js';
 
@@ -115,16 +112,13 @@ describe('P2 & P3 Optimizations', () => {
     });
 
     describe('P3-3: server.registerTool registration across all MCP tools', () => {
-        it('successfully registers all 7 tools using server.registerTool', () => {
+        it('successfully registers all 4 core tools using server.registerTool', () => {
             const server = new McpServer({ name: 'test', version: '1.0.0' });
             const runtime = createMyWebSearchRuntime();
 
             registerSearchTool(server, runtime);
             registerFetchWebTool(server, runtime);
             registerFetchGithubTool(server, runtime);
-            registerFetchCsdnTool(server, runtime);
-            registerFetchJuejinTool(server, runtime);
-            registerResolveLibraryTool(server, runtime);
             registerQueryDocsTool(server, runtime);
 
             // Verify tools are registered in server
@@ -133,9 +127,6 @@ describe('P2 & P3 Optimizations', () => {
             expect(registered['search']).toBeDefined();
             expect(registered['fetchWebContent']).toBeDefined();
             expect(registered['fetchGithubContent']).toBeDefined();
-            expect(registered['fetchCsdnArticle']).toBeDefined();
-            expect(registered['fetchJuejinArticle']).toBeDefined();
-            expect(registered['resolveLibraryId']).toBeDefined();
             expect(registered['queryDocs']).toBeDefined();
         });
     });

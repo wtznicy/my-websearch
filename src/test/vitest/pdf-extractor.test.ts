@@ -173,7 +173,7 @@ describe('Transparent PDF Extractor', () => {
             });
         });
 
-        it('supports focus keyword matching and returns window snippet with metadata', async () => {
+        it('focus defaults to bm25 block selection and still supports window mode', async () => {
             const focusKeyword = 'CRITICAL_METRIC';
             // Total length 7000: 3000 'A' + 15 keyword + 3985 'B'
             const longPdfText = 'A'.repeat(3000) + focusKeyword + 'B'.repeat(3985);
@@ -191,21 +191,32 @@ describe('Transparent PDF Extractor', () => {
                 startIndex: 0,
                 targetMaxChars: 5000
             });
-            const resFocus = await tryHandlePdfFetch(ctxFocus, { focus: focusKeyword });
 
-            expect(resFocus).not.toBeNull();
-            expect(resFocus!.focused).toBe(true);
-            expect(resFocus!.focusMatchOffset).toBe(3000);
+            // 默认 bm25：按相关性选块。选块是非连续的，因此不提供续读指针
+            const bm25Res = await tryHandlePdfFetch(ctxFocus, { focus: focusKeyword });
+            expect(bm25Res).not.toBeNull();
+            expect(bm25Res!.focused).toBe(true);
+            expect(bm25Res!.focusMode).toBe('bm25');
+            expect(bm25Res!.focusMatchOffset).toBe(3000);
+            expect(bm25Res!.content).toContain('(bm25)');
+            expect(bm25Res!.content).toContain(focusKeyword);
+            expect(bm25Res!.hasMore).toBeUndefined();
+            expect(bm25Res!.pdfPages).toBe(7);
+
+            // 显式 window：保留旧的固定窗口行为（向后兼容）
+            const windowRes = await tryHandlePdfFetch(ctxFocus, { focus: focusKeyword, focusMode: 'window' });
+            expect(windowRes!.focused).toBe(true);
+            expect(windowRes!.focusMode).toBe('window');
+            expect(windowRes!.focusMatchOffset).toBe(3000);
             // Window is [500, 5515], both prefix and suffix are attached
-            expect(resFocus!.startIndex).toBe(500);
-            expect(resFocus!.truncated).toBe(true);
-            expect(resFocus!.hasMore).toBe(true);
-            expect(resFocus!.nextStartIndex).toBe(500 + resFocus!.content.length);
-            expect(resFocus!.content).toContain(`focused on "${focusKeyword}" at offset 3000, showing 500-5515 of 7000`);
-            expect(resFocus!.content).toContain(`[... truncated; continue with startIndex=5515 or specify another focus ...]`);
-            expect(resFocus!.content).toContain(focusKeyword);
-            expect(resFocus!.pdfPages).toBe(7);
-            expect(resFocus!.contentType).toBe('application/pdf');
+            expect(windowRes!.startIndex).toBe(500);
+            expect(windowRes!.truncated).toBe(true);
+            expect(windowRes!.hasMore).toBe(true);
+            expect(windowRes!.nextStartIndex).toBe(500 + windowRes!.content.length);
+            expect(windowRes!.content).toContain(`focused on "${focusKeyword}" at offset 3000, showing 500-5515 of 7000`);
+            expect(windowRes!.content).toContain(`[... truncated; continue with startIndex=5515 or specify another focus ...]`);
+            expect(windowRes!.content).toContain(focusKeyword);
+            expect(windowRes!.contentType).toBe('application/pdf');
         });
     });
 });

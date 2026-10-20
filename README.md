@@ -30,7 +30,7 @@
 - ⚡ **Native Web Protocol & Proof-of-Work Solvers (Zero-Browser Fast Path)**  
   Built on `wreq-js` with native modern TLS/HTTP2 handshake emulation and persistent session cookies. Includes pure-JS/Rust solvers for **Startpage's Anubis SHA-256 PoW challenge** and **DuckDuckGo's `d.js` (`isJsaChallenge`) HTML5/arithmetic challenge**, resolving structured challenge responses in milliseconds without launching a 400MB browser. Real URL resolution for Sogou redirect links, Baidu `Location`, and Bing Base64 links.
 - 📄 **High-Purity Markdown Article Extraction & Dedicated Site Purifiers**  
-  Combines Mozilla Readability with intelligent chrome noise stripping. Features dedicated purification rules for **WeChat Official Accounts** (`mp.weixin.qq.com`), **StackOverflow questions & accepted answers**, and transparent internal routing for **CSDN & Juejin**. Removes `<nav>`, `<aside>`, `<footer>`, and breadcrumbs while faithfully preserving article titles, code blocks, and GFM tables. Supports seamless pagination (`startIndex`).
+  Combines Mozilla Readability with intelligent chrome noise stripping. Features dedicated purification rules for **WeChat Official Accounts** (`mp.weixin.qq.com`), **StackOverflow questions & accepted answers**, and transparent internal routing for **CSDN & Juejin**. Removes `<nav>`, `<aside>`, `<footer>`, and breadcrumbs while faithfully preserving article titles, code blocks, and GFM tables. Supports seamless pagination (`startIndex`), plus three token-saving modes: **BM25 relevance-ranked `focus`**, **CSS-selector `extract` to JSON with no LLM**, and **numbered `citations`**.
 - 📚 **Unified Context7 Library Docs Lookup (`queryDocs`)**  
   Directly query official documentation with natural package names (e.g. `"next.js"`, `"vue"`) or Context7 IDs without needing a separate resolve step. Includes automatic candidate ranking, blind-guess 404 self-healing, and related alternatives discovery.
 - 🐙 **Extended GitHub / Gitee Resource Fetcher**  
@@ -72,11 +72,11 @@
 | Tool Name | Purpose | Key Highlights |
 | :--- | :--- | :--- |
 | **`search`** | Federated web & code search (14 engines) | Supports parallel queries, `timeRange: day\|week\|month\|year` date filter, `site: string[]` filter, `fetchTop` preview injection, `code` engine (grep.app); explicit `engines` defaults to `minResults=0` (no unconstrained cascade); returns inline `diagnostics` on failure |
-| **`fetchWebContent`** | Web page extraction, Markdown & transparent PDF parsing | **All-in-one content extractor**: Built-in disk-level Markdown cache (Node 22 `node:sqlite` / partitioned JSON fallback, 200MB LRU, `cache: default\|reload`); transparent PDF parsing (up to 20MB / 50 pages, `[page N]` tags, scanned doc detection); pagination & `focus` keyword targeting |
+| **`fetchWebContent`** | Web page extraction, Markdown & transparent PDF parsing | **All-in-one content extractor**: Built-in disk-level Markdown cache (Node 22 `node:sqlite` / partitioned JSON fallback, 200MB LRU, `cache: default\|reload`); transparent PDF parsing (up to 20MB / 50 pages, `[page N]` tags, scanned doc detection); pagination & `focus` keyword targeting (**`bm25`** relevance-ranked blocks by default, `window` for the legacy fixed window); **`selector`** to scope extraction to a CSS subtree (errors instead of silently returning the whole page); **`extract`** for CSS-selector JSON with no LLM; **`citations`** for numbered references; **`retainLinks`** to strip URLs (-50% on index pages) |
 | **`fetchGithubContent`** | Comprehensive GitHub / Gitee content reader | Fetches README, **one source file** (`/blob/<ref>/<path>`), directory trees (`/tree/`), and Issue / PR discussions; `ref` may be a branch, tag, or commit; not a repo clone; Gitee parity via API (file/tree/issue/PR, optional `GITEE_TOKEN`); returns `warnings` |
 | **`queryDocs`** | All-in-one official library documentation | Directly resolves library names or Context7 IDs; includes low-confidence protection and automatic fallback chain (npm registry → PyPI JSON → GitHub README); returns `source: context7\|npm\|pypi\|github-readme`, `confidence`, and `warnings` |
 
-> 💡 **Backward Compatibility**: Legacy `fetchCsdnArticle` and `fetchJuejinArticle` are automatically routed under `fetchWebContent`. Legacy `resolveLibraryId` is merged into `queryDocs` (which supports directly passing `library` name or legacy `libraryId` alias). Set `REGISTER_LEGACY_ARTICLE_TOOLS=true` if your LLM requires `fetchCsdnArticle` / `fetchJuejinArticle` explicitly exposed as separate tools.
+> 💡 **Backward Compatibility**: Legacy `fetchCsdnArticle` and `fetchJuejinArticle` are automatically routed under `fetchWebContent`; legacy `resolveLibraryId` is merged into `queryDocs` (which accepts a `library` name or the legacy `libraryId` alias). The separate legacy tools were removed — the `REGISTER_LEGACY_ARTICLE_TOOLS` switch is gone, because keeping three unregistered handlers around still cost tool-description budget for nothing.
 
 ---
 
@@ -96,7 +96,21 @@ npx -y my-websearch@latest
 
 ### 2. Configure in AI Clients
 
-#### 🔹 Claude Desktop / Cursor / Windsurf / Cline (STDIO Mode)
+#### 🔹 Automated setup (recommended)
+
+`init` detects installed MCP clients, writes the server entry into their config files, and keeps a `.bak` backup:
+
+```bash
+npx -y my-websearch@latest init                      # auto-detect and write
+npx -y my-websearch@latest init --dry-run            # preview the diff, write nothing
+npx -y my-websearch@latest init --client cursor,code # target specific clients
+```
+
+Supported out of the box: **Claude Desktop**, **Cursor**, and **VS Code** (workspace `.vscode/mcp.json`). An existing entry is never overwritten unless you pass `--force`, corrupt config files are left untouched, and on Windows it writes `cmd /c npx` for you. Restart the client, then verify with `my-websearch doctor`.
+
+#### 🔹 Manual configuration
+
+**Claude Desktop / Cursor / Windsurf / Cline (STDIO Mode)**
 
 Add to your MCP settings file:
 
@@ -114,7 +128,7 @@ Add to your MCP settings file:
 }
 ```
 
-*(For Windows environments where `npx` is not in the system path, set `command` to `cmd` and `args` to `["/c", "npx", "-y", "my-websearch@latest"]`)*
+*(For Windows: `init` handles this automatically. When configuring manually, if `npx` is not in the system path, set `command` to `cmd` and `args` to `["/c", "npx", "-y", "my-websearch@latest"]`)*
 
 #### 🔹 Cherry Studio (Streamable HTTP Mode)
 
@@ -143,6 +157,9 @@ Start the server in your terminal with `npx my-websearch@latest` (default port `
 ```bash
 # Global install
 npm install -g my-websearch
+
+# Detect installed MCP clients and write their config (--dry-run to preview)
+my-websearch init
 
 # Start persistent local HTTP daemon (port 3210 by default)
 my-websearch serve

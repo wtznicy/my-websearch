@@ -4,7 +4,7 @@ import './utils/startupQuiet.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
+import { applyHostValidation, applyJsonBody } from './adapters/http/sharedMiddleware.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import express from 'express';
 import type { Request } from 'express';
@@ -167,7 +167,7 @@ async function main() {
     console.error('🔌 Starting HTTP server...');
     // 创建 Express 应用
     const app = express();
-    app.use(express.json());
+    applyJsonBody(app);
 
     // 容器/平台健康检查探针（Glama / Docker / K8s 等环境探活）：
     // 必须放在 hostHeaderValidation 之前，避免容器外或集群内的探针因 Host 头不是 localhost 被误拦截。
@@ -179,13 +179,8 @@ async function main() {
       });
     });
 
-    // DNS rebinding 保护：用 SDK 的 hostHeaderValidation 中间件（port-agnostic，
-    // 通过 URL API 解析 Host 头的 hostname 部分，兼容 127.0.0.1:3211 这种带端口的请求）。
-    // 默认仅放行本地回环；如需局域网/公网访问，用 OPEN_WEBSEARCH_ALLOWED_HOSTS 显式放行。
-    const allowedHostnames = process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS
-      ? process.env.OPEN_WEBSEARCH_ALLOWED_HOSTS.split(',').map((host) => host.trim()).filter(Boolean)
-      : ['127.0.0.1', 'localhost', '[::1]'];
-    app.use(hostHeaderValidation(allowedHostnames));
+    // DNS rebinding 保护（与本地 REST daemon 共用同一套白名单解析，见 adapters/http/sharedMiddleware）
+    applyHostValidation(app);
 
     const mcpCorsOptions = buildMcpCorsOptions(config);
     if (mcpCorsOptions) {

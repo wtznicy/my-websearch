@@ -62,7 +62,8 @@ function testNormalizeEngineName(): void {
         'github',
         'stackoverflow',
         'hackernews',
-        'arxiv'
+        'arxiv',
+        'code'
     ], 'supported engines list');
     console.log('✅ normalizeEngineName and supported engines');
 }

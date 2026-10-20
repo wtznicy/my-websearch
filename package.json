@@ -10,7 +10,7 @@
   "author": "wtznicy",
   "repository": {
     "type": "git",
-    "url": "https://gitee.com/wtznicy/my-websearch.git"
+    "url": "https://github.com/wtznicy/my-websearch.git"
   },
   "homepage": "https://gitee.com/wtznicy/my-websearch",
   "keywords": [
@@ -33,7 +33,7 @@
     "!build/test"
   ],
   "scripts": {
-    "check:ci": "npm run typecheck:strict && npm run lint && npm test && npm run build",
+    "check:ci": "npm run typecheck:strict && npm run lint && npm test && npm run build && npm run test:deterministic",
     "typecheck:strict": "tsc --project tsconfig.strict.json",
     "build": "node -e \"require('fs').rmSync('build', { recursive: true, force: true })\" && tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
     "watch": "tsc --watch",
@@ -47,6 +47,7 @@
     "test:http": "node -e \"process.env.MODE='http'; import('./build/index.js')\"",
     "test:both": "node -e \"process.env.MODE='both'; import('./build/index.js')\"",
     "test": "vitest run",
+    "test:deterministic": "node build/tools/runDeterministicTests.js",
     "test:unit": "vitest run",
     "test:live": "tsc && node build/tools/runCurrentTests.js",
     "test:integration": "tsc && node build/tools/runCurrentTests.js",
@@ -56,18 +57,12 @@
     "lint:fix": "eslint src --fix",
     "test:list": "tsc && node build/tools/runCurrentTests.js --list",
     "test:bing-parser": "tsc && node build/test/test-bing-parser.js",
-    "test:cli": "tsc && node build/test/test-cli-search.js",
-    "test:cli-search": "tsc && node build/test/test-cli-search.js",
     "test:core-search": "tsc && node build/test/test-core-search.js",
     "test:core-fetch-services": "tsc && node build/test/test-core-fetch-services.js",
     "test:core-target-validation": "tsc && node build/test/test-core-target-validation.js",
     "test:engine-normalization": "tsc && node build/test/test-engine-normalization.js",
-    "test:local-daemon": "tsc && node build/test/test-local-daemon.js",
-    "test:mcp-adapter": "tsc && node build/test/test-mcp-adapter.js",
-    "test:runtime": "tsc && node build/test/test-runtime.js",
     "test:sogou": "tsc && node build/test/test-sogou.js",
     "test:startpage": "tsc && node build/test/test-startpage.js",
-    "test:http-request-options": "tsc && node build/test/test-http-request-options.js",
     "test:url-safety": "tsc && node build/test/test-url-safety.js",
     "test:redirect-safety": "tsc && node build/test/test-redirect-safety.js",
     "test:browser-path-guard": "tsc && node build/test/test-browser-path-guard.js",

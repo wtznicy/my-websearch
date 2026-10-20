@@ -1,4 +1,7 @@
 import { FetchWebContentOptions, FetchWebContentResult, generateMarkdownToc } from '../../engines/web/fetchWebContent.js';
+import type { ExtractSchema } from '../../engines/web/extract.js';
+import type { FocusMode } from '../../engines/web/types.js';
+import type { LinkRetentionMode } from '../../utils/linkRetention.js';
 import {
     validateArticleUrl,
     validateGithubRepositoryUrl,
@@ -73,6 +76,11 @@ export function createWebFetchService(
             startIndex?: number;
             format?: 'text' | 'markdown';
             focus?: string;
+            focusMode?: FocusMode;
+            citations?: boolean;
+            retainLinks?: LinkRetentionMode;
+            selector?: string;
+            extract?: ExtractSchema;
             signal?: AbortSignal;
         }): Promise<FetchWebContentResult> {
             return executeFetchPipeline(

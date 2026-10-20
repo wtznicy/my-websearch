@@ -30,7 +30,7 @@
 - ⚡ **现代 Web 协议栈与前端算力求解（零浏览器轻量直通）**  
   基于 `wreq-js` 原生模拟现代浏览器 TLS/HTTP2 协议握手与长效会话机制；内置算法解析 **Startpage Anubis SHA-256 PoW 算力挑战** 与 **DuckDuckGo `d.js` (`isJsaChallenge`) 动态前端挑战**；真实 URL 快速解析（搜狗跳转页还原、百度 `Location` 直取、Bing Base64 解码）；无需拉起 400MB 浏览器即可稳定高效获取正文。
 - 📄 **高纯度 Markdown 正文提纯与特色站点规则**  
-  整合 Mozilla Readability 与容器级智能降噪，为**微信公众号**（`#js_content` 深度清洗）、**StackOverflow**（问答主体与采纳答案精准提纯）定制专属净化器，针对 **CSDN 与掘金** 自动走专用提取链路；精准保留文章主标题、代码围栏及 GFM 表格；支持长文无缝分页（`startIndex`）。
+  整合 Mozilla Readability 与容器级智能降噪，为**微信公众号**（`#js_content` 深度清洗）、**StackOverflow**（问答主体与采纳答案精准提纯）定制专属净化器，针对 **CSDN 与掘金** 自动走专用提取链路；精准保留文章主标题、代码围栏及 GFM 表格；支持长文无缝分页（`startIndex`），并提供三种省 token 模式：**BM25 相关性排序的 `focus`**、**无需 LLM 的 CSS 选择器 `extract` 结构化 JSON**、**编号 `citations` 引用**。
 - 📚 **统一 Context7 官方框架/库文档直查（`queryDocs` 一站式合体）**  
   直接输入技术库名（如 `"next.js"`, `"vue"`）或 Context7 ID，内部自动多候选排序、404 自愈重搜并返回相似替代库，免去额外调用 ID 解析步骤。
 - 🐙 **全面升级的 GitHub / Gitee 资源抓取**  
@@ -72,11 +72,11 @@
 | 工具名称 | 功能定位 | 关键特性 |
 | :--- | :--- | :--- |
 | **`search`** | 14 大引擎联合联网与代码检索 | 支持多词并发、`timeRange: day\|week\|month\|year` 时间过滤、`site: string[]` 域名过滤、`fetchTop` 正文前瞻注入、`code` 代码引擎（grep.app）；显式传 `engines` 默认 `minResults=0` 且仅在候选内级联；失败附带网络内联诊断（`diagnostics: { proxy, dns, suggestion }`） |
-| **`fetchWebContent`** | 通用网页正文、Markdown 与透明 PDF 提取 | **全能知识提取网关**：内置磁盘级 Markdown 缓存（Node 22 `node:sqlite` / 分片 JSON 兜底，200MB LRU，`cache: default\|reload` 强制刷新）；透明解析 PDF（上限 20MB / 50 页，带 `[page N]` 标记，纯扫描版明确报错）；统一分页与 `focus` 章节定位 |
+| **`fetchWebContent`** | 通用网页正文、Markdown 与透明 PDF 提取 | **全能知识提取网关**：内置磁盘级 Markdown 缓存（Node 22 `node:sqlite` / 分片 JSON 兜底，200MB LRU，`cache: default\|reload` 强制刷新）；透明解析 PDF（上限 20MB / 50 页，带 `[page N]` 标记，纯扫描版明确报错）；统一分页与 `focus` 章节定位（默认 **`bm25`** 按段落相关性选块，`window` 保留旧的固定窗口）；**`selector`** 用 CSS 选择器收窄提取范围（未命中直接报错，不静默回退全页）；**`extract`** 用 CSS schema 直接产出结构化 JSON（无需 LLM）；**`citations`** 把正文链接改写成编号引用 + 末尾 References；**`retainLinks`** 裁剪 URL（列表页实测省 50%） |
 | **`fetchGithubContent`** | 全能 GitHub / Gitee 内容提取网关 | 提取 README、**单个源码文件**（`/blob/<ref>/<path>`）、目录树（`/tree/`）、Issue 与 PR；`ref` 可为分支/tag/commit；不是整仓 clone；Gitee 已与 GitHub 对齐（文件/目录/Issue/PR，可选 `GITEE_TOKEN`）；返回 `warnings` |
 | **`queryDocs`** | 一站式开源框架/库官方文档 | 直接传入库名或 Context7 ID；内置低置信度保护与自动兜底链（npm registry → PyPI JSON → 官方 GitHub README），响应标注 `source: context7\|npm\|pypi\|github-readme`、`confidence` 与 `warnings` |
 
-> 💡 **向后兼容说明**：原独立的 `fetchCsdnArticle` 与 `fetchJuejinArticle` 已平滑下沉并收口进通用的 `fetchWebContent`（按域名自动采用最佳专有提取引擎）；原 `resolveLibraryId` 已合并入 `queryDocs`（支持直接传 `library` 库名或旧版 `libraryId` 别名自动解析定位）。如需向大模型显式暴露旧版独立工具，可配置 `REGISTER_LEGACY_ARTICLE_TOOLS=true`。
+> 💡 **向后兼容说明**：原独立的 `fetchCsdnArticle` 与 `fetchJuejinArticle` 已平滑下沉并收口进通用的 `fetchWebContent`（按域名自动采用最佳专有提取引擎）；原 `resolveLibraryId` 已合并入 `queryDocs`（支持直接传 `library` 库名或旧版 `libraryId` 别名自动解析定位）。独立的 legacy 工具已移除 —— `REGISTER_LEGACY_ARTICLE_TOOLS` 开关一并删除，因为保留三个永不注册的 handler 依然要占工具描述预算。
 
 ---
 
@@ -96,7 +96,21 @@ npx -y my-websearch@latest
 
 ### 2. 主流 AI 客户端配置
 
-#### 🔹 Claude Desktop / Cursor / Windsurf / Cline (STDIO 极简模式)
+#### 🔹 自动配置（推荐）
+
+`init` 会自动探测本机已安装的 MCP 客户端，把服务器条目写进它们的配置文件，并保留 `.bak` 备份：
+
+```bash
+npx -y my-websearch@latest init                      # 自动探测并写入
+npx -y my-websearch@latest init --dry-run            # 只打印 diff，不落盘
+npx -y my-websearch@latest init --client cursor,code # 指定客户端
+```
+
+开箱支持 **Claude Desktop**、**Cursor** 和 **VS Code**（工作区级 `.vscode/mcp.json`）。已有条目默认**不会覆盖**（需要 `--force`），配置文件不是合法 JSON 时直接拒绝修改，Windows 下会自动写入 `cmd /c npx`。重启客户端后可用 `my-websearch doctor` 验证。
+
+#### 🔹 手动配置
+
+**Claude Desktop / Cursor / Windsurf / Cline (STDIO 极简模式)**
 
 在对应客户端的 MCP 配置文件中加入：
 
@@ -114,7 +128,7 @@ npx -y my-websearch@latest
 }
 ```
 
-*(Windows 环境若遇环境缺失，可将 `command` 设为 `cmd`，`args` 设为 `["/c", "npx", "-y", "my-websearch@latest"]`)*
+*(Windows 环境：`init` 已自动处理。手动配置时若 `npx` 不在系统 PATH 中，可将 `command` 设为 `cmd`，`args` 设为 `["/c", "npx", "-y", "my-websearch@latest"]`)*
 
 #### 🔹 Cherry Studio (Streamable HTTP 模式)
 
@@ -143,6 +157,9 @@ npx -y my-websearch@latest
 ```bash
 # 全局安装
 npm install -g my-websearch
+
+# 自动探测已安装的 MCP 客户端并写入配置（--dry-run 仅预览）
+my-websearch init
 
 # 启动本地常驻 Daemon（复用底层连接池与缓存，默认端口 3210）
 my-websearch serve

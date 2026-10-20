@@ -8,6 +8,8 @@ import { htmlToMarkdown } from '../../utils/markdown.js';
 import { looksLikeBotChallengePage } from '../../utils/browserCookies.js';
 import { extractPdfText, isPdfResponse, MAX_PDF_DOWNLOAD_BYTES } from './pdfExtractor.js';
 import { purifySiteContent } from './sitePurifiers.js';
+import { extractWithSchema, pickExtractionHtml, type ExtractResult } from './extract.js';
+import { scopeHtmlToSelector } from '../../utils/htmlScope.js';
 
 // Types & Errors
 import {
@@ -81,6 +83,10 @@ export interface ExtractedHtmlStage {
     byline?: string;
     excerpt?: string;
     siteName?: string;
+    /** CSS schema 结构化提取结果（仅在请求了 extract 且拿到 HTML 时存在） */
+    extraction?: ExtractResult;
+    /** selector 收窄生效时的回显 */
+    scoped?: { selector: string; matched: number };
 }
 
 /**
@@ -214,6 +220,14 @@ export async function tryHandlePdfFetch(
         return null;
     }
 
+    if (options.selector) {
+        throw new AppError({
+            code: 'extraction_failed',
+            retryable: false,
+            message: `selector requires an HTML page, but this target is a PDF (${primary.finalUrl})`
+        });
+    }
+
     let pdfBytes: Uint8Array;
     if (primary.response.data instanceof Uint8Array) {
         pdfBytes = new Uint8Array(primary.response.data.buffer, primary.response.data.byteOffset, primary.response.data.byteLength);
@@ -241,6 +255,7 @@ export async function tryHandlePdfFetch(
         startIndex: primary.startIndex,
         maxChars: primary.targetMaxChars,
         focus: options.focus,
+        focusMode: options.focusMode,
         appendTruncationMarker: false,
         generateToc: true
     });
@@ -258,7 +273,9 @@ export async function tryHandlePdfFetch(
         ...(paginated.hasMore ? { hasMore: true, nextStartIndex: paginated.nextStartIndex } : {}),
         pdfPages: pdfResult.totalPages,
         ...(paginated.toc && paginated.toc.length > 0 ? { toc: paginated.toc } : {}),
-        ...(paginated.focused ? { focused: true, focusMatchOffset: paginated.focusMatchOffset } : {})
+        ...(paginated.focused ? { focused: true, focusMatchOffset: paginated.focusMatchOffset } : {}),
+        ...(paginated.focusMode ? { focusMode: paginated.focusMode } : {}),
+        ...(paginated.focusBlocks ? { focusBlocks: paginated.focusBlocks } : {})
     };
 }
 
@@ -315,6 +332,8 @@ export async function fetchAndExtractHtmlWithBrowserFallback(
     let readabilityApplied = false;
     const degradedNotices: string[] = [];
     let readableHtml: string | undefined;
+    let sitePurifiedHtml: string | undefined;
+    let scoped: { selector: string; matched: number } | undefined;
     let links: ExtractedLink[] | undefined;
     let byline: string | undefined;
     let excerpt: string | undefined;
@@ -387,6 +406,30 @@ export async function fetchAndExtractHtmlWithBrowserFallback(
             }
         }
 
+        // 选择器收窄：在浏览器兜底之后、所有正文提取之前执行，
+        // 这样 Readability / 站点提纯 / markdown 转换全部只作用于命中子树。
+        // 未命中会抛 selector_not_found（带候选），绝不静默回退全页。
+        if (options.selector) {
+            if (!(contentType.includes('text/html') || looksLikeHtml(raw))) {
+                throw new AppError({
+                    code: 'extraction_failed',
+                    retryable: false,
+                    message: `selector requires an HTML page, but this target returned ${contentType || 'a non-HTML body'}`
+                });
+            }
+            const scopeResult = scopeHtmlToSelector(raw, options.selector);
+            raw = scopeResult.html;
+            scoped = { selector: options.selector, matched: scopeResult.matched };
+
+            // 子树变了，容器提取要重跑；标题保留整页的（子树里通常没有 <title>）
+            const scopedExtraction = extractMainTextFromHtml(raw);
+            htmlExtraction = scopedExtraction;
+            extractedContent = scopedExtraction.text;
+            if (!title && scopedExtraction.title) {
+                title = scopedExtraction.title;
+            }
+        }
+
         const sitePurified = (contentType.includes('text/html') || looksLikeHtml(raw))
             ? purifySiteContent(finalUrl || primary.parsedUrl.toString(), raw)
             : undefined;
@@ -396,6 +439,7 @@ export async function fetchAndExtractHtmlWithBrowserFallback(
             if (sitePurified.author) byline = sitePurified.author;
             if (sitePurified.siteName) siteName = sitePurified.siteName;
             readableHtml = sitePurified.html;
+            sitePurifiedHtml = sitePurified.html;
             if (options.format === 'markdown') {
                 try {
                     const markdown = htmlToMarkdown(sitePurified.html);
@@ -460,6 +504,26 @@ export async function fetchAndExtractHtmlWithBrowserFallback(
         }
     }
 
+    // 结构化提取：在正文提取之后、分页之前执行。
+    // 用原始页面 DOM 而不是 Readability 的 DOM —— 用户写 selector 时参考的是真实页面结构。
+    let extraction: ExtractResult | undefined;
+    if (options.extract) {
+        const html = pickExtractionHtml({
+            raw,
+            sitePurifiedHtml,
+            readableHtml,
+            containerHtml: htmlExtraction?.html
+        });
+        if (!html) {
+            throw new AppError({
+                code: 'extraction_failed',
+                retryable: false,
+                message: 'extract requires an HTML page, but this target returned Markdown, plain text, or a PDF'
+            });
+        }
+        extraction = extractWithSchema(html, options.extract);
+    }
+
     return {
         finalUrl,
         contentType,
@@ -473,7 +537,9 @@ export async function fetchAndExtractHtmlWithBrowserFallback(
         links,
         byline,
         excerpt,
-        siteName
+        siteName,
+        ...(extraction ? { extraction } : {}),
+        ...(scoped ? { scoped } : {})
     };
 }
 
@@ -521,7 +587,9 @@ export function validateFetchOutcome(
         }
     }
 
-    if (!stage.extractedContent) {
+    // 结构化提取成功时，正文提取为空是正常的（页面正文可能全是 JS 渲染，
+    // 而目标数据在静态 DOM 里）——此时应把 JSON 交给调用方，而不是报 empty_content
+    if (!stage.extractedContent && !stage.extraction) {
         if (primary.httpErrorStatus !== undefined) {
             throw new AppError({
                 code: primary.httpErrorStatus === 429 ? 'rate_limited' : 'network_error',
@@ -546,10 +614,39 @@ export function assembleFetchResult(
     stage: ExtractedHtmlStage,
     options: FetchWebContentOptions
 ): FetchWebContentResult {
+    // 结构化提取命中时直接返回 JSON，跳过 paginateContent：
+    // 对数组/对象做字符切片只会产出无法解析的 JSON。
+    if (stage.extraction) {
+        const json = JSON.stringify(stage.extraction.items, null, 2);
+        return {
+            url: primary.parsedUrl.toString(),
+            finalUrl: stage.finalUrl,
+            contentType: 'application/json',
+            title: stage.title,
+            retrievalMethod: stage.retrievalMethod,
+            truncated: false,
+            content: json,
+            totalLength: json.length,
+            startIndex: 0,
+            format: 'json',
+            extracted: stage.extraction.items,
+            extraction: {
+                count: stage.extraction.count,
+                matchedBase: stage.extraction.matchedBase,
+                ...(options.extract?.baseSelector ? { baseSelector: options.extract.baseSelector } : {})
+            },
+            ...(stage.scoped ? { scoped: stage.scoped } : {}),
+            ...(stage.degradedNotices.length > 0 ? { degraded: stage.degradedNotices } : {}),
+            ...(stage.siteName ? { siteName: stage.siteName } : {}),
+            ...(stage.byline ? { byline: stage.byline } : {})
+        };
+    }
+
     const paginated = paginateContent(stage.extractedContent, {
         startIndex: primary.startIndex,
         maxChars: primary.targetMaxChars,
         focus: options.focus,
+        focusMode: options.focusMode,
         appendTruncationMarker: true,
         generateToc: !options.raw
     });
@@ -568,13 +665,15 @@ export function assembleFetchResult(
         ...(paginated.hasMore ? { hasMore: true, nextStartIndex: paginated.nextStartIndex } : {}),
         ...(options.readability ? { readabilityApplied: stage.readabilityApplied } : {}),
         ...(stage.degradedNotices.length > 0 ? { degraded: stage.degradedNotices } : {}),
-        ...(options.includeReadableHtml && stage.readableHtml ? { readableHtml: stage.readableHtml } : {}),
         ...(options.format === 'markdown' ? { format: 'markdown' as const } : {}),
         ...(stage.links ? { links: stage.links } : {}),
         ...(stage.byline ? { byline: stage.byline } : {}),
         ...(stage.excerpt ? { excerpt: stage.excerpt } : {}),
         ...(stage.siteName ? { siteName: stage.siteName } : {}),
         ...(paginated.toc && paginated.toc.length > 0 ? { toc: paginated.toc } : {}),
-        ...(paginated.focused ? { focused: true, focusMatchOffset: paginated.focusMatchOffset } : {})
+        ...(paginated.focused ? { focused: true, focusMatchOffset: paginated.focusMatchOffset } : {}),
+        ...(paginated.focusMode ? { focusMode: paginated.focusMode } : {}),
+        ...(paginated.focusBlocks ? { focusBlocks: paginated.focusBlocks } : {}),
+        ...(stage.scoped ? { scoped: stage.scoped } : {})
     };
 }
