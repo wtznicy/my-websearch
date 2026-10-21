@@ -155,9 +155,11 @@ describe('Search Outcome Semantics (ok / degraded / empty / failed)', () => {
             });
 
             expect(res.engineMetrics[0]?.timedOut).toBe(true);
+            // 15s 而不是 4s：全量并行跑时（多个 worker 各自起本地 server + 负载）实测 socket 关闭会超过 4s，
+            // 断言语义是「最终会关闭」，放宽等待不会削弱它，但能消掉一个反复出现的假失败。
             await Promise.race([
                 socketClosedPromise,
-                new Promise((_, reject) => setTimeout(() => reject(new Error('in-flight HTTP request was not aborted')), 4000))
+                new Promise((_, reject) => setTimeout(() => reject(new Error('in-flight HTTP request was not aborted')), 15000))
             ]);
             expect(serverRequestClosed).toBe(true);
 

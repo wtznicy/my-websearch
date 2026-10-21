@@ -73,6 +73,11 @@ export async function paginateSearch<T>(options: PaginateSearchOptions<T>): Prom
         try {
             results = await fetchPage(page);
         } catch (pageError) {
+            // 取消信号必须向上传播：一旦被吞掉，调用方会把「被取消的截断结果」当成搜索完成。
+            // 放在「部分结果容忍」之前判断，否则第 2 页起的 abort 会被下面的 break 静默吃掉。
+            if (signal?.aborted) {
+                throw signal.reason instanceof Error ? signal.reason : pageError;
+            }
             // 如果首页已成功收集到部分结果，后续分页偶发失败时不应抹杀已有结果
             if (pageIndex > 0 && allResults.length > 0) {
                 console.warn(`Pagination fetchPage failed on page ${page}, gracefully returning ${allResults.length} collected results:`, pageError instanceof Error ? pageError.message : String(pageError));
