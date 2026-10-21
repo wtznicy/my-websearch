@@ -8,6 +8,7 @@ import { __resetDirectSlowHostCacheForTests } from '../utils/httpRequest.js';
 import { __setOverseasReachableForTests } from '../utils/overseasProbe.js';
 import { resetDnsCache } from '../utils/dnsCache.js';
 import { detectSystemProxy, resetSystemProxyCache } from '../utils/systemProxy.js';
+import { readEngineLatencyStats } from '../core/engineLatency.js';
 import { __resetGithubReadmeCacheForTests } from '../engines/github/github.js';
 import { resetContext7Cache } from '../core/context7/context7Service.js';
 
@@ -247,6 +248,8 @@ export async function buildDoctorReport(
         browser: browserInfo,
         engines,
         recommendations,
+        // 跨进程的引擎延迟样本（最近 7 天），供用户判断该不该调整路由权重
+        engineLatency: readEngineLatencyStats(),
         ...(options.resetHealth ? { healthReset: true } : {})
     };
 }

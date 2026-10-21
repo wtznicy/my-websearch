@@ -123,6 +123,8 @@ export type DoctorReport = {
         failureTtlMs: number;
     };
     probedEngines: string[];
+    /** 最近 7 天的引擎耗时聚合（跨进程持久化）；为空表示还没有样本 */
+    engineLatency: Array<{ engine: string; samples: number; successRate: number; p50: number; p95: number }>;
     configSources: {
         appConfigFile: { path: string; exists: boolean };
         projectConfigFile: { path: string; exists: boolean };

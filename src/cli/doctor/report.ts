@@ -221,6 +221,16 @@ export function formatDoctorHumanReadable(report: DoctorReport): string {
         );
     }
 
+    if (report.engineLatency.length > 0) {
+        lines.push('');
+        lines.push('Engine latency (last 7 days, persisted across runs):');
+        for (const item of report.engineLatency) {
+            lines.push(
+                `  - ${item.engine.padEnd(13)} p50=${String(item.p50).padStart(6)}ms  p95=${String(item.p95).padStart(6)}ms  success=${String(item.successRate).padStart(3)}%  n=${item.samples}`
+            );
+        }
+    }
+
     if (report.recommendations.length > 0) {
         lines.push('');
         lines.push('Recommendations:');

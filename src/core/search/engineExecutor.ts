@@ -7,6 +7,7 @@ import { Semaphore } from '../../utils/concurrency.js';
 import type { SearchEngineExecutorMap, SearchExecutionFailure } from './searchTypes.js';
 import { recordEngineSuccess, tripEngineCircuit } from './engineCircuitBreaker.js';
 import { hintProxyConnectionError } from '../../utils/httpRequest.js';
+import { recordEngineLatency, compactEngineLatencyFile, type EngineLatencySample } from '../engineLatency.js';
 
 /**
  * P1-5：按引擎细粒度并发限流（避免突发并发把 sogou/baidu 等脆弱引擎打满 10s 超时或触发反爬）：
@@ -322,11 +323,23 @@ export async function executePrimaryEngines(
         });
     }));
 
+    const latencySamples: EngineLatencySample[] = [];
     executableEngines.forEach((engine, index) => {
         const engineResult = engineResults[index] ?? [];
         const elapsedMs = engineMetrics[index]?.ms ?? (Date.now() - (startedAtByIndex[index] ?? Date.now()));
         metrics.recordEngineSearch(engine, elapsedMs, engineResult.length > 0);
+        // 「拿到响应」与「有结果」不是一回事：0 结果但没报错说明链路正常，延迟数据仍然有效
+        const metric = engineMetrics[index];
+        latencySamples.push({
+            engine,
+            ms: elapsedMs,
+            ok: !metric?.error && !metric?.timedOut,
+            at: Date.now()
+        });
     });
+    // 跨进程持久化，供 doctor 展示与后续「按历史耗时做路由」使用
+    recordEngineLatency(latencySamples);
+    compactEngineLatencyFile();
 
     let directAnswer: string | undefined;
     for (const engineResult of engineResults) {
