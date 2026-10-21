@@ -7,7 +7,7 @@ import { BROWSER_USER_AGENT } from '../utils/constants.js';
 import { __resetDirectSlowHostCacheForTests } from '../utils/httpRequest.js';
 import { __setOverseasReachableForTests } from '../utils/overseasProbe.js';
 import { resetDnsCache } from '../utils/dnsCache.js';
-import { resetSystemProxyCache } from '../utils/systemProxy.js';
+import { detectSystemProxy, resetSystemProxyCache } from '../utils/systemProxy.js';
 import { __resetGithubReadmeCacheForTests } from '../engines/github/github.js';
 import { resetContext7Cache } from '../core/context7/context7Service.js';
 
@@ -150,9 +150,13 @@ export async function buildDoctorReport(
     const { configSources } = collectDoctorConfigSources(env, cwd);
     const effectiveConfig = buildDoctorEffectiveConfig(runtime.config, env);
 
-    // 2. 代理基础 TCP 探针
-    const effectiveProxyServer = getProxyUrl(runtime.config);
-    const proxyProbe = runtime.config.useProxy && effectiveProxyServer
+    // 2. 代理基础 TCP 探针：显式配置优先，其次运行时真正生效的系统代理
+    //    （TUN 模式下两者可能都为空 —— 流量由网络层接管，属正常）
+    const detectedSystemProxy = runtime.config.useProxy ? null : await detectSystemProxy();
+    const effectiveProxyServer = (runtime.config.useProxy ? getProxyUrl(runtime.config) : undefined)
+        ?? detectedSystemProxy
+        ?? undefined;
+    const proxyProbe = effectiveProxyServer
         ? await probeTcpEndpoint(effectiveProxyServer, probeTimeoutMs)
         : null;
 
@@ -193,6 +197,7 @@ export async function buildDoctorReport(
         networkChecked,
         engines,
         proxyTcpProbe: proxyProbe,
+        systemProxyServer: detectedSystemProxy,
         probeUpstreamFallback: async () => {
             return probeNetworkWithCache('duckduckgo', runtime.config, networkProbeTimeoutMs, probeOptions);
         }

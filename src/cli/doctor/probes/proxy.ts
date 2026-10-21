@@ -36,6 +36,8 @@ export async function evaluateProxyDoctor(
         networkChecked: boolean;
         engines: DoctorEngineStatus[];
         proxyTcpProbe?: ProxyTcpProbeResult;
+        /** 未显式配置 USE_PROXY 时，运行时实际生效的系统代理（auto-detect 结果） */
+        systemProxyServer?: string | null;
         probeUpstreamFallback?: () => Promise<{ reachable: boolean; http?: 'reachable' | 'unreachable'; error?: string }>;
     }
 ): Promise<{
@@ -43,10 +45,15 @@ export async function evaluateProxyDoctor(
     effectiveProxyServer?: string;
     proxyTcpProbe: ProxyTcpProbeResult;
 }> {
-    const effectiveProxyServer = getProxyUrl(appConfig);
+    // 「显式配置」与「系统代理兜底」是两条路径，运行时都会真正走代理。
+    // doctor 之前只看 useProxy，于是「系统代理已开启」时仍报 disabled —— 和实际行为相反。
+    const explicitProxyServer = appConfig.useProxy ? getProxyUrl(appConfig) : undefined;
+    const systemProxyServer = explicitProxyServer ? undefined : (options.systemProxyServer ?? undefined);
+    const proxyInEffect = Boolean(explicitProxyServer || systemProxyServer);
+    const effectiveProxyServer = explicitProxyServer ?? systemProxyServer;
     const proxyTcpProbe = options.proxyTcpProbe !== undefined
         ? options.proxyTcpProbe
-        : (appConfig.useProxy && effectiveProxyServer
+        : (proxyInEffect && effectiveProxyServer
             ? await probeTcpEndpoint(effectiveProxyServer, options.proxyProbeTimeoutMs)
             : null);
 
@@ -54,7 +61,7 @@ export async function evaluateProxyDoctor(
     let proxyNetworkStatus: DoctorReport['proxy']['networkStatus'] = 'disabled';
     let proxyError: string | null = proxyTcpProbe?.error ?? null;
 
-    if (appConfig.useProxy && effectiveProxyServer) {
+    if (proxyInEffect && effectiveProxyServer) {
         if (!proxyTcpProbe || !proxyTcpProbe.reachable) {
             proxyStatus = 'unreachable';
             proxyNetworkStatus = 'unreachable';
@@ -85,10 +92,10 @@ export async function evaluateProxyDoctor(
     }
 
     const proxy: DoctorReport['proxy'] = {
-        enabled: appConfig.useProxy,
-        // 代理未启用时不要回显那个不生效的默认 URL（config 里的 DEFAULT_PROXY_URL）。
+        enabled: proxyInEffect,
+        // 代理未生效时不要回显那个不生效的默认 URL（config 里的 DEFAULT_PROXY_URL）。
         // 它曾把排查方向带偏：「doctor 显示 7897，是不是工具还在走代理？」
-        server: appConfig.useProxy ? maskProxyUrl(effectiveProxyServer) : '',
+        server: proxyInEffect ? maskProxyUrl(effectiveProxyServer) : '',
         status: proxyStatus,
         networkStatus: proxyNetworkStatus,
         tcpReachable: proxyTcpProbe ? proxyTcpProbe.reachable : null,
