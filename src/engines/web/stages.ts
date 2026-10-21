@@ -31,7 +31,6 @@ import {
     createBrowserBudget,
     decodeRawResponse,
     fetchHtmlViaBrowser,
-    isLikelySmallFile,
     shouldTryBrowserHtmlFallback,
     tryRequestWithBrowserCookies
 } from './transport.js';
@@ -106,40 +105,12 @@ export async function validateAndFetchPrimary(
     const startIndex = Math.max(0, Math.floor(options.startIndex ?? 0));
     const targetMaxChars = clampMaxChars(maxChars);
 
-    // Pre-flight check to avoid downloading oversized payloads when Content-Length is present.
-    // 明显的小文件（.md/.txt/.json 等）跳过 HEAD 预检：HEAD 一次延迟翻倍，
-    // 这些类型超 2MB 上限的概率极低，且部分站点禁 HEAD 会白等超时。
-    // GET 请求自带 maxBodyLength 硬上限兜底（见 buildRequestOptions）。
-    if (!isLikelySmallFile(parsedUrl)) {
-        try {
-            const headResponse = await requestDirectFirst('HEAD', parsedUrl.toString(), (forceDirect) => ({
-                ...buildRequestOptions(undefined, forceDirect, signal),
-                responseType: 'json',
-                validateStatus: (status: number) => status >= 200 && status < 400
-            }), 'Request URL');
-            const headContentType = String(headResponse.headers['content-type'] || '').toLowerCase();
-            const isPdfPreflight = headContentType.includes('application/pdf') || parsedUrl.pathname.toLowerCase().endsWith('.pdf');
-            const maxAllowedBytes = isPdfPreflight ? MAX_PDF_DOWNLOAD_BYTES : MAX_DOWNLOAD_BYTES;
-            const headLength = Number(headResponse.headers['content-length']);
-            if (Number.isFinite(headLength) && headLength > maxAllowedBytes) {
-                throw new AppError({
-                    code: 'response_too_large',
-                    retryable: false,
-                    details: { legacyCode: 'ERR_RESPONSE_TOO_LARGE' },
-                    message: `Response body too large (${headLength} bytes). Max allowed is ${maxAllowedBytes} bytes`
-                });
-            }
-        } catch (error: unknown) {
-            if (signal?.aborted) {
-                throw error;
-            }
-            const errCode = (error as { code?: string })?.code;
-            if (errCode === 'ERR_RESPONSE_TOO_LARGE' || errCode === 'response_too_large' || errCode === 'invalid_arguments') {
-                throw error;
-            }
-            void error;
-        }
-    }
+    // 不再做 HEAD 预检：它对每个页面都多一个 RTT（国内 30-80ms、海外 200-600ms），
+    // 而它的两个目的在 GET 上都已经有等价兜底：
+    //   - 大小上限 → buildRequestOptions 的 maxBodyLength/maxContentLength 硬中断
+    //   - PDF 判定 → GET 响应上的 isPdfResponse()，以及下面按 .pdf 路径选 20MB 上限
+    // 已知取舍：非 .pdf 路径提供的大 PDF（>2MB）会先撞 2MB 上限；这类 URL 极少，
+    // 且相比「每个页面都白花一个 RTT」，这个代价更划算。
 
     let response: AxiosResponse;
     let usedBrowserCookies = false;

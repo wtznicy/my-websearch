@@ -17,12 +17,6 @@ import {
 } from './types.js';
 import { looksLikeHtml, MIN_METADATA_FALLBACK_CHARS } from './extraction.js';
 
-/** 按 URL 路径扩展名判断"明显的小文件"：跳过 HEAD 预检（注意 .pdf 不跳过预检） */
-export function isLikelySmallFile(parsedUrl: URL): boolean {
-    const path = parsedUrl.pathname.toLowerCase();
-    return /\.(md|markdown|txt|text|json|csv|xml|ya?ml|html?|png|jpe?g|gif|webp|svg|ico|css|js)$/.test(path);
-}
-
 export function buildRequestOptions(
     cookieHeader?: string,
     forceDirect = false,
