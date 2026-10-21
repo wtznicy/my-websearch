@@ -287,20 +287,22 @@ export async function executePrimaryEngines(
             let done = false;
             const timer = setTimeout(() => {
                 done = true;
+                // 预算耗尽 ≠ 网络错误：这是「搜索总 deadline 到了，引擎还没回」。
+                // 之前一律记成 network_timeout，会污染健康统计和路由权重（把慢引擎判成坏引擎）。
                 controller?.abort(new AppError({
-                    code: 'network_timeout',
-                    retryable: true,
+                    code: 'engine_timeout',
+                    retryable: false,
                     engine,
-                    message: `Engine timeout after ${wait}ms`
+                    message: `Engine budget exhausted after ${wait}ms (search deadline reached), not a network error`
                 }));
-                engineMetrics[index] = { engine, ms: wait, count: 0, error: `timeout after ${wait}ms`, timedOut: true };
+                engineMetrics[index] = { engine, ms: wait, count: 0, error: `budget exhausted after ${wait}ms`, timedOut: true };
                 if (engine && !partialFailures.some((failure) => failure.engine === engine)) {
                     partialFailures.push({
                         engine,
                         code: 'engine_error',
-                        errorCode: 'network_timeout',
-                        retryable: true,
-                        message: buildHintedMessage(engine, `Engine timeout after ${wait}ms (no response in time)`)
+                        errorCode: 'engine_timeout',
+                        retryable: false,
+                        message: buildHintedMessage(engine, `Engine budget exhausted after ${wait}ms because the search deadline was reached (no response in time; not a network error)`)
                     });
                 }
                 resolve([]);

@@ -9,7 +9,7 @@ import {
 import { config, getProxyUrl, engineShouldUseProxy } from '../config.js';
 import { assertPublicHttpUrlResolved, isPrivateOrLocalHostname } from './urlSafety.js';
 import { cachedDnsLookup, peekCachedLookup } from './dnsCache.js';
-import { getSystemProxyFallbackUrl } from './systemProxy.js';
+import { detectSystemProxy, getSystemProxyFallbackUrl } from './systemProxy.js';
 import { metrics } from '../core/metrics.js';
 import { AppError } from '../core/errors.js';
 
@@ -440,7 +440,11 @@ export async function requestDirectFirst(
     urlLabel: string = 'Request URL'
 ): Promise<AxiosResponse> {
     const hasConfiguredProxy = Boolean(config.useProxy && config.proxyUrl);
-    if (hasConfiguredProxy && isHostMarkedDirectSlow(url)) {
+    // 自动检测到的系统代理同样算「有代理可用」：否则只开了系统代理、没配 PROXY_URL 的用户
+    // 在直连失败时不会回退到代理，只会拿到一个 network_error（arxiv 采样失败就是这个形态）。
+    const systemProxyUrl = hasConfiguredProxy ? null : await detectSystemProxy();
+    const hasProxyAvailable = hasConfiguredProxy || Boolean(systemProxyUrl);
+    if (hasProxyAvailable && isHostMarkedDirectSlow(url)) {
         const proxyOptions = buildOptions(false);
         try {
             return await requestWithSafeRedirects(method, url, proxyOptions, urlLabel);
@@ -483,7 +487,7 @@ export async function requestDirectFirst(
         if (!isNetworkLayerError(message)) {
             throw directError;
         }
-        if (hasConfiguredProxy) {
+        if (hasProxyAvailable) {
             try {
                 const response = await requestWithSafeRedirects(method, url, buildOptions(false), urlLabel);
                 markHostDirectSlow(url);
