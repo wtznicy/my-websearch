@@ -87,7 +87,7 @@ export function buildDoctorEffectiveConfig(
         allowedSearchEngines: appConfig.allowedSearchEngines,
         searchMode: appConfig.searchMode,
         useProxy: appConfig.useProxy,
-        proxyUrl: maskProxyUrl(appConfig.proxyUrl),
+        proxyUrl: appConfig.useProxy ? maskProxyUrl(appConfig.proxyUrl) : null,
         proxyEngines: appConfig.proxyEngines,
         searchDeadlineMs: appConfig.searchDeadlineMs,
         enableHttpServer: appConfig.enableHttpServer,

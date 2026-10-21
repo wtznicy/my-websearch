@@ -135,7 +135,8 @@ export type DoctorReport = {
         allowedSearchEngines: string[];
         searchMode: string;
         useProxy: boolean;
-        proxyUrl: string;
+        /** 代理未启用时为 null —— 不要展示一个不生效的默认值，那会误导用户去排查"代理" */
+        proxyUrl: string | null;
         proxyEngines: string[];
         searchDeadlineMs: number;
         enableHttpServer: boolean;

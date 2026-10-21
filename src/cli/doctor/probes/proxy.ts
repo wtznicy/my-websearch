@@ -86,7 +86,9 @@ export async function evaluateProxyDoctor(
 
     const proxy: DoctorReport['proxy'] = {
         enabled: appConfig.useProxy,
-        server: maskProxyUrl(effectiveProxyServer),
+        // 代理未启用时不要回显那个不生效的默认 URL（config 里的 DEFAULT_PROXY_URL）。
+        // 它曾把排查方向带偏：「doctor 显示 7897，是不是工具还在走代理？」
+        server: appConfig.useProxy ? maskProxyUrl(effectiveProxyServer) : '',
         status: proxyStatus,
         networkStatus: proxyNetworkStatus,
         tcpReachable: proxyTcpProbe ? proxyTcpProbe.reachable : null,
