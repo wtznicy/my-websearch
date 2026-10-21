@@ -24,9 +24,22 @@ export function isOverseasEngine(engine: string | undefined): boolean {
 
 /** 缓存状态：undefined = 尚未检测，null = 检测过但无系统代理，string = 系统代理 URL */
 let cachedSystemProxy: string | null | undefined;
+let cachedSystemProxyAt = 0;
+let systemProxyInFlight: Promise<string | null> | undefined;
+
+/**
+ * 检测结果的 TTL：60 秒。
+ *
+ * 之前是「进程内只检测一次」，对常驻的 MCP server 意味着——**启动时没开代理，之后开了也看不见，
+ * 必须重启 server**。这与用户的实际操作节奏（先搜索、发现不通、再开 Clash）完全相反。
+ * 60s 的代价只是偶尔多跑一次 `reg query` / `scutil`（~20ms）。
+ */
+const SYSTEM_PROXY_CACHE_TTL_MS = 60_000;
 
 export function resetSystemProxyCache(): void {
     cachedSystemProxy = undefined;
+    cachedSystemProxyAt = 0;
+    systemProxyInFlight = undefined;
 }
 
 /** 解析系统代理 URL（http://host:port），失败返回 null */
@@ -121,21 +134,33 @@ async function readSystemProxy(): Promise<string | null> {
 }
 
 /**
- * 检测系统代理（带缓存，进程内只检测一次）。
+ * 检测系统代理（带 60s TTL + 并发去重）。
  * 探测流程在直连失败后调用它并缓存结果，供实际请求同步读取。
  */
 export async function detectSystemProxy(): Promise<string | null> {
-    if (cachedSystemProxy !== undefined) {
+    const now = Date.now();
+    if (cachedSystemProxy !== undefined && now - cachedSystemProxyAt < SYSTEM_PROXY_CACHE_TTL_MS) {
         return cachedSystemProxy;
     }
-    const detected = await readSystemProxy();
-    // 统一规范化为带协议的完整 URL（Windows 注册表 ProxyServer 常为 "host:port" 无协议前缀，
-    // HttpsProxyAgent 需要完整 URL）；格式非法时视为无系统代理
-    const normalized = detected && parseProxyUrl(detected)
-        ? (detected.includes('://') ? detected : `http://${detected}`)
-        : null;
-    cachedSystemProxy = normalized;
-    return normalized;
+    // 多个引擎并发探测时只跑一次系统调用
+    if (systemProxyInFlight) {
+        return systemProxyInFlight;
+    }
+    systemProxyInFlight = (async () => {
+        try {
+            const detected = await readSystemProxy();
+            // 统一规范化为带协议的完整 URL（Windows 注册表 ProxyServer 常为 "host:port" 无协议前缀，
+            // HttpsProxyAgent 需要完整 URL）；格式非法时视为无系统代理
+            cachedSystemProxy = detected && parseProxyUrl(detected)
+                ? (detected.includes('://') ? detected : `http://${detected}`)
+                : null;
+            cachedSystemProxyAt = Date.now();
+            return cachedSystemProxy;
+        } finally {
+            systemProxyInFlight = undefined;
+        }
+    })();
+    return systemProxyInFlight;
 }
 
 /** 同步读取已检测的系统代理（未检测时为 null；调用方应先 await detectSystemProxy） */

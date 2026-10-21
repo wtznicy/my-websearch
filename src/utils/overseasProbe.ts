@@ -132,12 +132,20 @@ async function isDirectlyReachable(engine: 'duckduckgo' | 'brave' | 'startpage')
     }
 
     // 直连与系统代理**并行**探测（有系统代理时），任一可达即放行：
-    // 串行时国内无直连环境要先白等直连 3s×2=6s 才轮到代理，这 6s 会吃掉引擎的搜索预算
+    // 串行时国内无直连环境要先白等直连 3s×2=6s 才轮到代理，这 6s 会吃掉引擎的搜索预算。
+    //
+    // 直连的重试次数：没有系统代理时保留 1 次（可能是网络抖动，重试有意义）；
+    // 有系统代理时降为 0 —— 说明用户本来就想走代理，直连失败一次基本是确定性的（被墙/无直连），
+    // 再等 3s 只是把 DDG 的失败从 ~4s 拉到 ~7s；真能用的话并行中的代理探测会立刻成功。
     const systemProxy = await detectSystemProxy();
+    // 有系统代理时两条路径都只探 1 次：它们本来就是并行兜底关系，
+    // 任一条能通会立刻短路，重试只会在「双双失败」时把 3s 翻成 6s（实测 7.3s → 3.4s）。
+    // 没有系统代理时保留 1 次重试：可能是网络抖动，没有第二条路可走。
+    const probeRetries = systemProxy ? 0 : PROBE_MAX_RETRIES;
     const attempts: Array<Promise<boolean>> = [
         (async () => {
             let reachable = false;
-            for (let attempt = 0; attempt <= PROBE_MAX_RETRIES && !reachable; attempt += 1) {
+            for (let attempt = 0; attempt <= probeRetries && !reachable; attempt += 1) {
                 reachable = await probeOnce(PROBE_TARGETS[engine]);
             }
             return reachable;
@@ -146,7 +154,7 @@ async function isDirectlyReachable(engine: 'duckduckgo' | 'brave' | 'startpage')
     if (systemProxy) {
         attempts.push((async () => {
             let reachable = false;
-            for (let attempt = 0; attempt <= PROBE_MAX_RETRIES && !reachable; attempt += 1) {
+            for (let attempt = 0; attempt <= probeRetries && !reachable; attempt += 1) {
                 reachable = await probeOnce(PROBE_TARGETS[engine], systemProxy);
             }
             return reachable;
