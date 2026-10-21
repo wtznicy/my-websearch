@@ -1,6 +1,6 @@
 import { SearchResult } from '../../types.js';
 import { AppConfig, config } from '../../config.js';
-import { distributeLimit, SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
+import { SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
 import { rankSearchResults } from './resultRanking.js';
 import { isEngineCircuitOpen, getEngineCircuitRemainingMs } from './engineCircuitBreaker.js';
 import { quoteModelLikeTerms, preprocessSearchQuery } from '../../utils/queryPreprocess.js';
@@ -402,7 +402,12 @@ export function createSearchService(
                         }
                     }
 
-                    const limits = distributeLimit(limit, executableEngines.length);
+                    // 每个引擎都按完整 limit 请求（上限 10，避免深分页），合并后统一去重再截断。
+                    // 之前用 distributeLimit 把 limit 切成 n 份：limit=5、3 个引擎 → 每引擎 2 条，
+                    // 任何单个快引擎都凑不够 minResults，早退永远不触发、级联池被全量炸出来
+                    // （实测 auto 中文 17.3s，其中 bing 一个引擎就 13.8s）。
+                    const perEngineLimit = Math.min(limit, 10);
+                    const limits = executableEngines.map(() => perEngineLimit);
                     const effectiveSearchMode = resolveSearchModeOverride(searchMode);
 
                     const extractedSites = extractSiteDomains(cleanQuery);
@@ -421,8 +426,9 @@ export function createSearchService(
                         engineMap,
                         deadlineAt,
                         perEngineTimeoutMs,
-                        // 结果足够即提前返回（给慢引擎 800ms 宽限），避免最慢的主引擎把整次搜索拖满
-                        satisfiedResults: minResults,
+                        // 结果足够即提前返回（给慢引擎 800ms 宽限）。
+                        // minResults 未显式给出时用 limit 本身作为达标线，而不是「所有引擎配额之和」
+                        satisfiedResults: minResults && minResults > 0 ? minResults : limit,
                         signal: effectiveSignal,
                         timeRange,
                         site: siteDomains,

@@ -111,18 +111,23 @@ async function testSearchServiceExecution(): Promise<void> {
         query: '  open web search  ',
         engines: ['bing', 'startpage'],
         limit: 3,
+        // 故意要求 5 条（> bing 能提供的 3 条），让「满意即止」不触发，
+        // 这样 startpage 会完整走完 3 次重试并失败——本用例验证的是失败归因，不是早退
+        minResults: 5,
         searchMode: 'playwright'
     });
 
     assertEqual(result.query, 'open web search', 'trims query');
-    assertEqual(result.totalResults, 2, 'keeps successful engine results');
+    // 每个引擎都按完整 limit 请求（上限 10），合并后再截断；不再把 limit 切成 n 份。
+    // 原因：切成 n 份会让任何单个引擎都凑不够 minResults，早退永远不触发。
+    assertEqual(result.totalResults, 3, 'keeps successful engine results');
     assertEqual(result.partialFailures.length, 1, 'captures one partial failure');
     assertEqual(result.partialFailures[0].engine, 'startpage', 'records failed engine');
     assertEqual(result.partialFailures[0].code, 'engine_error', 'uses stable partial failure code');
     assertEqualArray(
         seenCalls.map(call => `${call.engine}:${call.query}:${call.limit}:${call.searchMode ?? 'none'}`),
-        ['bing:open web search:2:playwright', 'startpage:open web search:1:playwright', 'startpage:open web search:1:playwright', 'startpage:open web search:1:playwright'],
-        'passes trimmed query, distributed limits, and request-level search mode (startpage retried 3x then failed)'
+        ['bing:open web search:3:playwright', 'startpage:open web search:3:playwright', 'startpage:open web search:3:playwright', 'startpage:open web search:3:playwright'],
+        'passes trimmed query, full per-engine limit, and request-level search mode (startpage retried 3x then failed)'
     );
 
     console.log('✅ search service executes with partial failures');
@@ -334,27 +339,27 @@ async function testSearchQueryTooLong(): Promise<void> {
 }
 
 async function testSearchZeroQuotaEngines(): Promise<void> {
-    // limit=1, 3 引擎 → 配额 [1,0,0]；后两个引擎虽配额为 0 但不应产生 partialFailures（它们"未被调用"）
+    // 方案 A 之后：每个引擎都按完整 limit 请求（上限 10），不再把 limit 切成 n 份，
+    // 因此「配额为 0 的引擎」这个场景不再存在；本用例改为验证「全量配额 + 空结果归因」。
     const called: string[] = [];
     const service = createSearchService({
         bing: async (query, limit) => { called.push(`bing:${limit}`); return [{ title: 'a', url: 'https://a.com', description: '', source: 'a.com', engine: 'bing' }]; },
-        duckduckgo: async () => { called.push('duckduckgo'); return []; },
-        startpage: async () => { called.push('startpage'); return []; }
+        duckduckgo: async (query, limit) => { called.push(`duckduckgo:${limit}`); return []; },
+        startpage: async (query, limit) => { called.push(`startpage:${limit}`); return []; }
     });
 
     const result = await service.execute({ query: 'q', engines: ['bing', 'duckduckgo', 'startpage'], limit: 1 });
 
-    // 只有 bing 被调用（配额 1），duckduckgo/startpage 配额 0 不应被调用
-    assertEqualArray(called, ['bing:1'], 'only engines with non-zero quota are invoked');
-    // 未调用的引擎不应出现在 partialFailures（它们只是没被分配配额）
-    assertEqual(result.partialFailures.length, 0, 'zero-quota engines are not reported as failures');
+    assertEqualArray(called, ['bing:1', 'duckduckgo:1', 'startpage:1'], 'every engine receives the full limit');
+    assertEqual(result.partialFailures.length, 2, 'engines that return no results are reported');
+    assertEqual(result.partialFailures.every((failure) => failure.code === 'no_results'), true, 'empty engines use no_results');
 
-    // 相反：配额 >0 但返回空 → 应计入 partialFailures
+    // 本次验证：有结果的引擎正常返回，空结果引擎不阻塞整体
     const result2 = await service.execute({ query: 'q2', engines: ['bing', 'duckduckgo'], limit: 3 });
-    assertEqual(result2.partialFailures.length, 1, 'engine with quota but no results is reported');
+    assertEqual(result2.partialFailures.length, 1, 'engine with no results is reported');
     assertEqual(result2.partialFailures[0].engine, 'duckduckgo', 'empty-result engine is identified');
 
-    console.log('✅ search service reports zero-quota engines distinctly from empty results');
+    console.log('✅ search service grants full limit per engine and reports empty results');
 }
 
 async function testEngineCircuitQuotaTransfer(): Promise<void> {

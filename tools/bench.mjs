@@ -177,29 +177,35 @@ async function benchFetch() {
 
 async function benchSearch() {
     const { createMyWebSearchRuntime } = await import(toImportSpecifier(path.join(ROOT, 'build', 'runtime', 'createRuntime.js')));
+    const { pickDefaultEnginesForQuery } = await import(toImportSpecifier(path.join(ROOT, 'build', 'core', 'search', 'queryEngineRouting.js')));
     const runtime = createMyWebSearchRuntime();
     const rows = [];
 
     for (const query of SEARCH_QUERIES) {
+        // 走 auto 路由（和 CLI/MCP 默认路径一致），而不是写死单引擎
+        const routed = pickDefaultEnginesForQuery(query, runtime.config.defaultSearchEngine);
         const durations = [];
         let count = 0;
         let error = null;
+        let engines = '';
         for (let i = 0; i < RUNS; i += 1) {
             try {
                 const t0 = process.hrtime.bigint();
                 const result = await runtime.services.search.execute({
                     query,
-                    engines: ['bing'],
+                    engines: routed,
                     limit: 5,
-                    minResults: 0
+                    minResults: 5,
+                    requestedEngines: routed
                 });
                 durations.push(Number(process.hrtime.bigint() - t0) / 1e6);
                 count = result.results?.length ?? 0;
+                engines = (result.engineMetrics ?? []).map((metric) => `${metric.engine}=${Math.round(metric.ms)}ms`).join(' ');
             } catch (e) {
                 error = e.message;
             }
         }
-        rows.push({ query, engine: 'bing', results: count, ms: durations.length > 0 ? stats(durations) : null, error });
+        rows.push({ query, engine: routed.join(','), results: count, ms: durations.length > 0 ? stats(durations) : null, error, metrics: engines });
     }
     return rows;
 }
@@ -241,9 +247,9 @@ async function main() {
     }
 
     if (out.search) {
-        console.log('\n搜索（单引擎 bing，排除多引擎并发）：');
+        console.log('\n搜索（auto 路由，与 CLI/MCP 默认路径一致）：');
         for (const row of out.search) {
-            console.log(`  "${row.query}"  ${fmt(row.ms)}  → ${row.results} 条${row.error ? `  ❌ ${row.error}` : ''}`);
+            console.log(`  "${row.query}"  ${fmt(row.ms)}  → ${row.results} 条  [${row.engine}]${row.metrics ? `  ${row.metrics}` : ''}${row.error ? `  ❌ ${row.error}` : ''}`);
         }
     }
     console.log('');

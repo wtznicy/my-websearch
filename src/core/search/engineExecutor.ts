@@ -478,6 +478,10 @@ export async function executePrimaryEngines(
     }
 
     executableEngines.forEach((engine, index) => {
+        // 早退时被 abort 的引擎不是「没结果」，而是「没来得及」——不要记成 no_results
+        if (collected.skipped.has(index)) {
+            return;
+        }
         const executor = engineMap[engine];
         const limitForEngine = limits[index] ?? 0;
         const engineResult = engineResults[index] ?? [];
