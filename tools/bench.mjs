@@ -122,10 +122,14 @@ function rawProbe(url, redirectsLeft = 3) {
 
 async function benchFetch() {
     const { fetchWebContent } = await import(toImportSpecifier(BUILD_ENTRY));
+    // 管线路径（MCP/CLI/daemon 实际走的那条）：包一层 fetch 服务 + 磁盘缓存
+    const { createWebFetchService } = await import(toImportSpecifier(path.join(ROOT, 'build', 'core', 'fetch', 'fetchServices.js')));
+    const pipeline = createWebFetchService(fetchWebContent);
     const rows = [];
 
     for (const url of FETCH_URLS) {
         const appDurations = [];
+        const pipelineDurations = [];
         const rawTotals = [];
         let chars = 0;
         let appError = null;
@@ -133,11 +137,19 @@ async function benchFetch() {
         for (let i = 0; i < RUNS; i += 1) {
             try {
                 const t0 = process.hrtime.bigint();
-                const result = await fetchWebContent(url, 30000, { format: 'markdown', cache: 'reload' });
+                const result = await fetchWebContent(url, 30000, { format: 'markdown' });
                 appDurations.push(Number(process.hrtime.bigint() - t0) / 1e6);
                 chars = result.content?.length ?? 0;
             } catch (error) {
                 appError = error.message;
+            }
+            try {
+                // cache: 'reload' 保证每次都真实抓取，避免第二次命中缓存
+                const t1 = process.hrtime.bigint();
+                await pipeline.execute({ url, maxChars: 30000, cache: 'reload' });
+                pipelineDurations.push(Number(process.hrtime.bigint() - t1) / 1e6);
+            } catch (error) {
+                appError = appError ?? error.message;
             }
             try {
                 const probe = await rawProbe(url);
@@ -151,6 +163,7 @@ async function benchFetch() {
             url,
             chars,
             app: appDurations.length > 0 ? stats(appDurations) : null,
+            pipeline: pipelineDurations.length > 0 ? stats(pipelineDurations) : null,
             raw: rawTotals.length > 0 ? stats(rawTotals) : null,
             overhead: appDurations.length > 0 && rawTotals.length > 0
                 ? Math.round(pct(appDurations, 50) - pct(rawTotals, 50))
@@ -220,8 +233,9 @@ async function main() {
         console.log('\n抓取 fetchWebContent：');
         for (const row of out.fetch) {
             console.log(`  ${row.url}`);
-            console.log(`    app  ${fmt(row.app)}  → ${row.chars} 字符`);
-            console.log(`    raw  ${fmt(row.raw)}   (DNS/TCP/TLS/TTFB/body 单次 GET)`);
+            console.log(`    app       ${fmt(row.app)}  → ${row.chars} 字符   (引擎直连)`);
+            console.log(`    pipeline  ${fmt(row.pipeline)}   (MCP/CLI/daemon 实际路径，含缓存填充)`);
+            console.log(`    raw       ${fmt(row.raw)}   (DNS/TCP/TLS/TTFB/body 单次 GET)`);
             console.log(`    应用层开销 ≈ ${row.overhead ?? '—'} ms${row.error ? `  ❌ ${row.error}` : ''}`);
         }
     }
