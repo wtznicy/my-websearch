@@ -42,7 +42,9 @@ export async function searchArxiv(
             searchQuery = `${searchQuery} AND submittedDate:[${fromDate}0000 TO ${toDate}2359]`;
         }
 
-        const url = 'http://export.arxiv.org/api/query';
+        // 必须用 https：arXiv 对 http:// 一律 301 到 https，
+        // 经代理时会多一跳、多一次 http→https 的协议切换（实测该跳在代理/TUN 路径上偶发 4xx）。
+        const url = 'https://export.arxiv.org/api/query';
         const response = await requestDirectFirst('GET', url, (forceDirect) => ({
             ...buildAxiosRequestOptions({
                 engine: 'arxiv',

@@ -230,7 +230,7 @@ export const ENGINE_REGISTRY: readonly EngineDescriptor[] = [
         supportsNativeSite: true,
         supportsPlaywright: false,
         defaultTimeoutMs: 10000,
-        probeUrl: 'http://export.arxiv.org/api/query?search_query=all:electron&max_results=1',
+        probeUrl: 'https://export.arxiv.org/api/query?search_query=all:electron&max_results=1',
         execute: searchArxiv
     },
     {
