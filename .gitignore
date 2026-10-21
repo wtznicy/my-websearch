@@ -19,3 +19,7 @@ MCP_EVALUATION_REPORT.md
 
 # 仅本机协作约定，不入库
 /AGENTS.md
+
+# 临时采样/基准日志，不入库
+/.latency*.jsonl
+/.bench*.log
