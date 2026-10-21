@@ -61,9 +61,13 @@ describe('pickDefaultEngineForQuery', () => {
         metrics.recordEngineSearch('duckduckgo', 10000, false);
         expect(pickDefaultEnginesForQuery('rust tokio select', 'auto')).toEqual(['bing', 'exa']);
 
-        // 中文主引擎 sogou 熔断时，纯中文查询自动替补 csdn
+        // 中文主引擎 sogou 熔断时，用**同类通用引擎**替补（bing），而不是 CSDN/掘金这类垂直站：
+        // 垂直站无法回答「杭州落户政策」「今天天气」这类通用查询（P1-6 修正）
         tripEngineCircuit('sogou');
-        expect(pickDefaultEnginesForQuery('异步运行时原理对比', 'auto')).toEqual(['baidu', 'csdn']);
+        const zhFallback = pickDefaultEnginesForQuery('异步运行时原理对比', 'auto');
+        expect(zhFallback).toEqual(['baidu', 'bing']);
+        expect(zhFallback).not.toContain('csdn');
+        expect(zhFallback).not.toContain('juejin');
     });
 
     it('should route mixed Chinese-English technical queries to [bing, juejin, baidu]', () => {

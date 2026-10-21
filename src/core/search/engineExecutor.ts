@@ -119,6 +119,8 @@ export interface ExecutePrimaryEnginesOptions {
     engineMap: SearchEngineExecutorMap;
     deadlineAt: number;
     perEngineTimeoutMs: number;
+    /** 满足早退的最小结果数（通常来自 minResults）；未提供时用 limit 总和 */
+    satisfiedResults?: number;
     signal?: AbortSignal;
     timeRange?: 'day' | 'week' | 'month' | 'year';
     site?: string[];
@@ -130,6 +132,118 @@ export interface ExecutePrimaryEnginesResult {
     partialFailures: SearchExecutionFailure[];
     engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }>;
     directAnswer?: string;
+    /** 是否因为结果已足够而提前返回（未完成的引擎被 abort，不计失败、不计延迟样本） */
+    earlyReturn?: boolean;
+}
+
+/** 结果足够后给慢引擎的宽限窗口：有人已满足 minResults 时，最多再等这么久 */
+const EARLY_RETURN_GRACE_MS = 800;
+
+function countUniqueResultUrls(results: Array<SearchResult[] | undefined>): number {
+    const seen = new Set<string>();
+    for (const engineResult of results) {
+        for (const item of engineResult ?? []) {
+            if (item.url) {
+                seen.add(item.url);
+            }
+        }
+    }
+    return seen.size;
+}
+
+function resolveSatisfiedTarget(limits: number[], requested?: number): number {
+    const total = limits.reduce((sum, value) => sum + Math.max(0, value), 0);
+    const fallback = Math.max(1, total);
+    if (!requested || requested <= 0) {
+        return fallback;
+    }
+    return Math.max(1, Math.min(requested, fallback));
+}
+
+/**
+ * 收集主引擎结果，「满意即止」：
+ * 只要已完成引擎的去重结果数达到目标，就再给未完成引擎一个宽限窗口（800ms），
+ * 到期直接 abort 并返回——避免最慢的那个引擎把整次搜索拖满
+ * （实测中文 baidu 9.3s vs sogou 3.0s）。单引擎不启用：用户点名一个引擎时就该给它完整预算。
+ */
+async function collectPrimaryResults(
+    races: Array<Promise<SearchResult[]>>,
+    context: {
+        satisfiedTarget: number;
+        controllers: AbortController[];
+        executableEngines: string[];
+    }
+): Promise<{ engineResults: SearchResult[][]; earlyReturn: boolean; skipped: Set<number> }> {
+    const settled: Array<SearchResult[] | undefined> = new Array(races.length).fill(undefined);
+    const skipped = new Set<number>();
+    let earlyReturn = false;
+
+    if (races.length <= 1) {
+        settled[0] = (await races[0]) ?? [];
+        return { engineResults: settled.map((results) => results ?? []), earlyReturn: false, skipped };
+    }
+
+    await new Promise<void>((resolve) => {
+        let remaining = races.length;
+        let graceTimer: NodeJS.Timeout | undefined;
+        let finished = false;
+        const finish = () => {
+            if (finished) {
+                return;
+            }
+            finished = true;
+            if (graceTimer) {
+                clearTimeout(graceTimer);
+            }
+            resolve();
+        };
+        const maybeArmGrace = () => {
+            if (finished || graceTimer) {
+                return;
+            }
+            if (countUniqueResultUrls(settled) < context.satisfiedTarget) {
+                return;
+            }
+            graceTimer = setTimeout(() => {
+                earlyReturn = true;
+                finish();
+            }, EARLY_RETURN_GRACE_MS);
+        };
+        races.forEach((race, index) => {
+            race.then((results) => {
+                settled[index] = results;
+                remaining -= 1;
+                maybeArmGrace();
+                if (remaining === 0) {
+                    finish();
+                }
+            }).catch(() => {
+                settled[index] = [];
+                remaining -= 1;
+                maybeArmGrace();
+                if (remaining === 0) {
+                    finish();
+                }
+            });
+        });
+    });
+
+    if (earlyReturn) {
+        for (let index = 0; index < settled.length; index += 1) {
+            if (settled[index] !== undefined) {
+                continue;
+            }
+            skipped.add(index);
+            settled[index] = [];
+            context.controllers[index]?.abort(new AppError({
+                code: 'engine_timeout',
+                retryable: false,
+                message: `Skipped: ${context.satisfiedTarget} results already collected (early return)`
+            }));
+        }
+    }
+
+    return { engineResults: settled.map((results) => results ?? []), earlyReturn, skipped };
 }
 
 export async function executePrimaryEngines(
@@ -272,7 +386,7 @@ export async function executePrimaryEngines(
         return [];
     });
 
-    const engineResults = await Promise.all(tasks.map((task, index) => {
+    const engineRaces = tasks.map((task, index) => {
         const engine = executableEngines[index] ?? '';
         const controller = controllers[index];
         const remaining = deadlineAt - Date.now();
@@ -323,10 +437,21 @@ export async function executePrimaryEngines(
                 resolve([]);
             });
         });
-    }));
+    });
+
+    const collected = await collectPrimaryResults(engineRaces, {
+        satisfiedTarget: resolveSatisfiedTarget(limits, options.satisfiedResults),
+        controllers,
+        executableEngines
+    });
+    const engineResults = collected.engineResults;
 
     const latencySamples: EngineLatencySample[] = [];
     executableEngines.forEach((engine, index) => {
+        // 提前返回时被 abort 的引擎：既没失败也没完成，不能进延迟样本，否则会污染 p50
+        if (collected.skipped.has(index)) {
+            return;
+        }
         const engineResult = engineResults[index] ?? [];
         const elapsedMs = engineMetrics[index]?.ms ?? (Date.now() - (startedAtByIndex[index] ?? Date.now()));
         metrics.recordEngineSearch(engine, elapsedMs, engineResult.length > 0);
@@ -372,6 +497,7 @@ export async function executePrimaryEngines(
         engineResults,
         partialFailures,
         engineMetrics,
-        directAnswer
+        directAnswer,
+        ...(collected.earlyReturn ? { earlyReturn: true } : {})
     };
 }

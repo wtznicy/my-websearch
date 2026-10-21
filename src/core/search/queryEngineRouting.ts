@@ -58,9 +58,12 @@ function applyPrimaryHealthFilter(baseGroup: string[], isChinese: boolean, hasCu
 
     const result = [...healthyBase];
     const hasExaKey = Boolean(process.env.EXA_API_KEY?.trim());
+    // 替补必须是**同类通用搜索引擎**：CSDN/掘金是站内技术库，拿它顶替百度会让
+    // 「杭州落户政策」「今天天气」这类查询直接 0 结果（可用性换延迟是亏本买卖）。
+    // 垂直引擎只在查询被判定为代码/学术特征时才由路由显式拉入。
     const fallbackPool = isChinese
-        ? ['csdn', 'juejin', 'bing']
-        : [...(hasExaKey ? ['exa'] : []), 'stackoverflow', 'github', 'brave', 'startpage', 'hackernews', 'arxiv'];
+        ? ['bing', 'sogou', 'baidu']
+        : [...(hasExaKey ? ['exa'] : []), 'brave', 'duckduckgo', 'bing'];
 
     for (const candidate of fallbackPool) {
         if (result.length >= baseGroup.length) {

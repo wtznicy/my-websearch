@@ -421,6 +421,8 @@ export function createSearchService(
                         engineMap,
                         deadlineAt,
                         perEngineTimeoutMs,
+                        // 结果足够即提前返回（给慢引擎 800ms 宽限），避免最慢的主引擎把整次搜索拖满
+                        satisfiedResults: minResults,
                         signal: effectiveSignal,
                         timeRange,
                         site: siteDomains,

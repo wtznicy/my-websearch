@@ -59,19 +59,44 @@ const EN_CASCADE_PRIORITY: readonly string[] = ENGINE_REGISTRY
  * - 近期无样本或成功率 ≥50% 的引擎保持在第一梯队（按基础优先级排序）；
  * - 近期出现连续失败/超时（样本数 >0 且成功率 <50%）的慢引擎降级到队尾，避免占满首个级联批次预算。
  */
+import { readEngineLatencyStats, type EngineLatencyStat } from '../engineLatency.js';
+
+/** 持久化延迟统计的进程内缓存（60s），避免每次排序都读文件 */
+let persistedLatencyCache: { at: number; byEngine: Map<string, EngineLatencyStat> } | null = null;
+
+function getPersistedLatencyMap(now = Date.now()): Map<string, EngineLatencyStat> {
+    if (persistedLatencyCache && now - persistedLatencyCache.at < 60_000) {
+        return persistedLatencyCache.byEngine;
+    }
+    const byEngine = new Map(readEngineLatencyStats({ now }).map((stat) => [stat.engine, stat]));
+    persistedLatencyCache = { at: now, byEngine };
+    return byEngine;
+}
+
+/**
+ * 按近期健康度排序级联候选。
+ *
+ * 数据源优先用进程内滑动窗口（更及时）；没有样本时回退到持久化的
+ * `engine-latency.jsonl`（CLI 每次都是新进程，否则永远冷启动）。
+ * 注意：这里只调整**同类候选之间**的先后——类别错配由路由层的 fallbackPool 负责拦截。
+ */
 function sortCandidatesByRecentHealth(candidates: string[]): string[] {
     if (candidates.length <= 1) {
         return candidates;
     }
+    const persisted = getPersistedLatencyMap();
     const indexed = candidates.map((engine, index) => {
         const health = metrics.getRecentEngineHealth(engine);
-        const isDegraded = Boolean(health && health.total >= 2 && health.successRate < 50);
+        const stored = persisted.get(engine);
+        const sampleCount = health?.total ?? stored?.samples ?? 0;
+        const successRate = health?.successRate ?? stored?.successRate ?? 100;
+        const avgDurationMs = health?.avgDurationMs ?? stored?.p50 ?? 0;
         return {
             engine,
             index,
-            isDegraded,
-            successRate: health?.successRate ?? 100,
-            avgDurationMs: health?.avgDurationMs ?? 0
+            isDegraded: sampleCount >= 2 && successRate < 50,
+            successRate,
+            avgDurationMs
         };
     });
     indexed.sort((a, b) => {
