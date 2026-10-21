@@ -6,6 +6,7 @@ import { AppError, isRetryableError, extractErrorStatus, extractErrorCode, extra
 import { Semaphore } from '../../utils/concurrency.js';
 import type { SearchEngineExecutorMap, SearchExecutionFailure } from './searchTypes.js';
 import { recordEngineSuccess, tripEngineCircuit } from './engineCircuitBreaker.js';
+import { hintProxyConnectionError } from '../../utils/httpRequest.js';
 
 /**
  * P1-5：按引擎细粒度并发限流（避免突发并发把 sogou/baidu 等脆弱引擎打满 10s 超时或触发反爬）：
@@ -213,16 +214,19 @@ export async function executePrimaryEngines(
                 }
                 return results;
             } catch (error) {
-                lastError = error;
+                // search 路径此前从不经过 hintProxyConnectionError，所以死代理的失败既没有提示、
+                // 也照常重试 3 次（10s × 3 = 30s）。这里统一归类，确定性的代理失败不再重试。
+                const normalizedError = hintProxyConnectionError(error);
+                lastError = normalizedError;
                 if (signal.aborted || Date.now() >= deadlineAt) {
                     break;
                 }
-                if (attempt < 2 && isRetryableEngineError(error)) {
-                    const backoff = computeRetryBackoff(error, attempt);
+                if (attempt < 2 && isRetryableEngineError(normalizedError)) {
+                    const backoff = computeRetryBackoff(normalizedError, attempt);
                     if (Date.now() + backoff >= deadlineAt) {
                         break;
                     }
-                    console.error(`⚠️ Engine ${engine} failed (attempt ${attempt + 1}/3), retrying in ${backoff}ms:`, error instanceof Error ? error.message : String(error));
+                    console.error(`⚠️ Engine ${engine} failed (attempt ${attempt + 1}/3), retrying in ${backoff}ms:`, normalizedError instanceof Error ? normalizedError.message : String(normalizedError));
                     await sleepWithSignal(backoff, signal);
                     if (signal.aborted || Date.now() >= deadlineAt) {
                         break;
@@ -248,6 +252,10 @@ export async function executePrimaryEngines(
             const details = extractErrorDetails(lastError);
             if (status === 429 || errorCode === 'rate_limited' || status === 202 || errorCode === 'bot_challenge') {
                 tripEngineCircuit(engine);
+            } else if (errorCode === 'proxy_unreachable' && !isRetryableEngineError(lastError)) {
+                // 只对「确定性代理失败」短冷却。普通 network_error 不进熔断：
+                // 无代理用户（例如海外用户）遇到一次网络抖动就被静默停用 60s，代价远大于收益。
+                tripEngineCircuit(engine, 60_000);
             }
             partialFailures.push({
                 engine,

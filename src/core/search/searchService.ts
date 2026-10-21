@@ -447,7 +447,11 @@ export function createSearchService(
                         effectiveSearchMode,
                         deadlineAt,
                         perEngineTimeoutMs,
-                        allowedEngines: appConfig.allowedSearchEngines,
+                        // 显式点名引擎时，级联只能在点名的集合内补位；否则会悄悄换成用户没选的引擎
+                        // （例如只指定 github，却在 DDG 挂死时返回 bing 的结果）
+                        allowedEngines: requestedEngines && requestedEngines.length > 0
+                            ? requestedEngines.filter((engine) => appConfig.allowedSearchEngines.length === 0 || appConfig.allowedSearchEngines.includes(engine))
+                            : appConfig.allowedSearchEngines,
                         siteDomains,
                         signal: effectiveSignal,
                         timeRange,
@@ -508,6 +512,18 @@ export function createSearchService(
                             diagnostics = await runInlineDiagnostics();
                         } catch {
                             // ignore diagnostics error
+                        }
+                    }
+
+                    // 代理不可达但直连可用 → 给一条可行动的警告，而不是让用户盯着超时发呆
+                    if (appConfig.useProxy) {
+                        const proxyFailures = allFailures.filter((failure) => failure.errorCode === 'proxy_unreachable');
+                        if (proxyFailures.length > 0 && merged.length > 0) {
+                            warnings.push(
+                                `Configured proxy ${appConfig.proxyUrl} looks unreachable: ${proxyFailures.length} proxied engine(s) failed to connect while direct engines returned results. `
+                                + 'Check the proxy section of ~/.my-websearch/config.json, or set USE_PROXY=false to go direct. '
+                                + `/ 配置的代理 ${appConfig.proxyUrl} 可能不可达：${proxyFailures.length} 个走代理的引擎连接失败，直连引擎正常。请检查配置或设置 USE_PROXY=false 直连。`
+                            );
                         }
                     }
 

@@ -8,6 +8,7 @@ import {
     looksLikeBotChallengePage
 } from '../../utils/browserCookies.js';
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
+import { resolveAcceptLanguage } from '../../utils/locale.js';
 import { AppError } from '../../core/errors.js';
 import {
     DEFAULT_TIMEOUT_MS,
@@ -26,7 +27,7 @@ export function buildRequestOptions(
     const headers: Record<string, string> = {
         'User-Agent': DEFAULT_DESKTOP_UA,
         'Accept': 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.8,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+        'Accept-Language': resolveAcceptLanguage()
     };
     // 国内站点（.cn/已知国内域名）直连，不因全局 USE_PROXY 走代理——代理挂掉时国内抓取不受影响
     const requestOptions = buildAxiosRequestOptions({

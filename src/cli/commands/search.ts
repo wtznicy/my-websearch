@@ -233,7 +233,10 @@ export async function handleSearchCommand(ctx: CommandContext): Promise<number> 
             engines: parsed.engines,
             limit: parsed.limit,
             searchMode: parsed.searchMode,
-            minResults: parsed.minResults
+            minResults: parsed.minResults,
+            // 显式 --engines 时把原集合传下去：级联只能在用户点名的引擎里补位，
+            // 而不是悄悄把 duckduckgo/brave 也拉进来（实测 --engines github 跑了 6 个引擎、22s）
+            ...(parsed.enginesExplicit ? { requestedEngines: [...parsed.engines] } : {})
         });
 
         if (result.outcome === 'failed') {

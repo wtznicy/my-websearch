@@ -157,14 +157,34 @@ function getInsecureTrustedStaticHttpsAgent(): https.Agent {
  * 附加明确提示（最常见原因：代理软件没启动或 PROXY_URL 端口不对），
  * 让调用方/LLM 一眼知道是代理配置问题而不是目标站点问题。
  */
+/**
+ * 失败信息是否「看起来和代理有关」。
+ * 除了连接被拒，还包括死代理的典型形态：连上了但不回数据（timeout / TLS eof / socket disconnected）。
+ */
+export function isProxyRelatedFailure(message: string): boolean {
+    // 注意：不能只写 timeout —— 引擎自己的 "Engine timeout after 10000ms" 也含 timeout，
+    // 那会把所有慢站点都误判成代理问题。这里只认 axios 的 "timeout of Nms exceeded"。
+    return /ECONNREFUSED|ECONNRESET|socket hang up|ENETUNREACH|ETIMEDOUT|ECONNABORTED|timeout of \d+ms exceeded|TLS|unexpected eof|socket disconnected|proxy/i.test(message);
+}
+
+/**
+ * 是否是确定性的「连不上代理」——这类失败重试没有意义，只会把 10s 拉成 30s。
+ * 普通 timeout 不算（可能只是站点慢），仍然保留重试。
+ */
+export function isDeterministicProxyFailure(message: string): boolean {
+    return /ECONNREFUSED|ENETUNREACH|ECONNRESET|socket hang up|TLS|unexpected eof|socket disconnected/i.test(message);
+}
+
 export function hintProxyConnectionError(error: unknown): Error {
     const message = error instanceof Error ? error.message : String(error);
-    if (config.useProxy && /ECONNREFUSED|ECONNRESET|socket hang up|ENETUNREACH/i.test(message)) {
+    if (config.useProxy && isProxyRelatedFailure(message)) {
         return new AppError({
             code: 'proxy_unreachable',
-            retryable: true,
+            retryable: !isDeterministicProxyFailure(message),
             cause: error instanceof Error ? error : undefined,
-            message: `${message} | Hint: 请求经代理 ${config.proxyUrl} 失败——请确认代理软件已启动、PROXY_URL 端口正确，或将 PROXY_URL 设为 false 临时直连（国内站点可直连）`
+            message: `${message} | Hint: request via proxy ${config.proxyUrl} failed. `
+                + 'Check that the proxy is running and PROXY_URL is correct, or set USE_PROXY=false to go direct. '
+                + `请求经代理 ${config.proxyUrl} 失败：请确认代理已启动、PROXY_URL 正确，或设置 USE_PROXY=false 直连。`
         });
     }
     return error instanceof Error ? error : new Error(message);

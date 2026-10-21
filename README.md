@@ -37,6 +37,7 @@
   `fetchGithubContent` (formerly `fetchGithubReadme`) supports both GitHub and Gitee: repository READMEs, any source file (`/blob/...`), directory trees (`/tree/...`), and complete issue / PR discussions.
 - 🌏 **Zero-Config Network Detection & Fake-IP Ready**  
   Auto-detects OS system proxies (Windows Registry / macOS scutil / Linux env). Automatically routes overseas engines through proxy while keeping domestic engines on fast direct lines. Pre-whitelists `198.18.0.0/15` for TUN / Fake-IP compatibility while enforcing strict SSRF security bounds.
+  **No proxy is the supported default**: outside mainland China, leave `USE_PROXY` unset and every engine is queried directly — you don't need Clash/v2ray to use this server.
 - 🔌 **Versatile Deployment Modes**  
   Works seamlessly across **MCP STDIO** (Claude Desktop/Cursor), **Streamable HTTP / SSE** (Cherry Studio/remote clients), **CLI one-shot commands**, and a **Local HTTP Daemon** with connection pool reuse and Prometheus `/metrics` monitoring.
 
