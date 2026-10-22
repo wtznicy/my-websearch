@@ -30,6 +30,8 @@ export interface EngineLatencyStat {
 
 const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
+/** 低于该值的"耗时"不可能来自一次真实网络调用（测试假引擎 / 缓存命中），不入库也不参与统计 */
+const MIN_MEANINGFUL_LATENCY_MS = 10;
 
 export function engineLatencyPath(env: NodeJS.ProcessEnv = process.env): string {
     return env.MYWEBSEARCH_LATENCY_PATH || path.join(getAppConfigDir(env), 'engine-latency.jsonl');
@@ -37,7 +39,8 @@ export function engineLatencyPath(env: NodeJS.ProcessEnv = process.env): string 
 
 /** 追加采样；任何 I/O 失败都静默忽略——采样不能影响搜索本身 */
 export function recordEngineLatency(samples: EngineLatencySample[], env: NodeJS.ProcessEnv = process.env): void {
-    if (samples.length === 0) {
+    const meaningful = samples.filter((sample) => sample.ms >= MIN_MEANINGFUL_LATENCY_MS);
+    if (meaningful.length === 0) {
         return;
     }
     try {
@@ -45,7 +48,7 @@ export function recordEngineLatency(samples: EngineLatencySample[], env: NodeJS.
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.appendFileSync(
             filePath,
-            samples.map((s) => JSON.stringify({ e: s.engine, ms: Math.round(s.ms), ok: s.ok, t: s.at })).join('\n') + '\n',
+            meaningful.map((s) => JSON.stringify({ e: s.engine, ms: Math.round(s.ms), ok: s.ok, t: s.at })).join('\n') + '\n',
             'utf8'
         );
     } catch {
@@ -111,7 +114,12 @@ export function readEngineLatencyStats(
 
     const stats: EngineLatencyStat[] = [];
     for (const [engine, bucket] of byEngine) {
-        const recent = bucket.slice(-maxSamples);
+        // 过滤掉「不可能是一次真实网络调用」的样本：测试用假引擎、缓存命中都会产生 0-9ms 记录，
+        // 混进来会把 p50 拉到 0（实测 bing p50=0ms / n=195），指标失去诊断价值。
+        const recent = bucket.slice(-maxSamples).filter((sample) => sample.ms >= MIN_MEANINGFUL_LATENCY_MS);
+        if (recent.length === 0) {
+            continue;
+        }
         const durations = recent.map((s) => s.ms).sort((a, b) => a - b);
         const success = recent.filter((s) => s.ok).length;
         stats.push({

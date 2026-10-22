@@ -491,14 +491,22 @@ export function createSearchService(
 
                     if (timeRange) {
                         const beforeCount = merged.length;
-                        const filtered = merged.filter((item) => item.publishedAt && isDateWithinTimeRange(item.publishedAt, timeRange));
+                        // 只丢弃「日期明确超出范围」的结果；**日期缺失的保留**。
+                        // 之前把 missing 和 out-of-range 合并处理：搜索结果页的 HTML 通常不暴露发布时间，
+                        // 于是 bing/baidu/sogou 在 timeRange 下恒定返回 0 条（引擎已在服务端过滤过一遍）。
+                        const filtered = merged.filter((item) =>
+                            !item.publishedAt || isDateWithinTimeRange(item.publishedAt, timeRange));
                         const droppedCount = beforeCount - filtered.length;
+                        const unknownDateCount = filtered.filter((item) => !item.publishedAt).length;
                         if (droppedCount > 0) {
                             filterFallback = 'partial';
-                            warnings.push(`Under timeRange='${timeRange}', ${droppedCount} results were dropped because their publication date was outside the range or missing.`);
+                            warnings.push(`Under timeRange='${timeRange}', ${droppedCount} results were dropped because their publication date was outside the range.`);
                             metrics.recordTimeRangeAttempt(true);
                         } else {
                             metrics.recordTimeRangeAttempt(false);
+                        }
+                        if (unknownDateCount > 0) {
+                            warnings.push(`${unknownDateCount} results have no parseable publication date and were kept, since the engine already applied its own time filter.`);
                         }
                         merged = filtered;
                     }

@@ -15,6 +15,14 @@ if (!process.env.MYWEBSEARCH_DATA_DIR) {
     process.env.MYWEBSEARCH_DATA_DIR = path.join(os.tmpdir(), 'my-websearch-vitest-config-isolated');
 }
 
+// 引擎延迟样本也必须隔离：否则测试里的假引擎（0ms）会写进一个跨轮次累积的文件，
+// 让「按历史健康度排序」这类断言在本地红、在 CI 绿（实测 cascade 用例被历史样本带偏）。
+// 每个测试进程一个独立文件，互不污染。
+process.env.MYWEBSEARCH_LATENCY_PATH = path.join(
+    process.env.MYWEBSEARCH_DATA_DIR,
+    `engine-latency-vitest-${process.pid}.jsonl`
+);
+
 afterEach(async (context) => {
     if (context.task.result?.state === 'fail') {
         const [{ config, formatSanitizedConfigSummary }, { getErrorClassificationMetrics }] = await Promise.all([

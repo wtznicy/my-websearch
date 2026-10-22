@@ -64,11 +64,18 @@ import { readEngineLatencyStats, type EngineLatencyStat } from '../engineLatency
 /** 持久化延迟统计的进程内缓存（60s），避免每次排序都读文件 */
 let persistedLatencyCache: { at: number; byEngine: Map<string, EngineLatencyStat> } | null = null;
 
+/** 持久化样本达到这个数量才允许影响排序，避免一两条噪声样本把静态优先级打乱 */
+const MIN_PERSISTED_SAMPLES_FOR_ROUTING = 5;
+
 function getPersistedLatencyMap(now = Date.now()): Map<string, EngineLatencyStat> {
     if (persistedLatencyCache && now - persistedLatencyCache.at < 60_000) {
         return persistedLatencyCache.byEngine;
     }
-    const byEngine = new Map(readEngineLatencyStats({ now }).map((stat) => [stat.engine, stat]));
+    const byEngine = new Map(
+        readEngineLatencyStats({ now })
+            .filter((stat) => stat.samples >= MIN_PERSISTED_SAMPLES_FOR_ROUTING)
+            .map((stat) => [stat.engine, stat])
+    );
     persistedLatencyCache = { at: now, byEngine };
     return byEngine;
 }

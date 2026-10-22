@@ -64,4 +64,18 @@ describe('engine latency store', () => {
         expect(readEngineLatencyStats({ env })).toEqual([]);
         expect(() => compactEngineLatencyFile(env)).not.toThrow();
     });
+
+    it('ignores sub-10ms samples produced by test fakes or cache hits', () => {
+        const { env } = makeEnv();
+        const now = Date.now();
+        recordEngineLatency([
+            { engine: 'bing', ms: 0, ok: true, at: now },
+            { engine: 'bing', ms: 3, ok: true, at: now },
+            { engine: 'bing', ms: 1200, ok: true, at: now }
+        ], env);
+
+        // 0ms/3ms 不应入库，p50 不能被拉到 0
+        expect(readEngineLatencyStats({ env, now }).find((s) => s.engine === 'bing'))
+            .toMatchObject({ samples: 1, p50: 1200 });
+    });
 });
