@@ -47,6 +47,7 @@ export type PublicErrorCode =
     | 'not_found'
     | 'proxy_unreachable'
     | 'overseas_unreachable'
+    | 'dns_pollution'
     | 'network_timeout'
     | 'engine_timeout'
     | 'network_error'

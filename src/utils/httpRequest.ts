@@ -7,7 +7,8 @@ import {
     RequestFilteringHttpsAgent
 } from 'request-filtering-agent';
 import { config, getProxyUrl, engineShouldUseProxy } from '../config.js';
-import { assertPublicHttpUrlResolved, isPrivateOrLocalHostname } from './urlSafety.js';
+import { assertPublicHttpUrlResolved, isDnsPollutionAddress, isPrivateOrLocalHostname, stripDnsPollutionAddresses } from './urlSafety.js';
+import type { DnsLookupFn } from './dnsCache.js';
 import { cachedDnsLookup, peekCachedLookup } from './dnsCache.js';
 import { detectSystemProxy, getSystemProxyFallbackUrl } from './systemProxy.js';
 import { metrics } from '../core/metrics.js';
@@ -19,10 +20,30 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 // keepAlive + 并发上限：同一 agent 的多次请求（sogou link 解析、baidu redirect、分页、MCP 会话内多次搜索）
 // 复用 TCP/TLS 连接，省掉重复握手；lookup 走进程内 DNS 缓存（60s TTL），
 // request-filtering-agent 会继续对解析结果做私网过滤，SSRF 防护不削弱。
+const filteredDnsLookup: DnsLookupFn = (hostname, options, callback) => {
+    cachedDnsLookup(hostname, options, (error, address, family) => {
+        if (error) {
+            callback(error, address, family);
+            return;
+        }
+        if (Array.isArray(address)) {
+            // 二层防护不一致的修复：先把 DNS 污染地址剔掉，再交给 request-filtering-agent
+            callback(null, stripDnsPollutionAddresses(address));
+            return;
+        }
+        if (typeof address === 'string' && isDnsPollutionAddress(address)) {
+            // 单一地址就是污染地址：没有更好的选择，交给连接层报错（上层会映射成"疑似 DNS 污染"）
+            callback(null, address, family);
+            return;
+        }
+        callback(null, address, family);
+    });
+};
+
 const AGENT_KEEPALIVE_OPTIONS = {
     keepAlive: true,
     maxSockets: 16,
-    lookup: cachedDnsLookup
+    lookup: filteredDnsLookup
 } as const;
 
 type BuildAxiosRequestOptions = {
@@ -188,6 +209,27 @@ export function hintProxyConnectionError(error: unknown): Error {
         });
     }
     return error instanceof Error ? error : new Error(message);
+}
+
+/**
+ * 连接层报「private IP / not allowed」时，实际多半是 DNS 污染：
+ * 解析结果里混入了伪造地址，而我们的第一层判定（urlSafety）认为「存在公网地址即可放行」。
+ * 这条提示让用户能采取行动，而不是对着 "private IP address" 猜。
+ */
+export function hintDnsPollutionError(error: unknown): unknown {
+    const message = error instanceof Error ? error.message : String((error as { message?: unknown })?.message ?? error);
+    if (/is not allowed.*(private IP|local IP)|private IP address/i.test(message)) {
+        return new AppError({
+            code: 'dns_pollution',
+            retryable: true,
+            cause: error instanceof Error ? error : undefined,
+            message: `${message} | Hint: the hostname resolved to a private or polluted address (likely DNS pollution). `
+                + 'Retry, enable a proxy (USE_PROXY=true or PROXY_URL), or switch DNS. '
+                + `域名解析到私网/污染地址（疑似 DNS 污染）：建议重试、开启代理或更换 DNS。`
+        });
+    }
+    // 原样返回：axios 的错误对象上可能挂着 response.status 等字段，包一层会丢掉它们
+    return error;
 }
 
 export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {}): AxiosRequestConfig {
@@ -485,7 +527,8 @@ export async function requestDirectFirst(
         }
         const message = directError instanceof Error ? directError.message : String(directError);
         if (!isNetworkLayerError(message)) {
-            throw directError;
+            // 「private IP / not allowed」不是网络层错误，但十有八九是 DNS 污染
+            throw hintDnsPollutionError(directError);
         }
         if (hasProxyAvailable) {
             try {

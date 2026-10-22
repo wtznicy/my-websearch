@@ -172,6 +172,22 @@ export function isDnsPollutionAddress(address: string): boolean {
 }
 
 /**
+ * 从解析结果中剔除 DNS 污染地址（Teredo / 黑洞 / 保留段）。
+ *
+ * 背景：运营商可能同时返回真实 A 记录和被伪造的 AAAA（如 2001::1）。
+ * urlSafety 的判定是「只要存在公网地址就放行」，但连接层的 request-filtering-agent
+ * 会按自己的规则把 2001::1 判成 private 并直接拒绝——两层结论相反，请求 100% 死在本地，
+ * 报错还是误导性的 "private IP address"（en.wikipedia.org 间歇性失败的根因）。
+ *
+ * 规则：只要还存在非污染地址，就只把那些地址交给连接层；全部都被污染时原样返回
+ * （让连接层报错，由上层映射成"疑似 DNS 污染"的提示）。
+ */
+export function stripDnsPollutionAddresses<T extends { address: string }>(resolved: T[]): T[] {
+    const usable = resolved.filter((entry) => !isDnsPollutionAddress(entry.address));
+    return usable.length > 0 ? usable : resolved;
+}
+
+/**
  * DNS rebinding 类主机名：把内网地址藏进域名，本地/fake-ip 解析都看不出真相。
  *
  * 分两类处理：

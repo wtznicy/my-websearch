@@ -356,6 +356,22 @@ export async function fetchAndExtractHtmlWithBrowserFallback(
             extractedContent = normalizeText(raw);
         }
 
+        // 配额型拒绝（429 / GitHub 的 403）直接返回可重试错误，不要升级到浏览器通道：
+        // 浏览器兜底还要再等 20-25s，对"匿名配额打满"毫无帮助（实测 GitHub /commits 25s 仍失败）。
+        const quotaBlocked = primary.httpErrorStatus === 429
+            || (primary.httpErrorStatus === 403 && /(^|\.)github\.com$/i.test(primary.parsedUrl.hostname));
+        if (quotaBlocked) {
+            const isGithub = /(^|\.)github\.com$/i.test(primary.parsedUrl.hostname);
+            throw new AppError({
+                code: 'rate_limited',
+                retryable: true,
+                hint: isGithub ? 'Set GITHUB_TOKEN to raise GitHub anonymous rate limits, or retry later.' : 'Retry later or configure the relevant API token.',
+                message: `Upstream returned HTTP ${primary.httpErrorStatus} for ${primary.parsedUrl.toString()} (rate limited / quota exhausted). `
+                    + (isGithub ? 'Configure GITHUB_TOKEN to raise the anonymous quota. ' : '')
+                    + 'Browser fallback was skipped: it cannot bypass quota-based rejections and only wastes the budget.'
+            });
+        }
+
         if (shouldTryBrowserHtmlFallback(contentType, raw, htmlExtraction)) {
             let browserResult: Awaited<ReturnType<typeof fetchHtmlViaBrowser>> = undefined;
             try {
