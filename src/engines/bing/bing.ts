@@ -866,10 +866,87 @@ async function searchBingWithPlaywright(query: string, limit: number, signal?: A
     }
 }
 
+/** Playwright 兜底的独立预算：不能让它把整个搜索 deadline 吃光（默认 6s，可用 BING_PLAYWRIGHT_BUDGET_MS 覆盖） */
+const BING_PLAYWRIGHT_FALLBACK_BUDGET_MS = (() => {
+    const parsed = Number(process.env.BING_PLAYWRIGHT_BUDGET_MS);
+    return Number.isFinite(parsed) && parsed >= 1000 ? Math.floor(parsed) : 6000;
+})();
+
+/**
+ * 带独立预算的 Playwright 兜底。
+ * 返回 undefined 表示「没拿到结果 / 超预算 / 被上层取消」——调用方据此保留已有结果，
+ * 而不是像以前那样把 HTTP 已经拿到的可用结果整批丢弃
+ * （实测：request 模式 2.9s/3 条，auto 25.9s，12s deadline 时直接 0 条）。
+ */
+async function searchBingWithPlaywrightFallback(
+    query: string,
+    limit: number,
+    signal?: AbortSignal
+): Promise<SearchResult[] | undefined> {
+    if (signal?.aborted) {
+        return undefined;
+    }
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(signal?.reason);
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    let timer: NodeJS.Timeout | undefined;
+    // 用 race 而不是只靠 signal：Playwright 内部可能不响应 abort，
+    // 只发信号的话仍会等它跑完（实测 11s+），预算等于没生效。
+    const budgetExceeded = new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => {
+            controller.abort(new Error(`Bing Playwright fallback exceeded ${BING_PLAYWRIGHT_FALLBACK_BUDGET_MS}ms budget`));
+            resolve(undefined);
+        }, BING_PLAYWRIGHT_FALLBACK_BUDGET_MS);
+    });
+    const attempt = searchBingWithPlaywright(query, limit, controller.signal)
+        .catch((error) => {
+            if (!signal?.aborted) {
+                console.warn(
+                    '[bing] Playwright fallback failed; keeping HTTP results:',
+                    error instanceof Error ? error.message : String(error)
+                );
+            }
+            return undefined;
+        });
+
+    try {
+        const results = await Promise.race([attempt, budgetExceeded]);
+        // 预算到了才完成的结果可能不完整，宁可保留 HTTP 结果
+        if (!results || results.length === 0 || controller.signal.aborted) {
+            return undefined;
+        }
+        return results;
+    } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+    }
+}
+
+/**
+ * 漂移回退的取舍（纯函数，便于回归测试）：
+ * 兜底有结果就用兜底；否则**保留 HTTP 已拿到的结果**——它们是可用的，
+ * 只是可能只匹配了首词。以前这里直接 return 兜底结果，等于把可用结果整批扔掉。
+ */
+export function resolveBingDriftOutcome(
+    httpResults: SearchResult[],
+    fallbackResults: SearchResult[] | undefined
+): { results: SearchResult[]; keptHttpFallback: boolean } {
+    if (fallbackResults && fallbackResults.length > 0) {
+        return { results: fallbackResults, keptHttpFallback: false };
+    }
+    return { results: httpResults, keptHttpFallback: httpResults.length > 0 };
+}
+
 export async function searchBing(
     query: string,
     limit: number,
-    options?: { searchMode?: 'request' | 'auto' | 'playwright'; signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }
+    options?: {
+        searchMode?: 'request' | 'auto' | 'playwright';
+        signal?: AbortSignal;
+        timeRange?: 'day' | 'week' | 'month' | 'year';
+        requestContext?: { addWarning?: (warning: string) => void };
+    }
 ): Promise<SearchResult[]> {
     const effectiveSearchMode = options?.searchMode ?? getEngineSearchMode('bing', config);
     const signal = options?.signal;
@@ -894,7 +971,17 @@ export async function searchBing(
             const canUsePlaywright = await isPlaywrightAvailable();
             if (canUsePlaywright && !signal?.aborted) {
                 console.warn('Request-based Bing search returned first-token drift for multi-word query, falling back to Playwright mode');
-                return searchBingWithPlaywright(query, limit, signal);
+                // 兜底失败/超预算时保留已拿到的 HTTP 结果，并显式标记为 degraded
+                const fallbackResults = await searchBingWithPlaywrightFallback(query, limit, signal);
+                const outcome = resolveBingDriftOutcome(httpResults, fallbackResults);
+                if (!outcome.keptHttpFallback) {
+                    return outcome.results;
+                }
+                options?.requestContext?.addWarning?.(
+                    'Bing kept HTTP results that may match only the first query token: '
+                    + 'first-token drift was detected and the Playwright fallback produced no results within its budget.'
+                );
+                return outcome.results;
             }
         }
         return httpResults;
@@ -919,7 +1006,12 @@ export async function searchBing(
         }
 
         console.warn('Request-based Bing search failed, falling back to Playwright mode:', requestError);
-        return searchBingWithPlaywright(query, limit, signal);
+        // 同样走带预算的兜底；兜底失败则抛原始错误（让级联换更轻量的引擎）
+        const fallbackResults = await searchBingWithPlaywrightFallback(query, limit, signal);
+        if (fallbackResults && fallbackResults.length > 0) {
+            return fallbackResults;
+        }
+        throw requestError;
     }
 }
 

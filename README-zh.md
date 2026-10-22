@@ -25,7 +25,7 @@
 
 `my-websearch` 是专为 AI Agent（Claude Desktop、Cursor、Cherry Studio、Windsurf、Cline、ZCode 等）打造的**全栈联网检索与技术文档基础设施**。开箱即用，具备全引擎自适应路由与高质量正文提纯能力：
 
-- 🌐 **13 大引擎融合与自适应路由**  
+- 🌐 **14 大引擎融合与自适应路由**  
   聚合国内直连（**Bing、百度、CSDN、掘金、搜狗**）、海外通用（**DuckDuckGo、Brave、Startpage、Exa**）与垂直开发者平台（**GitHub、StackOverflow、Hacker News、arXiv**）。支持中文/英文按语种自动路由（`auto`）、多词并发检索（`queries`）、跨引擎去重排序与 `minResults` 自动级联补位。
 - ⚡ **现代 Web 协议栈与前端算力求解（零浏览器轻量直通）**  
   基于 `wreq-js` 原生模拟现代浏览器 TLS/HTTP2 协议握手与长效会话机制；内置算法解析 **Startpage Anubis SHA-256 PoW 算力挑战** 与 **DuckDuckGo `d.js` (`isJsaChallenge`) 动态前端挑战**；真实 URL 快速解析（搜狗跳转页还原、百度 `Location` 直取、Bing Base64 解码）；无需拉起 400MB 浏览器即可稳定高效获取正文。
@@ -42,7 +42,7 @@
 
 ---
 
-## 🌍 13 大搜索引擎一览
+## 🌍 14 大搜索引擎一览
 
 | 引擎标识 | 网络要求 | API Key | 核心技术与优势 | 最擅长场景 |
 | :--- | :---: | :---: | :--- | :--- |
@@ -248,7 +248,7 @@ my-websearch doctor --reset-health
 
 | 变量名 | 默认值 | 可选值 / 说明 |
 | :--- | :--- | :--- |
-| `DEFAULT_SEARCH_ENGINE` | `auto` | 默认搜索引擎。`auto`（智能感知路由：中文走 `baidu,sogou`，英文走 `bing,duckduckgo`）。支持全部 13 个引擎：`auto`、`bing`、`baidu`、`sogou`、`duckduckgo`、`brave`、`csdn`、`juejin`、`startpage`、`exa`、`github`、`stackoverflow`、`hackernews`、`arxiv`（垂直开发者引擎可配置为默认，全局默认推荐保持 `auto` 或通用网页引擎） |
+| `DEFAULT_SEARCH_ENGINE` | `auto` | 默认搜索引擎。`auto`（智能感知路由：中文走 `baidu,sogou`，英文走 `bing,duckduckgo`）。支持全部 14 个引擎：`auto`、`bing`、`baidu`、`sogou`、`duckduckgo`、`brave`、`csdn`、`juejin`、`startpage`、`exa`、`github`、`stackoverflow`、`hackernews`、`arxiv`、`code`（垂直开发者引擎可配置为默认，全局默认推荐保持 `auto` 或通用网页引擎） |
 | `ALLOWED_SEARCH_ENGINES` | 全部 | 限制启用的引擎白名单（逗号分隔，如 `bing,baidu,duckduckgo`） |
 | `BING_BASE_URL` | `https://cn.bing.com/search` | Bing 搜索请求基址。国际用户可改为 `https://www.bing.com/search` 或自定义中转域名（兼容旧变量 `OPEN_WEBSEARCH_BING_HOST`） |
 | `DEFAULT_MIN_RESULTS` | `5` | 级联补位阈值：可用结果数不足该值时，自动调度备用引擎补齐 |

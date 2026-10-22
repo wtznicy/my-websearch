@@ -43,7 +43,7 @@
 
 ---
 
-## 🌍 13 Search Engines
+## 🌍 14 Search Engines
 
 | Engine | Mainland China Connectivity | API Key | Core Technology | Best For |
 | :--- | :---: | :---: | :--- | :--- |
@@ -249,7 +249,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 
 | Variable | Default | Allowed Values / Description |
 | :--- | :--- | :--- |
-| `DEFAULT_SEARCH_ENGINE` | `auto` | Default engine: `auto` (smart query routing: Chinese `baidu,sogou`, English/foreign `bing,duckduckgo`). Supports all 13 engines: `auto`, `bing`, `baidu`, `sogou`, `duckduckgo`, `brave`, `csdn`, `juejin`, `startpage`, `exa`, `github`, `stackoverflow`, `hackernews`, `arxiv` (vertical developer engines can be configured as default, though `auto` or general web engines are recommended for global default) |
+| `DEFAULT_SEARCH_ENGINE` | `auto` | Default engine: `auto` (smart query routing: Chinese `baidu,sogou`, English/foreign `bing,duckduckgo`). Supports all 14 engines: `auto`, `bing`, `baidu`, `sogou`, `duckduckgo`, `brave`, `csdn`, `juejin`, `startpage`, `exa`, `github`, `stackoverflow`, `hackernews`, `arxiv`, `code` (vertical developer engines can be configured as default, though `auto` or general web engines are recommended for global default) |
 | `ALLOWED_SEARCH_ENGINES` | all | Comma-separated whitelist of allowed search engines (e.g. `bing,baidu,duckduckgo`) |
 | `BING_BASE_URL` | `https://cn.bing.com/search` | Base URL for Bing queries. Overseas users or reverse proxy nodes can set to `https://www.bing.com/search` (legacy alias `OPEN_WEBSEARCH_BING_HOST` supported) |
 | `DEFAULT_MIN_RESULTS` | `5` | Cascade threshold: triggers fallback engines when usable results are fewer than this value |

@@ -52,6 +52,8 @@ This document defines the corrected evolution path for `my-websearch` as a combi
 
 ## Phase plan
 
+> **Status: all four phases are complete (as of 1.3.5).** This section is kept as historical context for how the codebase was extracted; it is not a roadmap. The daemon, one-shot CLI, and skill integration all shipped — see the Phase 3 section for the delivered surface.
+
 ## Phase 1: Extract core
 
 Goal:
@@ -62,10 +64,10 @@ Deliverables:
 - shared result/error model
 - MCP adapter reduced to schema registration and argument/result mapping
 
-Do not do yet:
-- daemon
-- background process management
-- protocol expansion
+Deferred at the time (all delivered later):
+- daemon → Phase 3
+- background process management → Phase 3 (`serve`, connection-pool reuse, Prometheus `/metrics`)
+- protocol expansion → Phase 3 (Streamable HTTP / SSE)
 
 ## Phase 2: Add one-shot CLI
 

@@ -4,6 +4,38 @@ All notable changes to `my-websearch` are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Bing 漂移回退不再丢弃已成功的 HTTP 结果。** `auto` 模式检测到首词漂移后，Playwright 兜底改走独立预算（8s），兜底失败/超预算时保留 HTTP 结果并写入一条 warning，而不是整批丢弃（实测 2.9s→25.9s、12s deadline 下 0 条）。
+- **`timeRange` 不再因「缺少发布日期」清空结果。** 只丢弃明确超出范围的条目；日期未知的保留并给出说明。修复 Bing/Baidu/Sogou 在 `timeRange` 下恒定返回 0 条。
+- **DNS 污染双层判定不一致。** 连接前剔除 Teredo/黑洞地址，并把连接层的 `private IP` 报错映射为 `dns_pollution`（建议开代理）。
+- **429 不再升级到浏览器兜底。** 配额型拒绝直接返回可重试错误；GitHub 提示配置 `GITHUB_TOKEN`。
+- **`focus` 未命中改为显式标记。** 输出 `focused: false`、`focusBlocks: {selected: 0, total: N}` 和 warning，不再静默返回整页。
+- **引擎延迟统计剔除 <10ms 的噪声样本**（测试假引擎/缓存命中），`doctor` 的 p50 不再被拉到 0。
+
+### Changed
+- 文档：引擎数 13 → 14（补 `code`）；`docs/architecture/overview.md` 标注四阶段已完成。
+
+## [1.3.5] - 2026-10-21
+
+### Performance
+- 抓取去掉 HEAD 预检：每页少一个 RTT（应用层开销 570ms → 32ms）。
+- 每个引擎按完整 `limit` 请求 + 「满意即止」：结果足够后给慢引擎 800ms 宽限，到期 abort。auto 中文 17.3s → 3.6s，英文 8.5s → 4.0s。
+- 死代理快速失败：连接类代理错误不再重试 3 次（30s → ~10s）。
+
+### Fixed
+- `--engines` 改为硬限制：级联只在点名的引擎内补位。
+- 代理不可达但直连有结果时返回可操作 warning。
+- `doctor` 正确汇报系统代理状态；代理未启用时不再显示不生效的默认 `proxyUrl`。
+- 系统代理检测改为 60s TTL：启动后再开代理一分钟内生效，无需重启。
+- 区分 `engine_timeout`（预算耗尽）与真实网络错误。
+- arXiv 引擎改用 https，避免 301 跳转在代理路径上偶发 4xx。
+- 直连失败时也回退到自动检测的系统代理。
+
+### Added
+- `doctor` 展示每个引擎最近 7 天的 p50 / p95 / 成功率（持久化到 `~/.my-websearch/engine-latency.jsonl`）。
+- `Accept-Language` 跟随系统区域（`ACCEPT_LANGUAGE` 可覆盖；Bing 保持随机化）。
+- `tools/bench.mjs` 性能基线工具。
+
 ## [1.3.4] - 2026-10-20
 
 ### Behavior changes (read before upgrading)
