@@ -25,6 +25,8 @@ export interface PaginateResult {
     focusMatchOffset?: number;
     focusMode?: FocusMode;
     focusBlocks?: { selected: number; total: number };
+    /** focus 未命中时的说明（也会并入 warnings） */
+    focusWarning?: string;
     toc?: string[];
 }
 
@@ -58,12 +60,14 @@ export function paginateContent(
     let focusBlocks: { selected: number; total: number } | undefined;
 
     const focusTerm = options.focus?.trim();
+    let focusWarning: string | undefined;
+    let bm25Missed = false;
     if (focusTerm) {
         // bm25（默认）：按段落相关性挑块，解决「只命中第一次出现 + 只给一段连续窗口」的问题
         if ((options.focusMode ?? 'bm25') === 'bm25') {
             // 预留 header 与分隔符空间，避免选块把 maxChars 撑爆
             const selection = selectFocusBlocks(fullText, focusTerm, Math.max(400, options.maxChars - 200));
-            if (selection) {
+            if (selection.selectedBlocks > 0) {
                 focused = true;
                 resolvedFocusMode = 'bm25';
                 focusBlocks = { selected: selection.selectedBlocks, total: selection.totalBlocks };
@@ -73,6 +77,10 @@ export function paginateContent(
                 // 所以不提供 nextStartIndex 续读指针（续读只对 window/普通分页有意义）
                 truncated = true;
                 pageContent = `[... focused on "${focusTerm}" (bm25): ${selection.selectedBlocks}/${selection.totalBlocks} blocks selected by relevance, doc offsets ${selection.start}-${selection.end} of ${totalLength} ...]\n\n${selection.content}`;
+            } else if (selection.totalBlocks > 0) {
+                // 零命中也要把事实暴露出来：matched 0 of N，而不是静默退回整页
+                bm25Missed = true;
+                focusBlocks = { selected: 0, total: selection.totalBlocks };
             }
         }
 
@@ -95,6 +103,13 @@ export function paginateContent(
                 startIndex = start;
                 truncated = start > 0 || end < totalLength;
             }
+        }
+
+        if (bm25Missed) {
+            const total = focusBlocks?.total ?? 0;
+            focusWarning = focused && resolvedFocusMode === 'window'
+                ? `BM25 matched 0 of ${total} blocks; fell back to window mode (±2500 chars around the first literal occurrence).`
+                : `focus term "${focusTerm}" matched 0 of ${total} blocks; returned the full page (the term may be absent, or it may tokenize to nothing after stop-word removal).`;
         }
     }
 
@@ -126,9 +141,12 @@ export function paginateContent(
         truncated,
         ...(truncated && canContinue ? { hasMore: true, nextStartIndex: startIndex + pageContent.length } : {}),
         ...(toc && toc.length > 0 ? { toc } : {}),
-        ...(focused ? { focused: true, focusMatchOffset } : {}),
+        // 有 focus 就显式给 true/false：false 表示"传了 focus 但没定位成功"，与"没传 focus"区分开
+        ...(focusTerm ? { focused } : {}),
+        ...(focused ? { focusMatchOffset } : {}),
         ...(resolvedFocusMode ? { focusMode: resolvedFocusMode } : {}),
-        ...(focusBlocks ? { focusBlocks } : {})
+        ...(focusBlocks ? { focusBlocks } : {}),
+        ...(focusWarning ? { focusWarning } : {})
     };
 }
 
@@ -192,6 +210,11 @@ export function sliceMarkdownContent(
         }
     }
 
+    const mergedWarnings = [...(options.warnings ?? [])];
+    if (paginated.focusWarning) {
+        mergedWarnings.push(paginated.focusWarning);
+    }
+
     return {
         url: options.url,
         finalUrl: options.finalUrl || options.url,
@@ -214,10 +237,11 @@ export function sliceMarkdownContent(
         ...(options.readabilityApplied !== undefined ? { readabilityApplied: options.readabilityApplied } : {}),
         ...(options.degraded && options.degraded.length > 0 ? { degraded: options.degraded } : {}),
         ...(options.scoped ? { scoped: options.scoped } : {}),
-        ...(options.warnings && options.warnings.length > 0 ? { warnings: options.warnings } : {}),
+        ...(mergedWarnings.length > 0 ? { warnings: mergedWarnings } : {}),
         ...(options.pdfPages ? { pdfPages: options.pdfPages } : {}),
         ...(paginated.toc && paginated.toc.length > 0 ? { toc: paginated.toc } : {}),
-        ...(paginated.focused ? { focused: true, focusMatchOffset: paginated.focusMatchOffset } : {}),
+        ...(options.focus?.trim() ? { focused: paginated.focused ?? false } : {}),
+        ...(paginated.focused ? { focusMatchOffset: paginated.focusMatchOffset } : {}),
         ...(paginated.focusMode ? { focusMode: paginated.focusMode } : {}),
         ...(paginated.focusBlocks ? { focusBlocks: paginated.focusBlocks } : {})
     };

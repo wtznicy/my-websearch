@@ -77,8 +77,12 @@ describe('bm25 block selection', () => {
         expect(selection!.content).toContain('CRITICAL_METRIC');
     });
 
-    it('returns null when nothing matches, so the caller can fall back to window mode', () => {
-        expect(selectFocusBlocks(makeDoc(), 'kubernetes', 4000)).toBeNull();
+    it('returns a zero-selection (not null) when nothing matches, so the caller can still report counts', () => {
+        const selection = selectFocusBlocks(makeDoc(), 'kubernetes', 4000);
+        expect(selection.selectedBlocks).toBe(0);
+        expect(selection.totalBlocks).toBeGreaterThan(0);
+        // 零命中必须保留计数：调用方要能告诉用户 "matched 0 of N blocks"
+        expect(selection.content).toBe('');
     });
 
     it('respects the maxChars budget', () => {
@@ -270,6 +274,28 @@ describe('pagination integration', () => {
         expect(result.hasMore).toBeUndefined();
     });
 
+    it('marks a miss explicitly instead of silently returning the full page', () => {
+        const result = paginateContent(doc, { maxChars: 3000, focus: 'quantum entanglement' });
+        // 正文仍是整页，但调用方必须能看出「这不是定位结果」
+        expect(result.focused).toBe(false);
+        expect(result.focusBlocks?.selected).toBe(0);
+        expect(result.focusBlocks?.total).toBeGreaterThan(0);
+        expect(result.focusWarning).toContain('matched 0 of');
+        expect(result.content).not.toContain('(bm25)');
+    });
+
+    it('warns when bm25 misses but the literal term exists and window mode takes over', () => {
+        // 词在两个块里各出现一次但分词后无法对齐时，BM25 可能零命中，回退 window
+        const weird = '## A\n\nXYZZY-1 is here.\n\n## B\n\nunrelated body text.';
+        const result = paginateContent(weird, { maxChars: 3000, focus: 'XYZZY-1' });
+        if (result.focusMode === 'window') {
+            expect(result.focused).toBe(true);
+            expect(result.focusWarning ?? '').toContain('window');
+        } else {
+            expect(result.focused).toBe(true);
+        }
+    });
+
     it('keeps the legacy window behaviour when explicitly requested', () => {
         const result = paginateContent(doc, { maxChars: 3000, focus: 'bearer token', focusMode: 'window' });
         expect(result.focusMode).toBe('window');
@@ -281,7 +307,10 @@ describe('pagination integration', () => {
 
     it('falls back to window mode when bm25 finds no block', () => {
         const result = paginateContent('aaa bbb ccc', { maxChars: 3000, focus: 'zzz', focusMode: 'bm25' });
-        expect(result.focused).toBeUndefined();
+        // 新契约：传了 focus 就显式给 false，而不是用 undefined 表示"没定位"
+        expect(result.focused).toBe(false);
+        expect(result.focusBlocks?.selected).toBe(0);
+        expect(result.focusWarning ?? '').toContain('full page');
     });
 
     it('applies citations only at slice time and reports metadata', () => {

@@ -244,9 +244,11 @@ export async function tryHandlePdfFetch(
         ...(paginated.hasMore ? { hasMore: true, nextStartIndex: paginated.nextStartIndex } : {}),
         pdfPages: pdfResult.totalPages,
         ...(paginated.toc && paginated.toc.length > 0 ? { toc: paginated.toc } : {}),
-        ...(paginated.focused ? { focused: true, focusMatchOffset: paginated.focusMatchOffset } : {}),
+        ...(options.focus?.trim() ? { focused: paginated.focused ?? false } : {}),
+        ...(paginated.focused ? { focusMatchOffset: paginated.focusMatchOffset } : {}),
         ...(paginated.focusMode ? { focusMode: paginated.focusMode } : {}),
-        ...(paginated.focusBlocks ? { focusBlocks: paginated.focusBlocks } : {})
+        ...(paginated.focusBlocks ? { focusBlocks: paginated.focusBlocks } : {}),
+        ...(paginated.focusWarning ? { warnings: [paginated.focusWarning] } : {})
     };
 }
 
@@ -658,9 +660,11 @@ export function assembleFetchResult(
         ...(stage.excerpt ? { excerpt: stage.excerpt } : {}),
         ...(stage.siteName ? { siteName: stage.siteName } : {}),
         ...(paginated.toc && paginated.toc.length > 0 ? { toc: paginated.toc } : {}),
-        ...(paginated.focused ? { focused: true, focusMatchOffset: paginated.focusMatchOffset } : {}),
+        ...(options.focus?.trim() ? { focused: paginated.focused ?? false } : {}),
+        ...(paginated.focused ? { focusMatchOffset: paginated.focusMatchOffset } : {}),
         ...(paginated.focusMode ? { focusMode: paginated.focusMode } : {}),
         ...(paginated.focusBlocks ? { focusBlocks: paginated.focusBlocks } : {}),
+        ...(paginated.focusWarning ? { warnings: [paginated.focusWarning] } : {}),
         ...(stage.scoped ? { scoped: stage.scoped } : {})
     };
 }

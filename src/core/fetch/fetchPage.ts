@@ -310,6 +310,10 @@ export async function executeFetchPipeline(
             delegateReadabilityApplied = fetchResult.readabilityApplied;
             delegateDegraded = fetchResult.degraded;
             delegateScoped = fetchResult.scoped;
+            // 引擎侧产生的 warning（例如 focus 未命中的说明）必须一路上浮，否则调用方永远看不到
+            if (fetchResult.warnings && fetchResult.warnings.length > 0) {
+                warnings.push(...fetchResult.warnings);
+            }
 
             // 结构化提取结果已是最终形态：不再切片/分页，也不写缓存
             if (fetchResult.extracted !== undefined) {

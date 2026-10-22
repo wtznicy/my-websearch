@@ -260,21 +260,34 @@ export type FocusSelection = {
 
 /**
  * 按 BM25 选出最相关的若干块并拼接。
- * 返回 null 表示「没有块命中任何查询词」，调用方应回退到 window 模式。
+ *
+ * 注意：**零命中时也返回结果对象**（selectedBlocks=0，totalBlocks 尽量给出），
+ * 而不是 null——调用方需要把"扫过多少块、命中 0 块"这个事实暴露给用户，
+ * 否则 focus 没命中会和"没传 focus"完全无法区分。
  */
 export function selectFocusBlocks(
     fullText: string,
     focus: string,
     maxChars: number
-): FocusSelection | null {
+): FocusSelection {
+    const emptySelection = (totalBlocks: number): FocusSelection => ({
+        content: '',
+        selectedBlocks: 0,
+        totalBlocks,
+        start: 0,
+        end: 0,
+        bestOffset: 0,
+        matchedTerms: 0
+    });
+
     const blocks = splitIntoBlocks(fullText);
     if (blocks.length === 0) {
-        return null;
+        return emptySelection(0);
     }
 
     const queryTokens = tokenize(focus);
     if (queryTokens.length === 0) {
-        return null;
+        return emptySelection(blocks.length);
     }
 
     const scores = scoreBlocks(blocks.map((block) => block.text), queryTokens, focus);
@@ -294,7 +307,7 @@ export function selectFocusBlocks(
         }
     }
     if (bestIndex < 0) {
-        return null;
+        return emptySelection(blocks.length);
     }
 
     const ordered = scores
@@ -317,7 +330,7 @@ export function selectFocusBlocks(
         used += cost;
     }
     if (chosen.size === 0) {
-        return null;
+        return emptySelection(blocks.length);
     }
 
     const indices = [...chosen].sort((left, right) => left - right);
