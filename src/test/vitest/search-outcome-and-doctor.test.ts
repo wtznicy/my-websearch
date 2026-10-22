@@ -108,14 +108,25 @@ describe('Search Outcome Semantics (ok / degraded / empty / failed)', () => {
         expect(failedMissingKey).toEqual({ outcome: 'failed', retryable: false });
     });
 
-    it('terminates in-flight HTTP requests and pagination when AbortSignal fires on timeout', async () => {
+    it('terminates in-flight HTTP requests and pagination when AbortSignal fires', async () => {
         let serverRequestClosed = false;
         let resolveSocketClosed!: () => void;
         const socketClosedPromise = new Promise<void>((resolve) => {
             resolveSocketClosed = resolve;
         });
+        let resolveRequestReceived!: () => void;
+        const requestReceived = new Promise<void>((resolve) => {
+            resolveRequestReceived = resolve;
+        });
+
+        const withTimeout = <T>(promise: Promise<T>, ms: number, message: string): Promise<T> =>
+            Promise.race([
+                promise,
+                new Promise<T>((_, reject) => setTimeout(() => reject(new Error(message)), ms))
+            ]);
 
         const server = http.createServer((req, res) => {
+            resolveRequestReceived();
             req.on('close', () => {
                 if (!res.writableEnded) {
                     serverRequestClosed = true;
@@ -136,7 +147,11 @@ describe('Search Outcome Semantics (ok / degraded / empty / failed)', () => {
         const url = `http://127.0.0.1:${address.port}/search`;
 
         try {
-            const res = await executePrimaryEngines({
+            // 用外部 AbortController，而不是让 executor 的 80ms 预算去触发 abort：
+            // 负载下 80ms 可能早于连接建立，server 收不到请求，"socket 关闭"就只能干等超时
+            // （此前把等待从 4s 放宽到 15s 仍偶发失败，根因是「请求可能根本没发出去」）。
+            const abortController = new AbortController();
+            const enginePromise = executePrimaryEngines({
                 query: 'abort test',
                 searchQuery: 'abort test',
                 executableEngines: ['bing'],
@@ -150,17 +165,19 @@ describe('Search Outcome Semantics (ok / degraded / empty / failed)', () => {
                         return [];
                     }
                 },
-                deadlineAt: Date.now() + 80,
-                perEngineTimeoutMs: 80
+                deadlineAt: Date.now() + 30_000,
+                perEngineTimeoutMs: 30_000,
+                signal: abortController.signal
             });
 
-            expect(res.engineMetrics[0]?.timedOut).toBe(true);
-            // 15s 而不是 4s：全量并行跑时（多个 worker 各自起本地 server + 负载）实测 socket 关闭会超过 4s，
-            // 断言语义是「最终会关闭」，放宽等待不会削弱它，但能消掉一个反复出现的假失败。
-            await Promise.race([
-                socketClosedPromise,
-                new Promise((_, reject) => setTimeout(() => reject(new Error('in-flight HTTP request was not aborted')), 15000))
-            ]);
+            // 先等请求真的到达 server，再 abort —— 断言才有确定的观察点
+            await withTimeout(requestReceived, 5000, 'request never reached the local server');
+            abortController.abort(new Error('abort test'));
+
+            const res = await withTimeout(enginePromise, 5000, 'engine did not settle after abort');
+            expect(res.engineResults[0]).toEqual([]);
+
+            await withTimeout(socketClosedPromise, 5000, 'in-flight HTTP request was not aborted');
             expect(serverRequestClosed).toBe(true);
 
             // Also verify paginateSearch stops immediately when signal aborts during page delay
