@@ -12,8 +12,14 @@ All notable changes to `my-websearch` are documented in this file.
 - **`focus` 未命中改为显式标记。** 输出 `focused: false`、`focusBlocks: {selected: 0, total: N}` 和 warning，不再静默返回整页。
 - **引擎延迟统计剔除 <10ms 的噪声样本**（测试假引擎/缓存命中），`doctor` 的 p50 不再被拉到 0。
 
+### Added
+- **发布日期多路抽取**：搜索层从 URL 路径/标题/摘要做纯本地解析（严格年月日边界，拒绝 `/item/2000/10/`、`v2.10.21` 这类误判）；抓取层从 JSON-LD、`article:published_time`、`<time datetime>` 抽取，经 `fetchWebContent.publishedAt` 返回。实测覆盖率 10/15 = 67%（无代理）。
+- **引擎事实 SSOT**：新增零依赖的 `src/engines/definitions.ts`（id / label / region / category），海外清单与默认代理名单均由它派生；新增守卫测试保证定义 ↔ registry ↔ 代理名单 ↔ 国内通用池一致。
+- **可选 RRF 融合**（`SEARCH_FUSION=rrf`）：保留每个引擎内的排名并计算 `Σ 1/(k+rank)`（k 默认 20）；重排阶段用 `0.45*rrfNorm + 0.35*BM25 + 0.20*权威度` 替换 position+consensus，避免重复计分。
+
 ### Changed
 - 文档：引擎数 13 → 14（补 `code`）；`docs/architecture/overview.md` 标注四阶段已完成。
+- **RRF 默认仍为 `legacy`**：在 10 条固定查询、固定 bing+baidu 输入的对照实验中，两种模式结果集合基本一致（overlap@5 = 4.70/5），但 authority@3 为 legacy 0.20 vs rrf 0.17；且两引擎 URL 重合度极低（consensus@3 恒为 0），RRF 的共识信号没有发挥空间。待主引擎组扩大或积累更大评测集后再考虑切换默认。
 
 ## [1.3.5] - 2026-10-21
 
