@@ -277,6 +277,7 @@ export async function executeFetchPipeline(
     let delegateReadabilityApplied: boolean | undefined;
     let delegateDegraded: string[] | undefined;
     let delegateScoped: FetchWebContentResult['scoped'];
+    let delegatePublishedAt: string | undefined;
 
     // 专有站点内部转发（CSDN / 掘金 / GitHub / Stack Overflow）
     // 请求了 extract 时跳过这些转发：它们只产出文本/Markdown，拿不到可选择的 HTML DOM
@@ -355,6 +356,7 @@ export async function executeFetchPipeline(
             delegateReadabilityApplied = fetchResult.readabilityApplied;
             delegateDegraded = fetchResult.degraded;
             delegateScoped = fetchResult.scoped;
+            delegatePublishedAt = fetchResult.publishedAt;
             // P0-2：条件请求所需的验证器必须从上游响应带回来，
             // 否则缓存记录里 etag / lastModified 恒为 null，304 续期分支永远不可达。
             etag = fetchResult.etag;
@@ -392,7 +394,7 @@ export async function executeFetchPipeline(
     }
 
     // Step 6: 统一分页与切片返回
-    return sliceMarkdownContent(fullMarkdown, {
+    const sliced = sliceMarkdownContent(fullMarkdown, {
         url,
         finalUrl,
         title: pageTitle,
@@ -414,4 +416,5 @@ export async function executeFetchPipeline(
         ...(delegateDegraded ? { degraded: delegateDegraded } : {}),
         ...(delegateScoped ? { scoped: delegateScoped } : {})
     });
+    return delegatePublishedAt ? { ...sliced, publishedAt: delegatePublishedAt } : sliced;
 }

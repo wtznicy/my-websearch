@@ -51,6 +51,7 @@ import {
 
 // Pagination
 import { paginateContent } from './pagination.js';
+import { extractPublishedDateFromHtml } from './publishedDate.js';
 
 export interface PrimaryFetchContext {
     url: string;
@@ -655,6 +656,8 @@ export function assembleFetchResult(
         appendTruncationMarker: true,
         generateToc: !options.raw
     });
+    // 页面自己声明的发布日期（不影响 search 的 timeRange，只服务 fetchWebContent 的返回）
+    const publishedAt = extractPublishedDateFromHtml(stage.raw);
 
     return {
         url: primary.parsedUrl.toString(),
@@ -681,6 +684,7 @@ export function assembleFetchResult(
         ...(paginated.focusMode ? { focusMode: paginated.focusMode } : {}),
         ...(paginated.focusBlocks ? { focusBlocks: paginated.focusBlocks } : {}),
         ...(paginated.focusWarning ? { warnings: [paginated.focusWarning] } : {}),
+        ...(publishedAt ? { publishedAt } : {}),
         // P0-2：把上游验证器带回给 fetchPage，供缓存过期后的 304 条件请求复验
         ...(primary.response?.headers?.etag ? { etag: String(primary.response.headers.etag) } : {}),
         ...(primary.response?.headers?.['last-modified'] ? { lastModified: String(primary.response.headers['last-modified']) } : {}),

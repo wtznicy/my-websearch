@@ -15,7 +15,8 @@ import {
     truncateMetricError
 } from './engineExecutor.js';
 import { executeCascade } from './cascadeExecutor.js';
-import { normalizePublishedDate, isDateWithinTimeRange, TimeRange } from '../../utils/dateNormalizer.js';
+import { isDateWithinTimeRange, TimeRange } from '../../utils/dateNormalizer.js';
+import { derivePublishedAt } from './dateExtraction.js';
 import { runInlineDiagnostics, InlineDiagnostics } from '../../utils/networkDiagnostics.js';
 import { RequestContext, createRequestContext } from '../requestContext.js';
 import { Semaphore } from '../../utils/concurrency.js';
@@ -494,9 +495,15 @@ export function createSearchService(
                     const warnings: string[] = [];
                     let filterFallback: 'partial' | undefined;
 
+                    // 日期抽取：引擎字段 → 标题 → 摘要 → URL（纯本地，不发任何网络请求）
                     for (const item of merged) {
                         if (!item.publishedAt) {
-                            item.publishedAt = normalizePublishedDate(item.date) || normalizePublishedDate(item.title);
+                            item.publishedAt = derivePublishedAt({
+                                rawDate: item.date,
+                                title: item.title,
+                                description: item.description,
+                                url: item.url
+                            });
                         }
                     }
 

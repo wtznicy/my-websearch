@@ -15,6 +15,8 @@ export interface FetchWebContentResult {
     /** Upstream validators, needed for conditional (304) revalidation by the page cache. */
     etag?: string;
     lastModified?: string;
+    /** 页面声明的发布日期（JSON-LD / article:published_time / time[datetime]），ISO yyyy-mm-dd */
+    publishedAt?: string;
     /** Total length of the extracted (or raw) content before paging. */
     totalLength: number;
     /** Starting character offset of this page (echo of the request). */
