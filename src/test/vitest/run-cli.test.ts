@@ -57,6 +57,13 @@ describe('runCli argument parsing', () => {
             expect(parsed.engines).toEqual(['bing', 'baidu']);
         });
 
+        it('parses --time-range and rejects invalid values', () => {
+            const parsed = parseSearchArgs(['typescript', 'release', '--time-range', 'week'], mockRuntime);
+            expect(parsed.timeRange).toBe('week');
+            expect(() => parseSearchArgs(['test', '--time-range', 'yesterday'], mockRuntime))
+                .toThrow('--time-range must be one of: day, week, month, year');
+        });
+
         it('routes engines automatically when defaultSearchEngine is auto and no engines specified', () => {
             const autoRuntime = {
                 config: {

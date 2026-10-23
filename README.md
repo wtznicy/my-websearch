@@ -168,6 +168,9 @@ my-websearch serve
 # One-shot terminal search (reuses running daemon automatically)
 my-websearch search "Model Context Protocol best practices" --limit 5 --min-results 5 --json
 
+# Only results published within the last week (day|week|month|year)
+my-websearch search "typescript 5.9 release" --time-range week --json
+
 # Extract web page as clean Markdown
 my-websearch fetch-web "https://blog.vuejs.org/posts/vue-3-5" --max-chars 15000 --json
 
@@ -290,6 +293,8 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `DEFAULT_MIN_RESULTS` | `5` | Cascade threshold: triggers fallback engines when usable results are fewer than this value |
 | `DEFAULT_SEARCH_LIMIT` | `10` | Default result limit when not explicitly specified in tool calls (max 50) |
 | `SEARCH_DEADLINE_MS` | `30000` | Global hard deadline for multi-engine search execution (milliseconds) |
+| `SEARCH_FUSION` | `legacy` | Result fusion mode: `legacy` (engine-hit count + arrival order) or `rrf` (Reciprocal Rank Fusion over per-engine ranks, which also replaces the position/consensus terms in re-ranking). RRF stays opt-in until a larger evaluation exists. |
+| `SEARCH_FUSION_RRF_K` | `20` | RRF constant k; lower values amplify rank differences. Only used when `SEARCH_FUSION=rrf`. |
 | `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | First circuit-breaker cooldown for an engine (429 / 202 / bot_challenge). Repeated failures back off exponentially (30s → 60s → 120s…). |
 | `ENGINE_CIRCUIT_MAX_COOLDOWN_MS` | `300000` | Upper bound for the exponential circuit-breaker backoff (default 5 minutes). |
 | `SEARCH_AUTHORITY_DOMAINS` | empty | Additional authority domain whitelist for result re-ranking (comma-separated, appended to built-in list) |

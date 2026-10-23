@@ -64,6 +64,15 @@ describe('Disk-level Markdown Page Cache', () => {
         expect(determineTtlMs('https://example.com/non-existent', true)).toBe(NOT_FOUND_TTL_MS);
     });
 
+    it('round-trips publishedAt through the cache', () => {
+        const url = 'https://example.com/news/2024/10/21/story';
+        const markdown = '# Story\n\n' + 'Body text that is long enough for the quality gate. '.repeat(10);
+        pageCache.set(url, markdown, 'markdown', { title: 'Story', publishedAt: '2024-10-21' });
+
+        const cached = pageCache.get(url, 'markdown');
+        expect(cached?.publishedAt).toBe('2024-10-21');
+    });
+
     it('caches and retrieves page entries with deep copy', () => {
         const url = 'https://developer.mozilla.org/en-US/docs/Web/JavaScript';
         const markdown = '# JavaScript Documentation\n\n' + 'JavaScript is a high-level language. '.repeat(15);

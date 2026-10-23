@@ -28,6 +28,7 @@ export type ParsedSearchArgs = {
     /** 结果数低于此值时自动用其他引擎补位（0 = 不启用） */
     minResults: number;
     minResultsExplicit?: boolean;
+    timeRange?: 'day' | 'week' | 'month' | 'year';
     json: boolean;
 };
 
@@ -37,6 +38,7 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
     let limit: number | undefined;
     let searchMode: AppConfig['searchMode'] | undefined;
     let minResults: number | undefined;
+    let timeRange: 'day' | 'week' | 'month' | 'year' | undefined;
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -85,6 +87,16 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
                 throw new Error('--min-results must be a non-negative integer');
             }
             minResults = parsed;
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--time-range') {
+            const next = requireFlagValue(argv, index, '--time-range');
+            if (next !== 'day' && next !== 'week' && next !== 'month' && next !== 'year') {
+                throw new Error('--time-range must be one of: day, week, month, year');
+            }
+            timeRange = next;
             index += 1;
             continue;
         }
@@ -149,6 +161,7 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
         searchMode,
         minResults: effectiveMinResults,
         minResultsExplicit,
+        timeRange,
         json
     };
 }
@@ -192,11 +205,11 @@ export async function handleSearchCommand(ctx: CommandContext): Promise<number> 
             io.stdout(JSON.stringify(createErrorEnvelope(
                 ErrorCode.INVALID_ARGUMENTS,
                 message,
-                { hint: 'Use `my-websearch search <query> [--limit N] [--engine NAME] [--search-mode MODE] [--json]`.' }
+                { hint: 'Use `my-websearch search <query> [--limit N] [--engine NAME] [--search-mode MODE] [--time-range day|week|month|year] [--json]`.' }
             ), null, 2));
         } else {
             io.stderr(message);
-            io.stderr('Usage: my-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--json]');
+            io.stderr('Usage: my-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--time-range day|week|month|year] [--json]');
         }
         return 1;
     }
@@ -210,7 +223,8 @@ export async function handleSearchCommand(ctx: CommandContext): Promise<number> 
                 engines: parsed.enginesExplicit ? parsed.engines : undefined,
                 limit: parsed.limitExplicit ? parsed.limit : undefined,
                 searchMode: parsed.searchMode,
-                minResults: parsed.minResultsExplicit ? parsed.minResults : undefined
+                minResults: parsed.minResultsExplicit ? parsed.minResults : undefined,
+                ...(parsed.timeRange ? { timeRange: parsed.timeRange } : {})
             },
             options
         );
@@ -234,6 +248,7 @@ export async function handleSearchCommand(ctx: CommandContext): Promise<number> 
             limit: parsed.limit,
             searchMode: parsed.searchMode,
             minResults: parsed.minResults,
+            ...(parsed.timeRange ? { timeRange: parsed.timeRange } : {}),
             // 显式 --engines 时把原集合传下去：级联只能在用户点名的引擎里补位，
             // 而不是悄悄把 duckduckgo/brave 也拉进来（实测 --engines github 跑了 6 个引擎、22s）
             ...(parsed.enginesExplicit ? { requestedEngines: [...parsed.engines] } : {})

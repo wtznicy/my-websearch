@@ -167,6 +167,9 @@ my-websearch serve
 # 终端一次性搜索（自动复用运行中的 Daemon）
 my-websearch search "Model Context Protocol 最佳实践" --limit 5 --min-results 5 --json
 
+# 只看最近一周发布的结果（day|week|month|year）
+my-websearch search "typescript 5.9 release" --time-range week --json
+
 # 提取网页正文为纯净 Markdown
 my-websearch fetch-web "https://blog.vuejs.org/posts/vue-3-5" --max-chars 15000 --json
 
@@ -254,6 +257,8 @@ my-websearch doctor --reset-health
 | `DEFAULT_MIN_RESULTS` | `5` | 级联补位阈值：可用结果数不足该值时，自动调度备用引擎补齐 |
 | `DEFAULT_SEARCH_LIMIT` | `10` | 工具调用未显式传 `limit` 时的单次返回上限（最大 50） |
 | `SEARCH_DEADLINE_MS` | `30000` | 搜索任务全局超时硬预算（毫秒） |
+| `SEARCH_FUSION` | `legacy` | 结果融合模式：`legacy`（命中引擎数 + 到达顺序）或 `rrf`（按各引擎内排名做 Reciprocal Rank Fusion，并在重排阶段替换 position/consensus 两项）。RRF 默认关闭，等待更大评测集。 |
+| `SEARCH_FUSION_RRF_K` | `20` | RRF 常数 k，越小越放大排名差异；仅 `SEARCH_FUSION=rrf` 时生效。 |
 | `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | 引擎首次熔断冷却（429 / 202 / 验证状态）。连续失败指数退避（30s → 60s → 120s…）。 |
 | `ENGINE_CIRCUIT_MAX_COOLDOWN_MS` | `300000` | 熔断指数退避上限（默认 5 分钟）。 |
 | `SEARCH_AUTHORITY_DOMAINS` | 空 | 结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单） |

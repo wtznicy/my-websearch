@@ -16,6 +16,8 @@ export interface PageCacheRecord {
     title: string;
     etag?: string;
     lastModified?: string;
+    /** 页面声明的发布日期（抓取时抽取，缓存命中也要能带回） */
+    publishedAt?: string;
     fetchedAt: number;
     expiresAt: number;
     contentHash: string;
@@ -30,6 +32,7 @@ export interface PageCacheRecord {
 export interface SetPageCacheOptions {
     etag?: string;
     lastModified?: string;
+    publishedAt?: string;
     title?: string;
     siteName?: string;
     isNotFound?: boolean;
@@ -213,6 +216,7 @@ class SqliteStorageBackend implements StorageBackend {
                 title TEXT NOT NULL,
                 etag TEXT,
                 last_modified TEXT,
+                published_at TEXT,
                 fetched_at INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL,
                 content_hash TEXT NOT NULL,
@@ -228,6 +232,13 @@ class SqliteStorageBackend implements StorageBackend {
             CREATE INDEX IF NOT EXISTS idx_page_cache_expires ON page_cache (expires_at ASC);
         `);
 
+        // 老库迁移：published_at 为 1.3.6 新增列（CREATE TABLE IF NOT EXISTS 不会补列）
+        try {
+            this.db.exec('ALTER TABLE page_cache ADD COLUMN published_at TEXT');
+        } catch {
+            // 列已存在
+        }
+
         // P1-12：过期记录此前只能靠同 key 覆盖或 LRU 压力淘汰（idx_page_cache_expires 建了却没人用）。
         // 启动时顺手清一次，成本 O(过期行数)。
         try {
@@ -241,9 +252,9 @@ class SqliteStorageBackend implements StorageBackend {
         this.stmtSet = this.db.prepare(`
             INSERT OR REPLACE INTO page_cache (
                 url_hash, normalized_url, format, markdown, title,
-                etag, last_modified, fetched_at, expires_at, content_hash,
+                etag, last_modified, published_at, fetched_at, expires_at, content_hash,
                 total_length, byte_size, is_not_found, site_name, is_pdf, pdf_pages, last_accessed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         this.stmtRenew = this.db.prepare('UPDATE page_cache SET expires_at = ?, fetched_at = ?, last_accessed_at = ? WHERE url_hash = ?');
         this.stmtDel = this.db.prepare('DELETE FROM page_cache WHERE url_hash = ?');
@@ -272,6 +283,7 @@ class SqliteStorageBackend implements StorageBackend {
             title: row.title,
             etag: row.etag || undefined,
             lastModified: row.last_modified || undefined,
+            publishedAt: row.published_at || undefined,
             fetchedAt: row.fetched_at,
             expiresAt: row.expires_at,
             contentHash: row.content_hash,
@@ -294,6 +306,7 @@ class SqliteStorageBackend implements StorageBackend {
             record.title,
             record.etag ?? null,
             record.lastModified ?? null,
+            record.publishedAt ?? null,
             record.fetchedAt,
             record.expiresAt,
             record.contentHash,
@@ -565,6 +578,7 @@ export class PageCacheService {
             title,
             etag: options.etag,
             lastModified: options.lastModified,
+            publishedAt: options.publishedAt,
             fetchedAt: now,
             expiresAt,
             contentHash,

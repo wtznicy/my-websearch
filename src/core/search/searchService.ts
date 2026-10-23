@@ -562,6 +562,21 @@ export function createSearchService(
                         }
                     }
 
+                    // 显式点名的引擎与查询语种不匹配时给出可操作提示：
+                    // baidu/sogou/csdn/juejin 对纯英文查询的召回基本不可用（实测 Top-1 常是 baidu.com 跳转页）。
+                    if (requestedEngines && requestedEngines.length > 0) {
+                        const cjkCount = (cleanQuery.match(/[\u4e00-\u9fff]/g) ?? []).length;
+                        const chineseFocusedEngines = new Set(['baidu', 'sogou', 'csdn', 'juejin']);
+                        if (cjkCount < 2 && executableEngines.length > 0
+                            && executableEngines.every((engine) => chineseFocusedEngines.has(engine))) {
+                            warnings.push(
+                                'Requested engines are Chinese-focused, but the query contains no CJK characters; '
+                                + 'recall for English queries may be poor. Consider bing, duckduckgo or brave. '
+                                + '/ 显式指定的引擎偏中文站点，但查询不含中文，英文召回可能很差。'
+                            );
+                        }
+                    }
+
                     const combinedWarnings = [...new Set([...rc.warnings, ...warnings])];
 
                     const result: SearchExecutionResult = {

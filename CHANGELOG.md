@@ -4,6 +4,8 @@ All notable changes to `my-websearch` are documented in this file.
 
 ## [Unreleased]
 
+## [1.3.6] - 2026-10-23
+
 ### Fixed
 - **Bing 漂移回退不再丢弃已成功的 HTTP 结果。** `auto` 模式检测到首词漂移后，Playwright 兜底改走独立预算（8s），兜底失败/超预算时保留 HTTP 结果并写入一条 warning，而不是整批丢弃（实测 2.9s→25.9s、12s deadline 下 0 条）。
 - **`timeRange` 不再因「缺少发布日期」清空结果。** 只丢弃明确超出范围的条目；日期未知的保留并给出说明。修复 Bing/Baidu/Sogou 在 `timeRange` 下恒定返回 0 条。
@@ -13,9 +15,23 @@ All notable changes to `my-websearch` are documented in this file.
 - **引擎延迟统计剔除 <10ms 的噪声样本**（测试假引擎/缓存命中），`doctor` 的 p50 不再被拉到 0。
 
 ### Added
-- **发布日期多路抽取**：搜索层从 URL 路径/标题/摘要做纯本地解析（严格年月日边界，拒绝 `/item/2000/10/`、`v2.10.21` 这类误判）；抓取层从 JSON-LD、`article:published_time`、`<time datetime>` 抽取，经 `fetchWebContent.publishedAt` 返回。实测覆盖率 10/15 = 67%（无代理）。
+- **发布日期多路抽取**：搜索层从 URL 路径/标题/摘要做纯本地解析（严格年月日边界，拒绝 `/item/2000/10/`、`v2.10.21` 这类误判）；抓取层从 JSON-LD、`article:published_time`、`<time datetime>` 抽取，经 `fetchWebContent.publishedAt` 返回，并随页面缓存持久化（缓存命中不再丢日期）。实测覆盖率 10/15 = 67%（无代理）。
 - **引擎事实 SSOT**：新增零依赖的 `src/engines/definitions.ts`（id / label / region / category），海外清单与默认代理名单均由它派生；新增守卫测试保证定义 ↔ registry ↔ 代理名单 ↔ 国内通用池一致。
 - **可选 RRF 融合**（`SEARCH_FUSION=rrf`）：保留每个引擎内的排名并计算 `Σ 1/(k+rank)`（k 默认 20）；重排阶段用 `0.45*rrfNorm + 0.35*BM25 + 0.20*权威度` 替换 position+consensus，避免重复计分。
+- **CLI `--time-range day|week|month|year`**：此前只有 MCP 工具支持时间过滤。
+- **显式引擎与语种不匹配提示**：只点名中文引擎却搜英文时返回可操作 warning，建议改用 bing/duckduckgo/brave。
+- **`npm run canary`**：固定查询集 × 引擎，对比 `.canary-baseline.json`，骤降 >50% 时退出码 1。
+
+### Performance
+- 引擎请求改用可信域名专用 keepAlive + DNS 缓存 agent（此前落到 axios 默认 agent，每次重新 DNS/TLS 握手）。
+- `fetchWebContent` 增加全局 deadline（默认 45s，`FETCH_WEB_DEADLINE_MS` 可调），避免 cookie/浏览器/主请求/回退四段预算叠加到 ~65s。
+- 页面缓存：SQLite 开 WAL + `busy_timeout=5000`、启动清理过期行、JSON 后端 tmp+rename 原子写；命中 touch 60s 节流。
+- bing 增加并发闸门（4）；bing/baidu 的 wreq 超时从硬编码 15s 对齐到引擎预算 10s。
+
+### Security
+- 页面缓存写入失败不再拖垮整个抓取响应（`safeCacheSet`）。
+- 重定向钩子拒绝单标签主机名；daemon 绑定非回环地址时打印无鉴权警告；SSRF 拦截进入 Prometheus（`mywebsearch_ssrf_blocked_total`）。
+- 未知 MCP session 返回 404（规范语义）；README 增加安全模型章节；`MYWEBSEARCH_NO_AUTO_BOOTSTRAP=1` 可关闭跨应用密钥复制。
 
 ### Changed
 - 文档：引擎数 13 → 14（补 `code`）；`docs/architecture/overview.md` 标注四阶段已完成。

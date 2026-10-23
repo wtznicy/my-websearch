@@ -198,7 +198,7 @@ export async function executeFetchPipeline(
             } else if (!pageCache.isExpired(cachedRecord)) {
                 // 正向缓存命中 (<50ms 纯切片返回)
                 metrics.recordFetchCacheHit();
-                return sliceMarkdownContent(cachedRecord.markdown, {
+                const sliced = sliceMarkdownContent(cachedRecord.markdown, {
                     url,
                     finalUrl: cachedRecord.normalizedUrl || url,
                     title: cachedRecord.title,
@@ -214,6 +214,7 @@ export async function executeFetchPipeline(
                     warnings,
                     pdfPages: cachedRecord.pdfPages
                 });
+                return cachedRecord.publishedAt ? { ...sliced, publishedAt: cachedRecord.publishedAt } : sliced;
             } else if (cachedRecord.etag || cachedRecord.lastModified) {
                 // 已过期但具备 ETag / Last-Modified：发起轻量条件请求（304 探测）
                 try {
@@ -235,7 +236,7 @@ export async function executeFetchPipeline(
                     if (check304.status === 304) {
                         pageCache.renew(url, effectiveFormat);
                         metrics.recordFetchCacheHit();
-                        return sliceMarkdownContent(cachedRecord.markdown, {
+                        const sliced = sliceMarkdownContent(cachedRecord.markdown, {
                             url,
                             finalUrl: cachedRecord.normalizedUrl || url,
                             title: cachedRecord.title,
@@ -251,6 +252,7 @@ export async function executeFetchPipeline(
                             warnings,
                             pdfPages: cachedRecord.pdfPages
                         });
+                        return cachedRecord.publishedAt ? { ...sliced, publishedAt: cachedRecord.publishedAt } : sliced;
                     }
                 } catch {
                     // 304 探测失败或超时，平滑回退到全量抓取
@@ -388,6 +390,7 @@ export async function executeFetchPipeline(
             siteName,
             etag,
             lastModified,
+            ...(delegatePublishedAt ? { publishedAt: delegatePublishedAt } : {}),
             isPdf,
             pdfPages
         });
