@@ -130,6 +130,22 @@ export async function validateAndFetchPrimary(
             throw hintProxyConnectionError(error);
         }
 
+        // P0-5：配额型拒绝（429 / GitHub 403）在进入 15s 的浏览器 cookie 采集之前短路。
+        // 之前只挡住了 30s 的浏览器渲染通道，cookie 通道仍要先付 15s，注释与行为矛盾。
+        const quotaBlocked = status === 429
+            || (status === 403 && /(^|\.)github\.com$/i.test(parsedUrl.hostname));
+        if (quotaBlocked) {
+            const isGithub = /(^|\.)github\.com$/i.test(parsedUrl.hostname);
+            throw new AppError({
+                code: 'rate_limited',
+                retryable: true,
+                hint: isGithub ? 'Set GITHUB_TOKEN to raise GitHub anonymous rate limits, or retry later.' : 'Retry later or configure the relevant API token.',
+                message: `Upstream returned HTTP ${status} for ${parsedUrl.toString()} (rate limited / quota exhausted). `
+                    + (isGithub ? 'Configure GITHUB_TOKEN to raise the anonymous quota. ' : '')
+                    + 'Browser cookie/render fallbacks were skipped: they cannot bypass quota-based rejections.'
+            });
+        }
+
         let cookieRetry: { response?: AxiosResponse; usedBrowserCookies: boolean };
         try {
             cookieRetry = await withinCookieBudget((stageSignal) => tryRequestWithBrowserCookies(parsedUrl.toString(), stageSignal), 'cookie retry');
@@ -665,6 +681,9 @@ export function assembleFetchResult(
         ...(paginated.focusMode ? { focusMode: paginated.focusMode } : {}),
         ...(paginated.focusBlocks ? { focusBlocks: paginated.focusBlocks } : {}),
         ...(paginated.focusWarning ? { warnings: [paginated.focusWarning] } : {}),
+        // P0-2：把上游验证器带回给 fetchPage，供缓存过期后的 304 条件请求复验
+        ...(primary.response?.headers?.etag ? { etag: String(primary.response.headers.etag) } : {}),
+        ...(primary.response?.headers?.['last-modified'] ? { lastModified: String(primary.response.headers['last-modified']) } : {}),
         ...(stage.scoped ? { scoped: stage.scoped } : {})
     };
 }

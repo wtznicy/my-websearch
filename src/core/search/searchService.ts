@@ -203,6 +203,8 @@ export class SearchTtlCache {
         return JSON.stringify({
             q: input.query.trim().toLowerCase(),
             e: [...input.engines].sort(),
+            // P0-3：requestedEngines 决定级联候选集合，语义不同不能共用缓存
+            re: [...(input.requestedEngines ?? [])].sort(),
             l: normalizeLimitBucket(input.limit),
             m: normalizedSearchMode,
             r: input.minResults ?? 0,
@@ -216,7 +218,9 @@ export class SearchTtlCache {
         return JSON.stringify({
             q: input.query.trim().toLowerCase(),
             e: [...input.engines].sort(),
-            l: input.limit,
+            re: [...(input.requestedEngines ?? [])].sort(),
+            // 与 buildKey 使用同一分桶，否则 limit=3/5 落同一缓存桶却无法合并单飞
+            l: normalizeLimitBucket(input.limit),
             m: normalizedSearchMode,
             r: input.minResults ?? 0,
             t: input.timeRange,

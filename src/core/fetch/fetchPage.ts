@@ -127,6 +127,14 @@ export async function executeFetchPipeline(
     }
 
     const pageCache = getGlobalPageCache();
+    // 缓存是加速器，不是成功路径的一部分：写失败（磁盘满 / SQLITE_BUSY / 权限）不能让已抓到的正文陪葬
+    const safeCacheSet = (...args: Parameters<typeof pageCache.set>): void => {
+        try {
+            pageCache.set(...args);
+        } catch (error) {
+            console.warn('[fetchPage] cache write failed (ignored):', error instanceof Error ? error.message : String(error));
+        }
+    };
     const effectiveFormat = format ?? 'markdown';
     // 结构化提取需要 HTML，而缓存里只有 Markdown —— 因此 extract 请求既不读缓存也不写缓存。
     // readability / includeLinks / selector 同理：缓存键只有 (url, format)，不含这些「提取方式」开关，
@@ -202,6 +210,9 @@ export async function executeFetchPipeline(
                             startIndex,
                             maxChars,
                             focus,
+                            focusMode,
+                            citations,
+                            retainLinks,
                             cached: true,
                             warnings,
                             pdfPages: cachedRecord.pdfPages
@@ -274,7 +285,7 @@ export async function executeFetchPipeline(
                     forwardError.code === 'bot_challenge')
             ) {
                 if (forwardError.code === 'not_found') {
-                    pageCache.set(url, '', effectiveFormat, { isNotFound: true, ttlMs: 60 * 1000 });
+                    safeCacheSet(url, '', effectiveFormat, { isNotFound: true, ttlMs: 60 * 1000 });
                 }
                 throw forwardError;
             }
@@ -310,6 +321,10 @@ export async function executeFetchPipeline(
             delegateReadabilityApplied = fetchResult.readabilityApplied;
             delegateDegraded = fetchResult.degraded;
             delegateScoped = fetchResult.scoped;
+            // P0-2：条件请求所需的验证器必须从上游响应带回来，
+            // 否则缓存记录里 etag / lastModified 恒为 null，304 续期分支永远不可达。
+            etag = fetchResult.etag;
+            lastModified = fetchResult.lastModified;
             // 引擎侧产生的 warning（例如 focus 未命中的说明）必须一路上浮，否则调用方永远看不到
             if (fetchResult.warnings && fetchResult.warnings.length > 0) {
                 warnings.push(...fetchResult.warnings);
@@ -324,7 +339,7 @@ export async function executeFetchPipeline(
             }
         } catch (fetchError) {
             if (fetchError instanceof AppError && fetchError.code === 'not_found') {
-                pageCache.set(url, '', effectiveFormat, { isNotFound: true, ttlMs: 60 * 1000 });
+                safeCacheSet(url, '', effectiveFormat, { isNotFound: true, ttlMs: 60 * 1000 });
             }
             throw fetchError;
         }
@@ -332,7 +347,7 @@ export async function executeFetchPipeline(
 
     // Step 5: 质量门禁与回写缓存（深拷贝存储）
     if (cacheEligible && fullMarkdown && passesQualityGate(fullMarkdown, pageTitle)) {
-        pageCache.set(url, fullMarkdown, effectiveFormat, {
+        safeCacheSet(url, fullMarkdown, effectiveFormat, {
             title: pageTitle,
             siteName,
             etag,

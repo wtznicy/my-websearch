@@ -179,8 +179,11 @@ async function main() {
       });
     });
 
+    // 绑定地址必须先解析：Host 白名单要和它联动，否则 HOST=0.0.0.0（Docker/容器）
+    // 的部署会被 Host 校验 403 掉——文档里的生产配方直接失效。
+    const HOST = process.env.OPEN_WEBSEARCH_HOST || process.env.HOST || '127.0.0.1';
     // DNS rebinding 保护（与本地 REST daemon 共用同一套白名单解析，见 adapters/http/sharedMiddleware）
-    applyHostValidation(app);
+    applyHostValidation(app, [HOST]);
 
     const mcpCorsOptions = buildMcpCorsOptions(config);
     if (mcpCorsOptions) {
@@ -475,7 +478,7 @@ async function main() {
 
     // 默认只绑定回环地址，避免端口暴露到局域网/公网（配合上面的 DNS rebinding 保护）。
     // 如需局域网/公网或容器访问，设置 OPEN_WEBSEARCH_HOST=0.0.0.0 或 HOST=0.0.0.0 显式放开。
-    const HOST = process.env.OPEN_WEBSEARCH_HOST || process.env.HOST || '127.0.0.1';
+    // （HOST 已在 Host 白名单注册前解析，见上方 applyHostValidation 调用）
 
     const httpServer = app.listen(PORT, HOST, () => {
       console.error(`✅ HTTP server running on ${HOST}:${PORT}`);

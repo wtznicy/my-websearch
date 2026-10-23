@@ -12,6 +12,9 @@ export interface FetchWebContentResult {
     content: string;
     /** Raw response body (HTML/plain text) as received, before any extraction. */
     raw?: string;
+    /** Upstream validators, needed for conditional (304) revalidation by the page cache. */
+    etag?: string;
+    lastModified?: string;
     /** Total length of the extracted (or raw) content before paging. */
     totalLength: number;
     /** Starting character offset of this page (echo of the request). */
