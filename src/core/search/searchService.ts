@@ -485,6 +485,7 @@ export function createSearchService(
                         .map((result) => {
                             const cleaned = { ...result };
                             delete cleaned.rankBoost;
+                            delete cleaned.rrfScore;
                             return cleaned;
                         })
                         .map((result) => normalizeSearchResult(result))

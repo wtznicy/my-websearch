@@ -9,6 +9,8 @@ export interface SearchResult {
     engineHits?: number;
     /** 内部排序权重（如精确仓库命中）；返回给调用方前会被剥离，不进入公共 JSON */
     rankBoost?: number;
+    /** RRF（Reciprocal Rank Fusion）融合分；内部字段，出口剥离 */
+    rrfScore?: number;
     /** 发布/更新日期（如 "2025-11-20"、"2026-02" 等） */
     date?: string;
     /** 归一化 ISO 发布时间（YYYY-MM-DD） */

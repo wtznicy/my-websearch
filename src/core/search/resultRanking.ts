@@ -1,5 +1,6 @@
 import { SearchResult } from '../../types.js';
 import { config } from '../../config.js';
+import { isRrfFusionEnabled } from './mergeResults.js';
 
 /**
  * 轻量本地结果重排（无外部依赖、毫秒级）。
@@ -375,6 +376,11 @@ export function rankSearchResults(
     const authorityWeight = restWeight * (1 / 3);
     const consensusWeight = restWeight * (1 / 6);
 
+    // RRF 模式：RRF 分数已经融合了「各引擎内的排名」，再叠加 position/consensus 就是重复计分。
+    // 因此用单一 rrfNorm 替换这两项，只保留 BM25 与权威度。
+    const useRrf = isRrfFusionEnabled() && results.some((result) => typeof result.rrfScore === 'number');
+    const maxRrf = useRrf ? Math.max(...results.map((result) => result.rrfScore ?? 0), 1e-6) : 1;
+
     const scored = results.map((result, index) => {
         const positionScore = 1 / (1 + index * 0.35);
         const rawBm25 = bm25[index] ?? 0;
@@ -385,10 +391,14 @@ export function rankSearchResults(
         const consensus = Math.min(result.engineHits ?? 1, 3) / 3;
         const entryPagePenalty = isEntryPage ? 0.25 : 0;
         const freshnessAdjustment = computeFreshnessAdjustment(result.date, queryHasFreshness);
-        const score = positionWeight * positionScore
-            + relevanceWeight * relevance
-            + authorityWeight * authority
-            + consensusWeight * consensus
+        const score = (useRrf
+            ? 0.45 * ((result.rrfScore ?? 0) / maxRrf)
+                + 0.35 * relevance
+                + 0.20 * authority
+            : positionWeight * positionScore
+                + relevanceWeight * relevance
+                + authorityWeight * authority
+                + consensusWeight * consensus)
             + (result.rankBoost ?? 0)
             - entryPagePenalty
             + freshnessAdjustment;

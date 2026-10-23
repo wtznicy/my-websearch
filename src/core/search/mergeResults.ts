@@ -48,25 +48,49 @@ export function isPlaceholderResult(result: SearchResult): boolean {
     return title.length < 10;
 }
 
-/** 跨引擎融合：按规范化 URL 去重，并按“被多少个引擎命中”加权排序。 */
+/** RRF 融合开关：默认 legacy，设置 SEARCH_FUSION=rrf 启用（便于 bench A/B 对比） */
+export function isRrfFusionEnabled(): boolean {
+    return process.env.SEARCH_FUSION === 'rrf';
+}
+
+/** RRF 常数 k：2-3 个引擎时 60 会抹平差异，默认 20（可用 SEARCH_FUSION_RRF_K 覆盖） */
+function getRrfK(): number {
+    const parsed = Number(process.env.SEARCH_FUSION_RRF_K);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 20;
+}
+
+/** 跨引擎融合：按规范化 URL 去重；默认按「命中引擎数 + 遍历序」，开启 RRF 后按排名倒数之和。 */
 export function mergeSearchResults(engineResults: SearchResult[][]): SearchResult[] {
-    const seen = new Map<string, { result: SearchResult; engines: Set<string>; order: number }>();
+    const useRrf = isRrfFusionEnabled();
+    const rrfK = getRrfK();
+    const seen = new Map<string, { result: SearchResult; engines: Set<string>; order: number; rrf: number }>();
     let order = 0;
 
     for (const results of engineResults) {
-        for (const result of results) {
+        results.forEach((result, rankIndex) => {
             const key = normalizeResultUrl(result.url);
+            const rank = rankIndex + 1;
+            const contribution = 1 / (rrfK + rank);
             const existing = seen.get(key);
             if (existing) {
                 existing.engines.add(result.engine);
+                existing.rrf += contribution;
             } else {
-                seen.set(key, { result, engines: new Set([result.engine]), order });
+                seen.set(key, { result, engines: new Set([result.engine]), order, rrf: contribution });
                 order += 1;
             }
-        }
+        });
     }
 
-    return [...seen.values()]
-        .sort((a, b) => b.engines.size - a.engines.size || a.order - b.order)
-        .map(({ result, engines }) => (engines.size > 1 ? { ...result, engineHits: engines.size } : result));
+    const entries = [...seen.values()];
+    entries.sort(useRrf
+        // RRF：排名越靠前、被越多引擎推荐，分越高；同分用命中数、再按 URL 字典序保证确定性
+        ? (a, b) => b.rrf - a.rrf || b.engines.size - a.engines.size || a.result.url.localeCompare(b.result.url)
+        : (a, b) => b.engines.size - a.engines.size || a.order - b.order);
+
+    return entries.map(({ result, engines, rrf }) => ({
+        ...result,
+        ...(engines.size > 1 ? { engineHits: engines.size } : {}),
+        ...(useRrf ? { rrfScore: Math.round(rrf * 1e6) / 1e6 } : {})
+    }));
 }
