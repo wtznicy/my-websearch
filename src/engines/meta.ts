@@ -3,21 +3,17 @@
  * Must stay dependency-free: systemProxy imports this file, while registry
  * imports concrete engine modules; importing registry from systemProxy would
  * recreate the registry → engines → httpRequest → systemProxy cycle.
+ *
+ * 事实来源是 `definitions.ts`（同样零依赖），这里只做派生。
  */
 
-export const OVERSEAS_ENGINE_NAMES = [
-    'duckduckgo',
-    'exa',
-    'brave',
-    'startpage',
-    'github',
-    'stackoverflow',
-    'hackernews',
-    'arxiv',
-    'code'
-] as const;
+import { ENGINE_DEFINITIONS } from './definitions.js';
 
-export type OverseasEngineName = typeof OVERSEAS_ENGINE_NAMES[number];
+export const OVERSEAS_ENGINE_NAMES: readonly string[] = ENGINE_DEFINITIONS
+    .filter((definition) => definition.region === 'overseas')
+    .map((definition) => definition.id);
+
+export type OverseasEngineName = string;
 
 const overseasEngineSet = new Set<string>(OVERSEAS_ENGINE_NAMES);
 
