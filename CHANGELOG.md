@@ -4,6 +4,8 @@ All notable changes to `my-websearch` are documented in this file.
 
 ## [Unreleased]
 
+## [1.3.7] - 2026-10-23
+
 ### Fixed
 - **GitHub/Gitee 内容抓取加总预算 + host 熔断**：README 此前 7 个候选 × 3 个 ref × 10s（网络错误再 ×2）最坏可叠到 90~180s；现在共享 `GITHUB_CONTENT_BUDGET_MS`（默认 12s，CDN-first 6s）、单次上限 4.5s，失败 host 本次调用内不再重试。
 - **blob 尊重 CDN-first**：源码文件此前固定 raw 15s + jsDelivr 15s，开关完全不生效；现在与 README 共用开关与预算，CDN-first 时直接走 CDN，预算有剩余才回退 raw。
