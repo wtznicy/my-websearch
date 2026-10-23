@@ -76,6 +76,8 @@ class MetricsCollector {
     private cacheMetrics: CacheMetrics = { hits: 0, misses: 0 };
     private fetchCacheMetrics: CacheMetrics = { hits: 0, misses: 0 };
     private timeRangeMetrics = { total: 0, fallback: 0 };
+    /** SSRF 拦截计数：即使 SECURITY_AUDIT 关闭也要进 Prometheus（审计日志是可选的，指标不是） */
+    private ssrfBlockedTotal = 0;
     private pdfMetrics = { total: 0, success: 0, failure: 0 };
     private queryDocsMetrics = { total: 0, fallback: 0, sources: new Map<string, number>() };
 
@@ -247,6 +249,9 @@ class MetricsCollector {
     // ─── 安全审计 ────────────────────────────────────────────────────────────
 
     recordSecurityEvent(event: SecurityAuditEvent): void {
+        if (event.type === 'ssrf_blocked') {
+            this.ssrfBlockedTotal += 1;
+        }
         if (!this.securityAuditEnabled) return;
 
         this.emit('SECURITY_AUDIT', `Security event: ${event.type}`, {
@@ -457,8 +462,7 @@ class MetricsCollector {
             }
         }
 
-        push('# HELP mywebsearch_cache_hits_total Search cache hits');
-        push('# TYPE mywebsearch_cache_hits_total counter');
+        push('# HELP mywebsearch_cache_hits_total Search cache hits');        push('# TYPE mywebsearch_cache_hits_total counter');
         push(`mywebsearch_cache_hits_total ${snapshot.cache.hits}`);
         push('# HELP mywebsearch_cache_misses_total Search cache misses');
         push('# TYPE mywebsearch_cache_misses_total counter');
@@ -466,6 +470,10 @@ class MetricsCollector {
         push('# HELP mywebsearch_cache_hit_rate_percent Search cache hit rate in percent');
         push('# TYPE mywebsearch_cache_hit_rate_percent gauge');
         push(`mywebsearch_cache_hit_rate_percent ${snapshot.cache.hitRate}`);
+
+        push('# HELP mywebsearch_ssrf_blocked_total SSRF/private-network requests blocked');
+        push('# TYPE mywebsearch_ssrf_blocked_total counter');
+        push(`mywebsearch_ssrf_blocked_total ${this.ssrfBlockedTotal}`);
 
         push('# HELP mywebsearch_fetch_cache_hits_total Page markdown cache hits');
         push('# TYPE mywebsearch_fetch_cache_hits_total counter');

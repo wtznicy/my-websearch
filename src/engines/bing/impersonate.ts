@@ -2,6 +2,7 @@ import { config, engineShouldUseProxy, getProxyUrl } from '../../config.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { AppError } from '../../core/errors.js';
+import { PER_ENGINE_TIMEOUT_MS } from '../../utils/timeouts.js';
 
 /**
  * Bing HTTP 模式的浏览器指纹请求层（wreq-js，Rust 实现）。
@@ -278,7 +279,7 @@ export async function searchBingWithImpersonate(
                 throw createBingAbortError(signal);
             }
             const url = buildImpersonateSearchUrl(query, pageNumber, timeRange);
-            const response = await raceWithSignal(signal, () => session.fetch(url, { timeout: 15000 }));
+            const response = await raceWithSignal(signal, () => session.fetch(url, { timeout: PER_ENGINE_TIMEOUT_MS }));
             const html = await raceWithSignal(signal, () => response.text());
 
             if (isAntiBotPage(html)) {

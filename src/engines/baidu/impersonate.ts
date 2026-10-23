@@ -1,5 +1,6 @@
 import { config } from '../../config.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
+import { PER_ENGINE_TIMEOUT_MS } from '../../utils/timeouts.js';
 import { createWreqSession, loadWreqModule } from '../bing/impersonate.js';
 import type { WreqSession } from '../bing/impersonate.js';
 export { isImpersonateAvailable } from '../bing/impersonate.js';
@@ -150,7 +151,7 @@ export async function searchBaiduWithImpersonate(
             }
             if (!hasBaiduSessionCookie(session.getAllCookies())) {
                 try {
-                    await raceWithSignal(signal, () => session.fetch(BAIDU_HOME_URL, { timeout: 15000 }));
+                    await raceWithSignal(signal, () => session.fetch(BAIDU_HOME_URL, { timeout: PER_ENGINE_TIMEOUT_MS }));
                     await savePersistedBaiduCookies(session.getAllCookies());
                 } catch (error) {
                     if (signal?.aborted) {
@@ -172,7 +173,7 @@ export async function searchBaiduWithImpersonate(
                 throw createBaiduAbortError(signal);
             }
             const url = `${BAIDU_HOME_URL}s?wd=${encodeURIComponent(query)}&pn=${pageNumber * 10}&ie=utf-8&tn=baiduhome_pg`;
-            const response = await raceWithSignal(signal, () => session.fetch(url, { timeout: 15000 }));
+            const response = await raceWithSignal(signal, () => session.fetch(url, { timeout: PER_ENGINE_TIMEOUT_MS }));
             const html = await raceWithSignal(signal, () => response.text());
 
             if (isBaiduAntiBotPage(html)) {

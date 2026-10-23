@@ -264,6 +264,22 @@ To share settings across all MCP clients without duplicate configuration:
 
 Can be set via the global configuration file (`~/.my-websearch/config.json`), local `.env`, or system environment variables:
 
+**Precedence** (highest first): process environment → project `.env` → project `.my-websearch.json` → `~/.my-websearch/config.json` → built-in defaults.
+
+#### 0. 🖥️ Server & Runtime
+
+| Variable | Default | Allowed Values / Description |
+| :--- | :--- | :--- |
+| `MODE` | `both` | `both` / `http` / `stdio`. `http` enables Streamable HTTP + SSE. |
+| `HOST` / `OPEN_WEBSEARCH_HOST` | `127.0.0.1` | MCP HTTP bind address. Binding to a non-loopback address also registers that host in the Host allowlist and prints a no-auth warning. |
+| `PORT` | `3211` | MCP HTTP port |
+| `OPEN_WEBSEARCH_ALLOWED_HOSTS` | empty | Extra Host-header allowlist entries (comma-separated), needed when serving through a public domain/reverse proxy |
+| `OPEN_WEBSEARCH_DAEMON_HOST` / `OPEN_WEBSEARCH_DAEMON_PORT` | `127.0.0.1` / `3210` | Local REST daemon bind address (no auth: keep it on loopback) |
+| `METRICS_ENABLED` | `false` | Enables in-process counters and the daemon `/metrics` endpoint |
+| `FETCH_WEB_DEADLINE_MS` | `45000` | Hard deadline for one `fetchWebContent` call (cookie + browser + retries combined) |
+| `BING_PLAYWRIGHT_BUDGET_MS` | `6000` | Budget for the Bing Playwright fallback before the HTTP results are kept |
+| `MYWEBSEARCH_NO_AUTO_BOOTSTRAP` | unset | Set to `1` to stop copying API keys out of other apps' MCP configs on first run |
+
 #### 1. 🔍 Search & Routing Orchestration
 
 | Variable | Default | Allowed Values / Description |
