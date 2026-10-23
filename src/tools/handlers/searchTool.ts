@@ -63,7 +63,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                 queries: z.preprocess((val) => (typeof val === 'string' ? [val] : val), z.array(z.string().min(1, "Query must not be empty").max(500)).min(1).max(4).optional())
                     .describe("1-4 queries run concurrently and merged (required if 'query' is omitted)"),
                 limit: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(1).max(50).optional())
-                    .describe("Max results (default: server DEFAULT_SEARCH_LIMIT, usually 10)"),
+                    .describe("Target total results after merging all engines (default: server DEFAULT_SEARCH_LIMIT, usually 10). Not a per-engine quota: once enough results are collected, slower engines may be cancelled (see cancelledEngines). Pass explicit `engines` to disable early cancellation."),
                 searchMode: z.enum(['request', 'auto', 'playwright']).optional()
                     .describe("Execution mode: 'request' (HTTP only), 'auto' (HTTP with browser fallback), or 'playwright' (headless browser only)"),
                 minResults: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(0).max(50).optional())

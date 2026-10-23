@@ -56,8 +56,9 @@ describe('executePrimaryEngines early return', () => {
         expect(value.earlyReturn).toBe(true);
         expect(value.engineResults[0]?.length).toBe(5);
         expect(slowAborted).toBe(true);
-        // 被跳过的引擎不应出现在 metric 里
-        expect(value.engineMetrics.some((metric) => metric.engine === 'slow')).toBe(false);
+        // 被取消的引擎仍要可见（cancelled: true），不能凭空消失
+        expect(value.engineMetrics.find((metric) => metric.engine === 'slow')?.cancelled).toBe(true);
+        expect(value.cancelledEngines?.map((item) => item.engine)).toContain('slow');
     });
 
     it('waits for all engines when results are still insufficient', async () => {

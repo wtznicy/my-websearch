@@ -59,7 +59,7 @@
 | **`stackoverflow`**| 🌐 需代理 | 无 | StackExchange 2.3 官方 API + HTML 实体智能解码 | 编程报错排错、高质量代码问答 |
 | **`hackernews`** | 🌐 需代理 | 无 | Algolia HN API，含 points、评论数与作者元信息 | 极客社区讨论、前沿科技热点与观点 |
 | **`arxiv`** | 🌐 需代理 | 无 | 官方 Atom XML API 检索论文标题、作者与摘要 | 计算机科学、AI/ML 与自然科学最新论文 |
-| **`code`** | 🇨🇳 直连 | 无 | grep.app API 实时检索全球 GitHub 代码，含仓库、文件路径与精确代码行 | 源码实现翻查、API 使用范例、开源语法实战 |
+| **`code`** | 🌐 国内需代理 | 无 | grep.app API 实时检索全球 GitHub 代码，含仓库、文件路径与精确代码行 | 源码实现翻查、API 使用范例、开源语法实战 |
 
 ---
 
@@ -210,7 +210,8 @@ my-websearch doctor --reset-health
 
 1. **启动日志显示 `🌐 Proxy: disabled`，但明明配置了 `proxy.url`？**
    - **排查 `useProxy` 字段**：在 `~/.my-websearch/config.json` 中，若配置了 `"useProxy": false`，根据配置优先级规则，该参数会**显式覆盖并强制禁用 `url`**（产生 `PROXY_URL='false'`），导致代理被静默关闭。请将 `"useProxy"` 改为 `true` 或直接删除该字段（只要存在有效 `url` 即可自动启用代理）。
-   - **未开启系统代理且未配 `PROXY_URL`**：纯直连网络下（未开启本地网络代理环境），国际引擎无法直接连通，此时请显式设置 `PROXY_URL`（如 `http://127.0.0.1:7890` 或 `7897`）。
+   - **系统代理会自动检测**：未显式配置代理时，程序会读取系统代理（Windows 注册表 / macOS `scutil` / `HTTPS_PROXY`）并用于海外引擎和通用抓取——只要代理软件开着「系统代理」就不必再配 `PROXY_URL`；只有检测失败或需要固定某个代理时才显式设置。
+   - **优先写 `~/.my-websearch/config.json`，不要写客户端 `env`**：把 `proxy.url` 和 API key 放进配置文件。部分 MCP 客户端（如 WorkBuddy）用 `command + args + env 键名集合 + cwd` 计算信任指纹，加一个 `PROXY_URL` 环境变量会改变指纹，服务器可能静默掉线；配置文件在启动时读取，不受影响。
 
 2. **配置了有效代理后，国际引擎依然失败或超时？（上游 IP 频控限流，非本地配置错误）**
    - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：DDG 对当前公网出口 IP 触发了频控限制；可能首条查询成功、后续返回 `anomalyDetectionBlock`，Cookie 机制无法解除上游限流。请更换网络出口 IP 或等待频控冷却。

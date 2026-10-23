@@ -41,7 +41,33 @@ const DEFAULT_AUTHORITY_DOMAINS = [
     'cnblogs.com',
     'openai.com',
     'anthropic.com',
-    'docs.aws.amazon.com'
+    'docs.aws.amazon.com',
+    // 主流官方文档站（中文查询容易被 runoob/镜像站挤占，官方站需要加权）
+    'tailwindcss.com',
+    'react.dev',
+    'vuejs.org',
+    'angular.dev',
+    'angular.io',
+    'nextjs.org',
+    'svelte.dev',
+    'typescriptlang.org',
+    'deno.com',
+    'bun.sh',
+    'vitejs.dev',
+    'webpack.js.org',
+    'fastapi.tiangolo.com',
+    'docs.djangoproject.com',
+    'spring.io',
+    'kubernetes.io',
+    'docs.docker.com',
+    'postgresql.org',
+    'dev.mysql.com',
+    'redis.io',
+    'go.dev',
+    'golang.org',
+    'kotlinlang.org',
+    'git-scm.com',
+    'nginx.org'
 ];
 
 function getAuthorityDomains(customDomains?: string[]): string[] {

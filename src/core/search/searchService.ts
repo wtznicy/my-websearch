@@ -141,7 +141,7 @@ export type SearchExecutionResult = {
     directAnswer?: string;
     /** 每引擎耗时/结果数/错误（可观测性：一眼区分超时与被拒/限流；error 为截断版，完整消息见 partialFailures）
      *  timedOut=true 表示该引擎触发了单引擎超时上限（结果已被丢弃；ms 为超时上限而非墙钟耗时） */
-    engineMetrics?: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }>;
+    engineMetrics?: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean; cancelled?: boolean }>;
     /** 警告信息集合（如 timeRange 过滤导致的部分剔除、引擎降级等） */
     warnings?: string[];
     /** 时间过滤降级指示：'partial' 表示部分结果因无日期字段而被剔除 */

@@ -25,7 +25,7 @@
 
 `my-websearch` is a full-stack search and technical documentation engine built specifically for AI coding agents (**Claude Desktop, Cursor, Cherry Studio, Windsurf, Cline, ZCode**, etc.). Out of the box, ready for multiple mainstream AI clients:
 
-- 🌐 **13-Engine Federated Search & Smart Routing**  
+- 🌐 **14-Engine Federated Search & Smart Routing**  
   Aggregates direct domestic engines (**Bing, Baidu, CSDN, Juejin, Sogou**), global engines (**DuckDuckGo, Brave, Startpage, Exa**), and specialized developer platforms (**GitHub, StackOverflow, Hacker News, arXiv**). Features automatic language-aware routing (`auto`), parallel multi-query execution (`queries: string[]`), URL deduplication, and automatic `minResults` cascading fallback.
 - ⚡ **Native Web Protocol & Proof-of-Work Solvers (Zero-Browser Fast Path)**  
   Built on `wreq-js` with native modern TLS/HTTP2 handshake emulation and persistent session cookies. Includes pure-JS/Rust solvers for **Startpage's Anubis SHA-256 PoW challenge** and **DuckDuckGo's `d.js` (`isJsaChallenge`) HTML5/arithmetic challenge**, resolving structured challenge responses in milliseconds without launching a 400MB browser. Real URL resolution for Sogou redirect links, Baidu `Location`, and Bing Base64 links.
@@ -60,7 +60,7 @@
 | **`stackoverflow`**| 🌐 Proxy in CN | None | Official StackExchange 2.3 API with HTML entity decoding | Developer troubleshooting, stack traces & answers |
 | **`hackernews`** | 🌐 Proxy in CN | None | Algolia HN Search API with points, comments & author metadata | Tech discussions, startup launches & engineering news |
 | **`arxiv`** | 🌐 Proxy in CN | None | Official arXiv Atom XML API parsing titles, authors & abstracts | Scientific papers, machine learning & AI research |
-| **`code`** | 🇨🇳 Direct | None | grep.app API search across global GitHub code with repo, path & exact line numbers | Source code implementations, API usage patterns |
+| **`code`** | 🌐 Proxy in CN | None | grep.app API search across global GitHub code with repo, path & exact line numbers | Source code implementations, API usage patterns |
 
 ---
 
@@ -211,7 +211,8 @@ When configuring or diagnosing proxy connectivity, refer to these common edge ca
 
 1. **Startup log shows `🌐 Proxy: disabled` even though `proxy.url` is set?**
    - **Check `useProxy` flag**: In `~/.my-websearch/config.json`, setting `"useProxy": false` takes precedence and **explicitly overrides and disables `url`** (setting `PROXY_URL='false'`). Change `"useProxy": true` or simply omit the field (providing a valid `url` automatically enables the proxy).
-   - **No system proxy active without `PROXY_URL`**: If no system proxy or local proxy client is running, overseas engines will be blocked by default. Explicitly declare `PROXY_URL` (e.g. `http://127.0.0.1:7897` or `7890`).
+   - **System proxy is auto-detected**: when no explicit proxy is configured, the OS system proxy (Windows registry / macOS `scutil` / `HTTPS_PROXY`) is used for overseas engines and generic fetches — you do **not** need `PROXY_URL` just because a proxy client is running. If detection fails or you want to pin a specific proxy, set `PROXY_URL` (e.g. `http://127.0.0.1:7897`).
+   - **Prefer `~/.my-websearch/config.json` over client `env`**: put `proxy.url` and API keys in the config file. Some MCP clients (e.g. WorkBuddy) fingerprint the server by `command + args + env key names + cwd`, so adding a `PROXY_URL` env entry changes the trust fingerprint and the server may silently drop out of the session. Config-file settings are read at startup and avoid that.
 
 2. **Proxy is configured properly, but overseas engines fail or timeout? (Upstream IP Rate Limiting, NOT a Config Error)**
    - **DuckDuckGo returns HTTP 202 / challenge**: DDG rate-limits the egress IP. The first query may succeed and later ones return `anomalyDetectionBlock`; cookie warming cannot resolve this upstream rate limit. Change the egress IP or wait for cooldown.

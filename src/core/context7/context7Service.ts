@@ -44,6 +44,7 @@ type ResolvedLibraryEntry = {
     bestId: string;
     alternatives: Array<{ id: string; title: string; description?: string }>;
     confidence: 'high' | 'medium' | 'low';
+    warnings?: string[];
     expiresAt: number;
 };
 const resolvedNameCache = new Map<string, ResolvedLibraryEntry>();
@@ -85,15 +86,102 @@ export function resetContext7Cache(): void {
 }
 
 /**
+ * 常见裸库名 → 官方 Context7 仓库前缀。
+ *
+ * 只用于「用户只传了库名」时的歧义消解：Context7 搜索会把第三方同名包
+ * （如 /catppuccin/tailwindcss）排在官方库前面，而两边 slug 都叫 tailwindcss，
+ * 仅按 slug 精确匹配会把第三方包判成 high confidence。
+ * 完整 ID（/owner/repo）永远优先，不经过这里。
+ */
+const OFFICIAL_LIBRARY_HINTS: Record<string, string[]> = {
+    tailwindcss: ['tailwindlabs/tailwindcss'],
+    react: ['facebook/react'],
+    vue: ['vuejs/core'],
+    next: ['vercel/next.js'],
+    'next.js': ['vercel/next.js'],
+    nuxt: ['nuxt/nuxt'],
+    svelte: ['sveltejs/svelte'],
+    angular: ['angular/angular'],
+    express: ['expressjs/express'],
+    fastapi: ['fastapi/fastapi'],
+    django: ['django/django'],
+    typescript: ['microsoft/typescript'],
+    node: ['nodejs/node'],
+    nodejs: ['nodejs/node'],
+    deno: ['denoland/deno'],
+    bun: ['oven-sh/bun'],
+    vite: ['vitejs/vite'],
+    webpack: ['webpack/webpack'],
+    prisma: ['prisma/prisma'],
+    supabase: ['supabase/supabase'],
+    pytorch: ['pytorch/pytorch'],
+    tensorflow: ['tensorflow/tensorflow']
+};
+
+function normalizeLibraryKey(raw: string): string {
+    return raw.trim().toLowerCase().replace(/^\//, '').replace(/@.*$/, '');
+}
+
+function ownerOfLibraryId(id: string): string {
+    return id.replace(/^\//, '').split('/')[0]?.toLowerCase() ?? '';
+}
+
+function slugOfLibraryId(id: string): string {
+    return (id.replace(/^\//, '').split('/')[1] ?? '').split('@')[0]?.toLowerCase() ?? '';
+}
+
+function isOfficialHintedCandidate(candidate: Context7Library, rawInput: string): boolean {
+    const hints = OFFICIAL_LIBRARY_HINTS[normalizeLibraryKey(rawInput)];
+    if (!hints) {
+        return false;
+    }
+    const id = candidate.id.replace(/^\//, '').toLowerCase();
+    return hints.some((hint) => id === hint.toLowerCase() || id.startsWith(`${hint.toLowerCase()}@`));
+}
+
+/**
+ * 裸库名是否命中多个不同 owner 的候选（同名包歧义）。
+ * 例如 "tailwindcss" → /tailwindlabs/tailwindcss 与 /catppuccin/tailwindcss。
+ */
+export function findAmbiguousLibraryCandidates(candidates: Context7Library[], rawInput: string): Context7Library[] {
+    if (rawInput.includes('/')) {
+        return [];
+    }
+    const target = normalizeLibraryKey(rawInput);
+    const matches = candidates.filter((candidate) => (
+        slugOfLibraryId(candidate.id) === target
+        || candidate.title.trim().toLowerCase() === target
+        || ownerOfLibraryId(candidate.id) === target
+    ));
+    const owners = new Set(matches.map((candidate) => ownerOfLibraryId(candidate.id)));
+    return owners.size > 1 ? matches : [];
+}
+
+/**
  * 候选库智能打分函数（防个人 fork / 镜像库排在官方库前面）：
- * 1. 名称或 ID 尾段精确匹配优先
- * 2. 综合质量分（trustScore + benchmarkScore）与代码片段数排序
+ * 1. 完整 ID 精确匹配优先
+ * 2. 裸库名优先命中官方映射
+ * 3. 名称/ID 尾段精确匹配优先，再按质量分排序
  */
 export function pickBestLibrary(candidates: Context7Library[], rawInput: string): Context7Library | undefined {
     if (!candidates || candidates.length === 0) {
         return undefined;
     }
-    const target = rawInput.trim().toLowerCase();
+    const raw = rawInput.trim();
+    const target = normalizeLibraryKey(raw);
+
+    if (raw.includes('/')) {
+        const exactId = candidates.find((candidate) => normalizeLibraryKey(candidate.id) === target);
+        if (exactId) {
+            return exactId;
+        }
+    } else {
+        const official = candidates.find((candidate) => isOfficialHintedCandidate(candidate, raw));
+        if (official) {
+            return official;
+        }
+    }
+
     return [...candidates].sort((a, b) => {
         const aExact = a.title.toLowerCase() === target || a.id.toLowerCase().endsWith(`/${target}`) ? 1 : 0;
         const bExact = b.title.toLowerCase() === target || b.id.toLowerCase().endsWith(`/${target}`) ? 1 : 0;
@@ -110,18 +198,25 @@ export function pickBestLibrary(candidates: Context7Library[], rawInput: string)
 
 /**
  * 候选库匹配置信度评估：
- * - high: 库名/别名/完整ID精确匹配
- * - medium: 包含关系或词干高度接近
+ * - high: 库名/别名/完整ID精确匹配，且不是「同名多 owner」的歧义命中
+ * - medium: 包含关系、词干接近，或裸库名存在同名第三方包
  * - low: 模糊弱相关（避免未知库/拼写错误自信地返回无关文档）
  */
 export function evaluateLibraryMatchConfidence(
     candidate: Context7Library,
-    rawInput: string
+    rawInput: string,
+    allCandidates: Context7Library[] = []
 ): 'high' | 'medium' | 'low' {
     const target = rawInput.trim().toLowerCase().replace(/^@/, '');
     const candidateTitle = candidate.title.trim().toLowerCase();
     const candidateId = candidate.id.trim().toLowerCase().replace(/^\//, '');
     const candidateSlug = candidateId.split('/').pop()?.split('@')[0] ?? '';
+
+    const ambiguous = findAmbiguousLibraryCandidates(allCandidates, rawInput).length > 0;
+    const official = isOfficialHintedCandidate(candidate, rawInput);
+    const capIfAmbiguous = (level: 'high' | 'medium' | 'low'): 'high' | 'medium' | 'low' => (
+        level === 'high' && ambiguous && !official ? 'medium' : level
+    );
 
     // 精确匹配：标题、完整ID或尾部slug完全一致
     if (
@@ -130,7 +225,7 @@ export function evaluateLibraryMatchConfidence(
         candidateId === target ||
         candidateId.endsWith(`/${target}`)
     ) {
-        return 'high';
+        return capIfAmbiguous('high');
     }
 
     // 去除特殊字符后的精确匹配（如 next.js 与 nextjs）
@@ -142,7 +237,7 @@ export function evaluateLibraryMatchConfidence(
         cleanTarget.length > 0 &&
         (cleanSlug === cleanTarget || cleanTitle === cleanTarget)
     ) {
-        return 'high';
+        return capIfAmbiguous('high');
     }
 
     // 中等置信度：包含关系（目标包含slug或slug包含目标，且长度差距不大）
@@ -223,14 +318,17 @@ export function createContext7Services() {
                     let bestId: string;
                     let alternatives: Array<{ id: string; title: string; description?: string }> = [];
                     let confidence: 'high' | 'medium' | 'low' = 'high';
+                    let resolutionWarnings: string[] = [];
 
                     const cachedResolved = resolvedNameCache.get(normalizedKey);
                     if (cachedResolved && now < cachedResolved.expiresAt) {
                         bestId = cachedResolved.bestId;
                         alternatives = cachedResolved.alternatives;
                         confidence = cachedResolved.confidence;
+                        resolutionWarnings = cachedResolved.warnings ?? [];
                     } else {
                         const searchRes = await searchContext7Libraries(libraryName, input.query, 5);
+                        const ambiguous = findAmbiguousLibraryCandidates(searchRes.results, libraryName);
                         const best = pickBestLibrary(searchRes.results, libraryName);
                         if (!best) {
                             throw new AppError({
@@ -241,16 +339,26 @@ export function createContext7Services() {
                             });
                         }
                         bestId = best.id;
-                        confidence = evaluateLibraryMatchConfidence(best, libraryName);
+                        confidence = evaluateLibraryMatchConfidence(best, libraryName, searchRes.results);
                         alternatives = searchRes.results
                             .filter((r) => r.id !== best.id)
                             .slice(0, 3)
                             .map((r) => ({ id: r.id, title: r.title, description: r.description }));
 
+                        // 同名多 owner：把候选与「改用完整 ID」的提示带上，避免把第三方包当官方文档
+                        if (ambiguous.length > 1 && !isOfficialHintedCandidate(best, libraryName)) {
+                            resolutionWarnings = [
+                                `The name "${libraryName}" matches multiple repositories `
+                                + `(${ambiguous.slice(0, 3).map((item) => item.id).join(', ')}). `
+                                + 'The selected one may not be the official package; pass a full Context7 ID such as /owner/repo to disambiguate.'
+                            ];
+                        }
+
                         resolvedNameCache.set(normalizedKey, {
                             bestId,
                             alternatives,
                             confidence,
+                            warnings: resolutionWarnings,
                             expiresAt: now + RESOLVED_NAME_CACHE_TTL_MS
                         });
                     }
@@ -281,7 +389,8 @@ export function createContext7Services() {
                         ...docsResult,
                         resolvedFrom: originalRequested ?? libraryName,
                         alternativeLibraries: alternatives.length > 0 ? alternatives : undefined,
-                        matchConfidence: confidence
+                        matchConfidence: confidence,
+                        ...(resolutionWarnings.length > 0 ? { warnings: resolutionWarnings } : {})
                     };
                     return enriched;
                 }

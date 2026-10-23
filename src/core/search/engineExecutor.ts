@@ -139,7 +139,7 @@ export interface ExecutePrimaryEnginesOptions {
 export interface ExecutePrimaryEnginesResult {
     engineResults: SearchResult[][];
     partialFailures: SearchExecutionFailure[];
-    engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }>;
+    engineMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean; cancelled?: boolean }>;
     directAnswer?: string;
     /** 是否因为结果已足够而提前返回（未完成的引擎被 abort，不计失败、不计延迟样本） */
     earlyReturn?: boolean;
@@ -532,7 +532,10 @@ export async function executePrimaryEngines(
     return {
         engineResults,
         partialFailures,
-        engineMetrics,
+        engineMetrics: [
+            ...engineMetrics.filter(Boolean),
+            ...cancelledEngines.map((item) => ({ engine: item.engine, ms: 0, count: 0, cancelled: true as const }))
+        ],
         directAnswer,
         ...(cancelledEngines.length > 0 ? { cancelledEngines } : {}),
         ...(collected.earlyReturn ? { earlyReturn: true } : {})

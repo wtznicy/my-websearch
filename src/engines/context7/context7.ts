@@ -109,8 +109,10 @@ export type Context7DocsResult = {
     resolvedFrom?: string;
     /** 备选候选库简表（解决歧义与多选） */
     alternativeLibraries?: Array<{ id: string; title: string; description?: string }>;
-    /** 自然库名解析时的匹配置信度：high (精确匹配/别名), medium (前缀/包含), low (仅模糊相关) */
+    /** 自然库名解析时的匹配置信度：high (精确匹配/别名), medium (前缀/包含/同名歧义), low (仅模糊相关) */
     matchConfidence?: 'high' | 'medium' | 'low';
+    /** 解析阶段的附加告警（如裸库名命中多个同名仓库） */
+    warnings?: string[];
 };
 
 function getApiKey(): string | undefined {

@@ -5,6 +5,8 @@ All notable changes to `my-websearch` are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **`queryDocs` 不再把第三方同名包当官方库（high confidence）**：裸库名 `tailwindcss` 曾解析到 `/catppuccin/tailwindcss`。现在裸库名优先命中官方映射（tailwindlabs、facebook、vuejs 等 22 个高风险库），同名多 owner 命中时置信度最高 `medium`，并附带候选列表与「改用完整 Context7 ID」的 warning；完整 `/owner/repo` 仍精确优先。
+- **`limit` 语义写清楚 + 被取消引擎进 `engineMetrics`**：工具描述改为「合并后的目标总数，不是每引擎配额」；早退取消的引擎现在以 `cancelled: true` 出现在 `engineMetrics`，不再凭空消失（配合已有的 `cancelledEngines`）。
 - **被早退取消的引擎不再「看起来像返回 0 条」**：主引擎/级联因结果足够而 abort 的引擎，现在写入 `cancelledEngines`（含 engine/reason/message）并追加 warning，CLI 也会打印「Cancelled engines」；此前这些引擎既无结果也无失败记录，外部无法区分「0 条」与「没来得及」。
 - **显式点名引擎时禁用早退**：用户用 `engines`/`--engines` 点名的引擎不再被兄弟引擎的早退 abort（此前 `--engines github,stackoverflow` 里 SO 常被 github 的快速结果取消，表现为 0 条）；代价是显式多引擎会等到各自完成。
 - **系统代理不再「只检测、不使用」**：搜索与抓取入口会先 `ensureSystemProxyDetected()` 预热检测，首次请求即可走系统代理；此前缓存为空时首发直连失败（如 react.dev 的 TLS reset），事后才在错误提示里补检测。
@@ -12,6 +14,8 @@ All notable changes to `my-websearch` are documented in this file.
 
 ### Changed
 - 显式 `PROXY_URL` 仍按 `PROXY_ENGINES` 白名单生效（默认仅海外引擎），国内引擎保持直连；不配 `PROXY_URL` 时则自动使用系统代理。
+- **权威域名白名单扩充**：补入 tailwindcss.com、react.dev、vuejs.org、angular.dev、nextjs.org、typescriptlang.org、fastapi.tiangolo.com、kubernetes.io 等 25 个官方文档站，缓解中文查询被 runoob/镜像站挤占（可用 `SEARCH_AUTHORITY_DOMAINS` 继续追加）。
+- **文档修正**：README 的「13-Engine」改为 14；`code` 引擎标记从「🇨🇳 直连」改为「🌐 国内需代理」；代理排障从「没有 `PROXY_URL` 就没有系统代理」改为「系统代理自动检测」，并补充 WorkBuddy 信任指纹（`env` 键名参与指纹）建议改用 `~/.my-websearch/config.json`。
 
 ## [1.3.7] - 2026-10-23
 

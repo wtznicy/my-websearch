@@ -206,7 +206,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     infoSnippets: context7Result.infoSnippets,
                     codeSnippets: context7Result.codeSnippets,
                     alternativeLibraries: context7Result.alternativeLibraries,
-                    warnings: unknownWarnings
+                    warnings: [...(context7Result.warnings ?? []), ...unknownWarnings]
                 }));
                 return {
                     content: [{ type: 'text', text }],
