@@ -5,7 +5,11 @@ All notable changes to `my-websearch` are documented in this file.
 ## [Unreleased]
 
 ### Fixed
-- **`directAnswer` 不再泄漏 CSS**：`.text()` 会把 `<style>` 内容当文本返回（实测 `#rscarousel strong{...}`）；新增 `textFromSelection`（先删 style/script/noscript/svg 再取文本）与 `stripCssFragments` 兜底，Bing/Baidu 答案卡和出口层都清洗。
+- **GitHub/Gitee 内容抓取加总预算 + host 熔断**：README 此前 7 个候选 × 3 个 ref × 10s（网络错误再 ×2）最坏可叠到 90~180s；现在共享 `GITHUB_CONTENT_BUDGET_MS`（默认 12s，CDN-first 6s）、单次上限 4.5s，失败 host 本次调用内不再重试。
+- **blob 尊重 CDN-first**：源码文件此前固定 raw 15s + jsDelivr 15s，开关完全不生效；现在与 README 共用开关与预算，CDN-first 时直接走 CDN，预算有剩余才回退 raw。
+- **jsDelivr 多域名失败转移**：`cdn.jsdelivr.net` → `fastly.jsdelivr.net` → `gcore.jsdelivr.net`，仅在网络层失败时轮转（404 不换域名）。
+- **PR 变更文件列表级截断**：只列前 30 个 + `… and N more`，不再被全局字符上限砍在半行；Gitee 的 `files` 端点忽略 `per_page` 的现状已在代码中注明，并用 `changed_files` 标注“first N of M”。
+- `directAnswer` 不再泄漏 CSS：`.text()` 会把 `<style>` 内容当文本返回（实测 `#rscarousel strong{...}`）；新增 `textFromSelection`（先删 style/script/noscript/svg 再取文本）与 `stripCssFragments` 兜底，Bing/Baidu 答案卡和出口层都清洗。
 - **Bing 不再把答案卡/轮播链接当自然结果**：`RESULT_SELECTORS` 只保留 `li.b_algo`，并排除 `.b_ans`/`#rscarousel`/`.b_related` 容器（此前购物卡商品页会混进结果）。
 - **`extract`/`selector`/`readability`/`includeLinks` 强制 HTML 内容协商**：默认 `Accept` 优先 Markdown，站点（实测 benchlm.ai）会直接返回 `text/markdown` 导致 `extract` 报错；现在这类请求发 `text/html` 优先，并跳过 alternate Markdown 覆盖。
 - **Stack Overflow 查询放松**：`q` 是全词 AND，`asyncio gather vs create_task difference` 实测 0 条；现在按「原查询 → 去比较词 → 去停用词 → 标识符组合」逐级降级并返回 relaxed warning。
@@ -14,6 +18,8 @@ All notable changes to `my-websearch` are documented in this file.
 ### Changed
 - **GitHub 概念型查询质量**：剥掉 `best practices/guide/tutorial` 等意图词后按主题词重搜并合并；低星仓库（<10/＜50）降权；非排错类查询不再用 Issue 补齐结果。
 - **Stack Overflow 质量信号**：0 回答/负分问题降权。
+- **工具描述与 CLI 帮助补 Gitee 示例**：明确 GitHub `/pull/<n>` 与 Gitee `/pulls/<n>` 的路径差异，避免模型只锚定 GitHub 示例。
+- 新环境变量 `GITHUB_CONTENT_CDN_FIRST`（旧名 `GITHUB_README_CDN_FIRST` 兼容）与 `GITHUB_CONTENT_BUDGET_MS`。
 
 ## [1.3.6] - 2026-10-23
 

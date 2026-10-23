@@ -164,7 +164,7 @@ describe('fetchGithubContent / fetchGithubReadme extended capabilities', () => {
         expect(result).toContain('- **Branch**: `feature/stream` -> `main`');
         expect(result).toContain('- **Changes**: +120 -15 across 2 files');
         expect(result).toContain('This PR implements streaming for responses.');
-        expect(result).toContain('## Changed Files (2)');
+        expect(result).toContain('## Changed Files (2 of 2)');
         expect(result).toContain('`src/stream.ts` (+100, -10, status: added)');
     });
 
@@ -277,5 +277,55 @@ describe('fetchWebContent integration with GitHub URLs', () => {
         expect(mockGithubFetcher).toHaveBeenCalled();
         expect(mockFallbackWebFetcher).toHaveBeenCalled();
         expect(res.content).toBe('Web fallback html');
+    });
+
+    it('routes Gitee pull request URLs and truncates a 200-file list cleanly', async () => {
+        const files = Array.from({ length: 200 }, (_, index) => ({
+            filename: `hutool-core/src/main/java/File${index}.java`,
+            additions: 1,
+            deletions: 1,
+            status: 'modified'
+        }));
+        vi.spyOn(axios, 'request')
+            .mockResolvedValueOnce({
+                status: 200,
+                data: {
+                    number: 1461,
+                    title: 'Big refactor',
+                    state: 'open',
+                    user: { login: 'author' },
+                    head: { ref: 'feature' },
+                    base: { ref: 'master' },
+                    html_url: 'https://gitee.com/o/r/pulls/1461'
+                },
+                headers: {}
+            })
+            .mockResolvedValueOnce({ status: 200, data: files, headers: {} });
+
+        const result = await fetchGithubContent('https://gitee.com/o/r/pulls/1461');
+        expect(result).toContain('# Pull Request #1461: Big refactor');
+        expect(result).toContain('## Changed Files (30 of 200)');
+        expect(result).toContain('… and 170 more');
+        // 列表级截断后不应再出现第 31 个文件
+        expect(result).not.toContain('File30.java');
+    });
+
+    it('routes Gitee issue URLs', async () => {
+        vi.spyOn(axios, 'request').mockResolvedValue({
+            status: 200,
+            data: {
+                number: 42,
+                title: 'Gitee issue title',
+                state: 'open',
+                user: { login: 'someone' },
+                body: 'Issue body',
+                created_at: '2026-01-01T00:00:00Z',
+                html_url: 'https://gitee.com/o/r/issues/42'
+            },
+            headers: {}
+        });
+
+        const result = await fetchGithubContent('https://gitee.com/o/r/issues/42');
+        expect(result).toContain('Gitee issue title');
     });
 });

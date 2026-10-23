@@ -7,6 +7,18 @@ import { detectSystemProxy } from '../../utils/systemProxy.js';
 import { AppError } from '../../core/errors.js';
 import { detectLanguageFromPath, formatSourceFile, renderAsciiTree } from './format.js';
 import { fetchGiteeBlob, fetchGiteeIssue, fetchGiteePullRequest, fetchGiteeTree } from './gitee.js';
+import {
+    attemptTimeoutMs,
+    buildJsdelivrPath,
+    ContentBudgetExhaustedError,
+    createContentBudget,
+    formatChangedFilesSection,
+    isBudgetExhausted,
+    isGithubContentCdnFirst,
+    JSDELIVR_HOSTS,
+    remainingMs,
+    type ContentBudget
+} from './contentBudget.js';
 
 export { detectLanguageFromPath, formatSourceFile, renderAsciiTree };
 
@@ -29,7 +41,6 @@ const RAW_GITHUB_BASE = 'https://raw.githubusercontent.com';
 // NOTE (P0-5): An empty ref (`''`) on jsDelivr 301-redirects to the latest semver git tag
 // (e.g. `tokio@0.1.5` from 2018) instead of the default branch! Always try explicit branch
 // refs (`@main`, `@master`) before falling back to `''`.
-const JSDELIVR_CDN_BASE = 'https://cdn.jsdelivr.net/gh';
 export const JSDELIVR_REF_CANDIDATES = ['@main', '@master', ''];
 
 // raw.githubusercontent.com 直连可达性探测：3s 超时、失败重试 1 次、结果缓存 5 分钟。
@@ -96,8 +107,8 @@ type ReadmeFetchOutcome =
     | { status: 'invalid'; message: string }
     | { status: 'error'; message: string; httpStatus?: number };
 
-/** 构造 README 抓取请求选项；forceDirect=true 时直连（raw 直连额外用可信 host 语义） */
-function buildReadmeOptions(label: string, forceDirect: boolean, timeout: number) {
+/** 构造 README 抓取请求选项；forceDirect=true 时直连（raw / jsDelivr 都是固定可信 CDN host） */
+function buildReadmeOptions(label: string, forceDirect: boolean, timeout: number, signal?: AbortSignal) {
     return {
         ...buildAxiosRequestOptions({
             headers: {
@@ -105,9 +116,13 @@ function buildReadmeOptions(label: string, forceDirect: boolean, timeout: number
                 // 可选 GITHUB_TOKEN：提高 raw 的速率上限（匿名额度用尽时会 403，README 抓取整体失败）
                 ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
             },
-            trustedStaticHost: label === 'raw' && forceDirect,
+            // raw 与 jsDelivr 的域名都由代码硬编码，属于「固定可信 host」。
+            // 走 trustedStaticHost 还能避开 request-filtering-agent 的 fake-IP 白名单在
+            // IPv6 目标上的 `Invalid CIDR 198.18.0.0/15` 崩溃（该库拿 v4 CIDR 去匹配 v6 地址）。
+            trustedStaticHost: forceDirect && (label === 'raw' || label === 'jsDelivr'),
             forceDirect,
             timeout,
+            ...(signal ? { signal } : {}),
             responseType: 'text',
             validateStatus: (status) => status === 200 || status === 404
         })
@@ -115,36 +130,63 @@ function buildReadmeOptions(label: string, forceDirect: boolean, timeout: number
 }
 
 /**
- * jsDelivr CDN 抓取：直连优先、代理兜底（requestDirectFirst）。
- * jsDelivr 是 raw 失败后的最后兜底，冷启动/并发时偶发超时（ECONNABORTED 实测），
- * 网络层错误重试 1 次；HTTP 状态错误（404/5xx）不重试。
+ * jsDelivr CDN 抓取：host 轮转，只在网络层失败时换下一个域名。
+ * 404/5xx 属于内容问题，换域名结果一样，直接交回上层分类。
  */
-async function fetchJsDelivr(url: string, timeout: number): Promise<AxiosResponse> {
+async function fetchJsDelivr(pathAfterGh: string, budget: ContentBudget, signal?: AbortSignal): Promise<AxiosResponse> {
+    const hosts = budget.preferredHost
+        ? [budget.preferredHost, ...JSDELIVR_HOSTS.filter((host) => host !== budget.preferredHost)]
+        : [...JSDELIVR_HOSTS];
     let lastError: unknown;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+
+    for (const host of hosts) {
+        if (budget.deadHosts.has(host) || isBudgetExhausted(budget)) {
+            continue;
+        }
         try {
-            return await requestDirectFirst('GET', url, (forceDirect) => buildReadmeOptions('jsDelivr', forceDirect, timeout), 'jsDelivr CDN');
+            const response = await requestDirectFirst(
+                'GET',
+                `https://${host}/gh${pathAfterGh}`,
+                (forceDirect) => buildReadmeOptions('jsDelivr', forceDirect, attemptTimeoutMs(budget), signal),
+                `jsDelivr CDN (${host})`
+            );
+            budget.preferredHost = host;
+            return response;
         } catch (error) {
             lastError = error;
             const message = error instanceof Error ? error.message : String(error);
             if (!isNetworkLayerError(message)) {
                 throw error;
             }
-            console.warn(`jsDelivr network-layer failure (attempt ${attempt + 1}/2), retrying: ${message}`);
+            budget.deadHosts.add(host);
+            console.warn(`jsDelivr host ${host} failed (${message}); trying next host`);
         }
     }
-    throw lastError;
+
+    throw lastError ?? new ContentBudgetExhaustedError();
 }
 
+type ReadmeSource =
+    | { kind: 'raw'; url: string }
+    | { kind: 'jsdelivr'; path: string };
+
 /**
- * Fetch one README candidate URL and classify the outcome.
- * @param url Candidate URL to fetch
- * @param label Source label for logs ('raw' or 'jsDelivr')
- * @param timeout Request timeout in ms
+ * Fetch one README candidate and classify the outcome.
+ * 所有请求共享同一个 ContentBudget：单次 timeout 取 min(4.5s, 剩余预算)。
  */
-async function fetchReadmeSource(url: string, label: string, timeout: number): Promise<ReadmeFetchOutcome> {
+async function fetchReadmeSource(source: ReadmeSource, budget: ContentBudget): Promise<ReadmeFetchOutcome> {
+    const label = source.kind === 'raw' ? 'raw' : 'jsDelivr';
+    const displayUrl = source.kind === 'raw'
+        ? source.url
+        : `https://${budget.preferredHost ?? JSDELIVR_HOSTS[0]}/gh${source.path}`;
+    const timeout = attemptTimeoutMs(budget);
+    // 硬预算：即使 requestDirectFirst 内部先直连再代理（两次请求），也不能突破总预算
+    const budgetController = new AbortController();
+    const budgetTimer = setTimeout(() => budgetController.abort(new ContentBudgetExhaustedError()), Math.max(1, remainingMs(budget)));
+    budgetTimer.unref?.();
+
     try {
-        console.error(`Fetching README from ${label}: ${url}`);
+        console.error(`Fetching README from ${label}: ${displayUrl}`);
 
         // raw：先探测直连可达性——
         // 直连可达 → 直连（可信 host，绕过 DNS 私网过滤，避免 100.64.0.0/10 误判为 SSRF）；
@@ -153,18 +195,22 @@ async function fetchReadmeSource(url: string, label: string, timeout: number): P
         // 直连不可达且配置了代理 → raw 走代理（代理通常可通 GitHub）；
         // 直连不可达且无代理 → 返回错误，由主循环转 jsDelivr CDN 兜底。
         let response: AxiosResponse;
-        if (label === 'raw') {
+        if (source.kind === 'raw') {
             const hasProxyAvailable = async () => Boolean((config.useProxy && config.proxyUrl) || (await detectSystemProxy()));
-            if (await isRawDirectlyReachable()) {
+            // 探测本身也要花 3s：预算不够时跳过探测，直接尝试直连（失败再走代理），
+            // 否则 CDN-first 的「快速失败」会被探测时间吃掉。
+            const canAffordProbe = remainingMs(budget) > RAW_PROBE_TIMEOUT_MS;
+            if (!canAffordProbe || await isRawDirectlyReachable()) {
                 try {
-                    response = await requestWithSafeRedirects('GET', url, buildReadmeOptions('raw', true, timeout), 'raw.githubusercontent.com');
+                    response = await requestWithSafeRedirects('GET', source.url, buildReadmeOptions('raw', true, timeout, budgetController.signal), 'raw.githubusercontent.com');
                 } catch (directError) {
                     const directMsg = directError instanceof Error ? directError.message : String(directError);
                     if (isNetworkLayerError(directMsg)) {
                         rawProbeCache = { reachable: false, checkedAt: Date.now() };
-                        if (await hasProxyAvailable()) {
-                            console.warn(`Direct raw.githubusercontent.com fetch failed (${directMsg}), retrying via proxy: ${url}`);
-                            response = await requestWithSafeRedirects('GET', url, buildReadmeOptions('raw', false, timeout), 'raw.githubusercontent.com (proxy)');
+                        // 系统代理探测本身可能要 1-3s；预算不够时不要为「可能存在的代理」再烧一轮
+                        if (remainingMs(budget) > 1000 && await hasProxyAvailable()) {
+                            console.warn(`Direct raw.githubusercontent.com fetch failed (${directMsg}), retrying via proxy: ${source.url}`);
+                            response = await requestWithSafeRedirects('GET', source.url, buildReadmeOptions('raw', false, timeout, budgetController.signal), 'raw.githubusercontent.com (proxy)');
                         } else {
                             throw directError;
                         }
@@ -172,20 +218,29 @@ async function fetchReadmeSource(url: string, label: string, timeout: number): P
                         throw directError;
                     }
                 }
-            } else if (await hasProxyAvailable()) {
-                response = await requestWithSafeRedirects('GET', url, buildReadmeOptions('raw', false, timeout), 'raw.githubusercontent.com (proxy)');
+            } else if (remainingMs(budget) > 1000 && await hasProxyAvailable()) {
+                response = await requestWithSafeRedirects('GET', source.url, buildReadmeOptions('raw', false, timeout, budgetController.signal), 'raw.githubusercontent.com (proxy)');
             } else {
                 return { status: 'error', message: 'raw.githubusercontent.com is unreachable from the current network without a proxy' };
             }
         } else {
-            response = await fetchJsDelivr(url, timeout);
+            response = await fetchJsDelivr(source.path, budget, budgetController.signal);
         }
 
         if (response.status === 404) {
             return { status: 'notfound' };
         }
 
+        // jsDelivr 对个别文件会 301 回 raw（body 是 "Moved Permanently. Redirecting to ..." 文本）。
+        // 这种 body 不是文件内容，必须当错误处理，否则会把重定向说明当成源码返回。
+        if (response.status !== 200) {
+            return { status: 'error', message: `Upstream returned HTTP ${response.status} instead of file content`, httpStatus: response.status };
+        }
+
         if (typeof response.data === 'string' && response.data.trim()) {
+            if (/^Moved Permanently\.\s+Redirecting to /i.test(response.data.trim())) {
+                return { status: 'error', message: 'Upstream returned a redirect stub instead of file content' };
+            }
             return { status: 'ok', content: response.data };
         }
 
@@ -197,14 +252,16 @@ async function fetchReadmeSource(url: string, label: string, timeout: number): P
         const message = error instanceof Error ? error.message : String(error);
 
         if (isTimeout) {
-            console.error(`Timeout fetching README from ${label}: ${url}`);
+            console.error(`Timeout fetching README from ${label}: ${displayUrl}`);
         } else if (status !== undefined) {
-            console.error(`Failed to fetch README from ${label}: ${url} (HTTP ${status}):`, message);
+            console.error(`Failed to fetch README from ${label}: ${displayUrl} (HTTP ${status}):`, message);
         } else {
-            console.error(`Network error fetching README from ${label}: ${url}:`, message);
+            console.error(`Network error fetching README from ${label}: ${displayUrl}:`, message);
         }
 
         return { status: 'error', message, ...(status !== undefined ? { httpStatus: status } : {}) };
+    } finally {
+        clearTimeout(budgetTimer);
     }
 }
 
@@ -321,46 +378,69 @@ async function fetchReadme(owner: string, repo: string, host: RepoHost): Promise
         return null;
     }
 
-    // github：raw.githubusercontent.com + jsDelivr CDN 双路径
-    const cdnFirst = process.env.GITHUB_README_CDN_FIRST === 'true';
+    // github：raw.githubusercontent.com + jsDelivr CDN 双路径（共享总预算）
+    const cdnFirst = isGithubContentCdnFirst();
+    const budget = createContentBudget();
+    console.error(`GitHub content budget: ${Math.max(0, remainingMs(budget))}ms, cdnFirst=${cdnFirst}`);
     let rawUnreachable = false;
+    let rawTried = false;
     let sawRawError = false;
     let sawCdnError = false;
     let sawAuthoritativeNotFound = false;
+    let budgetExhausted = false;
+
+    const tryRaw = async (readmeFile: string): Promise<string | null> => {
+        if (rawUnreachable || isBudgetExhausted(budget)) {
+            return null;
+        }
+        rawTried = true;
+        const rawResult = await fetchReadmeSource(
+            { kind: 'raw', url: `${RAW_GITHUB_BASE}/${ownerEnc}/${repoEnc}/HEAD/${readmeFile}` },
+            budget
+        );
+        if (rawResult.status === 'ok') {
+            return rawResult.content;
+        }
+        if (rawResult.status === 'notfound') {
+            sawAuthoritativeNotFound = true;
+        } else if (rawResult.status === 'error') {
+            sawRawError = true;
+            rawUnreachable = true;
+        }
+        return null;
+    };
 
     for (let i = 0; i < README_CANDIDATES.length; i += 1) {
+        if (isBudgetExhausted(budget)) {
+            budgetExhausted = true;
+            break;
+        }
         const readmeFile = README_CANDIDATES[i]!;
 
-        // 1) Try raw.githubusercontent.com first, unless CDN-first is forced or
-        //    a previous candidate proved the raw host unreachable.
-        if (!cdnFirst && !rawUnreachable) {
-            const rawUrl = `${RAW_GITHUB_BASE}/${ownerEnc}/${repoEnc}/HEAD/${readmeFile}`;
-            const rawResult = await fetchReadmeSource(rawUrl, 'raw', 10000);
-
-            if (rawResult.status === 'ok') {
-                return rawResult.content;
+        // 1) raw first, unless CDN-first is forced or the raw host already failed.
+        if (!cdnFirst) {
+            const hit = await tryRaw(readmeFile);
+            if (hit !== null) {
+                return hit;
             }
-            if (rawResult.status === 'notfound') {
-                sawAuthoritativeNotFound = true;
-                // P1-1：raw 的 HEAD 已经指向仓库默认分支；既然 raw 可达且明确返回 404，
-                // 无需再对同一个文件名去 jsDelivr 重复请求多个分支 ref，直接看下一个候选文件名。
+            if (sawAuthoritativeNotFound && rawTried && !rawUnreachable) {
+                // raw 的 HEAD 已指向默认分支且明确 404：直接看下一个候选文件名
                 continue;
-            }
-            if (rawResult.status === 'error') {
-                sawRawError = true;
-                // Domain-level failure: later candidates should not retry the raw host.
-                rawUnreachable = true;
             }
         }
 
-        // 2) Fall back to the jsDelivr CDN mirror ONLY when CDN-first is enabled or raw was unreachable/invalid.
-        //    P1-1：仅对首选 README.md 轮询完整分支列表（@main / @master / 默认），
-        //    其余备选文件名（readme.md / README.rst 等）仅用默认 ref（''）探测 1 次，避免 10×5=50 次请求风暴。
+        // 2) jsDelivr 兜底（或 CDN-first 主路径）
+        //    仅对首选 README.md 轮询 @main/@master/默认，其余文件名只试默认 ref。
         const refsToTry = i === 0 ? JSDELIVR_REF_CANDIDATES : [''];
         for (const ref of refsToTry) {
-            const cdnUrl = `${JSDELIVR_CDN_BASE}/${ownerEnc}/${repoEnc}${ref}/${readmeFile}`;
-            const cdnResult = await fetchReadmeSource(cdnUrl, 'jsDelivr', 10000);
-
+            if (isBudgetExhausted(budget)) {
+                budgetExhausted = true;
+                break;
+            }
+            const cdnResult = await fetchReadmeSource(
+                { kind: 'jsdelivr', path: buildJsdelivrPath(ownerEnc, repoEnc, ref, readmeFile) },
+                budget
+            );
             if (cdnResult.status === 'ok') {
                 return cdnResult.content;
             }
@@ -368,8 +448,33 @@ async function fetchReadme(owner: string, repo: string, host: RepoHost): Promise
                 sawAuthoritativeNotFound = true;
             } else if (cdnResult.status === 'error') {
                 sawCdnError = true;
+                // 所有 host 都因网络失败被熔断时，本轮 network 分支会抛 budget/network 错误
+                if (budget.deadHosts.size >= JSDELIVR_HOSTS.length) {
+                    break;
+                }
             }
         }
+        if (budgetExhausted) {
+            break;
+        }
+    }
+
+    // CDN-first 但 CDN 全挂：若预算还有剩余，回退 raw 一次（而不是直接失败）
+    if (cdnFirst && sawCdnError && !rawTried && !isBudgetExhausted(budget)) {
+        const hit = await tryRaw(README_CANDIDATES[0]!);
+        if (hit !== null) {
+            return hit;
+        }
+    }
+
+    if (budgetExhausted) {
+        throw new AppError({
+            code: 'network_timeout',
+            retryable: true,
+            engine: 'github',
+            hint: 'Increase GITHUB_CONTENT_BUDGET_MS, enable a proxy, or retry later.',
+            message: `Failed to fetch README for ${owner}/${repo}: content budget exhausted before any source returned content.`
+        });
     }
 
     if ((sawRawError || sawCdnError) && !sawAuthoritativeNotFound) {
@@ -410,15 +515,42 @@ async function fetchGithubBlob(
     const cleanPath = filePath.split('/').map(encodeURIComponent).join('/');
     const branchEnc = encodeURIComponent(branch.trim());
 
-    const rawUrl = `${RAW_GITHUB_BASE}/${ownerEnc}/${repoEnc}/${branchEnc}/${cleanPath}`;
-    const rawResult = await fetchReadmeSource(rawUrl, 'raw', 15000);
+    // blob 与 README 共用同一套开关与预算：CDN-first 时不再先白等 raw。
+    const cdnFirst = isGithubContentCdnFirst();
+    const budget = createContentBudget();
+    const cdnPath = buildJsdelivrPath(ownerEnc, repoEnc, `@${branchEnc}`, cleanPath);
+
+    const tryCdn = async (): Promise<ReadmeFetchOutcome> => fetchReadmeSource({ kind: 'jsdelivr', path: cdnPath }, budget);
+    const tryRaw = async (): Promise<ReadmeFetchOutcome> => fetchReadmeSource(
+        { kind: 'raw', url: `${RAW_GITHUB_BASE}/${ownerEnc}/${repoEnc}/${branchEnc}/${cleanPath}` },
+        budget
+    );
+
+    let rawResult: ReadmeFetchOutcome = { status: 'error', message: 'raw source skipped (CDN-first)' };
+    let cdnResult: ReadmeFetchOutcome = { status: 'error', message: 'CDN source skipped' };
+
+    if (cdnFirst) {
+        cdnResult = await tryCdn();
+        if (cdnResult.status === 'ok') {
+            return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, cdnResult.content) };
+        }
+        // CDN 失败且预算还有剩余：补一次 raw（而不是直接失败）
+        if (!isBudgetExhausted(budget)) {
+            rawResult = await tryRaw();
+        }
+    } else {
+        rawResult = await tryRaw();
+        if (rawResult.status === 'ok') {
+            return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, rawResult.content) };
+        }
+        if (!isBudgetExhausted(budget)) {
+            cdnResult = await tryCdn();
+        }
+    }
+
     if (rawResult.status === 'ok') {
         return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, rawResult.content) };
     }
-
-    // jsDelivr 兜底
-    const cdnUrl = `${JSDELIVR_CDN_BASE}/${ownerEnc}/${repoEnc}@${branchEnc}/${cleanPath}`;
-    const cdnResult = await fetchReadmeSource(cdnUrl, 'jsDelivr', 15000);
     if (cdnResult.status === 'ok') {
         return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, cdnResult.content) };
     }
@@ -783,7 +915,9 @@ async function fetchGithubPullRequest(
 
         // 尝试获取修改的文件清单
         try {
-            const filesUrl = `https://api.github.com/repos/${ownerEnc}/${repoEnc}/pulls/${numEnc}/files?per_page=30`;
+            // per_page=100 是 GitHub 的上限：拿更多文件名用于「… and N more」的准确计数，
+            // 展示层再截到前 30 个（列表级截断，避免被全局字符上限砍在半行）。
+            const filesUrl = `https://api.github.com/repos/${ownerEnc}/${repoEnc}/pulls/${numEnc}/files?per_page=100`;
             const filesRes = await requestDirectFirst('GET', filesUrl, (forceDirect) => ({
                 ...buildAxiosRequestOptions({
                     headers,
@@ -800,10 +934,7 @@ async function fetchGithubPullRequest(
             }>;
 
             if (Array.isArray(files) && files.length > 0) {
-                lines.push('', `## Changed Files (${files.length}${prData.changed_files && prData.changed_files > files.length ? ` of ${prData.changed_files}` : ''})`);
-                for (const f of files) {
-                    lines.push(`- \`${f.filename}\` (+${f.additions}, -${f.deletions}, status: ${f.status})`);
-                }
+                lines.push(...formatChangedFilesSection(files, prData.changed_files ?? files.length));
             }
         } catch (filesErr) {
             console.warn(`Failed to fetch changed files for PR #${prNumber}:`, filesErr instanceof Error ? filesErr.message : String(filesErr));

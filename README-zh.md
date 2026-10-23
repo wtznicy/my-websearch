@@ -259,6 +259,8 @@ my-websearch doctor --reset-health
 | `SEARCH_DEADLINE_MS` | `30000` | 搜索任务全局超时硬预算（毫秒） |
 | `SEARCH_FUSION` | `legacy` | 结果融合模式：`legacy`（命中引擎数 + 到达顺序）或 `rrf`（按各引擎内排名做 Reciprocal Rank Fusion，并在重排阶段替换 position/consensus 两项）。RRF 默认关闭，等待更大评测集。 |
 | `SEARCH_FUSION_RRF_K` | `20` | RRF 常数 k，越小越放大排名差异；仅 `SEARCH_FUSION=rrf` 时生效。 |
+| `GITHUB_CONTENT_CDN_FIRST` | `false` | README 与源码文件优先走 jsDelivr（仅公开仓库）；旧名 `GITHUB_README_CDN_FIRST` 仍兼容。 |
+| `GITHUB_CONTENT_BUDGET_MS` | `12000`（CDN-first 时 `6000`） | 单次 `fetchGithubContent` 的总时间预算；单次尝试上限 4.5s。 |
 | `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | 引擎首次熔断冷却（429 / 202 / 验证状态）。连续失败指数退避（30s → 60s → 120s…）。 |
 | `ENGINE_CIRCUIT_MAX_COOLDOWN_MS` | `300000` | 熔断指数退避上限（默认 5 分钟）。 |
 | `SEARCH_AUTHORITY_DOMAINS` | 空 | 结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单） |

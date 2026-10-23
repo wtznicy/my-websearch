@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer';
 import type { AxiosResponse } from 'axios';
 import { AppError } from '../../core/errors.js';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
+import { formatChangedFilesSection } from './contentBudget.js';
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 import { formatSourceFile, renderAsciiTree } from './format.js';
 
@@ -272,6 +273,8 @@ type GiteePullRequest = {
     head?: { ref?: string };
     base?: { ref?: string };
     merged_at?: string | null;
+    /** Gitee 部分响应会带总变更文件数；缺失时以 files.length 为准 */
+    changed_files?: number;
 };
 
 type GiteePullFile = {
@@ -297,7 +300,9 @@ export async function fetchGiteePullRequest(owner: string, repo: string, prNumbe
     const pr = res.data as GiteePullRequest;
     let files: GiteePullFile[] = [];
     try {
-        const filesRes = await giteeGet(`${base}/files?per_page=30`, 'pull request files');
+        // 注意：Gitee 该端点目前**忽略 per_page**，实测 PR #1461 返回全部 200 个文件。
+        // 传入 100 只是表达意图；若将来开始分页，用 changed_files 判断是否只拿到首屏。
+        const filesRes = await giteeGet(`${base}/files?per_page=100`, 'pull request files');
         if (filesRes.status === 200 && Array.isArray(filesRes.data)) {
             files = filesRes.data;
         }
@@ -307,6 +312,9 @@ export async function fetchGiteePullRequest(owner: string, repo: string, prNumbe
 
     const additions = files.reduce((sum, file) => sum + (Number(file.additions) || 0), 0);
     const deletions = files.reduce((sum, file) => sum + (Number(file.deletions) || 0), 0);
+    // 总数优先用接口声明值；否则以实际拿到的列表为准（Gitee 现在返回全量）
+    const totalFiles = Math.max(Number(pr.changed_files) || 0, files.length);
+    const isPartial = files.length < totalFiles;
 
     const lines: string[] = [];
     lines.push(`# Pull Request #${pr.number ?? prNumber}: ${pr.title ?? '(no title)'}`);
@@ -314,7 +322,8 @@ export async function fetchGiteePullRequest(owner: string, repo: string, prNumbe
     if (pr.user?.login) lines.push(`- **Author**: @${pr.user.login}`);
     if (pr.head?.ref || pr.base?.ref) lines.push(`- **Branch**: \`${pr.head?.ref ?? '?'}\` -> \`${pr.base?.ref ?? '?'}\``);
     if (files.length > 0) {
-        lines.push(`- **Changes**: +${additions} -${deletions} across ${files.length} files`);
+        const scope = isPartial ? `first ${files.length} of ${totalFiles}` : `${totalFiles}`;
+        lines.push(`- **Changes**: +${additions} -${deletions} across ${scope} files${isPartial ? ' (totals cover fetched files only)' : ''}`);
     }
     if (pr.created_at) lines.push(`- **Created**: ${pr.created_at}`);
     if (pr.html_url) lines.push(`- **URL**: ${pr.html_url}`);
@@ -323,12 +332,8 @@ export async function fetchGiteePullRequest(owner: string, repo: string, prNumbe
     lines.push(pr.body?.trim() || '_No description provided._');
 
     if (files.length > 0) {
-        lines.push('');
-        lines.push(`## Changed Files (${files.length})`);
-        for (const file of files) {
-            const status = file.status ? `, status: ${file.status}` : '';
-            lines.push(`- \`${file.filename ?? 'unknown'}\` (+${file.additions ?? 0}, -${file.deletions ?? 0}${status})`);
-        }
+        // 列表级截断：只列前 30 个 + "… and N more"，避免被全局字符上限砍在半行
+        lines.push(...formatChangedFilesSection(files, totalFiles));
     }
 
     return lines.join('\n');

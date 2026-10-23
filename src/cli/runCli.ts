@@ -84,6 +84,7 @@ function formatCliHelp(): string {
         '    `--selector CSS` scopes extraction to the matched subtree (keeps code/tables, errors if nothing matches); `--retain-links` drops URLs to save tokens on index pages; `--focus KW` targets a section (bm25 ranks paragraphs by relevance by default; `--focus-mode window` keeps the old fixed window). `--citations` rewrites links to numbered references. `--extract JSON` takes a CSS-selector schema and returns structured JSON instead of markdown.',
         '  my-websearch fetch-github-content <url> [--daemon-url URL] [--spawn] [--json]',
         '    Read GitHub/Gitee README, one source file (/blob/), directory tree (/tree/), Issue, or PR. Alias: fetch-github-readme.',
+        '    GitHub: /pull/42 ; Gitee: /pulls/4. Examples: https://github.com/o/r/blob/main/README.md , https://gitee.com/o/r/blob/master/README.md',
         '  my-websearch fetch-csdn <url> [--daemon-url URL] [--spawn] [--json]',
         '  my-websearch fetch-juejin <url> [--daemon-url URL] [--spawn] [--json]',
         '  my-websearch resolve-library-id <name> [--query QUERY] [--limit N] [--daemon-url URL] [--spawn] [--json]',

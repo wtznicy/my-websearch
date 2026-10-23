@@ -49,7 +49,7 @@ export const SERVER_INSTRUCTIONS = `
 my-websearch provides 4 focused tools for web search, web extraction, Git repositories, and documentation:
 1. 'search': Multi-engine web and code search. Use for finding pages, articles, issues, and code snippets across Bing, Baidu, DuckDuckGo, Brave, GitHub, grep.app, etc. Supports multi-query, timeRange (day/week/month/year), and site filters.
 2. 'fetchWebContent': Extract readable content and markdown from generic web pages and PDF files. Use for reading articles, blogs, documentation pages, or downloading and parsing PDF documents.
-3. 'fetchGithubContent': Fetch GitHub/Gitee content by URL: README, a single source file (/blob/), a directory tree (/tree/), an Issue (/issues/), or a PR (/pull/). Example: https://github.com/owner/repo/blob/main/src/index.ts — ref may be a branch, tag, or commit; one file or directory per call, not a whole-repo clone.
+3. 'fetchGithubContent': Fetch GitHub/Gitee content by URL: README, a single source file (/blob/), a directory tree (/tree/), an Issue (/issues/), or a PR (/pull/ on GitHub, /pulls/ on Gitee). Examples: https://github.com/owner/repo/blob/main/src/index.ts ; https://gitee.com/owner/repo/blob/master/README.md ; https://github.com/owner/repo/issues/42 ; https://gitee.com/owner/repo/pulls/4 — ref may be a branch, tag, or commit; one file or directory per call, not a whole-repo clone.
 4. 'queryDocs': Direct access to official documentation and code snippets for libraries and frameworks (Context7 with npm/PyPI and GitHub fallback). Always prefer queryDocs over general web search for official library APIs and examples.
 
 Routing guidance:

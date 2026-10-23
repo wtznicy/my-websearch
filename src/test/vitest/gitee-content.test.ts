@@ -115,7 +115,7 @@ describe('Gitee content parity (blob / tree / issue / PR)', () => {
         expect(result).toContain('- **Status**: MERGED (merged: 2026-02-02T00:00:00+08:00)');
         expect(result).toContain('- **Branch**: `feat/stream` -> `main`');
         expect(result).toContain('- **Changes**: +7 -1 across 2 files');
-        expect(result).toContain('## Changed Files (2)');
+        expect(result).toContain('## Changed Files (2 of 2)');
         expect(result).toContain('`src/stream.ts` (+5, -1)');
         expect(result).toContain('`src/index.ts` (+2, -0, status: modified)');
     });

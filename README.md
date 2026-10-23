@@ -280,6 +280,8 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `OPEN_WEBSEARCH_DAEMON_HOST` / `OPEN_WEBSEARCH_DAEMON_PORT` | `127.0.0.1` / `3210` | Local REST daemon bind address (no auth: keep it on loopback) |
 | `METRICS_ENABLED` | `false` | Enables in-process counters and the daemon `/metrics` endpoint |
 | `FETCH_WEB_DEADLINE_MS` | `45000` | Hard deadline for one `fetchWebContent` call (cookie + browser + retries combined) |
+| `GITHUB_CONTENT_CDN_FIRST` | `false` | Prefer jsDelivr over `raw.githubusercontent.com` for **README and source files** (public repos only). Legacy alias `GITHUB_README_CDN_FIRST` still works. |
+| `GITHUB_CONTENT_BUDGET_MS` | `12000` (`6000` in CDN-first) | Total time budget for one `fetchGithubContent` call; per-attempt timeout is capped at 4.5s. |
 | `BING_PLAYWRIGHT_BUDGET_MS` | `6000` | Budget for the Bing Playwright fallback before the HTTP results are kept |
 | `MYWEBSEARCH_NO_AUTO_BOOTSTRAP` | unset | Set to `1` to stop copying API keys out of other apps' MCP configs on first run |
 
