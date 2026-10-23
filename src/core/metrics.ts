@@ -80,7 +80,17 @@ class MetricsCollector {
     private queryDocsMetrics = { total: 0, fallback: 0, sources: new Map<string, number>() };
 
     private get logLevel(): LogLevel {
-        return (process.env.LOG_LEVEL as LogLevel) || 'info';
+        const raw = process.env.LOG_LEVEL;
+        if (!raw) {
+            return 'info';
+        }
+        const allowed: LogLevel[] = ['quiet', 'debug', 'info', 'warn', 'error'];
+        if (allowed.includes(raw as LogLevel)) {
+            return raw as LogLevel;
+        }
+        // 非法值此前会静默退化成 debug（全开），在 daemon 里是噪声灾难；退回 info 并明确告警一次
+        console.error(`⚠️ Invalid LOG_LEVEL="${raw}". Expected one of: quiet, debug, info, warn, error. Falling back to "info".`);
+        return 'info';
     }
 
     private get metricsEnabled(): boolean {
@@ -104,14 +114,17 @@ class MetricsCollector {
     }
 
     recordFetchCacheHit(): void {
+        if (!this.metricsEnabled) return;
         this.fetchCacheMetrics.hits += 1;
     }
 
     recordFetchCacheMiss(): void {
+        if (!this.metricsEnabled) return;
         this.fetchCacheMetrics.misses += 1;
     }
 
     recordTimeRangeAttempt(isFallback: boolean): void {
+        if (!this.metricsEnabled) return;
         this.timeRangeMetrics.total += 1;
         if (isFallback) {
             this.timeRangeMetrics.fallback += 1;
@@ -119,6 +132,7 @@ class MetricsCollector {
     }
 
     recordPdfAttempt(success: boolean): void {
+        if (!this.metricsEnabled) return;
         this.pdfMetrics.total += 1;
         if (success) {
             this.pdfMetrics.success += 1;
@@ -128,6 +142,7 @@ class MetricsCollector {
     }
 
     recordQueryDocsAttempt(source: string, isFallback: boolean): void {
+        if (!this.metricsEnabled) return;
         this.queryDocsMetrics.total += 1;
         if (isFallback) {
             this.queryDocsMetrics.fallback += 1;

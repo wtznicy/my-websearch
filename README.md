@@ -219,6 +219,25 @@ When configuring or diagnosing proxy connectivity, refer to these common edge ca
 
 <a id="configuration"></a>
 
+## 🔐 Security Model (read before exposing the server)
+
+The defaults are safe **as a package**, and every one of them matters:
+
+| Default | What it protects |
+|---|---|
+| Bind to `127.0.0.1` | Nothing outside the machine can reach the port |
+| No authentication | Acceptable *only* because of loopback binding |
+| Host header validation | Blocks DNS-rebinding attacks from a browser on the same machine |
+| CORS disabled | No cross-origin browser access |
+
+**Relaxing one without the others silently removes the protection:**
+
+- `HOST=0.0.0.0` (Docker) → the Host allowlist follows the bind address automatically; if you also use a public domain, add it via `OPEN_WEBSEARCH_ALLOWED_HOSTS` (comma-separated).
+- Exposing to the public internet → put it behind a reverse proxy with authentication (or an SSH tunnel). The daemon prints a warning when bound to a non-loopback address.
+- MCP session IDs are identifiers, **not credentials** — anyone who can reach the port can resume a session.
+- `FETCH_WEB_INSECURE_TLS=true` disables certificate verification for *user-supplied URLs*; only enable it for a trusted network.
+- The app copies API keys it finds in `~/.gemini/config/mcp_config.json` / `~/.workbuddy/mcp.json` into `~/.my-websearch/config.json` (mode `0600`) on first run. Run `my-websearch doctor` to see where each key came from; set `MYWEBSEARCH_NO_AUTO_BOOTSTRAP=1` to disable the copy.
+
 ## ⚙️ Configuration & Environment Variables
 
 ### Global Configuration (`~/.my-websearch/config.json`)

@@ -201,6 +201,11 @@ function tryAutoBootstrapConfig(
     targetPath: string,
     options: { quiet?: boolean; targetEnv?: NodeJS.ProcessEnv } = {}
 ): MyWebSearchConfigFile | null {
+    // P2-20：默认仍然自动引导（保持零配置体验），但必须可关闭——
+    // 「把别的应用里的密钥复制到本应用目录」对安全敏感用户是意外行为。
+    if (process.env.MYWEBSEARCH_NO_AUTO_BOOTSTRAP === '1') {
+        return null;
+    }
     const home = os.homedir();
     const candidateFiles = [
         path.join(home, '.gemini', 'config', 'mcp_config.json'),

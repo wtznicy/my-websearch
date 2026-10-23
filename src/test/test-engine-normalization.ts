@@ -14,7 +14,8 @@ const SUPPORTED_ENGINES = [
     'github',
     'stackoverflow',
     'hackernews',
-    'arxiv'
+    'arxiv',
+    'code'
 ] as const;
 
 const engineSchema = z.array(

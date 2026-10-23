@@ -66,6 +66,10 @@ docker run -d \
   my-websearch:latest
 ```
 
+> **注意 Host 白名单**：`HOST=0.0.0.0` 时，程序会自动把绑定地址加入 Host 白名单。
+> 若通过域名/反向代理访问，还必须额外设置 `OPEN_WEBSEARCH_ALLOWED_HOSTS=your.domain.com`，
+> 否则 SDK 的 Host 校验会返回 403。该 API **没有鉴权**，暴露到公网前请加反向代理认证。
+
 ### 生产环境变量推荐清单
 ```env
 # 运行模式：仅 HTTP MCP 服务

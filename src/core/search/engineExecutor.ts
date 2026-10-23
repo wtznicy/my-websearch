@@ -16,7 +16,10 @@ import { recordEngineLatency, compactEngineLatencyFile, type EngineLatencySample
 const DEFAULT_ENGINE_CONCURRENCY_LIMITS: Record<string, number> = {
     sogou: 3,
     baidu: 4,
-    startpage: 2
+    startpage: 2,
+    // P2-16：bing 此前没有闸门，全局 semaphore 允许 20 并发压同一个 cachedBingSession，
+    // 安全性完全押注 Rust 侧实现；给 4-6 之间的保守值，避免会话被并发打散。
+    bing: 4
 };
 
 let engineConcurrencyLimits: Record<string, number> = { ...DEFAULT_ENGINE_CONCURRENCY_LIMITS };

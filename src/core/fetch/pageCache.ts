@@ -4,6 +4,10 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { looksLikeBotChallengePage } from '../antiBot/antiBotDetection.js';
 
+// 读路径写放大治理：60s 内同一 key 只更新一次 last_accessed_at（LRU 精度足够，避免每次命中都写盘）
+const lastTouchByKey = new Map<string, number>();
+const TOUCH_THROTTLE_MS = 60_000;
+
 export interface PageCacheRecord {
     urlHash: string;
     normalizedUrl: string;
@@ -254,7 +258,11 @@ class SqliteStorageBackend implements StorageBackend {
             return null;
         }
         const now = Date.now();
-        this.stmtTouch.run(now, key);
+        const lastTouch = lastTouchByKey.get(key) ?? 0;
+        if (now - lastTouch >= TOUCH_THROTTLE_MS) {
+            lastTouchByKey.set(key, now);
+            this.stmtTouch.run(now, key);
+        }
 
         return {
             urlHash: row.url_hash,

@@ -26,6 +26,7 @@ import type {
     SearchExecutionFailure
 } from './searchTypes.js';
 import { normalizeResultUrl, isPlaceholderResult, mergeSearchResults } from './mergeResults.js';
+import { normalizeSearchResult } from './normalizeResult.js';
 
 export { Semaphore, normalizeResultUrl, isPlaceholderResult, mergeSearchResults };
 export type { SearchExecutionContext, SearchEngineExecutor, SearchEngineExecutorMap, SearchExecutionFailure };
@@ -476,13 +477,17 @@ export function createSearchService(
                     allFailures.push(...cascade.cascadeFailures);
                     allMetrics.push(...cascade.cascadeMetrics);
 
-                    // 管道第 3 阶段：全局重排与截断；剥离内部 rankBoost，避免泄漏到公共 JSON
+                    // 管道第 3 阶段：全局重排与截断；剥离内部 rankBoost，避免泄漏到公共 JSON。
+                    // P2-15：所有引擎结果先过统一出口（URL 协议校验 / description 截断 / source 补全），
+                    // 保证下游时间过滤、去重与 canary 断言面一致。
                     merged = rankSearchResults(merged, cleanQuery, { authorityDomains: appConfig.authorityDomains })
                         .map((result) => {
                             const cleaned = { ...result };
                             delete cleaned.rankBoost;
                             return cleaned;
                         })
+                        .map((result) => normalizeSearchResult(result))
+                        .filter((result): result is SearchResult => result !== null)
                         .slice(0, limit);
 
                     // 日期归一化（publishedAt）与 timeRange 过滤

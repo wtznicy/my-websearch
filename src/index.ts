@@ -390,7 +390,8 @@ async function main() {
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
       const session = sessionId ? transports.streamable[sessionId] : undefined;
       if (!session) {
-        res.status(400).send('Invalid or missing session ID');
+        // MCP 规范：会话不存在应返回 404，客户端据此重建会话；400 会让客户端卡死在坏会话上
+        res.status(404).send('Session not found');
         return;
       }
 
@@ -468,7 +469,7 @@ async function main() {
         session.lastActiveAt = Date.now();
         await session.transport.handlePostMessage(req, res, req.body);
       } else {
-        res.status(400).send('No transport found for sessionId');
+        res.status(404).send('Session not found');
       }
     });
 

@@ -1,5 +1,6 @@
 // src/config.ts
 import ipaddr from 'ipaddr.js';
+import { OVERSEAS_ENGINE_NAMES } from './engines/meta.js';
 import {
     loadApplicationConfigEnv,
     sanitizePathForLog,
@@ -226,7 +227,9 @@ function applyLegacyOverrides(
 }
 
 export const DEFAULT_PROXY_URL = 'http://127.0.0.1:7897';
-export const DEFAULT_PROXY_ENGINES = ['duckduckgo', 'exa', 'brave', 'startpage', 'github', 'stackoverflow', 'hackernews', 'arxiv'];
+// 单一事实源：海外引擎集合定义在 engines/meta（无依赖模块，避免 registry→engines→httpRequest 环）。
+// 之前这里是一份手写清单，漏了 code，导致配置代理后 code 引擎仍走直连。
+export const DEFAULT_PROXY_ENGINES: string[] = [...OVERSEAS_ENGINE_NAMES];
 
 export interface ParsedProxyConfig {
     useProxy: boolean;

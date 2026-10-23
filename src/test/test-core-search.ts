@@ -350,7 +350,8 @@ async function testSearchZeroQuotaEngines(): Promise<void> {
 
     const result = await service.execute({ query: 'q', engines: ['bing', 'duckduckgo', 'startpage'], limit: 1 });
 
-    assertEqualArray(called, ['bing:1', 'duckduckgo:1', 'startpage:1'], 'every engine receives the full limit');
+    // 引擎并行启动的顺序不稳定（bing 现在还要过并发闸门），比较集合而不是顺序
+    assertEqualArray([...called].sort(), ['bing:1', 'duckduckgo:1', 'startpage:1'], 'every engine receives the full limit');
     assertEqual(result.partialFailures.length, 2, 'engines that return no results are reported');
     assertEqual(result.partialFailures.every((failure) => failure.code === 'no_results'), true, 'empty engines use no_results');
 

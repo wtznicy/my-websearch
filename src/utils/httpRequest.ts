@@ -320,6 +320,16 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
                 message: 'Redirect target points to a private or local network address'
             });
         }
+        // P1-14：代理模式下没有 request-filtering-agent 的连接层兜底，
+        // 「重定向到未缓存域名」的 DNS 落点无法同步复检。单标签主机名（intranet 别名）
+        // 不可能出现在公开站点上，直接拒绝能把大部分内网探测挡在同步钩子里。
+        if (target && !/[.:]/.test(target)) {
+            throw new AppError({
+                code: 'redirect_not_allowed',
+                retryable: false,
+                message: `Redirect target "${target}" is a single-label hostname (possible intranet alias)`
+            });
+        }
         // 若该 hostname 的解析结果已在 DNS 缓存中且解析到私网地址，同步拦截
         // （覆盖"重定向到域名、而该域名此前已解析到私网 IP"的场景，不发起新 DNS 查询）
         if (target) {

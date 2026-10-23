@@ -71,7 +71,8 @@
     "test:bing:live": "tsc && node build/test/test-bing-live.js",
     "test:article-fetch:live": "tsc && node build/test/test-article-fetch-live.js",
     "prepare": "git config core.hooksPath .githooks || true",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "canary": "node tools/canary.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

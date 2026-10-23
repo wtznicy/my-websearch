@@ -23,3 +23,6 @@ MCP_EVALUATION_REPORT.md
 # 临时采样/基准日志，不入库
 /.latency*.jsonl
 /.bench*.log
+
+# canary 基线（本机网络相关，不入库）
+/.canary-baseline.json

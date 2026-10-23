@@ -304,6 +304,12 @@ export async function startLocalDaemon(
     options: LocalDaemonOptions = {}
 ): Promise<LocalDaemonHandle> {
     const host = options.host ?? DEFAULT_HOST;
+    if (!['127.0.0.1', 'localhost', '::1', '[::1]'].includes(host)) {
+        console.error(
+            `⚠️ Daemon bound to non-loopback host "${host}": the REST API has NO authentication. `
+            + 'Put it behind a reverse proxy with auth, or use an SSH tunnel. See docs/ops/security.md.'
+        );
+    }
     const requestedPort = options.port ?? Number(process.env.OPEN_WEBSEARCH_DAEMON_PORT || DEFAULT_PORT);
     const version = options.version ?? 'unknown';
 
