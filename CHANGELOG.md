@@ -5,6 +5,8 @@ All notable changes to `my-websearch` are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **被早退取消的引擎不再「看起来像返回 0 条」**：主引擎/级联因结果足够而 abort 的引擎，现在写入 `cancelledEngines`（含 engine/reason/message）并追加 warning，CLI 也会打印「Cancelled engines」；此前这些引擎既无结果也无失败记录，外部无法区分「0 条」与「没来得及」。
+- **显式点名引擎时禁用早退**：用户用 `engines`/`--engines` 点名的引擎不再被兄弟引擎的早退 abort（此前 `--engines github,stackoverflow` 里 SO 常被 github 的快速结果取消，表现为 0 条）；代价是显式多引擎会等到各自完成。
 - **系统代理不再「只检测、不使用」**：搜索与抓取入口会先 `ensureSystemProxyDetected()` 预热检测，首次请求即可走系统代理；此前缓存为空时首发直连失败（如 react.dev 的 TLS reset），事后才在错误提示里补检测。
 - **海外引擎闸门不再用 3s 探测误杀系统代理**：检测到系统代理时直接放行，由真实请求（10s 预算 + 完整错误映射）判断；只有完全无代理时才直连探测并快速失败。错误文案改为「未检测到系统代理」，不再声称「通过代理也不可达」。
 

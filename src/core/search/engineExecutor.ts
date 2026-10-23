@@ -143,6 +143,8 @@ export interface ExecutePrimaryEnginesResult {
     directAnswer?: string;
     /** 是否因为结果已足够而提前返回（未完成的引擎被 abort，不计失败、不计延迟样本） */
     earlyReturn?: boolean;
+    /** 被提前取消的引擎（不是返回 0 条，而是没来得及） */
+    cancelledEngines?: Array<{ engine: string; reason: 'early_return'; message: string }>;
 }
 
 /** 结果足够后给慢引擎的宽限窗口：有人已满足 minResults 时，最多再等这么久 */
@@ -452,13 +454,24 @@ export async function executePrimaryEngines(
         });
     });
 
+    const satisfiedTarget = resolveSatisfiedTarget(limits, options.satisfiedResults);
     const collected = await collectPrimaryResults(engineRaces, {
-        satisfiedTarget: resolveSatisfiedTarget(limits, options.satisfiedResults),
+        satisfiedTarget,
         controllers,
         executableEngines,
         countableResult: options.countableResult ?? (() => true)
     });
     const engineResults = collected.engineResults;
+    // 早退时被 abort 的引擎要显式暴露：否则外部只看到「没有结果」，无法区分
+    // 「引擎返回 0 条」与「被取消、没来得及」。
+    const cancelledEngines = [...collected.skipped]
+        .map((index) => executableEngines[index])
+        .filter((engine): engine is string => Boolean(engine))
+        .map((engine) => ({
+            engine,
+            reason: 'early_return' as const,
+            message: `Cancelled after ${satisfiedTarget} usable results were already collected`
+        }));
 
     const latencySamples: EngineLatencySample[] = [];
     executableEngines.forEach((engine, index) => {
@@ -521,6 +534,7 @@ export async function executePrimaryEngines(
         partialFailures,
         engineMetrics,
         directAnswer,
+        ...(cancelledEngines.length > 0 ? { cancelledEngines } : {}),
         ...(collected.earlyReturn ? { earlyReturn: true } : {})
     };
 }

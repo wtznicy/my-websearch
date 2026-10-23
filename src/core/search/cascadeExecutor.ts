@@ -40,6 +40,8 @@ export interface ExecuteCascadeResult {
     cascadedEngines: string[];
     cascadeFailures: SearchExecutionFailure[];
     cascadeMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }>;
+    /** 因兄弟引擎已满足目标而被取消的候选（不是 0 结果） */
+    cancelledEngines: Array<{ engine: string; reason: 'satisfied'; message: string }>;
 }
 
 const ZH_CASCADE_PRIORITY: readonly string[] = ENGINE_REGISTRY
@@ -201,6 +203,7 @@ export async function executeCascade(
     const cascadedEngines: string[] = [];
     const cascadeFailures: SearchExecutionFailure[] = [];
     const cascadeMetrics: Array<{ engine: string; ms: number; count: number; error?: string; timedOut?: boolean }> = [];
+    const cancelledEngines: Array<{ engine: string; reason: 'satisfied'; message: string }> = [];
 
     const CASCADE_BATCH_SIZE = 2;
     const MIN_CASCADE_BATCH_BUDGET_MS = 3000;
@@ -212,7 +215,8 @@ export async function executeCascade(
             merged,
             cascadedEngines,
             cascadeFailures,
-            cascadeMetrics
+            cascadeMetrics,
+            cancelledEngines
         };
     }
 
@@ -388,6 +392,11 @@ export async function executeCascade(
             }
             if (outcome.status === 'fulfilled') {
                 if (outcome.value.cancelledBySatisfaction) {
+                    cancelledEngines.push({
+                        engine: candidate,
+                        reason: 'satisfied',
+                        message: 'Cancelled after a sibling engine satisfied the cascade target'
+                    });
                     continue;
                 }
                 if (outcome.value.timedOut) {
@@ -431,6 +440,7 @@ export async function executeCascade(
         merged,
         cascadedEngines,
         cascadeFailures,
-        cascadeMetrics
+        cascadeMetrics,
+        cancelledEngines
     };
 }

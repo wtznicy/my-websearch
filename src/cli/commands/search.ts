@@ -178,6 +178,10 @@ export function formatSearchHumanReadable(result: Awaited<ReturnType<MyWebSearch
         lines.push(`Cascaded engines: ${result.cascadedEngines.join(', ')}`);
     }
 
+    if (result.cancelledEngines && result.cancelledEngines.length > 0) {
+        lines.push(`Cancelled engines: ${result.cancelledEngines.map((item) => item.engine).join(', ')} (enough results already collected; not a zero-result response)`);
+    }
+
     if (result.partialFailures.length > 0) {
         lines.push(`Partial failures: ${result.partialFailures.length}`);
     }

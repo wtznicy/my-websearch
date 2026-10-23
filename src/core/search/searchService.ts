@@ -135,6 +135,8 @@ export type SearchExecutionResult = {
     cached?: boolean;
     /** 级联补位实际成功的引擎（仅当 minResults 触发时出现） */
     cascadedEngines?: string[];
+    /** 因「结果已足够」被提前取消的引擎（不是返回 0 条，而是被 abort、没来得及） */
+    cancelledEngines?: Array<{ engine: string; reason: 'early_return' | 'satisfied'; message: string }>;
     /** SERP 首位的直接答案卡片文本（如百度汇率换算/百科摘要卡），LLM 可免抓详情页直接取事实 */
     directAnswer?: string;
     /** 每引擎耗时/结果数/错误（可观测性：一眼区分超时与被拒/限流；error 为截断版，完整消息见 partialFailures）
@@ -436,8 +438,11 @@ export function createSearchService(
                         deadlineAt,
                         perEngineTimeoutMs,
                         // 结果足够即提前返回（给慢引擎 800ms 宽限）。
-                        // minResults 未显式给出时用 limit 本身作为达标线，而不是「所有引擎配额之和」
-                        satisfiedResults: minResults && minResults > 0 ? minResults : limit,
+                        // 但显式点名了引擎时禁用早退：把用户点名的引擎 abort 掉，
+                        // 外部会表现为「该引擎返回 0 条」，违背显式指定的意图。
+                        satisfiedResults: requestedEngines && requestedEngines.length > 0
+                            ? undefined
+                            : (minResults && minResults > 0 ? minResults : limit),
                         // P1-10：早退计数必须用「过滤后的净结果」，与最终合并口径一致
                         countableResult: (item) => !isPlaceholderResult(item) && matchesSiteDomains(item.url, siteDomains),
                         signal: effectiveSignal,
@@ -594,6 +599,20 @@ export function createSearchService(
                         }
                     }
 
+                    // 被「结果已足够」取消的引擎必须显式暴露：它们没有返回 0 条，只是没来得及
+                    const cancelledEngines = [
+                        ...(primary.cancelledEngines ?? []),
+                        ...(cascade.cancelledEngines ?? [])
+                    ];
+                    if (cancelledEngines.length > 0) {
+                        warnings.push(
+                            `Cancelled after enough results were collected: ${cancelledEngines.map((item) => item.engine).join(', ')}. `
+                            + 'They returned no data because they were aborted, not because they matched nothing; '
+                            + 'raise minResults or query them alone to include them. '
+                            + '/ 这些引擎因结果已足够被取消，并非返回 0 条；提高 minResults 或单独查询可拿到结果。'
+                        );
+                    }
+
                     const combinedWarnings = [...new Set([...rc.warnings, ...warnings])];
 
                     const result: SearchExecutionResult = {
@@ -609,6 +628,7 @@ export function createSearchService(
                         ...(filterFallback ? { filterFallback } : {}),
                         ...(diagnostics ? { diagnostics } : {}),
                         ...(cascade.cascadedEngines.length > 0 ? { cascadedEngines: cascade.cascadedEngines } : {}),
+                        ...(cancelledEngines.length > 0 ? { cancelledEngines } : {}),
                         ...(primary.directAnswer ? { directAnswer: primary.directAnswer } : {}),
                         ...(allMetrics.some(Boolean) ? { engineMetrics: allMetrics.filter(Boolean) } : {})
                     };
