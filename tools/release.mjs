@@ -84,10 +84,16 @@ const writeJson = (file, value) => fs.writeFileSync(
 function resolveTokens(explicitFile) {
     const tokens = {};
 
-    const filePath = explicitFile
-        ? path.resolve(explicitFile)
-        : path.join(ROOT, '.release-tokens.json');
-    if (fs.existsSync(filePath)) {
+    // 解析顺序：--tokens > 环境变量 > 仓库内文件 > 家目录私有文件
+    // 推荐把 token 放在仓库之外（家目录），避免任何 AI 工具在仓库上下文里读到明文。
+    const candidates = explicitFile
+        ? [path.resolve(explicitFile)]
+        : [
+            path.join(ROOT, '.release-tokens.json'),
+            path.join(os.homedir(), '.my-websearch', 'release-tokens.json')
+        ];
+    const filePath = candidates.find((candidate) => fs.existsSync(candidate));
+    if (filePath) {
         try {
             const fromFile = JSON.parse(fs.readFileSync(filePath, 'utf8'));
             if (typeof fromFile.github === 'string') tokens.github = fromFile.github;

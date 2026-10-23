@@ -75,6 +75,25 @@ describe('executePrimaryEngines early return', () => {
         expect(value.engineResults.flat()).toHaveLength(3);
     });
 
+    it('does not early-return on results the final filters would drop (site/placeholder)', async () => {
+        const startedAt = Date.now();
+        const value = await executePrimaryEngines(makeOptions({
+            fast: async () => [result('a'), result('b'), result('c')],
+            slow: async () => {
+                await sleep(400);
+                return [result('d')];
+            }
+        }, {
+            satisfiedResults: 3,
+            // 模拟 site: 约束把 fast 的结果全过滤掉：净计数为 0，不该提前 abort slow
+            countableResult: () => false
+        }));
+
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(350);
+        expect(value.earlyReturn).toBeUndefined();
+        expect(value.engineResults.flat().length).toBeGreaterThanOrEqual(4);
+    });
+
     it('never early-returns for a single engine even when results are sufficient', async () => {
         const value = await executePrimaryEngines(makeOptions({
             only: async () => {

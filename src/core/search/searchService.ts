@@ -433,6 +433,8 @@ export function createSearchService(
                         // 结果足够即提前返回（给慢引擎 800ms 宽限）。
                         // minResults 未显式给出时用 limit 本身作为达标线，而不是「所有引擎配额之和」
                         satisfiedResults: minResults && minResults > 0 ? minResults : limit,
+                        // P1-10：早退计数必须用「过滤后的净结果」，与最终合并口径一致
+                        countableResult: (item) => !isPlaceholderResult(item) && matchesSiteDomains(item.url, siteDomains),
                         signal: effectiveSignal,
                         timeRange,
                         site: siteDomains,

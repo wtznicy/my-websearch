@@ -121,6 +121,11 @@ export interface ExecutePrimaryEnginesOptions {
     perEngineTimeoutMs: number;
     /** 满足早退的最小结果数（通常来自 minResults）；未提供时用 limit 总和 */
     satisfiedResults?: number;
+    /**
+     * 早退计数用的过滤谓词（placeholder / site 约束）。
+     * P1-10：必须先过滤再计数，否则带 site: 的查询会用膨胀计数提前 abort 其它引擎。
+     */
+    countableResult?: (result: SearchResult) => boolean;
     signal?: AbortSignal;
     timeRange?: 'day' | 'week' | 'month' | 'year';
     site?: string[];
@@ -139,11 +144,14 @@ export interface ExecutePrimaryEnginesResult {
 /** 结果足够后给慢引擎的宽限窗口：有人已满足 minResults 时，最多再等这么久 */
 const EARLY_RETURN_GRACE_MS = 800;
 
-function countUniqueResultUrls(results: Array<SearchResult[] | undefined>): number {
+function countUniqueResultUrls(
+    results: Array<SearchResult[] | undefined>,
+    countable: (result: SearchResult) => boolean
+): number {
     const seen = new Set<string>();
     for (const engineResult of results) {
         for (const item of engineResult ?? []) {
-            if (item.url) {
+            if (item.url && countable(item)) {
                 seen.add(item.url);
             }
         }
@@ -172,6 +180,7 @@ async function collectPrimaryResults(
         satisfiedTarget: number;
         controllers: AbortController[];
         executableEngines: string[];
+        countableResult: (result: SearchResult) => boolean;
     }
 ): Promise<{ engineResults: SearchResult[][]; earlyReturn: boolean; skipped: Set<number> }> {
     const settled: Array<SearchResult[] | undefined> = new Array(races.length).fill(undefined);
@@ -201,7 +210,7 @@ async function collectPrimaryResults(
             if (finished || graceTimer) {
                 return;
             }
-            if (countUniqueResultUrls(settled) < context.satisfiedTarget) {
+            if (countUniqueResultUrls(settled, context.countableResult) < context.satisfiedTarget) {
                 return;
             }
             graceTimer = setTimeout(() => {
@@ -442,7 +451,8 @@ export async function executePrimaryEngines(
     const collected = await collectPrimaryResults(engineRaces, {
         satisfiedTarget: resolveSatisfiedTarget(limits, options.satisfiedResults),
         controllers,
-        executableEngines
+        executableEngines,
+        countableResult: options.countableResult ?? (() => true)
     });
     const engineResults = collected.engineResults;
 

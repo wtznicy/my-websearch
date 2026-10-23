@@ -191,6 +191,15 @@ class SqliteStorageBackend implements StorageBackend {
         this.db = new DatabaseSync(dbPath);
         safeSetPermissions(dbPath, 0o600);
 
+        // P1-12：daemon 与 CLI 可能同时打开同一个缓存库。
+        // WAL 让读不阻塞写、写不阻塞读；busy_timeout 让并发写等待而不是直接 SQLITE_BUSY。
+        try {
+            this.db.exec('PRAGMA journal_mode = WAL');
+            this.db.exec('PRAGMA busy_timeout = 5000');
+        } catch {
+            // 老版本 SQLite 或只读挂载：保持默认行为
+        }
+
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS page_cache (
                 url_hash TEXT PRIMARY KEY,
@@ -214,6 +223,14 @@ class SqliteStorageBackend implements StorageBackend {
             CREATE INDEX IF NOT EXISTS idx_page_cache_lru ON page_cache (last_accessed_at ASC);
             CREATE INDEX IF NOT EXISTS idx_page_cache_expires ON page_cache (expires_at ASC);
         `);
+
+        // P1-12：过期记录此前只能靠同 key 覆盖或 LRU 压力淘汰（idx_page_cache_expires 建了却没人用）。
+        // 启动时顺手清一次，成本 O(过期行数)。
+        try {
+            this.db.exec(`DELETE FROM page_cache WHERE expires_at < ${Date.now()}`);
+        } catch {
+            // 清扫失败不影响正常读写
+        }
 
         this.stmtGet = this.db.prepare('SELECT * FROM page_cache WHERE url_hash = ?');
         this.stmtTouch = this.db.prepare('UPDATE page_cache SET last_accessed_at = ? WHERE url_hash = ?');
@@ -388,9 +405,13 @@ class JsonFileStorageBackend implements StorageBackend {
     set(record: PageCacheRecord): void {
         const filePath = this.getFilePath(record.urlHash);
         const data = JSON.stringify(record);
+        // P1-12：tmp + rename 原子写。直接覆盖时，并发读可能读到半截 JSON，
+        // 旧 catch 分支会因此把这条缓存直接删掉（一次竞态 = 永久丢失）。
+        const tmpPath = `${filePath}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
         try {
-            fs.writeFileSync(filePath, data, { mode: 0o600, encoding: 'utf8' });
-            safeSetPermissions(filePath, 0o600);
+            fs.writeFileSync(tmpPath, data, { mode: 0o600, encoding: 'utf8' });
+            safeSetPermissions(tmpPath, 0o600);
+            fs.renameSync(tmpPath, filePath);
             this.memoryIndex.set(record.urlHash, {
                 byteSize: Buffer.byteLength(data, 'utf8'),
                 lastAccessedAt: Date.now()

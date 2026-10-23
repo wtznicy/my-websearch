@@ -311,7 +311,20 @@ export async function executeCascade(
                     done = true;
                     clearTimeout(timer);
                     if (batchSatisfied && controller.signal.aborted) {
-                        resolve({ results: [], timedOut: false, cancelledBySatisfaction: true });
+                        // P1-9：abort 与「请求其实已经返回」可能同时发生。
+                        // 兄弟引擎已成功取回的结果不能白扔——先并入候选池再收尾。
+                        if (results.length > 0) {
+                            const before = merged.length;
+                            if (!cascadedEngines.includes(candidate)) {
+                                cascadedEngines.push(candidate);
+                            }
+                            engineResults.push(results);
+                            merged = mergeSearchResults(engineResults)
+                                .filter((result) => !isPlaceholderResult(result))
+                                .filter((result) => matchesSiteDomains(result.url, siteDomains ?? []));
+                            batchNewResults += merged.length - before;
+                        }
+                        resolve({ results, timedOut: false, cancelledBySatisfaction: true });
                         return;
                     }
                     if (!cascadeTimedOut) {
