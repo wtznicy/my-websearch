@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import type { AxiosRequestConfig, AxiosResponse, RawAxiosRequestHeaders, ResponseType } from 'axios';
 import https from 'node:https';
+import http from 'node:http';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import {
     RequestFilteringHttpAgent,
@@ -114,6 +115,27 @@ function buildFakeIpAgentCacheKey(): string {
 // so TUN/no-proxy paths do not re-block addresses already declared as fake DNS results.
 function buildFakeIpAllowlistOptions() {
     return config.fakeIpCidrs.length > 0 ? { allowIPAddressList: config.fakeIpCidrs } : {};
+}
+
+/**
+ * P1-7：可信固定域名的专用 agent（keepAlive + DNS 缓存，不做 request-filtering 私网拦截）。
+ * 只给 trustedStaticHost 分支使用——域名由代码硬编码，不接受用户输入。
+ */
+let trustedStaticHttpAgent: http.Agent | undefined;
+let trustedStaticHttpsAgent: https.Agent | undefined;
+
+function getTrustedStaticHttpAgent(): http.Agent {
+    if (!trustedStaticHttpAgent) {
+        trustedStaticHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 16, lookup: filteredDnsLookup });
+    }
+    return trustedStaticHttpAgent;
+}
+
+function getTrustedStaticHttpsAgent(): https.Agent {
+    if (!trustedStaticHttpsAgent) {
+        trustedStaticHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 16, lookup: filteredDnsLookup });
+    }
+    return trustedStaticHttpsAgent;
 }
 
 function getFilteringHttpAgent(): RequestFilteringHttpAgent {
@@ -360,6 +382,12 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
                 details: { host, engine }
             });
             requestOptions.httpsAgent = getInsecureTrustedStaticHttpsAgent();
+        } else {
+            // P1-7：不传 allowInsecureTls 的 trustedStaticHost 调用（全仓 12 处引擎请求）此前落到
+            // axios 默认 agent —— 既没有 maxSockets/keepAlive 池，也绕过了 cachedDnsLookup，
+            // 每次引擎搜索都重新 DNS + TLS 握手。这里给可信固定域名一对专用 agent。
+            requestOptions.httpAgent = getTrustedStaticHttpAgent();
+            requestOptions.httpsAgent = getTrustedStaticHttpsAgent();
         }
     } else {
         requestOptions.httpAgent = getFilteringHttpAgent();

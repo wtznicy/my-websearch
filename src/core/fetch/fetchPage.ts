@@ -86,6 +86,36 @@ function validateFetchOptionCombinations(params: FetchPipelineOptions): void {
     }
 }
 
+/** 整体抓取预算：cookie 15s + 浏览器 30s + 主请求 10s + 回退 10s 各自为政时最坏 ~65s，会打穿 MCP 客户端默认超时 */
+const FETCH_PIPELINE_DEADLINE_MS = (() => {
+    const parsed = Number(process.env.FETCH_WEB_DEADLINE_MS);
+    return Number.isFinite(parsed) && parsed >= 5000 ? Math.floor(parsed) : 45_000;
+})();
+
+/**
+ * 把调用方 signal 与整体 deadline 合并成一个 signal。
+ * 定时器 unref：请求提前返回时不会因为它把进程挂住。
+ */
+export function combineWithDeadline(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+    const controller = new AbortController();
+    if (signal) {
+        if (signal.aborted) {
+            controller.abort(signal.reason);
+        } else {
+            signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+        }
+    }
+    const timer = setTimeout(() => {
+        controller.abort(new AppError({
+            code: 'network_timeout',
+            retryable: true,
+            message: `fetch pipeline exceeded ${timeoutMs}ms deadline`
+        }));
+    }, Math.max(1, timeoutMs));
+    timer.unref?.();
+    return controller.signal;
+}
+
 /**
  * 单一 FetchPolicy 执行管线：
  * 校验 → 缓存 → 条件请求（304） → 重定向/SSRF → 解码 → 提取 → 质量门禁 → 回写缓存 → 分页切片
@@ -114,6 +144,10 @@ export async function executeFetchPipeline(
     } = params;
 
     validateFetchOptionCombinations(params);
+
+    // P1-13：整条抓取管线共用同一个 deadline（默认 45s，FETCH_WEB_DEADLINE_MS 可调），
+    // 避免 cookie/浏览器/主请求/代理回退四段预算叠加到 ~65s 打穿 MCP 客户端超时。
+    const pipelineSignal = combineWithDeadline(signal, FETCH_PIPELINE_DEADLINE_MS);
 
     const warnings: string[] = requestContext?.warnings ? [...requestContext.warnings] : [];
 
@@ -194,7 +228,7 @@ export async function executeFetchPipeline(
                     }
 
                     const check304 = await requestDirectFirst('HEAD', url, (forceDirect) => ({
-                        ...buildAxiosRequestOptions({ headers, forceDirect, signal, timeout: 3500 }),
+                        ...buildAxiosRequestOptions({ headers, forceDirect, signal: pipelineSignal, timeout: 3500 }),
                         validateStatus: (status: number) => status === 304 || (status >= 200 && status < 400)
                     }), 'Conditional 304 check');
 
@@ -306,7 +340,7 @@ export async function executeFetchPipeline(
                 format: effectiveFormat,
                 ...(extract ? { extract } : {}),
                 ...(selector ? { selector } : {}),
-                signal
+                signal: pipelineSignal
             });
 
             fullMarkdown = fetchResult.content;
