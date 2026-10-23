@@ -169,6 +169,26 @@ export function getDetectedSystemProxy(): string | null {
 }
 
 /**
+ * 预热系统代理检测（异步）。
+ *
+ * `getSystemProxyFallbackUrl()` 是同步的，只能读缓存；如果第一次请求发生前没人调用过
+ * detectSystemProxy()，请求会先走直连（国内无直连时表现为 TLS reset / 超时），
+ * 失败后才在错误提示里补做检测——用户看到的是"检测到代理但没用上"。
+ * 因此在搜索/抓取入口显式等待一次检测（缓存与并发去重都在 detectSystemProxy 内）。
+ */
+export async function ensureSystemProxyDetected(): Promise<void> {
+    if (config.useProxy) {
+        // 显式代理优先，无需探测系统代理
+        return;
+    }
+    try {
+        await detectSystemProxy();
+    } catch {
+        // 探测失败等同于"没有系统代理"，不阻断主流程
+    }
+}
+
+/**
  * 系统代理兜底 URL（encodeURI 后，与 getProxyUrl 格式一致）：
  * - 显式配置了 USE_PROXY → 不参与（返回 undefined，显式路径完全优先）
  * - 未显式配置 + 检测到系统代理 + 海外引擎（或未指定引擎的通用抓取）→ 返回系统代理 URL

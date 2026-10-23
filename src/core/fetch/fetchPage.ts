@@ -9,6 +9,7 @@ import {
     validatePublicWebUrl
 } from '../validation/targetValidation.js';
 import { AppError } from '../errors.js';
+import { ensureSystemProxyDetected } from '../../utils/systemProxy.js';
 import { isStackOverflowQuestionUrl, fetchStackOverflowQuestion } from '../../engines/stackoverflow/fetchStackOverflow.js';
 import { getGlobalPageCache, PageCacheRecord, passesQualityGate } from './pageCache.js';
 import { metrics } from '../metrics.js';
@@ -144,6 +145,9 @@ export async function executeFetchPipeline(
     } = params;
 
     validateFetchOptionCombinations(params);
+
+    // 预热系统代理检测：抓取路径的代理兜底是同步读取缓存，不预热会首发直连
+    await ensureSystemProxyDetected();
 
     // P1-13：整条抓取管线共用同一个 deadline（默认 45s，FETCH_WEB_DEADLINE_MS 可调），
     // 避免 cookie/浏览器/主请求/代理回退四段预算叠加到 ~65s 打穿 MCP 客户端超时。

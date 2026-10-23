@@ -3,7 +3,7 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 import { engineShouldUseProxy } from '../config.js';
 import { AppError } from '../core/errors.js';
 import { BROWSER_USER_AGENT } from './constants.js';
-import { detectSystemProxy, getDetectedSystemProxy } from './systemProxy.js';
+import { detectSystemProxy } from './systemProxy.js';
 import { isChineseLocale } from './locale.js';
 
 /**
@@ -228,24 +228,26 @@ export function __setOverseasReachableForTests(reachable: boolean | null): void 
 
 /**
  * 境外引擎可用性断言：调用方（引擎入口）在发起搜索前调用。
- * - 引擎已配置走代理 → 直接放行（不探测）
- * - 未配置代理 → 探测直连，不可达时立即抛错（快速失败）
+ * - 引擎已显式配置走代理 → 直接放行（不探测）
+ * - 检测到系统代理 → 直接放行：系统代理的可用性交给真实请求判断。
+ *   （此前用 3s 探测决定生死，代理冷启动稍慢就把可用代理误判为不可达，
+ *    还会缓存失败 60s；实测 2.3s 的代理被 3s 阈值误杀。）
+ * - 完全没有代理 → 探测直连，不可达时快速失败
  */
 export async function assertOverseasEngineUsable(engine: 'duckduckgo' | 'brave' | 'startpage'): Promise<void> {
     if (engineShouldUseProxy(engine)) {
         return;
     }
+
+    const systemProxy = await detectSystemProxy();
+    if (systemProxy) {
+        // 有系统代理就不再拦截：让真实请求（10s 预算、完整错误映射）去判断
+        return;
+    }
+
     const reachable = await isDirectlyReachable(engine);
     if (!reachable) {
-        // 把系统代理探测结果一并报出来：区分"压根没探测到代理"与"探测到了但走不通"，
-        // 否则用户只看到"需要代理"，无从判断该去开 Clash 的系统代理还是改 PROXY_URL。
-        const detectedSystemProxy = getDetectedSystemProxy();
-        const detectionNote = detectedSystemProxy
-            ? `A system proxy was detected at ${detectedSystemProxy} but the engine is still unreachable through it.`
-            : 'No usable system proxy was detected on this machine.';
-        // 配置类/网络环境类确定性错误：抛出结构化 AppError（retryable=false），多引擎搜索时其他引擎不受影响
-        // 无代理并不等于「配置坏了」：中国大陆以外的用户默认就是直连。
-        // 对 non-zh 环境给出「检查网络/换引擎」，而不是「去配代理、用国内引擎」。
+        // 无代理且直连不可达：报明确错误
         const chineseLocale = isChineseLocale();
         throw new AppError({
             code: 'overseas_unreachable',
@@ -253,14 +255,14 @@ export async function assertOverseasEngineUsable(engine: 'duckduckgo' | 'brave' 
             status: 503,
             engine,
             hint: chineseLocale
-                ? 'Set PROXY_URL (e.g. PROXY_URL=http://127.0.0.1:7897) or use domestic engines.'
+                ? 'Turn on your proxy client\'s "system proxy" switch, or set PROXY_URL (e.g. PROXY_URL=http://127.0.0.1:7897).'
                 : 'No proxy is configured (normal outside mainland China). Check your connection or try another engine (bing/duckduckgo/brave/github).',
             message: chineseLocale
-                ? `${engine} is unreachable from your current network without a proxy. ${detectionNote} ` +
-                'Set PROXY_URL to your proxy address (e.g. PROXY_URL=http://127.0.0.1:7897; the legacy USE_PROXY=true + PROXY_URL form is still accepted), ' +
+                ? `${engine} is unreachable from your current network without a proxy. No system proxy was detected on this machine. ` +
+                'Turn on your proxy client\'s "system proxy" switch, or set PROXY_URL to your proxy address (e.g. PROXY_URL=http://127.0.0.1:7897), ' +
                 'or use domestic engines (bing/baidu/csdn/juejin/sogou) or exa (requires EXA_API_KEY). ' +
-                'If your proxy client (Clash/v2ray/Surge) is running, make sure its "system proxy" switch is on, or set PROXY_URL explicitly in your MCP client config and restart the MCP server.'
-                : `${engine} is unreachable from your current network. ${detectionNote} ` +
+                'Then restart the MCP server so the new environment is picked up.'
+                : `${engine} is unreachable from your current network. No system proxy was detected on this machine. ` +
                 'No proxy is configured, which is the normal setup outside mainland China — so this is usually a local network/DNS problem rather than a missing proxy. ' +
                 'Try another engine (bing/duckduckgo/brave/github) or retry in a moment.'
         });

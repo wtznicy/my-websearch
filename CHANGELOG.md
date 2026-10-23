@@ -4,6 +4,13 @@ All notable changes to `my-websearch` are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **系统代理不再「只检测、不使用」**：搜索与抓取入口会先 `ensureSystemProxyDetected()` 预热检测，首次请求即可走系统代理；此前缓存为空时首发直连失败（如 react.dev 的 TLS reset），事后才在错误提示里补检测。
+- **海外引擎闸门不再用 3s 探测误杀系统代理**：检测到系统代理时直接放行，由真实请求（10s 预算 + 完整错误映射）判断；只有完全无代理时才直连探测并快速失败。错误文案改为「未检测到系统代理」，不再声称「通过代理也不可达」。
+
+### Changed
+- 显式 `PROXY_URL` 仍按 `PROXY_ENGINES` 白名单生效（默认仅海外引擎），国内引擎保持直连；不配 `PROXY_URL` 时则自动使用系统代理。
+
 ## [1.3.7] - 2026-10-23
 
 ### Fixed

@@ -1,4 +1,5 @@
 import { SearchResult } from '../../types.js';
+import { ensureSystemProxyDetected } from '../../utils/systemProxy.js';
 import { AppConfig, config } from '../../config.js';
 import { SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
 import { rankSearchResults } from './resultRanking.js';
@@ -338,6 +339,8 @@ export function createSearchService(
 
     return {
         async execute({ query, engines, limit, searchMode, minResults, timeRange, site, requestedEngines, signal, requestContext }: SearchExecutionInput): Promise<SearchExecutionResult> {
+            // 预热系统代理检测：engine 请求的代理兜底是同步读取缓存，不预热会首发直连
+            await ensureSystemProxyDetected();
             const cleanQuery = query.trim();
             if (!cleanQuery) {
                 throw new AppError({
