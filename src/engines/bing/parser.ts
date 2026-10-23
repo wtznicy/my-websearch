@@ -2,19 +2,19 @@ import { Buffer } from 'node:buffer';
 import * as cheerio from 'cheerio';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { normalizeText as normalizeWhitespace } from '../../utils/text.js';
+import { textFromSelection, stripCssFragments } from '../../utils/htmlText.js';
 
 type LoadedDoc = ReturnType<typeof cheerio.load>;
 type CheerioSelection = ReturnType<LoadedDoc>;
 
 const RESULT_SELECTORS = [
     '#b_results > li.b_algo',
-    '#b_results > li.b_ans',
-    '#b_results > li:not(.b_ad):not(.b_pag):not(.b_msg)',
     '#b_topw > li.b_algo',
-    '#b_topw > li.b_ans',
-    '.b_algo',
-    '.b_ans'
+    '.b_algo'
 ];
+
+/** 答案卡/轮播/相关推荐里的链接不是自然结果，统一按容器排除 */
+const NON_RESULT_CONTAINERS = '.b_ans, #rscarousel, .b_related, .b_carousel';
 
 function decodeBingRedirectTarget(url: URL): string {
     const encodedTarget = url.searchParams.get('u')?.trim();
@@ -192,7 +192,7 @@ function extractDate(element: CheerioSelection, description: string): string | u
 }
 
 function collectFallbackLinks($: LoadedDoc, limit: number, seenUrls: Set<string>, results: SearchResult[]): void {
-    const linkContainers = $('#b_results a[href], #b_topw a[href], .b_algo a[href], .b_ans a[href]');
+    const linkContainers = $('#b_results a[href], #b_topw a[href], .b_algo a[href]');
 
     linkContainers.each((index: number, element) => {
         if (results.length >= limit) {
@@ -200,6 +200,10 @@ function collectFallbackLinks($: LoadedDoc, limit: number, seenUrls: Set<string>
         }
 
         const linkElement = $(element);
+        // 答案卡/轮播/相关推荐里的链接不是自然结果
+        if (linkElement.closest(NON_RESULT_CONTAINERS).length > 0) {
+            return;
+        }
         const url = sanitizeBingUrl(linkElement.attr('href') || linkElement.attr('redirecturl') || linkElement.attr('data-h'));
         if (!url || seenUrls.has(url)) {
             return;
@@ -240,6 +244,10 @@ export function parseBingSearchResults(htmlContent: string, limit: number, loade
             if (element.hasClass('b_ad') || element.closest('.b_ad').length > 0 || element.hasClass('b_pag') || element.hasClass('b_msg')) {
                 return;
             }
+            // 答案卡/轮播里的 b_algo 不是自然结果（购物卡、相关推荐）
+            if (element.closest(NON_RESULT_CONTAINERS).length > 0) {
+                return;
+            }
 
             const titleLink = element.find('h2 a, .b_title a, a.tilk, a[target="_blank"]').first();
             const url = sanitizeBingUrl(titleLink.attr('href') || titleLink.attr('redirecturl') || titleLink.attr('data-h'));
@@ -276,8 +284,11 @@ export function parseBingSearchResults(htmlContent: string, limit: number, loade
 
     const response = results.slice(0, limit) as EngineSearchResponse;
     // 直接答案卡片（Bing 的 li.b_ans 答案块，如汇率/天气/计算/百科摘要）：
-    // 提取首位文本供 LLM 免抓详情页；长度阈值过滤空壳/碎片
-    const answerCard = $('#b_results > li.b_ans, #b_results > .b_ans').first().text().replace(/\s+/g, ' ').trim();
+    // 提取首位文本供 LLM 免抓详情页；长度阈值过滤空壳/碎片。
+    // 必须走 textFromSelection：cheerio 的 .text() 会把 <style> 里的 CSS 一起带出来。
+    const answerCard = stripCssFragments(textFromSelection(
+        $('#b_results > li.b_ans, #b_results > .b_ans, #b_topw > li.b_ans').first()
+    ));
     if (answerCard && answerCard.length >= 10) {
         response.directAnswer = answerCard.slice(0, 300);
     }

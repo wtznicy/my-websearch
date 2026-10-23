@@ -577,6 +577,20 @@ export function createSearchService(
                         }
                     }
 
+                    // 概念型查询 × 引用型引擎：best practices/原理 这类查询用词面匹配引擎效果差
+                    if (requestedEngines && requestedEngines.length > 0) {
+                        const conceptualQuery = /best\s+practice|guide|tutorial|how\s+to|原理|入门|教程|最佳实践|区别|差异/i.test(cleanQuery);
+                        const referenceEngines = new Set(['github', 'stackoverflow', 'arxiv', 'code']);
+                        if (conceptualQuery && executableEngines.length > 0
+                            && executableEngines.every((engine) => referenceEngines.has(engine))) {
+                            warnings.push(
+                                'This looks like a conceptual query (best practices / guide / how-to), but the requested engines are reference-oriented '
+                                + '(github/stackoverflow/arxiv/code). They match keywords rather than intent; consider brave, exa or duckduckgo. '
+                                + '/ 这更像概念型查询，而显式指定的都是引用型引擎；它们按词面匹配，建议改用 brave/exa/duckduckgo。'
+                            );
+                        }
+                    }
+
                     const combinedWarnings = [...new Set([...rc.warnings, ...warnings])];
 
                     const result: SearchExecutionResult = {

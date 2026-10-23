@@ -4,6 +4,17 @@ All notable changes to `my-websearch` are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **`directAnswer` 不再泄漏 CSS**：`.text()` 会把 `<style>` 内容当文本返回（实测 `#rscarousel strong{...}`）；新增 `textFromSelection`（先删 style/script/noscript/svg 再取文本）与 `stripCssFragments` 兜底，Bing/Baidu 答案卡和出口层都清洗。
+- **Bing 不再把答案卡/轮播链接当自然结果**：`RESULT_SELECTORS` 只保留 `li.b_algo`，并排除 `.b_ans`/`#rscarousel`/`.b_related` 容器（此前购物卡商品页会混进结果）。
+- **`extract`/`selector`/`readability`/`includeLinks` 强制 HTML 内容协商**：默认 `Accept` 优先 Markdown，站点（实测 benchlm.ai）会直接返回 `text/markdown` 导致 `extract` 报错；现在这类请求发 `text/html` 优先，并跳过 alternate Markdown 覆盖。
+- **Stack Overflow 查询放松**：`q` 是全词 AND，`asyncio gather vs create_task difference` 实测 0 条；现在按「原查询 → 去比较词 → 去停用词 → 标识符组合」逐级降级并返回 relaxed warning。
+- `no_results` 文案不再误导成配额问题（`for the allocated quota` → 说明查询/过滤过窄并带上请求数量）。
+
+### Changed
+- **GitHub 概念型查询质量**：剥掉 `best practices/guide/tutorial` 等意图词后按主题词重搜并合并；低星仓库（<10/＜50）降权；非排错类查询不再用 Issue 补齐结果。
+- **Stack Overflow 质量信号**：0 回答/负分问题降权。
+
 ## [1.3.6] - 2026-10-23
 
 ### Fixed

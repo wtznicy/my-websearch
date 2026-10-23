@@ -121,7 +121,9 @@ export async function validateAndFetchPrimary(
     try {
         const isPdfTarget = parsedUrl.pathname.toLowerCase().endsWith('.pdf');
         const maxDownloadBytes = isPdfTarget ? MAX_PDF_DOWNLOAD_BYTES : MAX_DOWNLOAD_BYTES;
-        response = await requestDirectFirst('GET', parsedUrl.toString(), (forceDirect) => buildRequestOptions(undefined, forceDirect, signal, maxDownloadBytes), 'Request URL');
+        // extract/selector/readability/includeLinks 需要真实 DOM：强制 HTML 内容协商
+        const needsHtml = Boolean(options.extract || options.selector || options.readability || options.includeLinks);
+        response = await requestDirectFirst('GET', parsedUrl.toString(), (forceDirect) => buildRequestOptions(undefined, forceDirect, signal, maxDownloadBytes, { preferHtml: needsHtml }), 'Request URL');
     } catch (error: unknown) {
         if (signal?.aborted) {
             throw error;
@@ -330,6 +332,9 @@ export async function fetchAndExtractHtmlWithBrowserFallback(
     let siteName: string | undefined;
 
     const finalParsedUrl = new URL(finalUrl);
+    // extract/selector/readability/includeLinks 依赖真实 DOM：不能用 alternate Markdown 覆盖 raw，
+    // 否则会出现「明明站点返回 HTML，extract 却报 target returned Markdown」（实测 benchlm.ai）。
+    const preferHtmlForDom = Boolean(options.extract || options.selector || options.readability || options.includeLinks);
 
     if (options.raw) {
         extractedContent = normalizeText(raw);
@@ -342,7 +347,7 @@ export async function fetchAndExtractHtmlWithBrowserFallback(
             extractedContent = htmlExtraction.text;
 
             const llmMdUrl = detectLlmMarkdownUrl(raw, extractedContent, finalUrl);
-            if (llmMdUrl) {
+            if (llmMdUrl && !preferHtmlForDom) {
                 try {
                     const mdParsed = new URL(llmMdUrl);
                     await assertPublicHttpUrlResolved(mdParsed, 'Alternate Markdown URL');

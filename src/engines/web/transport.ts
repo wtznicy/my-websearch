@@ -22,11 +22,18 @@ export function buildRequestOptions(
     cookieHeader?: string,
     forceDirect = false,
     signal?: AbortSignal,
-    maxBytes = MAX_DOWNLOAD_BYTES
+    maxBytes = MAX_DOWNLOAD_BYTES,
+    options: { preferHtml?: boolean } = {}
 ): AxiosRequestConfig {
+    // 默认优先 Markdown：站点做了内容协商时直接拿干净 Markdown，省去正文提取。
+    // 但 extract / selector / readability / includeLinks 依赖真实 DOM，必须先要 HTML，
+    // 否则站点会返回 text/markdown（实测 benchlm.ai），导致 extract 直接失败。
+    const accept = options.preferHtml
+        ? 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        : 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.8,*/*;q=0.8';
     const headers: Record<string, string> = {
         'User-Agent': DEFAULT_DESKTOP_UA,
-        'Accept': 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.8,*/*;q=0.8',
+        'Accept': accept,
         'Accept-Language': resolveAcceptLanguage()
     };
     // 国内站点（.cn/已知国内域名）直连，不因全局 USE_PROXY 走代理——代理挂掉时国内抓取不受影响

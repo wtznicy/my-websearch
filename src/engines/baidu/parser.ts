@@ -4,6 +4,7 @@ import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { BROWSER_USER_AGENT as BAIDU_USER_AGENT } from '../../utils/constants.js';
 import { mapWithConcurrencyBudget } from '../../utils/concurrency.js';
+import { textFromSelection, stripCssFragments } from '../../utils/htmlText.js';
 
 const BAIDU_LINK_REGEX = /^https?:\/\/www\.baidu\.com\/link\?url=/i;
 
@@ -143,7 +144,7 @@ export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>)
 
         // 直接答案卡片：提取首位文本作为 directAnswer（汇率换算、百科摘要等）
         if (!directAnswer && BAIDU_DIRECT_ANSWER_TEMPLATES.test(template)) {
-            const cardText = normalizeWhitespace($(element).text());
+            const cardText = stripCssFragments(textFromSelection($(element)));
             if (cardText && cardText.length >= 10) {
                 directAnswer = cardText.slice(0, DIRECT_ANSWER_MAX_CHARS);
             }

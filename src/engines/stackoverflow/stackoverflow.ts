@@ -26,6 +26,44 @@ interface StackExchangeResponse {
     error_name?: string;
 }
 
+const COMPARISON_TOKENS = /\b(vs\.?|versus|difference|differences|between|compare[ds]?|compared)\b/gi;
+const SO_STOPWORDS = new Set([
+    'how', 'to', 'the', 'a', 'an', 'in', 'of', 'for', 'with', 'and', 'or', 'on', 'is', 'are',
+    'what', 'why', 'best', 'practices', 'practice', 'guide', 'tutorial', 'using', 'use', 'work', 'works'
+]);
+
+/**
+ * StackExchange 的 `q` 是**全词 AND**语义：`asyncio gather vs create_task difference`
+ * 会返回 0 条（实测），而 `asyncio gather create_task` 返回 6 条。
+ * 因此按「原查询 → 去比较词 → 去停用词 → 标识符组合」逐级放松，且把降级告知调用方。
+ */
+export function relaxStackOverflowQueries(query: string): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const add = (value: string): void => {
+        const normalized = value.replace(/\s+/g, ' ').trim();
+        const key = normalized.toLowerCase();
+        if (normalized && !seen.has(key)) {
+            seen.add(key);
+            out.push(normalized);
+        }
+    };
+
+    add(query);
+    add(query.replace(COMPARISON_TOKENS, ' '));
+
+    const identifiers = query
+        .split(/\s+/)
+        .filter((token) => /^[A-Za-z_][\w.+-]*$/.test(token) && !SO_STOPWORDS.has(token.toLowerCase()));
+    if (identifiers.length >= 2) {
+        add(identifiers.join(' '));
+    }
+    if (identifiers.length >= 1) {
+        add(identifiers.slice(0, 3).join(' '));
+    }
+    return out;
+}
+
 async function fetchStackOverflowData(
     cleanQuery: string,
     targetLimit: number,
@@ -96,7 +134,22 @@ export async function searchStackOverflow(
     const apiKey = (process.env.STACKOVERFLOW_API_KEY || process.env.STACKEXCHANGE_API_KEY)?.trim();
 
     try {
-        let data = await fetchStackOverflowData(cleanQuery, targetLimit, apiKey, signal, context?.timeRange);
+        const candidates = relaxStackOverflowQueries(cleanQuery);
+        let data = await fetchStackOverflowData(candidates[0]!, targetLimit, apiKey, signal, context?.timeRange);
+        let usedQuery = candidates[0]!;
+        let candidateIndex = 0;
+
+        // 查询放松：全词 AND 语义下比较词/停用词会把结果卡成 0 条
+        while ((!data.items || data.items.length === 0) && !data.error_id && candidateIndex + 1 < candidates.length) {
+            candidateIndex += 1;
+            usedQuery = candidates[candidateIndex]!;
+            data = await fetchStackOverflowData(usedQuery, targetLimit, apiKey, signal, context?.timeRange);
+        }
+        if (candidateIndex > 0) {
+            context?.requestContext?.addWarning?.(
+                `stackoverflow: relaxed query to "${usedQuery}" (full query matched no questions)`
+            );
+        }
 
         // 如果配置了 Key 但 API 报错（例如 Key 输错 400 bad_parameter / 401 / 403），自动回退为匿名请求
         if (apiKey && data.error_id && (data.error_id === 400 || data.error_id === 401 || data.error_id === 403 || /key/i.test(data.error_message || ''))) {
@@ -131,13 +184,18 @@ export async function searchStackOverflow(
             const tags = Array.isArray(item.tags) && item.tags.length > 0 ? ` [${item.tags.join(', ')}]` : '';
             const accepted = item.is_answered ? ', Accepted' : '';
             const description = `[Score: ${item.score}, Answers: ${item.answer_count}${accepted}]${tags}`;
+            // 质量信号：0 回答/负分对「学最佳实践」这类意图几乎没有价值，交给重排阶段降权
+            const rankBoost = item.answer_count === 0
+                ? (item.score <= 0 ? -35 : -20)
+                : (item.score < 0 ? -25 : 0);
 
             return {
                 title: decodedTitle,
                 url: item.link,
                 description,
                 source: 'stackoverflow.com',
-                engine: 'stackoverflow'
+                engine: 'stackoverflow',
+                ...(rankBoost !== 0 ? { rankBoost } : {})
             };
         });
 

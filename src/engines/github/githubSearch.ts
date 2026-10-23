@@ -146,13 +146,17 @@ export function formatRepoItem(item: GitHubRepoItem & { title?: string; body?: s
     const lang = item.language ? `[${item.language}] ` : '';
     const updated = item.updated_at ? ` (Updated: ${item.updated_at.slice(0, 10)})` : '';
     const desc = (item.description || item.body || '').slice(0, 240).trim();
+    // 质量信号：低星仓库对「最佳实践」类意图几乎没有价值，交重排阶段降权而不是直接丢弃
+    const starCount = typeof item.stargazers_count === 'number' ? item.stargazers_count : 0;
+    const rankBoost = starCount < 10 ? -25 : (starCount < 50 ? -10 : 0);
 
     return {
         title: item.full_name || item.title || '',
         url: item.html_url,
         description: `${stars}${lang}${desc}${updated}`.trim(),
         source: 'github.com',
-        engine: 'github'
+        engine: 'github',
+        ...(rankBoost !== 0 ? { rankBoost } : {})
     };
 }
 
@@ -245,6 +249,13 @@ async function fetchExactRepo(
     return { ...formatRepoItem(res.data as GitHubRepoItem), rankBoost: 100 };
 }
 
+/** 概念型意图词：直接拿去检索仓库会命中「描述里恰好有这些词」的低星仓库 */
+const INTENT_PHRASES = /\b(best practices?|practices?|guide|tutorial|how to|getting started|learn|awesome|examples?|intro(?:duction)?)\b/gi;
+
+export function stripGithubIntentPhrases(query: string): string {
+    return query.replace(INTENT_PHRASES, ' ').replace(/\s+/g, ' ').trim();
+}
+
 async function fetchGithubData(
     cleanQuery: string,
     targetLimit: number,
@@ -276,11 +287,30 @@ async function fetchGithubData(
         const repos = await searchRepos(cleanQuery, targetLimit, headers, signal);
         results.push(...repos);
 
-        // 2. 若 Repos 结果不足，补充搜索 Issues
+        // 2. 概念型查询词面匹配会命中低星仓库：剥掉意图词后按主题词再搜一次，
+        //    例如 "asyncio best practices" → 再搜 "asyncio"，能拿回 aiohttp/httpx 这类高星库。
         if (results.length < targetLimit) {
-            const needed = targetLimit - results.length;
+            const subject = stripGithubIntentPhrases(cleanQuery);
+            if (subject && subject.toLowerCase() !== cleanQuery.toLowerCase()) {
+                try {
+                    const widened = await searchRepos(subject, targetLimit, headers, signal);
+                    const seen = new Set(results.map((result) => result.url));
+                    for (const result of widened) {
+                        if (!seen.has(result.url)) {
+                            seen.add(result.url);
+                            results.push(result);
+                        }
+                    }
+                } catch (err) {
+                    metrics.debug(`[github] widened repo search skipped: ${err instanceof Error ? err.message : String(err)}`);
+                }
+            }
+        }
+
+        // 3. 只有在完全没有仓库结果时才用 Issues 补齐，避免概念型查询里混进 Issue
+        if (results.length === 0) {
             try {
-                const issues = await searchIssues(cleanQuery, needed, headers, signal);
+                const issues = await searchIssues(cleanQuery, targetLimit, headers, signal);
                 results.push(...issues);
             } catch (err) {
                 // 补充搜索失败不阻断已有 Repo 结果

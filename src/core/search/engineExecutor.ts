@@ -8,6 +8,7 @@ import type { SearchEngineExecutorMap, SearchExecutionFailure } from './searchTy
 import { recordEngineSuccess, tripEngineCircuit } from './engineCircuitBreaker.js';
 import { hintProxyConnectionError } from '../../utils/httpRequest.js';
 import { recordEngineLatency, compactEngineLatencyFile, type EngineLatencySample } from '../engineLatency.js';
+import { stripCssFragments } from '../../utils/htmlText.js';
 
 /**
  * P1-5：按引擎细粒度并发限流（避免突发并发把 sogou/baidu 等脆弱引擎打满 10s 超时或触发反爬）：
@@ -485,8 +486,12 @@ export async function executePrimaryEngines(
     for (const engineResult of engineResults) {
         const candidate = (engineResult as { directAnswer?: unknown }).directAnswer;
         if (typeof candidate === 'string' && candidate.length > 0) {
-            directAnswer = candidate;
-            break;
+            // 出口兜底：任何引擎漏网的 CSS/样式块都在这里再清一次
+            const cleaned = stripCssFragments(candidate);
+            if (cleaned.length > 0) {
+                directAnswer = cleaned;
+                break;
+            }
         }
     }
 
@@ -504,7 +509,8 @@ export async function executePrimaryEngines(
                     engine,
                     code: 'no_results',
                     retryable: false,
-                    message: 'Engine returned no results for the allocated quota'
+                    // 不再说「for the allocated quota」——配额不是原因，查询/过滤太窄才是
+                    message: `Engine returned no results (requested ${limitForEngine}); its query matching or filters may be too narrow`
                 });
             }
         }

@@ -84,4 +84,44 @@ describe('parseBingSearchResults', () => {
         const results = parseBingSearchResults('<html><body><ol id="b_results"></ol></body></html>', 5);
         expect(results).toEqual([]);
     });
+
+    it('strips <style> blocks from directAnswer (no CSS leak)', () => {
+        const html = `<ol id="b_results">
+          <li class="b_ans">
+            <style>#rscarousel strong{color:#000;font-weight:600}</style>
+            <div class="b_caption">Sunny 21C in Beijing, light wind</div>
+          </li>
+          <li class="b_algo"><h2><a href="https://example.com/a">A result</a></h2></li>
+        </ol>`;
+        const results = parseBingSearchResults(html, 5);
+        const answer = results.directAnswer ?? '';
+        expect(answer).toContain('Sunny 21C');
+        expect(answer).not.toContain('{');
+        expect(answer).not.toContain('rscarousel');
+    });
+
+    it('does not treat answer-card carousel links as organic results', () => {
+        const html = `<ol id="b_results">
+          <li class="b_ans">
+            <div id="rscarousel">
+              <a href="https://shop.example.com/hyperx-headset">HyperX Cloud Headset</a>
+            </div>
+          </li>
+          <li class="b_algo"><h2><a href="https://example.com/real">Real result</a></h2>
+            <div class="b_caption"><p>Real snippet</p></div>
+          </li>
+        </ol>`;
+        const results = parseBingSearchResults(html, 5);
+        expect(results.map((r) => r.url)).toEqual(['https://example.com/real']);
+    });
+
+    it('does not parse b_algo elements nested inside an answer card', () => {
+        const html = `<ol id="b_results">
+          <li class="b_ans">
+            <div class="b_algo"><h2><a href="https://shop.example.com/product">Product card</a></h2></div>
+          </li>
+        </ol>`;
+        const results = parseBingSearchResults(html, 5);
+        expect(results).toHaveLength(0);
+    });
 });
