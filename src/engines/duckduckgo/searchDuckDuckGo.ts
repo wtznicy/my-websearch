@@ -14,7 +14,7 @@ import {
 } from '../../core/errors.js';
 
 const CHROME_133_SEC_CH_UA = '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"';
-const DDG_BLOCK_HINT = '当前出口 IP 被 DuckDuckGo 风控/限流（HTTP 202）；换一个代理节点、稍后重试，或改用 bing/brave 等引擎。';
+const DDG_BLOCK_HINT = 'DuckDuckGo 返回的是人机验证页（HTTP 202 anomaly CAPTCHA，需要点选图片），不是普通限流；内置 d.js 求解器只处理算术挑战，无法绕过它。换节点只有在换到未被标记的出口时才有用——实测多节点仍 202。建议改用 bing/brave，或配置 BRAVE_API_KEY / EXA_API_KEY 使用官方 API。';
 
 export function isTrustedDuckDuckGoPreloadUrl(value: string): boolean {
   try {
@@ -450,7 +450,7 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
           status: 202,
           engine: 'duckduckgo',
           hint: DDG_BLOCK_HINT,
-          message: 'DuckDuckGo returned a challenge page (HTTP 202) — upstream anti-bot; retry later or use another engine'
+          message: 'DuckDuckGo returned an anomaly CAPTCHA (HTTP 202) — human verification, not a simple rate limit'
         });
       }
 
@@ -650,7 +650,7 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
         status: 202,
         engine: 'duckduckgo',
         hint: DDG_BLOCK_HINT,
-        message: 'DuckDuckGo returned a challenge page (HTTP 202) — upstream anti-bot; retry later or use another engine'
+        message: 'DuckDuckGo returned an anomaly CAPTCHA (HTTP 202) — human verification, not a simple rate limit'
       });
     }
 
