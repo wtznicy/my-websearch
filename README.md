@@ -56,10 +56,10 @@
 | **`startpage`** | 🌐 Proxy in CN | None | **Multi-worker Anubis SHA-256 PoW solver** (difficulty ≤ 6) + cookie session (no browser needed) | Google-backed high-privacy results |
 | **`brave`** | 🌐 Proxy in CN | None | Native TLS fingerprinting + strict sponsored ad stripping | Independent English index & technical blogs |
 | **`exa`** | 🌐 Direct API | Optional Free Key | Official semantic search API (skipped if key is unset) | Semantic similarity, AI research & papers |
-| **`github`** | 🌐 Proxy in CN | None | Official GitHub Search REST API + **exact owner/repo fast path** (issues & repositories) | GitHub issues, bug reports, repositories, and exact repo lookup |
-| **`stackoverflow`**| 🌐 Proxy in CN | None | Official StackExchange 2.3 API with HTML entity decoding | Developer troubleshooting, stack traces & answers |
-| **`hackernews`** | 🌐 Proxy in CN | None | Algolia HN Search API with points, comments & author metadata | Tech discussions, startup launches & engineering news |
-| **`arxiv`** | 🌐 Proxy in CN | None | Official arXiv Atom XML API parsing titles, authors & abstracts | Scientific papers, machine learning & AI research |
+| **`github`** | 🌐 Direct API | None | Official GitHub Search REST API + **exact owner/repo fast path** (issues & repositories) | GitHub issues, bug reports, repositories, and exact repo lookup |
+| **`stackoverflow`**| 🌐 Direct API | None | Official StackExchange 2.3 API with HTML entity decoding | Developer troubleshooting, stack traces & answers |
+| **`hackernews`** | 🌐 Direct API | None | Algolia HN Search API with points, comments & author metadata | Tech discussions, startup launches & engineering news |
+| **`arxiv`** | 🌐 Direct API | None | Official arXiv Atom XML API parsing titles, authors & abstracts | Scientific papers, machine learning & AI research |
 | **`code`** | 🌐 Proxy in CN | None | grep.app API search across global GitHub code with repo, path & exact line numbers | Source code implementations, API usage patterns |
 
 ---

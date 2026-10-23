@@ -14,12 +14,17 @@ import { config } from '../config.js';
  * 走系统代理，国内引擎保持直连（Clash 系统代理模式下国内直连更快，且绕行节点易超时）。
  */
 
-import { isOverseasEngineName } from '../engines/meta.js';
+import { isOverseasEngineName, isProxyEligibleEngineName } from '../engines/meta.js';
 
 const execFileAsync = promisify(execFile);
 
 export function isOverseasEngine(engine: string | undefined): boolean {
     return isOverseasEngineName(engine);
+}
+
+/** 是否属于「需要代理」的海外引擎（API 型引擎直连可达，不在此列） */
+export function isProxyEligibleEngine(engine: string | undefined): boolean {
+    return isProxyEligibleEngineName(engine);
 }
 
 /** 缓存状态：undefined = 尚未检测，null = 检测过但无系统代理，string = 系统代理 URL */
@@ -202,7 +207,7 @@ export function getSystemProxyFallbackUrl(engine?: string): string | undefined {
     if (!sysProxy) {
         return undefined;
     }
-    if (engine === undefined || isOverseasEngine(engine)) {
+    if (engine === undefined || isProxyEligibleEngine(engine)) {
         return encodeURI(sysProxy);
     }
     return undefined;

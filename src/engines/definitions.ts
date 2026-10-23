@@ -15,6 +15,13 @@ export interface EngineDefinition {
     label: string;
     region: EngineRegion;
     category: EngineCategory;
+    /**
+     * 是否需要在墙内走代理（默认 true）。
+     * API 型引擎（GitHub / StackExchange / HN Algolia / arXiv export）实测直连可达，
+     * 走代理反而增加失败面；标 false 后默认代理名单与系统代理兜底都跳过它们。
+     * 用户显式把它们写进 PROXY_ENGINES 时仍会走代理（显式配置优先）。
+     */
+    proxyInChina?: boolean;
 }
 
 export const ENGINE_DEFINITIONS: readonly EngineDefinition[] = [
@@ -27,10 +34,10 @@ export const ENGINE_DEFINITIONS: readonly EngineDefinition[] = [
     { id: 'brave', label: 'Brave', region: 'overseas', category: 'general' },
     { id: 'startpage', label: 'Startpage', region: 'overseas', category: 'general' },
     { id: 'exa', label: 'Exa', region: 'overseas', category: 'general' },
-    { id: 'github', label: 'GitHub', region: 'overseas', category: 'vertical' },
-    { id: 'stackoverflow', label: 'Stack Overflow', region: 'overseas', category: 'vertical' },
-    { id: 'hackernews', label: 'Hacker News', region: 'overseas', category: 'vertical' },
-    { id: 'arxiv', label: 'arXiv', region: 'overseas', category: 'vertical' },
+    { id: 'github', label: 'GitHub', region: 'overseas', category: 'vertical', proxyInChina: false },
+    { id: 'stackoverflow', label: 'Stack Overflow', region: 'overseas', category: 'vertical', proxyInChina: false },
+    { id: 'hackernews', label: 'Hacker News', region: 'overseas', category: 'vertical', proxyInChina: false },
+    { id: 'arxiv', label: 'arXiv', region: 'overseas', category: 'vertical', proxyInChina: false },
     { id: 'code', label: 'Code Search', region: 'overseas', category: 'vertical' }
 ];
 

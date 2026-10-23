@@ -14,6 +14,7 @@ All notable changes to `my-websearch` are documented in this file.
 - **海外引擎闸门不再用 3s 探测误杀系统代理**：检测到系统代理时直接放行，由真实请求（10s 预算 + 完整错误映射）判断；只有完全无代理时才直连探测并快速失败。错误文案改为「未检测到系统代理」，不再声称「通过代理也不可达」。
 
 ### Changed
+- **API 型引擎默认改走直连**：GitHub（api.github.com）、Stack Overflow（api.stackexchange.com）、Hacker News（hn.algolia.com）、arXiv（export.arxiv.org）实测墙内可直连，现在默认代理名单不再包含它们，系统代理兜底也跳过它们；只有显式写进 `PROXY_ENGINES` 才走代理。README 对这四个引擎的标注从「Proxy in CN」改为「Direct API」。
 - 显式 `PROXY_URL` 仍按 `PROXY_ENGINES` 白名单生效（默认仅海外引擎），国内引擎保持直连；不配 `PROXY_URL` 时则自动使用系统代理。
 - **权威域名白名单扩充**：补入 tailwindcss.com、react.dev、vuejs.org、angular.dev、nextjs.org、typescriptlang.org、fastapi.tiangolo.com、kubernetes.io 等 25 个官方文档站，缓解中文查询被 runoob/镜像站挤占（可用 `SEARCH_AUTHORITY_DOMAINS` 继续追加）。
 - **文档修正**：README 的「13-Engine」改为 14；`code` 引擎标记从「🇨🇳 直连」改为「🌐 国内需代理」；代理排障从「没有 `PROXY_URL` 就没有系统代理」改为「系统代理自动检测」，并补充 WorkBuddy 信任指纹（`env` 键名参与指纹）建议改用 `~/.my-websearch/config.json`；DuckDuckGo 的 202 说明改为 anomaly CAPTCHA（不绕过）、并注明 `playwright:duckduckgo` 不受支持。

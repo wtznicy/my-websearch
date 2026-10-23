@@ -19,13 +19,24 @@ describe('engine definitions are the single source of truth', () => {
         expect([...definitionIds].sort()).toEqual([...SUPPORTED_SEARCH_ENGINES].sort());
     });
 
-    it('drives the overseas/proxy list', () => {
+    it('drives the overseas list and the proxy-eligible subset', () => {
         const overseasFromDefinitions = ENGINE_DEFINITIONS
             .filter((definition) => definition.region === 'overseas')
             .map((definition) => definition.id)
             .sort();
+        const proxyFromDefinitions = ENGINE_DEFINITIONS
+            .filter((definition) => definition.region === 'overseas' && definition.proxyInChina !== false)
+            .map((definition) => definition.id)
+            .sort();
         expect([...OVERSEAS_ENGINE_NAMES].sort()).toEqual(overseasFromDefinitions);
-        expect([...DEFAULT_PROXY_ENGINES].sort()).toEqual(overseasFromDefinitions);
+        expect([...DEFAULT_PROXY_ENGINES].sort()).toEqual(proxyFromDefinitions);
+    });
+
+    it('keeps API-reachable engines out of the default proxy list', () => {
+        for (const engine of ['github', 'stackoverflow', 'hackernews', 'arxiv']) {
+            expect(ENGINE_DEFINITIONS.find((entry) => entry.id === engine)?.proxyInChina).toBe(false);
+            expect(DEFAULT_PROXY_ENGINES).not.toContain(engine);
+        }
     });
 
     it('has a registry descriptor for every definition', () => {
