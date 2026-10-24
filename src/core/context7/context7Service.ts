@@ -20,6 +20,8 @@ export type Context7DocsInput = {
     library?: string;
     libraryId?: string;
     libraryName?: string;
+    /** 显式版本（如 "14.2.0" / "v15.1.8"）；优先于 library 字符串里的 @version */
+    version?: string;
     query?: string;
     limit?: number;
     strict?: boolean;
@@ -299,6 +301,17 @@ export function createContext7Services() {
 
                 const queryStr = (input.query ?? '').trim();
                 const limitVal = input.limit ?? 5;
+                const requestedVersion = input.version?.trim() || undefined;
+                const applyVersion = (id: string): string => {
+                    if (!requestedVersion) {
+                        return id;
+                    }
+                    const base = id.includes('@') ? id.slice(0, id.indexOf('@')) : id;
+                    return `${base}@${requestedVersion}`;
+                };
+                const versionOverrideWarning = requestedVersion && rawTarget.includes('@') && !rawTarget.endsWith(`@${requestedVersion}`)
+                    ? `version="${requestedVersion}" overrides the version embedded in "${rawTarget}".`
+                    : undefined;
 
                 // 核心解析与文档获取流程
                 async function resolveAndFetchDocs(
@@ -384,32 +397,40 @@ export function createContext7Services() {
                         });
                     }
 
-                    const docsResult = await fetchContext7Docs(bestId, input.query, limitVal);
+                    const docsResult = await fetchContext7Docs(applyVersion(bestId), input.query, limitVal);
+                    const warnings = [
+                        ...resolutionWarnings,
+                        ...(versionOverrideWarning ? [versionOverrideWarning] : [])
+                    ];
                     const enriched: Context7DocsResult = {
                         ...docsResult,
                         resolvedFrom: originalRequested ?? libraryName,
                         alternativeLibraries: alternatives.length > 0 ? alternatives : undefined,
                         matchConfidence: confidence,
-                        ...(resolutionWarnings.length > 0 ? { warnings: resolutionWarnings } : {})
+                        ...(warnings.length > 0 ? { warnings } : {})
                     };
                     return enriched;
                 }
 
                 // 分支 1：传入的是明确路径 ID（以 '/' 开头，如 '/vercel/next.js' 或 '/vercel/next.js@v15.1.8'）
                 if (rawTarget.startsWith('/')) {
-                    const cacheKey = `docs:${rawTarget}:${queryStr}:${limitVal}`;
+                    const targetId = applyVersion(rawTarget);
+                    const cacheKey = `docs:${targetId}:${queryStr}:${limitVal}`;
                     const cached = cachedGet<Context7DocsResult>(cacheKey);
                     if (cached) {
                         return cached;
                     }
 
                     try {
-                        const result = await fetchContext7Docs(rawTarget, input.query, limitVal);
+                        const fetched = await fetchContext7Docs(targetId, input.query, limitVal);
+                        const result = versionOverrideWarning
+                            ? { ...fetched, warnings: [...(fetched.warnings ?? []), versionOverrideWarning] }
+                            : fetched;
                         cachedSet(cacheKey, result);
                         if (result.redirectedFrom) {
                             cachedSet(`docs:${result.redirectedFrom}:${queryStr}:${limitVal}`, result);
                         }
-                        if (result.redirectUrl && result.redirectUrl !== rawTarget) {
+                        if (result.redirectUrl && result.redirectUrl !== targetId) {
                             cachedSet(`docs:${result.redirectUrl}:${queryStr}:${limitVal}`, result);
                         }
                         return result;
@@ -435,7 +456,7 @@ export function createContext7Services() {
                 }
 
                 // 分支 2：传入的是自然库名（不带 '/'，如 'next.js'、'react'、'fastapi'）
-                const cacheKey = `docs:resolved:${rawTarget.toLowerCase()}:${queryStr}:${limitVal}`;
+                const cacheKey = `docs:resolved:${rawTarget.toLowerCase()}:${queryStr}:${limitVal}:${requestedVersion ?? ''}`;
                 const cached = cachedGet<Context7DocsResult>(cacheKey);
                 if (cached) {
                     return cached;

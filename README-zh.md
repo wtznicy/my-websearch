@@ -34,7 +34,7 @@
 - 📚 **统一 Context7 官方框架/库文档直查（`queryDocs` 一站式合体）**  
   直接输入技术库名（如 `"next.js"`, `"vue"`）或 Context7 ID，内部自动多候选排序、404 自愈重搜并返回相似替代库，免去额外调用 ID 解析步骤。
 - 🐙 **全面升级的 GitHub / Gitee 资源抓取**  
-  `fetchGithubContent`（原 `fetchGithubReadme`）同时支持 GitHub 与 Gitee：仓库 README、任意源码单文件（`/blob/...`）、目录树（`/tree/...`）及 Issue / PR 完整讨论。
+  `fetchGithubContent`（原 `fetchGithubReadme`）同时支持 GitHub 与 Gitee：仓库 README、任意源码单文件（`/blob/...`，支持 `lines`/`#L120-L180` 行号切片）、目录树（`/tree/...`）、Issue / PR 完整讨论、Commit（`/commit/<sha>`）、版本对比（`/compare/a...b`）与 Release（`/releases`、`/releases/tag/<tag>`）。
 - 🌏 **零配置网络感知（TUN / Fake-IP 完美适配）**  
   自动嗅探系统代理（Windows 注册表 / macOS scutil / Linux 环境变量），海外引擎走代理、国内引擎直连；原生支持 `198.18.0.0/15` 放行，无缝兼容 TUN / 虚拟网卡，严守内网 SSRF 安全边界。
 - 🔌 **全形态接入支持**  
@@ -76,8 +76,8 @@
 | :--- | :--- | :--- |
 | **`search`** | 15 大引擎联合联网与代码检索 | 支持多词并发、`timeRange: day\|week\|month\|year` 时间过滤、`site: string[]` 域名过滤、`fetchTop` 正文前瞻注入、`code` 代码引擎（grep.app）；显式传 `engines` 默认 `minResults=0` 且仅在候选内级联；失败附带网络内联诊断（`diagnostics: { proxy, dns, suggestion }`） |
 | **`fetchWebContent`** | 通用网页正文、Markdown 与透明 PDF 提取 | **全能知识提取网关**：内置磁盘级 Markdown 缓存（Node 22 `node:sqlite` / 分片 JSON 兜底，200MB LRU，`cache: default\|reload` 强制刷新）；透明解析 PDF（上限 20MB / 50 页，带 `[page N]` 标记，纯扫描版明确报错）；统一分页与 `focus` 章节定位（默认 **`bm25`** 按段落相关性选块，`window` 保留旧的固定窗口）；**`selector`** 用 CSS 选择器收窄提取范围（未命中直接报错，不静默回退全页）；**`extract`** 用 CSS schema 直接产出结构化 JSON（无需 LLM）；**`citations`** 把正文链接改写成编号引用 + 末尾 References；**`retainLinks`** 裁剪 URL（列表页实测省 50%） |
-| **`fetchGithubContent`** | 全能 GitHub / Gitee 内容提取网关 | 提取 README、**单个源码文件**（`/blob/<ref>/<path>`）、目录树（`/tree/`）、Issue 与 PR；`ref` 可为分支/tag/commit；不是整仓 clone；Gitee 已与 GitHub 对齐（文件/目录/Issue/PR，可选 `GITEE_TOKEN`）；返回 `warnings` |
-| **`queryDocs`** | 一站式开源框架/库官方文档 | 直接传入库名或 Context7 ID；内置低置信度保护与自动兜底链（npm registry → PyPI JSON → 官方 GitHub README），响应标注 `source: context7\|npm\|pypi\|github-readme`、`confidence` 与 `warnings` |
+| **`fetchGithubContent`** | 全能 GitHub / Gitee 内容提取网关 | 提取 README、**单个源码文件**（`/blob/<ref>/<path>`，支持 `lines`/`#L120-L180` 切片，上限 400 行）、目录树（`/tree/`）、Issue 与 PR、Commit（`/commit/<sha>`）、Compare（`/compare/a...b`，patch 限长 + lockfile 过滤）、Release（`/releases[/tag/<tag>]`）；`ref` 可为分支/tag/commit；Gitee 已对齐（可选 `GITEE_TOKEN`）；返回 `warnings` |
+| **`queryDocs`** | 一站式开源框架/库官方文档 | 支持库名或 Context7 ID；可选 **`version`** 钉定 Context7/npm/PyPI 版本；**24h 本地缓存**（`cache: reload` 强制刷新）；兜底链 npm → PyPI → **crates.io → Go module proxy** → GitHub README；返回 `source`、`confidence` 与 `warnings` |
 
 > 💡 **向后兼容说明**：原独立的 `fetchCsdnArticle` 与 `fetchJuejinArticle` 已平滑下沉并收口进通用的 `fetchWebContent`（按域名自动采用最佳专有提取引擎）；原 `resolveLibraryId` 已合并入 `queryDocs`（支持直接传 `library` 库名或旧版 `libraryId` 别名自动解析定位）。独立的 legacy 工具已移除 —— `REGISTER_LEGACY_ARTICLE_TOOLS` 开关一并删除，因为保留三个永不注册的 handler 依然要占工具描述预算。
 

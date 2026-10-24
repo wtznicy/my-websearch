@@ -6,6 +6,11 @@ All notable changes to `my-websearch` are documented in this file.
 
 ### Added
 - **新增 `yahoo` 引擎（第 15 个）**：Yahoo 搜索是 SSR HTML，但必须先访问首页取得 `A1/A3` 等 cookie，否则直接 500；实现为「首页预热 + `div.algo` 解析 + `RU=` 重定向还原」，wreq 不可用时回退 axios cookie jar。它使用 Bing 索引，不参与默认路由/级联，只作为**英文主路由的健康替补**：DuckDuckGo 熔断或近期成功率过低时自动顶上（`AUTO_ROUTE_EN_ENGINES=bing,yahoo` 也可显式指定）。
+- **`fetchGithubContent` 行号切片**：支持 URL hash `#L120-L180` 或 `lines: "120-180"`，只返回指定区间的源码并保留真实行号；越界严格报错，单次最多 400 行（超出截断并提示），GitHub/Gitee 一致。
+- **`fetchGithubContent` 支持 Commit / Compare / Releases**：新增 `/commit/<sha>`、`/compare/<base>...<head>`、`/releases`、`/releases/tag/<tag>`（GitHub + Gitee）；Commit 输出提交信息、文件列表与限长 patch，Compare 输出 commits + 文件/补丁，Releases 输出 Markdown body 与 assets；patch 上限 30KB、文件上限 100，lockfile 自动跳过。
+- **`queryDocs` 显式 `version` 参数**：`version` 优先于 `library` 里的 `@version`，Context7 与 npm/PyPI 兜底都会绑定该版本。
+- **`queryDocs` 24h 本地缓存**：独立 `query_docs_cache` SQLite 表（Node 22 内置 `node:sqlite`，不可用时 JSON 文件兜底），只缓存置信度 ≥ medium 的成功结果；`cache: "reload"` 可绕过/刷新。
+- **`queryDocs` 注册表兜底扩展**：新增 **crates.io**（Rust，带规范 User-Agent）与 **Go module proxy**（仅 github.com/gitlab.com 模块可直接推导仓库 README）两层。
 
 ### Fixed
 - **Yahoo 遵循显式 `PROXY_ENGINES` 白名单**：旧配置里硬编码的 8 引擎名单不含 `yahoo`，而 Yahoo 逻辑此前会无条件套用 `PROXY_URL`/系统代理；现在显式名单优先，未配置名单时才用系统代理兜底。实测国内直连 Yahoo 15–20s 超时，走代理约 2s，因此自定义名单必须包含 `yahoo`（或直接删掉名单用默认）。

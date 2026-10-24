@@ -3,6 +3,8 @@
  * Kept dependency-free so both host adapters can import them without cycles.
  */
 
+import { LineRange, MAX_LINE_RANGE, sliceCodeLines } from './lineRange.js';
+
 /** 从文件路径推断 Markdown 围栏代码块语言标识 */
 export function detectLanguageFromPath(filePath: string): string {
     const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
@@ -56,8 +58,20 @@ export function detectLanguageFromPath(filePath: string): string {
     return map[ext] || '';
 }
 
-export function formatSourceFile(owner: string, repo: string, branch: string, filePath: string, content: string): string {
+export function formatSourceFile(owner: string, repo: string, branch: string, filePath: string, content: string, lineRange?: LineRange): string {
     const isMd = /\.mdx?$/i.test(filePath) || /\.markdown$/i.test(filePath);
+    if (lineRange) {
+        const sliced = sliceCodeLines(content, lineRange);
+        const width = String(sliced.end).length;
+        const numbered = sliced.lines
+            .map((line, index) => `${String(sliced.start + index).padStart(width)} | ${line}`)
+            .join('\n');
+        const lang = isMd ? 'markdown' : detectLanguageFromPath(filePath);
+        const truncationNote = sliced.truncated
+            ? `\n> Requested lines are longer than ${MAX_LINE_RANGE}; only the first ${MAX_LINE_RANGE} lines of the range are shown.`
+            : '';
+        return `# File: \`${filePath}\` (${owner}/${repo} @ ${branch}), lines ${sliced.start}-${sliced.end} of ${sliced.total}${truncationNote}\n\n\`\`\`${lang}\n${numbered}\n\`\`\``;
+    }
     if (isMd) {
         return `# File: \`${filePath}\` (${owner}/${repo} @ ${branch})\n\n${content}`;
     }

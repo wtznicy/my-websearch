@@ -5,6 +5,8 @@ import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRe
 import { formatChangedFilesSection } from './contentBudget.js';
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 import { formatSourceFile, renderAsciiTree } from './format.js';
+import type { LineRange } from './lineRange.js';
+import { renderCommit, renderCompare, renderReleases, type ChangedFile } from './changes.js';
 
 const GITEE_API = 'https://gitee.com/api/v5';
 const GITEE_TIMEOUT_MS = 12000;
@@ -104,7 +106,7 @@ async function createGiteeMissingBlobError(
     return giteeNotFound(`Gitee file not found: ${owner}/${repo}@${ref}/${filePath}`, hint);
 }
 
-export async function fetchGiteeBlob(owner: string, repo: string, ref: string, filePath: string): Promise<string> {
+export async function fetchGiteeBlob(owner: string, repo: string, ref: string, filePath: string, lineRange?: LineRange): Promise<string> {
     const cleanPath = filePath.replace(/[?#].*$/, '');
     const url = `${GITEE_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(cleanPath)}?ref=${encodeURIComponent(ref)}`;
     const res = await giteeGet(url, 'contents');
@@ -153,7 +155,7 @@ export async function fetchGiteeBlob(owner: string, repo: string, ref: string, f
         });
     }
 
-    return formatSourceFile(owner, repo, ref, cleanPath, content);
+    return formatSourceFile(owner, repo, ref, cleanPath, content, lineRange);
 }
 
 export async function fetchGiteeTree(owner: string, repo: string, ref: string, dirPath?: string): Promise<string> {
@@ -337,4 +339,96 @@ export async function fetchGiteePullRequest(owner: string, repo: string, prNumbe
     }
 
     return lines.join('\n');
+}
+export async function fetchGiteeCommit(owner: string, repo: string, sha: string): Promise<string | null> {
+    const url = `${GITEE_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(sha)}`;
+    const res = await giteeGet(url, 'commit');
+    if (res.status === 404) {
+        return null;
+    }
+    if (res.status >= 400) {
+        throwGiteeStatus(res.status, 'commit');
+    }
+    const data = res.data as {
+        sha?: string;
+        html_url?: string;
+        commit?: { message?: string; author?: { name?: string; date?: string } };
+        stats?: { additions?: number; deletions?: number; total?: number };
+        files?: ChangedFile[];
+    };
+    return renderCommit({
+        sha: data.sha,
+        message: data.commit?.message,
+        author: data.commit?.author?.name,
+        date: data.commit?.author?.date,
+        url: data.html_url,
+        stats: data.stats,
+        files: data.files
+    }, sha);
+}
+
+export async function fetchGiteeCompare(owner: string, repo: string, base: string, head: string): Promise<string | null> {
+    const url = `${GITEE_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+    const res = await giteeGet(url, 'compare');
+    if (res.status === 404) {
+        return null;
+    }
+    if (res.status >= 400) {
+        throwGiteeStatus(res.status, 'compare');
+    }
+    const data = res.data as {
+        html_url?: string;
+        commits?: Array<{ sha?: string; commit?: { message?: string; author?: { name?: string; date?: string } } }>;
+        files?: ChangedFile[];
+    };
+    return renderCompare({
+        base,
+        head,
+        url: data.html_url,
+        commits: data.commits?.map((commit) => ({
+            sha: commit.sha,
+            message: commit.commit?.message,
+            author: commit.commit?.author?.name,
+            date: commit.commit?.author?.date
+        })),
+        files: data.files
+    }, base, head);
+}
+
+export async function fetchGiteeReleases(owner: string, repo: string, tag?: string): Promise<string | null> {
+    const url = `${GITEE_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases?per_page=10`;
+    const res = await giteeGet(url, 'releases');
+    if (res.status === 404) {
+        return null;
+    }
+    if (res.status >= 400) {
+        throwGiteeStatus(res.status, 'releases');
+    }
+    const releases = res.data as Array<{
+        tag_name?: string;
+        name?: string;
+        created_at?: string;
+        html_url?: string;
+        body?: string;
+        assets?: Array<{ name?: string; browser_download_url?: string }>;
+    }>;
+    if (!Array.isArray(releases) || releases.length === 0) {
+        return null;
+    }
+    const mapped = releases.map((release) => ({
+        tag: release.tag_name,
+        name: release.name,
+        publishedAt: release.created_at,
+        url: release.html_url,
+        body: release.body,
+        assets: release.assets?.map((asset) => ({ name: asset.name, url: asset.browser_download_url }))
+    }));
+    if (!tag) {
+        return renderReleases(mapped);
+    }
+    if (tag === 'latest') {
+        return renderReleases(mapped.slice(0, 1));
+    }
+    const match = mapped.filter((release) => release.tag === tag);
+    return match.length > 0 ? renderReleases(match, tag) : null;
 }

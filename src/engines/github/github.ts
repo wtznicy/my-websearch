@@ -6,7 +6,9 @@ import { buildAxiosRequestOptions, isNetworkLayerError, requestDirectFirst, requ
 import { detectSystemProxy } from '../../utils/systemProxy.js';
 import { AppError } from '../../core/errors.js';
 import { detectLanguageFromPath, formatSourceFile, renderAsciiTree } from './format.js';
-import { fetchGiteeBlob, fetchGiteeIssue, fetchGiteePullRequest, fetchGiteeTree } from './gitee.js';
+import { LineRange, parseLineRangeFromUrl } from './lineRange.js';
+import { fetchGiteeBlob, fetchGiteeCommit, fetchGiteeCompare, fetchGiteeIssue, fetchGiteePullRequest, fetchGiteeReleases, fetchGiteeTree } from './gitee.js';
+import { fetchGithubCommit, fetchGithubCompare, fetchGithubReleases } from './changes.js';
 import {
     attemptTimeoutMs,
     buildJsdelivrPath,
@@ -508,7 +510,8 @@ async function fetchGithubBlob(
     owner: string,
     repo: string,
     branch: string,
-    filePath: string
+    filePath: string,
+    lineRange?: LineRange
 ): Promise<BlobFetchOutcome> {
     const ownerEnc = encodeURIComponent(owner.trim());
     const repoEnc = encodeURIComponent(repo.trim());
@@ -532,7 +535,7 @@ async function fetchGithubBlob(
     if (cdnFirst) {
         cdnResult = await tryCdn();
         if (cdnResult.status === 'ok') {
-            return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, cdnResult.content) };
+            return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, cdnResult.content, lineRange) };
         }
         // CDN 失败且预算还有剩余：补一次 raw（而不是直接失败）
         if (!isBudgetExhausted(budget)) {
@@ -541,7 +544,7 @@ async function fetchGithubBlob(
     } else {
         rawResult = await tryRaw();
         if (rawResult.status === 'ok') {
-            return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, rawResult.content) };
+            return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, rawResult.content, lineRange) };
         }
         if (!isBudgetExhausted(budget)) {
             cdnResult = await tryCdn();
@@ -549,10 +552,10 @@ async function fetchGithubBlob(
     }
 
     if (rawResult.status === 'ok') {
-        return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, rawResult.content) };
+        return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, rawResult.content, lineRange) };
     }
     if (cdnResult.status === 'ok') {
-        return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, cdnResult.content) };
+        return { status: 'ok', content: formatSourceFile(owner, repo, branch, filePath, cdnResult.content, lineRange) };
     }
 
     const rawNotFound = rawResult.status === 'notfound'
@@ -952,7 +955,7 @@ async function fetchGithubPullRequest(
  * @param githubUrl GitHub / Gitee URL
  * @returns 格式化后的 Markdown 内容字符串，失败或 404 返回 null
  */
-export async function fetchGithubContent(githubUrl: string): Promise<string | null> {
+export async function fetchGithubContent(githubUrl: string, lineRange?: LineRange): Promise<string | null> {
     console.error(`\n--- Processing URL: ${githubUrl} ---`);
 
     if (!githubUrl?.trim()) {
@@ -961,6 +964,30 @@ export async function fetchGithubContent(githubUrl: string): Promise<string | nu
     }
 
     const trimmed = githubUrl.trim();
+    const effectiveRange = lineRange ?? parseLineRangeFromUrl(trimmed);
+    if (effectiveRange && !/\/(?:blob)\//i.test(trimmed)) {
+        throw new AppError({
+            code: 'invalid_arguments',
+            retryable: false,
+            engine: 'github',
+            message: 'lines / #L ranges are only supported for /blob/ source-file URLs.',
+            hint: 'Open a file URL (/blob/<ref>/<path>) to use line ranges.'
+        });
+    }
+
+    // 0. Gitee / GitHub 的 commit、compare、releases（结构化 API，不抓 HTML 页面）
+    const giteeCommitMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?gitee\.com\/([^\/\s]+)\/([^\/\s]+)\/commit\/([0-9a-f]{7,64})/i);
+    if (giteeCommitMatch?.[1] && giteeCommitMatch[2] && giteeCommitMatch[3]) {
+        return fetchGiteeCommit(giteeCommitMatch[1], giteeCommitMatch[2], giteeCommitMatch[3]);
+    }
+    const giteeCompareMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?gitee\.com\/([^\/\s]+)\/([^\/\s]+)\/compare\/([^?#\s]+?)\.\.\.([^?#\s]+)/i);
+    if (giteeCompareMatch?.[1] && giteeCompareMatch[2] && giteeCompareMatch[3] && giteeCompareMatch[4]) {
+        return fetchGiteeCompare(giteeCompareMatch[1], giteeCompareMatch[2], giteeCompareMatch[3], giteeCompareMatch[4]);
+    }
+    const giteeReleasesMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?gitee\.com\/([^\/\s]+)\/([^\/\s]+)\/releases(?:\/tag\/([^/?#\s]+))?/i);
+    if (giteeReleasesMatch?.[1] && giteeReleasesMatch[2]) {
+        return fetchGiteeReleases(giteeReleasesMatch[1], giteeReleasesMatch[2], giteeReleasesMatch[3]);
+    }
 
     // 0. Gitee 与 GitHub 同款资源（blob / tree / issue / pull request）
     const giteeBlobMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?gitee\.com\/([^\/\s]+)\/([^\/\s]+)\/blob\/([^\/\s]+)\/(.+)/i);
@@ -970,7 +997,7 @@ export async function fetchGithubContent(githubUrl: string): Promise<string | nu
         const ref = giteeBlobMatch[3];
         const filePath = giteeBlobMatch[4].replace(/[?#].*$/, '');
         console.error(`✅ Detected Gitee source file: ${owner}/${repo} @ ${ref}:${filePath}`);
-        return fetchGiteeBlob(owner, repo, ref, filePath);
+        return fetchGiteeBlob(owner, repo, ref, filePath, effectiveRange);
     }
 
     const giteeTreeMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?gitee\.com\/([^\/\s]+)\/([^\/\s]+)\/tree\/([^\/\s]+)(?:\/(.+))?/i);
@@ -1001,7 +1028,21 @@ export async function fetchGithubContent(githubUrl: string): Promise<string | nu
         return fetchGiteePullRequest(owner, repo, prNumber);
     }
 
-    // 1. 匹配 GitHub blob 源码文件链接：https://github.com/{owner}/{repo}/blob/{branch}/{path}
+    // 1. GitHub commit / compare / releases（结构化 API，优先于 HTML 页面）
+    const githubCommitMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/commit\/([0-9a-f]{7,64})/i);
+    if (githubCommitMatch?.[1] && githubCommitMatch[2] && githubCommitMatch[3]) {
+        return fetchGithubCommit(githubCommitMatch[1], githubCommitMatch[2], githubCommitMatch[3]);
+    }
+    const githubCompareMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/compare\/([^?#\s]+?)\.\.\.([^?#\s]+)/i);
+    if (githubCompareMatch?.[1] && githubCompareMatch[2] && githubCompareMatch[3] && githubCompareMatch[4]) {
+        return fetchGithubCompare(githubCompareMatch[1], githubCompareMatch[2], githubCompareMatch[3], githubCompareMatch[4]);
+    }
+    const githubReleasesMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/releases(?:\/(?:tag\/)?([^/?#\s]+))?/i);
+    if (githubReleasesMatch?.[1] && githubReleasesMatch[2]) {
+        return fetchGithubReleases(githubReleasesMatch[1], githubReleasesMatch[2], githubReleasesMatch[3]);
+    }
+
+    // 2. 匹配 GitHub blob 源码文件链接：https://github.com/{owner}/{repo}/blob/{branch}/{path}
     const blobMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/blob\/([^\/\s]+)\/(.+)/i);
     if (blobMatch && blobMatch[1] && blobMatch[2] && blobMatch[3] && blobMatch[4]) {
         const owner = blobMatch[1];
@@ -1009,7 +1050,7 @@ export async function fetchGithubContent(githubUrl: string): Promise<string | nu
         const branch = blobMatch[3];
         const filePath = blobMatch[4].replace(/[?#].*$/, '');
         console.error(`✅ Detected GitHub source file: ${owner}/${repo} @ ${branch}:${filePath}`);
-        const blobOutcome = await fetchGithubBlob(owner, repo, branch, filePath);
+        const blobOutcome = await fetchGithubBlob(owner, repo, branch, filePath, effectiveRange);
         if (blobOutcome.status === 'ok') {
             return blobOutcome.content;
         }

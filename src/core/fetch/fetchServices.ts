@@ -9,10 +9,11 @@ import {
 } from '../validation/targetValidation.js';
 import { AppError } from '../errors.js';
 import { isStackOverflowQuestionUrl, fetchStackOverflowQuestion } from '../../engines/stackoverflow/fetchStackOverflow.js';
+import { parseLineRangeInput, type LineRange } from '../../engines/github/lineRange.js';
 
 export type ArticleFetchOptions = { format?: 'text' | 'markdown' };
 export type ArticleFetcher = (url: string, options?: ArticleFetchOptions) => Promise<{ content: string; title?: string }>;
-export type GithubReadmeFetcher = (url: string) => Promise<string | null>;
+export type GithubReadmeFetcher = (url: string, lineRange?: LineRange) => Promise<string | null>;
 export type StackOverflowQuestionFetcher = (url: string) => Promise<{ title: string; content: string } | null>;
 export type WebFetcher = (url: string, maxChars: number, options?: FetchWebContentOptions) => Promise<FetchWebContentResult>;
 
@@ -39,7 +40,7 @@ export function createArticleFetchService(
 
 export function createGithubReadmeService(fetcher: GithubReadmeFetcher) {
     return {
-        async execute({ url }: { url: string }): Promise<string | null> {
+        async execute({ url, lines }: { url: string; lines?: string }): Promise<string | null> {
             if (!validateGithubRepositoryUrl(url)) {
                 throw new AppError({
                     code: 'invalid_arguments',
@@ -49,7 +50,7 @@ export function createGithubReadmeService(fetcher: GithubReadmeFetcher) {
                 });
             }
 
-            return fetcher(url);
+            return fetcher(url, parseLineRangeInput(lines));
         }
     };
 }

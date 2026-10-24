@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { isContext7QuotaExhaustedError, Context7DocsResult, Context7InfoSnippet, Context7CodeSnippet } from '../../engines/context7/context7.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { fetchPackageDocsFallback, PackageDocsFallbackResult } from '../../core/docs/packageDocsFallback.js';
+import { docsCacheKey, getDocsCache, setDocsCache } from '../../core/docs/docsCache.js';
 import { metrics } from '../../core/metrics.js';
 import {
     logTool,
@@ -16,7 +17,7 @@ import {
 export type QueryDocsFormattedInput = {
     libraryId: string;
     query?: string;
-    source?: 'context7' | 'npm' | 'pypi' | 'github-readme';
+    source?: 'context7' | 'npm' | 'pypi' | 'crates' | 'go' | 'github-readme';
     confidence?: 'high' | 'medium' | 'low';
     warnings?: string[];
     resolvedFrom?: string;
@@ -145,21 +146,25 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
             inputSchema: z.object({
                 library: z.string().min(1).optional().describe("Library or package name (e.g. 'next.js', 'react', 'fastapi') or exact Context7 library ID (e.g. '/vercel/next.js', version-pinnable like '/vercel/next.js@v15.1.8')"),
                 libraryId: z.string().min(1).optional().describe("Legacy alias for library (e.g. /vercel/next.js)"),
+                version: z.string().min(1).optional().describe("Optional explicit version (e.g. '14.2.0' or 'v15.1.8'); overrides an @version embedded in library"),
                 query: z.string().min(1).optional().describe("The question, feature, or task to get relevant documentation for (optional; defaults to an overview when omitted, e.g. 'how to set up middleware with auth')"),
                 limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets to return (default 5)"),
+                cache: z.enum(['default', 'reload']).optional().describe("Use the 24h local docs cache (default) or bypass/refresh it with 'reload'"),
                 strict: z.boolean().optional().describe("If true, rejects low-confidence library name matches with an error instead of returning loosely matched candidate docs (default false)")
             }).passthrough(),
             annotations: TOOL_ANNOTATION_HINTS
         },
         async (rawArgs, extra) => {
-            const { library, libraryId, query, limit, strict } = rawArgs as {
+            const { library, libraryId, version, query, limit, strict, cache } = rawArgs as {
                 library?: string;
                 libraryId?: string;
+                version?: string;
                 query?: string;
                 limit?: number;
                 strict?: boolean;
+                cache?: 'default' | 'reload';
             } & Record<string, unknown>;
-            const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, ['library', 'libraryId', 'query', 'limit', 'strict']);
+            const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, ['library', 'libraryId', 'version', 'query', 'limit', 'strict', 'cache']);
             const target = (library ?? libraryId ?? '').trim();
             if (!target) {
                 return {
@@ -170,6 +175,21 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
 
             const signal = extra?.signal;
 
+            const cacheKey = docsCacheKey({ library: target, version, query, limit, strict });
+            if (cache !== 'reload') {
+                const cached = getDocsCache(cacheKey);
+                if (cached) {
+                    logTool(`queryDocs cache hit: ${cacheKey}`);
+                    return {
+                        content: [{ type: 'text', text: cached.text }],
+                        source: cached.source,
+                        confidence: cached.confidence,
+                        cached: true,
+                        warnings: unknownWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                }
+            }
+
             // 1. 尝试 Context7 查询
             let context7Result: Context7DocsResult | null = null;
             let context7Error: unknown = null;
@@ -178,6 +198,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 logTool(`Context7 fetching docs for: ${target}`);
                 context7Result = await runtime.services.context7Docs.execute({
                     library: target,
+                    version,
                     query,
                     limit,
                     strict,
@@ -208,6 +229,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     alternativeLibraries: context7Result.alternativeLibraries,
                     warnings: [...(context7Result.warnings ?? []), ...unknownWarnings]
                 }));
+                setDocsCache(cacheKey, { text, source: 'context7', confidence, cachedAt: Date.now() });
                 return {
                     content: [{ type: 'text', text }],
                     source: 'context7',
@@ -216,12 +238,13 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 } as unknown as { content: Array<{ type: 'text'; text: string }> };
             }
 
-            // 3. 低置信度拦截或未命中时，启动兜底链：npm -> PyPI -> GitHub README
-            logTool(`Context7 match confidence is low or failed for "${target}". Attempting npm/PyPI fallback...`);
+            // 3. 低置信度拦截或未命中时，启动兜底链：npm -> PyPI -> crates.io -> Go module proxy -> GitHub README
+            logTool(`Context7 match confidence is low or failed for "${target}". Attempting npm/PyPI/crates/Go fallback...`);
             let fallbackResult: PackageDocsFallbackResult | null = null;
             try {
                 fallbackResult = await fetchPackageDocsFallback({
                     library: target,
+                    version,
                     signal,
                     fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url })
                 });
@@ -242,6 +265,14 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     readme: fallbackResult.readme,
                     warnings: combinedWarnings
                 }));
+                if (fallbackResult.confidence !== 'low') {
+                    setDocsCache(cacheKey, {
+                        text,
+                        source: fallbackResult.source,
+                        confidence: fallbackResult.confidence,
+                        cachedAt: Date.now()
+                    });
+                }
                 return {
                     content: [{ type: 'text', text }],
                     source: fallbackResult.source,

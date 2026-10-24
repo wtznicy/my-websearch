@@ -22,7 +22,7 @@ export type FetchArticleService = {
 };
 
 export type GithubReadmeService = {
-    execute(input: { url: string }): Promise<string | null>;
+    execute(input: { url: string; lines?: string }): Promise<string | null>;
 };
 
 export type FetchWebService = {
@@ -58,6 +58,7 @@ export type Context7DocsService = {
         library?: string;
         libraryId?: string;
         libraryName?: string;
+        version?: string;
         query?: string;
         limit?: number;
         strict?: boolean;
