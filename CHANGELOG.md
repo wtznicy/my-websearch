@@ -2,7 +2,7 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
-## [Unreleased]
+## [1.3.9] - 2026-10-24
 
 ### Added
 - **新增 `bing-news` 垂直引擎（第 16 个）**：Bing News RSS + `pubDate` **24 小时过滤** + `apiclick.aspx?url=` 真实链接解码，自带 description；不进默认路由/级联，通过 `engines:["bing-news"]` 显式调用，适合突发新闻与 24h 更新。
@@ -15,6 +15,13 @@ All notable changes to `my-websearch` are documented in this file.
 
 ### Fixed
 - **Yahoo 遵循显式 `PROXY_ENGINES` 白名单**：旧配置里硬编码的 8 引擎名单不含 `yahoo`，而 Yahoo 逻辑此前会无条件套用 `PROXY_URL`/系统代理；现在显式名单优先，未配置名单时才用系统代理兜底。实测国内直连 Yahoo 15–20s 超时，走代理约 2s，因此自定义名单必须包含 `yahoo`（或直接删掉名单用默认）。
+
+### Changed
+- **统一日志入口 `core/log.ts`**：`LOG_LEVEL=debug|info|warn|error|silent|quiet|normal`，统一级别过滤、`[level] [my-websearch]` 前缀与 stderr 输出；CLI/MCP 入口安装 console bridge，存量 `console.*` 不再污染 `--json` 的 stdout。测试不安装 bridge，不影响 console spy。
+- **模块拆分**：GitHub Issue/PR 渲染抽到 `engines/github/discussion.ts`（github.ts 1160→964 行）；Bing 的 site 操作符/URL 构造函数抽到 `engines/bing/query.ts`（bing.ts 1018→951 行）；浏览器临时目录安全删除抽到 `utils/playwright/browserSessionTemp.ts`（browserSession.ts 1824→1778 行），均保留原导出路径兼容。
+- **测试脚本去重**：删除与 `npm test` 同义的 `test:unit`/`test:vitest`，以及与 `test:live` 同义的 `test:integration`；CI 改用 `npm test`。
+- **文档清理**：README 测试基线更新为 87 文件 / 667 用例；删除空的 `docs/assets/`；`docs/architecture/overview.md` 去掉已完成的 Phase 1–4 历史计划，改为当前分层与不变量。
+- **远端安全**：原 `origin` 指向上游 `Aas-ee/open-webSearch`（217/466 提交分叉，误 push 风险高），已重命名为 `upstream`；`gitee` / `github` 为仅有的推送远端。
 
 ## [1.3.8] - 2026-10-24
 

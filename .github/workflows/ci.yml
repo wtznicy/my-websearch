@@ -29,7 +29,7 @@ jobs:
 
       - run: npm run build
 
-      - run: npm run test:vitest
+      - run: npm test
 
       # 自校验脚本（src/test/test-*.ts）覆盖了 vitest 没有触碰的工具模块
       # （utils/text、utils/queryPreprocess、utils/dnsCache、core/validation/targetValidation 等）。

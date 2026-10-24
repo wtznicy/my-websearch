@@ -22,6 +22,12 @@ import {
   createSessionCapacityManager,
   type SessionSlotReservation
 } from './adapters/http/mcpHttpSecurity.js';
+import { configureLogging, installConsoleBridge } from './core/log.js';
+
+// 统一日志：级别来自 LOG_LEVEL；启动静默时默认 warn。console.* 统一转 stderr，
+// 避免污染 CLI --json 的 stdout。
+configureLogging({ quietStartup: process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true' });
+installConsoleBridge();
 
 // 从 package.json 注入真实版本号，避免 MCP 客户端看到的 server 版本失真。
 // 注意：此文件编译后位于 build/index.js，package.json 在仓库根目录，需上溯一级。

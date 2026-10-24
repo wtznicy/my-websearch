@@ -1,6 +1,6 @@
 {
   "name": "my-websearch",
-  "version": "1.3.8",
+  "version": "1.3.9",
   "engines": {
     "node": ">=20"
   },
@@ -48,10 +48,7 @@
     "test:both": "node -e \"process.env.MODE='both'; import('./build/index.js')\"",
     "test": "vitest run",
     "test:deterministic": "node build/tools/runDeterministicTests.js",
-    "test:unit": "vitest run",
     "test:live": "tsc && node build/tools/runCurrentTests.js",
-    "test:integration": "tsc && node build/tools/runCurrentTests.js",
-    "test:vitest": "vitest run",
     "eval:live": "node tools/runLiveEval.mjs",
     "lint": "eslint src --max-warnings 0",
     "lint:fix": "eslint src --fix",

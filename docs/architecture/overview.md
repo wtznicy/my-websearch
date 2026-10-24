@@ -1,8 +1,8 @@
-# Open WebSearch Architecture Overview
+# my-websearch Architecture Overview
 
-This document defines the corrected evolution path for `my-websearch` as a combined MCP + CLI + daemon product.
+`my-websearch` is a combined MCP server, one-shot CLI and local HTTP daemon over one shared runtime. This document describes the current layout and invariants; historical migration phases are not maintained here.
 
-## Target shape
+## Shape
 
 ```text
                 +----------------------+
@@ -33,107 +33,30 @@ This document defines the corrected evolution path for `my-websearch` as a combi
                     skill prefers CLI/daemon, keeps MCP compatibility
 ```
 
-## Product principles
+## Layering
 
-- `core` owns business behavior.
-- `shared runtime` owns initialization, configuration, and reusable state.
-- MCP and local HTTP are transport adapters over the same runtime.
+| Layer | Location | Owns |
+| :--- | :--- | :--- |
+| Core | `src/core/` | search pipeline, fetch pipeline, validation, logging, errors, cache |
+| Engines | `src/engines/` | per-provider HTTP/parse/format implementations |
+| Runtime | `src/runtime/` | dependency wiring, config, shared services |
+| Adapters | `src/adapters/` | MCP stdio/HTTP transports, request middleware |
+| Tools | `src/tools/handlers/` | MCP schemas, argument normalization, result mapping |
+| CLI | `src/cli/` | command dispatch and machine-readable output |
+| Utilities | `src/utils/` | proxy, Playwright session, timeouts, shared helpers |
+
+## Invariants
+
+- Core owns business behavior; adapters only translate transport.
+- MCP and local HTTP share the same runtime/services.
 - CLI is a control surface, not a second business implementation.
-- Skill should prefer the low-friction path later, but MCP remains a first-class standard capability layer.
+- `--json` writes machine-readable output to stdout; diagnostics/logs go to stderr.
+- Engine implementations stay behind the registry; adding an engine touches definitions/registry/tests/docs, not the pipeline.
 
-## Current code pressure points
- 
-- [`src/tools/handlers/`](../../src/tools/handlers) (modularized from the monolithic `setupTools.ts` into individual tool handlers):
-  - MCP-specific schema registration
-  - argument handling and normalization
-  - runtime service invocation
-  - MCP-specific result mapping
-- [`src/index.ts`](../../src/index.ts) coordinates both CLI dispatch and MCP bootstrapping as a thin entrypoint.
+## Source-of-truth documents
 
-## Phase plan
-
-> **Status: all four phases are complete (as of 1.3.5).** This section is kept as historical context for how the codebase was extracted; it is not a roadmap. The daemon, one-shot CLI, and skill integration all shipped — see the Phase 3 section for the delivered surface.
-
-## Phase 1: Extract core
-
-Goal:
-- move search/fetch orchestration, normalization, validation helpers, and result shaping into shared services
-
-Deliverables:
-- core API boundary
-- shared result/error model
-- MCP adapter reduced to schema registration and argument/result mapping
-
-Deferred at the time (all delivered later):
-- daemon → Phase 3
-- background process management → Phase 3 (`serve`, connection-pool reuse, Prometheus `/metrics`)
-- protocol expansion → Phase 3 (Streamable HTTP / SSE)
-
-## Phase 2: Add one-shot CLI
-
-Goal:
-- validate product surface and stable machine-readable output
-
-Commands to support first:
-- `my-websearch search`
-- `my-websearch fetch-web`
-- `my-websearch fetch-csdn`
-- `my-websearch fetch-juejin`
-- `my-websearch fetch-github-readme`
-
-Requirements:
-- human-readable default output
-- `--json` machine-readable output
-- structured error output
-
-## Phase 3: Add local daemon
-
-Goal:
-- reduce cold-start cost
-- reuse browser/runtime state
-- support frequent skill-driven calls
-
-First transport:
-- localhost HTTP only
-
-Commands to support:
-- `my-websearch serve`
-- `my-websearch status`
-
-Default CLI behavior:
-- do not silently spawn the daemon
-- support explicit `--spawn`
-
-## Phase 4: Skill integration
-
-Goal:
-- make `my-websearch` easier to use from the skill layer
-
-Rule:
-- skill may prefer CLI/daemon for lower friction
-- skill must keep MCP compatibility when capability already exists
-- CLI does not replace MCP
-
-## Design decisions already locked
-
-- daemon v1 uses localhost HTTP
-- CLI does not silently auto-start daemon by default
-- MCP adapter and local HTTP adapter should share one runtime container
-- output protocol must stabilize before the skill depends on CLI
-
-## Current source-of-truth documents
-
-The following documents should now be treated as the primary contract references for the current CLI/daemon behavior:
-- [cli-json-protocol.md](./cli-json-protocol.md)
-- [local-http-adapter.md](./local-http-adapter.md)
-
-## Risks to validate early
-
-- whether core extraction can preserve current MCP behavior without regressions
-- whether shared runtime can hold Playwright/browser state safely for both adapters
-- whether CLI `--json` is stable enough for skill consumption
-- how to distinguish:
-  - daemon healthy
-  - runtime initialized
-  - capability active
-  - activation pending reconnect/reload
+- [CLI JSON protocol](./cli-json-protocol.md)
+- [Local HTTP adapter](./local-http-adapter.md)
+- [Core runtime and adapters](./core-runtime-adapters.md)
+- [HTTP API](../http-api.md)
+- [Troubleshooting](../ops/troubleshooting.md)
