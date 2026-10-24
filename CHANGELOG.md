@@ -7,6 +7,9 @@ All notable changes to `my-websearch` are documented in this file.
 ### Added
 - **新增 `yahoo` 引擎（第 15 个）**：Yahoo 搜索是 SSR HTML，但必须先访问首页取得 `A1/A3` 等 cookie，否则直接 500；实现为「首页预热 + `div.algo` 解析 + `RU=` 重定向还原」，wreq 不可用时回退 axios cookie jar。它使用 Bing 索引，不参与默认路由/级联，只作为**英文主路由的健康替补**：DuckDuckGo 熔断或近期成功率过低时自动顶上（`AUTO_ROUTE_EN_ENGINES=bing,yahoo` 也可显式指定）。
 
+### Fixed
+- **Yahoo 遵循显式 `PROXY_ENGINES` 白名单**：旧配置里硬编码的 8 引擎名单不含 `yahoo`，而 Yahoo 逻辑此前会无条件套用 `PROXY_URL`/系统代理；现在显式名单优先，未配置名单时才用系统代理兜底。实测国内直连 Yahoo 15–20s 超时，走代理约 2s，因此自定义名单必须包含 `yahoo`（或直接删掉名单用默认）。
+
 ## [1.3.8] - 2026-10-24
 
 ### Fixed

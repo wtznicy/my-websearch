@@ -326,6 +326,8 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `FETCH_WEB_INSECURE_TLS`| `false` | Disable TLS certificate verification for `fetchWebContent` only (for broken legacy site certs) |
 | `GITHUB_README_CDN_FIRST` | `false` | When `true`, forces skipping `raw.githubusercontent.com` direct probe and queries jsDelivr CDN first (domestic network acceleration) |
 
+> **Custom proxy engine lists**: if you set `proxy.engines` in `~/.my-websearch/config.json` or use the `;engine1,engine2` suffix of `PROXY_URL`, **include `yahoo`**. A stale 1.3.7-era list (8 engines, no `yahoo`) leaves Yahoo on a direct connection — measured from CN: direct **times out after 15–20s**, while via proxy it returns in **~2s**. Removing the list entirely is recommended: defaults now include Yahoo and keep the direct API engines (GitHub / Stack Overflow / Hacker News / arXiv) off the proxy.
+
 #### 3. 🔐 Credentials & API Keys
 
 | Variable | Default | Allowed Values / Description |

@@ -290,6 +290,8 @@ my-websearch doctor --reset-health
 | `FETCH_WEB_INSECURE_TLS`| `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点旧证书链损坏时使用） |
 | `GITHUB_README_CDN_FIRST` | `false` | 为 `true` 时强制跳过 `raw.githubusercontent.com` 直连探测，优先走 jsDelivr CDN 镜像（国内无代理网络加速，免除 3 秒直连探测等待） |
 
+> **自定义代理引擎名单**：如果你在 `~/.my-websearch/config.json` 写了 `proxy.engines`，或用 `PROXY_URL` 的 `;engine1,engine2` 后缀，**务必把 `yahoo` 加进去**。旧版 1.3.7 时代的 8 引擎名单没有 `yahoo`，会让它以**直连**方式请求——实测国内直连 **15–20s 超时**，走代理约 **2s**。推荐直接删掉这份名单：现在的默认名单已包含 Yahoo，并把 GitHub / Stack Overflow / Hacker News / arXiv 这些直连 API 引擎排除在代理之外。
+
 #### 3. 🔐 外部服务凭据与 API Key
 
 | 变量名 | 默认值 | 可选值 / 说明 |

@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
-import { getProxyUrl } from '../../config.js';
+import { engineShouldUseProxy, getProxyUrl } from '../../config.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { detectSystemProxy } from '../../utils/systemProxy.js';
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
@@ -128,7 +128,11 @@ async function fetchYahooWithWreq(query: string, limit: number, signal?: AbortSi
         if (!mod) {
             return null;
         }
-        const proxy = getProxyUrl() ?? (await detectSystemProxy()) ?? undefined;
+        // 显式 PROXY_ENGINES 白名单优先；未显式配置时再退回系统代理。
+        // Yahoo 在默认 proxyInChina 名单里，但用户可能保留旧版硬编码名单（没有 yahoo），
+        // 此时不能再无条件套用 PROXY_URL，否则会绕过用户的白名单语义。
+        const explicitProxy = engineShouldUseProxy('yahoo') ? getProxyUrl() : undefined;
+        const proxy = explicitProxy ?? (await detectSystemProxy()) ?? undefined;
         const session = await createWreqSession(mod, 'yahoo', proxy ?? undefined);
         try {
             const home = await session.fetch(YAHOO_HOME, { timeout: 10000, headers: YAHOO_HEADERS });
