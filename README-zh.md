@@ -55,7 +55,7 @@
 | **`startpage`** | 🌐 需代理 | 无 | **多 Worker Anubis SHA-256 PoW 求解器**（难度 ≤ 6）+ 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
 | **`yahoo`** | 🌐 需代理 | 无 | SSR HTML + 首页 cookie 预热 + `RU=` 重定向还原；**英文替补池第一顺位**（DuckDuckGo 不健康时自动顶上） | 稳定的 Bing 索引英文兜底 |
 | **`brave`** | 🌐 需代理 | 无 | **固定 HTTP/1.1（axios）请求路径**（wreq/HTTP2 指纹会被 CloudFront 判 429）+ 赞助商商业推广深度剥离 | 独立海外英文索引、技术博客 |
-| **`exa`** | 🌐 API直连 | 选配 Key | 官方语义搜索 API（未配置时自动跳过，不阻断级联） | 深度语义相似搜索、学术与技术前沿 |
+| **`exa`** | 🌐 建议代理 | 选配 Key | 官方语义搜索 API（未配置时自动跳过，不阻断级联）；直连也可用，但实测代理约 0.77s、直连约 1.17s | 深度语义相似搜索、学术与技术前沿 |
 | **`github`** | 🌐 直连 API | 无 | 官方 REST API 检索仓库与 Issue；**精确 owner/repo 直取** | 开源项目源码、开源库 Issues 排查、已知仓库查看 |
 | **`stackoverflow`**| 🌐 直连 API | 无 | StackExchange 2.3 官方 API + HTML 实体智能解码 | 编程报错排错、高质量代码问答 |
 | **`hackernews`** | 🌐 直连 API | 无 | Algolia HN API，含 points、评论数与作者元信息 | 极客社区讨论、前沿科技热点与观点 |

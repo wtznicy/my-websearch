@@ -56,7 +56,7 @@
 | **`startpage`** | 🌐 Proxy in CN | None | **Multi-worker Anubis SHA-256 PoW solver** (difficulty ≤ 6) + cookie session (no browser needed) | Google-backed high-privacy results |
 | **`yahoo`** | 🌐 Proxy in CN | None | SSR HTML + homepage cookie warm-up + `RU=` redirect decoding; **English fallback pool** (auto-substitutes when DuckDuckGo is unhealthy) | Stable Bing-index English fallback |
 | **`brave`** | 🌐 Proxy in CN | None | **Plain HTTP/1.1 (axios) request path** (wreq/HTTP2 impersonation gets 429 from CloudFront) + strict sponsored ad stripping | Independent English index & technical blogs |
-| **`exa`** | 🌐 Direct API | Optional Free Key | Official semantic search API (skipped if key is unset) | Semantic similarity, AI research & papers |
+| **`exa`** | 🌐 Proxy preferred | Optional Free Key | Official semantic search API (skipped if key is unset); direct works too, but proxy measured ~0.77s vs ~1.17s direct | Semantic similarity, AI research & papers |
 | **`github`** | 🌐 Direct API | None | Official GitHub Search REST API + **exact owner/repo fast path** (issues & repositories) | GitHub issues, bug reports, repositories, and exact repo lookup |
 | **`stackoverflow`**| 🌐 Direct API | None | Official StackExchange 2.3 API with HTML entity decoding | Developer troubleshooting, stack traces & answers |
 | **`hackernews`** | 🌐 Direct API | None | Algolia HN Search API with points, comments & author metadata | Tech discussions, startup launches & engineering news |
