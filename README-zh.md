@@ -26,7 +26,7 @@
 `my-websearch` 是专为 AI Agent（Claude Desktop、Cursor、Cherry Studio、Windsurf、Cline、ZCode 等）打造的**全栈联网检索与技术文档基础设施**。开箱即用，具备全引擎自适应路由与高质量正文提纯能力：
 
 - 🌐 **16 大引擎融合与自适应路由**  
-  聚合国内直连（**Bing、Bing News、百度、CSDN、掘金、搜狗**）、海外通用（**DuckDuckGo、Brave、Startpage、Yahoo、Exa**）与垂直开发者平台（**GitHub、StackOverflow、Hacker News、arXiv**）。支持中文/英文按语种自动路由（`auto`）、多词并发检索（`queries`）、跨引擎去重排序与 `minResults` 自动级联补位；**DuckDuckGo 不健康时，Yahoo 会从英文替补池自动顶上**。
+  聚合国内直连（**Bing、百度、CSDN、掘金、搜狗**）、海外通用（**DuckDuckGo、Brave、Startpage、Yahoo、Exa、Bing News**）与垂直开发者平台（**GitHub、StackOverflow、Hacker News、arXiv**）。支持中文/英文按语种自动路由（`auto`）、多词并发检索（`queries`）、跨引擎去重排序与 `minResults` 自动级联补位；**DuckDuckGo 不健康时，Yahoo 会从英文替补池自动顶上**。
 - ⚡ **现代 Web 协议栈与前端算力求解（零浏览器轻量直通）**  
   基于 `wreq-js` 原生模拟现代浏览器 TLS/HTTP2 协议握手与长效会话机制；内置算法解析 **Startpage Anubis SHA-256 PoW 算力挑战** 与 **DuckDuckGo `d.js` (`isJsaChallenge`) 动态前端挑战**；真实 URL 快速解析（搜狗跳转页还原、百度 `Location` 直取、Bing Base64 解码）；无需拉起 400MB 浏览器即可稳定高效获取正文。请求栈按引擎区分：**DuckDuckGo 必须用 wreq 的 Chrome profile 发 GET**（axios POST 会吃 202），而 **Brave 固定用 HTTP/1.1（axios）**（wreq/HTTP2 指纹会被 CloudFront 判 429），两者不要统一。注意：DuckDuckGo 页面级的 **HTTP 202 anomaly CAPTCHA**（点选图片的人机验证）属于人工验证，**不会**被绕过，统一报 `bot_challenge`。
 - 📄 **高纯度 Markdown 正文提纯与特色站点规则**  
@@ -47,7 +47,7 @@
 | 引擎标识 | 网络要求 | API Key | 核心技术与优势 | 最擅长场景 |
 | :--- | :---: | :---: | :--- | :--- |
 | **`bing`** | 🇨🇳 直连 | 无 | Chrome TLS 指纹 + Base64 真实链接解码 + 隐身兜底 | 综合技术检索、中英文混合查询 |
-| **`bing-news`** | 🇨🇳 直连 | 无 | **Bing News RSS** + `pubDate` 24h 过滤 + `apiclick.aspx?url=` 解码；opt-in 垂直引擎 | 突发新闻、24 小时内更新 |
+| **`bing-news`** | 🌐 需代理 | 无 | **Bing News RSS** + `pubDate` 24h 过滤 + `apiclick.aspx?url=` 解码；直连可能 302 到 HTML 页，因此默认走代理；opt-in 垂直引擎 | 突发新闻、24 小时内更新 |
 | **`baidu`** | 🇨🇳 直连 | 无 | 并发 `Location` 跳转直取 + 验证拦截状态精准识别 | 中文资讯、本土百科、国内论坛 |
 | **`csdn`** | 🇨🇳 直连 | 无 | 自动持久化阿里云 WAF Cookie + 空壳响应智能重试 | 中文报错排查、开发踩坑笔记 |
 | **`juejin`** | 🇨🇳 直连 | 无 | 掘金官方接口直调，极速提取干净长文 | 前端/后端现代中文高质量技术博文 |
@@ -224,7 +224,7 @@ my-websearch doctor --reset-health
      | 代理软件的「系统代理」开关 | 完全不用配置。**1.3.8 起**会自动检测并用于海外引擎和通用抓取。 |
 
 2. **配置了有效代理后，国际引擎依然失败或超时？（逐引擎诊断，不是本地配置错误）**
-   - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：202 响应体是 DDG 的 **anomaly CAPTCHA（人工验证页）**，不是普通按 IP 限流；内置 `d.js` 算术求解器无法绕过。引擎会先用 **wreq Chrome 指纹 GET** 请求 HTML 端点——即使 axios POST 路径吃 202，这条路径通常也能返回 200；所以现在只有 wreq 路径失败、回退到 axios POST 时才会再见到 202。如果仍看到 202，先确认你的版本包含 wreq GET 路径（**1.3.8 及更早没有**），再重试或检查代理是否真的挂上。注意：`SEARCH_MODE=playwright:duckduckgo` 不受支持（DDG 没有浏览器渲染路径），会回退到 HTTP。
+   - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：202 响应体是 DDG 的 **anomaly CAPTCHA（人工验证页）**，不是普通按 IP 限流；内置 `d.js` 算术求解器无法绕过。引擎会先用 **wreq Chrome 指纹 GET** 请求 HTML 端点——即使 axios POST 路径吃 202，这条路径通常也能返回 200；所以现在只有 wreq 路径失败、回退到 axios POST 时才会再见到 202。如果仍看到 202，先确认你的版本包含 wreq GET 路径（**1.3.8 及更早没有**），再重试或检查代理是否真的挂上。**DDG 仍是 best-effort**：同一出口也可能间歇性被挑战，不要把它当 SLA；要稳定请用 Bing/Startpage 或配置 `BRAVE_API_KEY`/`EXA_API_KEY`。注意：`SEARCH_MODE=playwright:duckduckgo` 不受支持（DDG 没有浏览器渲染路径），会回退到 HTTP。
    - **Bing 返回 HTTP 200 但 0 条结果**：wreq 协议路径解析为空时会自动回退到 axios 网页路径；若两条路径都为空，通常是查询词或 IP 受到频控策略限制。
    - **Brave 返回 HTTP 429 (Too Many Requests)**：CloudFront 对出口 IP 的限流通常是**分钟级窗口，不是永久封禁**——冷却后同一节点可恢复 200（实测 429 → 稍后连续 6 次 200），但短时间连打会再次触发。同一节点实测：wreq（HTTP/2 Chrome 指纹）→ **429**，axios/curl（HTTP/1.1）→ **200**，所以当前 `main` 固定走 axios；要稳定使用请配置 `BRAVE_API_KEY`（官方 API，有免费额度）彻底绕开 WAF。
    - **Startpage 请求挂满超时或 Anubis PoW 难度过大**：难度 6 现由最多 4 个 Worker 并行求解（约 3–12s）；难度 >6 会自动跳过；pass-challenge 的 socket 错误/瞬时 5xx 会自动重试。

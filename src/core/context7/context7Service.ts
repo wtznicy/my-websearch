@@ -182,6 +182,16 @@ export function pickBestLibrary(candidates: Context7Library[], rawInput: string)
         if (official) {
             return official;
         }
+        // Context7 的 search 结果经常不包含官方库（例如 tailwindcss 只返回插件），
+        // 此时用已知官方映射生成候选，保证裸库名稳定命中官方文档，而不是随机插件。
+        const officialHint = OFFICIAL_LIBRARY_HINTS[normalizeLibraryKey(raw)]?.[0];
+        if (officialHint) {
+            return {
+                id: `/${officialHint}`,
+                title: raw,
+                description: 'Resolved from the built-in official library mapping.'
+            } as Context7Library;
+        }
     }
 
     return [...candidates].sort((a, b) => {
@@ -194,7 +204,7 @@ export function pickBestLibrary(candidates: Context7Library[], rawInput: string)
         const bSnippets = b.totalSnippets ?? 0;
         const aScore = (a.trustScore ?? 0) * 10 + (a.benchmarkScore ?? 0) + Math.min(aSnippets, 500) / 100;
         const bScore = (b.trustScore ?? 0) * 10 + (b.benchmarkScore ?? 0) + Math.min(bSnippets, 500) / 100;
-        return bScore - aScore;
+        return bScore - aScore || a.id.localeCompare(b.id);
     })[0];
 }
 

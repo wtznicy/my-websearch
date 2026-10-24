@@ -2,6 +2,16 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **`queryDocs` 裸库名稳定命中官方库**：Context7 search 常常不返回官方仓库（`tailwindcss` 只返回插件），旧逻辑会按分数随机落到 `/catppuccin/tailwindcss`、`/primefaces/tailwindcss-primeui` 等第三方包。现在裸库名命中内置官方映射时直接以官方 ID 作为候选（`tailwindcss` → `/tailwindlabs/tailwindcss`），并在同分时按 ID 排序保证确定性；缓存 key 升到 `v2`，旧缓存自动失效。
+- **`bing-news` 默认走代理**：实测部分网络下 `www.bing.com` 直连会 302 到 `cn.bing.com` 并返回 HTML，无法解析 RSS。引擎改为 `region: overseas`（进入默认代理名单），返回 HTML 时明确报 `overseas_unreachable` 并提示配置代理/加入 `proxy.engines`，不再静默返回 0 条。
+- **Yahoo / Bing News 错误提示**：直连超时或被挑战时，提示明确要求开启系统代理/`PROXY_URL`，并在使用显式 `proxy.engines` 时把对应引擎加进去。
+
+### Changed
+- **DDG 文档改为 best-effort**：wreq GET 仍可能间歇性遇到 anomaly CAPTCHA；README 明确“不要当 SLA”，稳定场景用 Bing/Startpage 或官方 API key。
+
 ## [1.3.9] - 2026-10-24
 
 ### Added

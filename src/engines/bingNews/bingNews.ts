@@ -143,8 +143,15 @@ export async function searchBingNews(
 
         const body = typeof response.data === 'string' ? response.data : String(response.data ?? '');
         if (!/<rss/i.test(body) && !/<item>/i.test(body)) {
-            // Bing 对部分 locale/query 会返回 HTML 而非 RSS；此时没有可解析的新闻条目
-            return [];
+            // www.bing.com 在部分网络会 302 到 cn.bing.com 并返回 HTML；此时 RSS 不可用
+            throw new AppError({
+                code: 'overseas_unreachable',
+                retryable: true,
+                status: 503,
+                engine: 'bing-news',
+                message: 'Bing News returned HTML instead of RSS (likely a 302 to cn.bing.com).',
+                hint: 'Enable the proxy / PROXY_URL, or add "bing-news" to an explicit proxy.engines list; direct access is not reliable from CN.'
+            });
         }
         return parseBingNewsRss(body, { limit });
     } catch (error) {

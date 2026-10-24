@@ -197,7 +197,7 @@ async function fetchYahooWithAxios(query: string, limit: number, signal?: AbortS
             status: 503,
             engine: 'yahoo',
             message: `Yahoo homepage returned HTTP ${home.status}; cannot warm cookies needed by the search endpoint.`,
-            hint: 'Check that the proxy is running and reachable, then retry.'
+            hint: 'Yahoo is unreachable directly from CN: enable the system proxy or PROXY_URL, and include "yahoo" in an explicit proxy.engines list.'
         });
     }
 
@@ -213,7 +213,7 @@ async function fetchYahooWithAxios(query: string, limit: number, signal?: AbortS
                 status: response.status === 429 ? 429 : 503,
                 engine: 'yahoo',
                 message: `Yahoo search returned HTTP ${response.status}.`,
-                hint: 'Yahoo may be throttling this exit IP; retry later or switch proxy node.'
+                hint: 'Yahoo needs a proxy in CN; if you configured proxy.engines explicitly, add "yahoo" to it. Otherwise check the proxy and retry.'
             });
         }
         const parsed = parseYahooHtmlResults(response.data, limit - results.length, seenUrls);

@@ -199,6 +199,8 @@ export function docsCacheKey(parts: {
     strict?: boolean;
 }): string {
     return [
+        // v2：修复裸库名解析（tailwindcss → 官方 tailwindlabs）后，旧缓存必须失效
+        'v2',
         parts.library.trim().toLowerCase(),
         parts.version?.trim() ?? '',
         parts.query?.trim().toLowerCase() ?? '',

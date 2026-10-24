@@ -106,7 +106,7 @@ export const ENGINE_REGISTRY: readonly EngineDescriptor[] = [
         name: 'bing-news',
         label: 'Bing News',
         aliases: ['bing-news', 'bingnews'],
-        region: 'domestic',
+        region: 'overseas',
         // 新闻垂直引擎：不进默认路由/级联，只通过 engines:["bing-news"] 显式调用
         cascade: {},
         supportsNativeSite: false,
