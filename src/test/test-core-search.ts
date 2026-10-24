@@ -52,6 +52,7 @@ function testNormalizeEngineName(): void {
     assertEqualArray([...SUPPORTED_SEARCH_ENGINES], [
         'baidu',
         'bing',
+        'bing-news',
         'csdn',
         'duckduckgo',
         'exa',

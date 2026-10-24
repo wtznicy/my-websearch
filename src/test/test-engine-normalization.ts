@@ -4,6 +4,7 @@ import { normalizeEngineName } from '../tools/setupTools.js';
 const SUPPORTED_ENGINES = [
     'baidu',
     'bing',
+    'bing-news',
     'csdn',
     'duckduckgo',
     'exa',

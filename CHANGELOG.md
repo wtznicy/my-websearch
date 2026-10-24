@@ -5,6 +5,7 @@ All notable changes to `my-websearch` are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **新增 `bing-news` 垂直引擎（第 16 个）**：Bing News RSS + `pubDate` **24 小时过滤** + `apiclick.aspx?url=` 真实链接解码，自带 description；不进默认路由/级联，通过 `engines:["bing-news"]` 显式调用，适合突发新闻与 24h 更新。
 - **新增 `yahoo` 引擎（第 15 个）**：Yahoo 搜索是 SSR HTML，但必须先访问首页取得 `A1/A3` 等 cookie，否则直接 500；实现为「首页预热 + `div.algo` 解析 + `RU=` 重定向还原」，wreq 不可用时回退 axios cookie jar。它使用 Bing 索引，不参与默认路由/级联，只作为**英文主路由的健康替补**：DuckDuckGo 熔断或近期成功率过低时自动顶上（`AUTO_ROUTE_EN_ENGINES=bing,yahoo` 也可显式指定）。
 - **`fetchGithubContent` 行号切片**：支持 URL hash `#L120-L180` 或 `lines: "120-180"`，只返回指定区间的源码并保留真实行号；越界严格报错，单次最多 400 行（超出截断并提示），GitHub/Gitee 一致。
 - **`fetchGithubContent` 支持 Commit / Compare / Releases**：新增 `/commit/<sha>`、`/compare/<base>...<head>`、`/releases`、`/releases/tag/<tag>`（GitHub + Gitee）；Commit 输出提交信息、文件列表与限长 patch，Compare 输出 commits + 文件/补丁，Releases 输出 Markdown body 与 assets；patch 上限 30KB、文件上限 100，lockfile 自动跳过。

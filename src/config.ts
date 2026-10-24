@@ -72,7 +72,7 @@ export interface AppConfig {
     corsOrigin?: string;
 }
 
-const validSearchEngines = ['auto', 'bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'juejin', 'startpage', 'yahoo', 'sogou', 'github', 'stackoverflow', 'hackernews', 'arxiv', 'code'];
+const validSearchEngines = ['auto', 'bing', 'bing-news', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'juejin', 'startpage', 'yahoo', 'sogou', 'github', 'stackoverflow', 'hackernews', 'arxiv', 'code'];
 
 export interface CreateConfigOptions {
     quiet?: boolean;

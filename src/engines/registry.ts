@@ -3,6 +3,7 @@ import type { SearchResult } from '../types.js';
 
 import { searchBaidu } from './baidu/baidu.js';
 import { searchBing } from './bing/bing.js';
+import { searchBingNews } from './bingNews/bingNews.js';
 import { resetBingImpersonateStateForTests } from './bing/impersonate.js';
 import { searchCsdn } from './csdn/csdn.js';
 import { searchDuckDuckGo } from './duckduckgo/index.js';
@@ -29,6 +30,7 @@ export type { SearchExecutionContext, SearchEngineExecutor, SearchEngineExecutor
 export const SUPPORTED_SEARCH_ENGINES = [
     'baidu',
     'bing',
+    'bing-news',
     'csdn',
     'duckduckgo',
     'exa',
@@ -99,6 +101,19 @@ export const ENGINE_REGISTRY: readonly EngineDescriptor[] = [
         probeUrl: 'https://cn.bing.com/search?q=mcp&count=1',
         execute: searchBing,
         resetHealth: resetBingImpersonateStateForTests
+    },
+    {
+        name: 'bing-news',
+        label: 'Bing News',
+        aliases: ['bing-news', 'bingnews'],
+        region: 'domestic',
+        // 新闻垂直引擎：不进默认路由/级联，只通过 engines:["bing-news"] 显式调用
+        cascade: {},
+        supportsNativeSite: false,
+        supportsPlaywright: false,
+        defaultTimeoutMs: 10000,
+        probeUrl: 'https://www.bing.com/news/search?q=mcp&format=RSS',
+        execute: searchBingNews
     },
     {
         name: 'csdn',

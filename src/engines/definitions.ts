@@ -27,6 +27,7 @@ export interface EngineDefinition {
 export const ENGINE_DEFINITIONS: readonly EngineDefinition[] = [
     { id: 'baidu', label: 'Baidu', region: 'domestic', category: 'general' },
     { id: 'bing', label: 'Bing', region: 'domestic', category: 'general' },
+    { id: 'bing-news', label: 'Bing News', region: 'domestic', category: 'vertical' },
     { id: 'sogou', label: 'Sogou', region: 'domestic', category: 'general' },
     { id: 'csdn', label: 'CSDN', region: 'domestic', category: 'vertical' },
     { id: 'juejin', label: 'Juejin', region: 'domestic', category: 'vertical' },
