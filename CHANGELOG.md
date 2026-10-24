@@ -4,6 +4,8 @@ All notable changes to `my-websearch` are documented in this file.
 
 ## [Unreleased]
 
+## [1.3.8] - 2026-10-24
+
 ### Fixed
 - **Brave 固定走 HTTP/1.1（axios），不再复用 wreq 指纹路径**：同一节点同一时刻实测 wreq（HTTP/2 Chrome 指纹）→ 429，而 axios/curl 的 HTTP/1.1 → 200（连续 6 次）；CloudFront WAF 对 HTTP/2 指纹更敏感。DDG 的方向相反（必须 wreq），两者不能共用同一请求栈。
 - **DDG 的 202 根因是 TLS/方法组合，不是 IP**：实测同一出口下 axios POST `html.duckduckgo.com` → 202，而 wreq-js 的 Chrome profile **GET** → 200（32KB 结果页）。现在 DDG 优先用 wreq 指纹 GET（显式代理或系统代理），失败才回退 axios；并还原 `//duckduckgo.com/l/?uddg=` 重定向链接，避免结果被 URL 校验丢弃。实测 `--engine duckduckgo` 从 202/0 条变为 3 条、约 2.1s。
