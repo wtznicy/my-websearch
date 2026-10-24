@@ -27,8 +27,10 @@ function buildBraveErrorMessage(error: unknown): Error {
             retryable: false,
             status: 429,
             engine: 'brave',
-            message: 'Brave rate limited (HTTP 429): the proxy/datacenter IP is throttled by Brave (CloudFront IP-level rate rule). ' +
-                'Circuit opened for 5 minutes; quota reallocated to other engines. Retry later or use duckduckgo/startpage.'
+            hint: 'Set BRAVE_API_KEY (free tier) to use the official API, or retry after a few minutes / switch exit node.',
+            message: 'Brave rate limited (HTTP 429): CloudFront throttled this exit IP — the block is usually minutes-long, not permanent. ' +
+                'Bursty requests re-trigger it; a single retry after cooldown can succeed. ' +
+                'For a stable path configure BRAVE_API_KEY (official API, free tier) instead of scraping. Retry later, or use startpage/duckduckgo/bing.'
         });
         tripEngineCircuit('brave');
         return err;

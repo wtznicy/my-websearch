@@ -216,7 +216,7 @@ my-websearch doctor --reset-health
 2. **配置了有效代理后，国际引擎依然失败或超时？（上游 IP 频控限流，非本地配置错误）**
    - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：这是 DDG 的 **anomaly CAPTCHA（人工验证页）**，不是普通按 IP 限流；内置 `d.js` 算术求解器无法绕过，换节点也只在换到未被标记的出口时才有用（实测多节点仍 202）。因为状态码是 202，引擎会记为 `bot_challenge` 并触发熔断冷却。建议改用 `bing`/`brave`，或配置 `BRAVE_API_KEY`/`EXA_API_KEY` 走官方 API。注意：`SEARCH_MODE=playwright:duckduckgo` 不受支持（DDG 没有浏览器渲染路径），会回退到 HTTP 并撞同一个 CAPTCHA。
    - **Bing 返回 HTTP 200 但 0 条结果**：wreq 协议路径解析为空时会自动回退到 axios 网页路径；若两条路径都为空，通常是查询词或 IP 受到频控策略限制。
-   - **Brave 返回 HTTP 429 (Too Many Requests)**：Brave 搜索对高频共享出口 IP 进行了速率限制，此错误属于出口 IP 请求过频。
+   - **Brave 返回 HTTP 429 (Too Many Requests)**：CloudFront 对出口 IP 的限流通常是**分钟级窗口，不是永久封禁**——冷却后同一节点可恢复 200（实测 429 → 稍后连续 6 次 200），但短时间连打会再次触发。纯 HTTP/1.1 客户端（axios/curl）比 HTTP/2 TLS 指纹模拟更容易通过；要稳定使用请配置 `BRAVE_API_KEY`（官方 API，有免费额度）彻底绕开 WAF。
    - **Startpage 请求挂满超时或 Anubis PoW 难度过大**：难度 6 现由最多 4 个 Worker 并行求解（约 3–12s）；难度 >6 会自动跳过；pass-challenge 的 socket 错误/瞬时 5xx 会自动重试。
    - 💡 **解决方案**：上述情况**并非本地客户端或 MCP 服务配置错误**，而是公网出口 IP 触发了上游搜索引擎的访问频控。请**更换代理服务出口 IP**，或在搜索时使用 `engines: ["bing", "baidu"]` 降级，亦可配置官方 API Key（如 `BRAVE_API_KEY`）直连官方高可用通道。
 
