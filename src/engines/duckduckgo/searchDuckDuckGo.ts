@@ -4,6 +4,9 @@ import {SearchResult} from "../../types.js";
 import {buildAxiosRequestOptions} from "../../utils/httpRequest.js";
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
+import { getProxyUrl } from '../../config.js';
+import { detectSystemProxy } from '../../utils/systemProxy.js';
+import { createWreqSession, loadWreqModule } from '../bing/impersonate.js';
 import {
   AppError,
   extractErrorCode,
@@ -319,6 +322,38 @@ export type DuckDuckGoHtmlParseResult = {
  * 解析 DuckDuckGo HTML 路径（html.duckduckgo.com/html/）的结果页。
  * 广告卡（.result--ad）与已见 URL 会被过滤；rawCount 供调用方计算下一页 offset。
  */
+/**
+ * DDG HTML 结果的 href 常是协议相对的重定向链接：
+ *   //duckduckgo.com/l/?uddg=https%3A%2F%2F...&rut=...
+ * 直接交给 normalizeSearchResult 会因「不是合法 URL」被丢弃，必须先还原成真实目标。
+ */
+export function resolveDuckDuckGoResultUrl(href: string): string {
+  if (!href) {
+    return '';
+  }
+  let candidate = href.trim();
+  if (candidate.startsWith('//')) {
+    candidate = `https:${candidate}`;
+  } else if (candidate.startsWith('/l/')) {
+    candidate = `https://duckduckgo.com${candidate}`;
+  }
+  try {
+    const parsed = new URL(candidate);
+    if (/(^|\.)duckduckgo\.com$/i.test(parsed.hostname) && parsed.pathname.startsWith('/l/')) {
+      const target = parsed.searchParams.get('uddg');
+      if (target) {
+        return decodeURIComponent(target);
+      }
+    }
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString();
+    }
+  } catch {
+    // fall through
+  }
+  return candidate;
+}
+
 export function parseDuckDuckGoHtmlResults(html: string, maxResults: number, seenUrls: Set<string>): DuckDuckGoHtmlParseResult {
   const $ = cheerio.load(html);
   const results: SearchResult[] = [];
@@ -333,7 +368,7 @@ export function parseDuckDuckGoHtmlResults(html: string, maxResults: number, see
     const titleEl = $(el).find('a.result__a');
     const snippetEl = $(el).find('.result__snippet');
     const title = titleEl.text().trim();
-    const url = titleEl.attr('href') || '';
+    const url = resolveDuckDuckGoResultUrl(titleEl.attr('href') || '');
     const description = snippetEl.text().trim();
     const sourceEl = $(el).find('.result__url');
     const source = sourceEl.text().trim();
@@ -365,6 +400,14 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
   const timeRange = options?.timeRange;
   // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂 15s 超时拖累整次搜索
   await assertOverseasEngineUsable('duckduckgo');
+
+  // 首选浏览器指纹 GET：DDG 对 axios 的 TLS/方法组合返回 202，对 wreq Chrome profile 的 GET 返回 200。
+  // 放在 preload 之前，避免每次都先撞一次 202 再回退。
+  const impersonatedResults = await tryImpersonatedDuckDuckGoHtml(query, limit, signal, timeRange);
+  if (impersonatedResults && impersonatedResults.length > 0) {
+    return impersonatedResults;
+  }
+
   let preloadError: unknown = null;
   // Try using the preloaded URL method
   try {
@@ -604,6 +647,62 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
       // 若 HTML 也失败，真实原因（网络/限流/解析）能通过 partialFailures 暴露出来
       console.error('DuckDuckGo预加载URL搜索失败:', error instanceof Error ? error.message : String(error));
       throw error;
+    }
+  }
+
+  /**
+   * 用 wreq-js 的浏览器 TLS/HTTP2 指纹走 HTML 端点（GET）。
+   *
+   * 背景：DDG 的 202 挑战与 IP 无关，Node/axios 的 TLS 指纹本身就是识别信号。
+   * 实测同一出口下：axios POST → 202；wreq 的 Chrome profile GET → 200（32KB 结果页）。
+   * wreq 原生 binding 不可用时返回 null，由 axios 路径兜底。
+   */
+  async function tryImpersonatedDuckDuckGoHtml(
+    query: string,
+    maxResults: number,
+    signal?: AbortSignal,
+    timeRange?: 'day' | 'week' | 'month' | 'year'
+  ): Promise<SearchResult[] | null> {
+    if (signal?.aborted) {
+      return null;
+    }
+    try {
+      const mod = await loadWreqModule();
+      if (!mod) {
+        return null;
+      }
+      // 显式代理优先；否则用系统代理（wreq 会话必须显式绑定，不能像 axios 那样后置回退）
+      const proxy = getProxyUrl() ?? (await detectSystemProxy()) ?? undefined;
+      const session = await createWreqSession(mod, 'duckduckgo', proxy ?? undefined);
+      try {
+        const params = new URLSearchParams({ q: query });
+        const dfMap: Record<string, string> = { day: 'd', week: 'w', month: 'm', year: 'y' };
+        if (timeRange && dfMap[timeRange]) {
+          params.set('df', dfMap[timeRange]);
+        }
+        const response = await session.fetch(`https://html.duckduckgo.com/html/?${params.toString()}`, {
+          timeout: 10000,
+          headers: {
+            'User-Agent': BROWSER_USER_AGENT,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9'
+          }
+        });
+        if (response.status !== 200) {
+          return null;
+        }
+        const html = await response.text();
+        if (!html || html.length < 2000 || /anomaly-modal|challenge-form/i.test(html)) {
+          return null;
+        }
+        const parsed = parseDuckDuckGoHtmlResults(html, maxResults, new Set());
+        return parsed.results.length > 0 ? parsed.results : null;
+      } finally {
+        await session.close();
+      }
+    } catch (error) {
+      console.warn('[duckduckgo] impersonated GET failed, falling back to axios:', error instanceof Error ? error.message : String(error));
+      return null;
     }
   }
 

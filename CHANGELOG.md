@@ -5,6 +5,7 @@ All notable changes to `my-websearch` are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **DDG 的 202 根因是 TLS/方法组合，不是 IP**：实测同一出口下 axios POST `html.duckduckgo.com` → 202，而 wreq-js 的 Chrome profile **GET** → 200（32KB 结果页）。现在 DDG 优先用 wreq 指纹 GET（显式代理或系统代理），失败才回退 axios；并还原 `//duckduckgo.com/l/?uddg=` 重定向链接，避免结果被 URL 校验丢弃。实测 `--engine duckduckgo` 从 202/0 条变为 3 条、约 2.1s。
 - **DuckDuckGo 202 诊断不再误导**：实测 202 响应体是 `anomaly CAPTCHA`（点选图片的人机验证），不是普通 IP 限流，也不是 `d.js` 算术挑战；内置求解器无法绕过，换节点也只在换到未标记出口时有效。错误文案改为说明这是 anomaly CAPTCHA、建议改用 bing/brave 或配 `BRAVE_API_KEY`/`EXA_API_KEY`，不再承诺"换节点即可"。
 - **`queryDocs` 不再把第三方同名包当官方库（high confidence）**：裸库名 `tailwindcss` 曾解析到 `/catppuccin/tailwindcss`。现在裸库名优先命中官方映射（tailwindlabs、facebook、vuejs 等 22 个高风险库），同名多 owner 命中时置信度最高 `medium`，并附带候选列表与「改用完整 Context7 ID」的 warning；完整 `/owner/repo` 仍精确优先。
 - **`limit` 语义写清楚 + 被取消引擎进 `engineMetrics`**：工具描述改为「合并后的目标总数，不是每引擎配额」；早退取消的引擎现在以 `cancelled: true` 出现在 `engineMetrics`，不再凭空消失（配合已有的 `cancelledEngines`）。

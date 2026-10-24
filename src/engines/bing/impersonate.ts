@@ -68,9 +68,9 @@ export function resolveWreqProxyUrl(engine?: string): string | undefined {
     return getProxyUrl();
 }
 
-/** 用配置的 profile 构造会话（引擎名用于解析显式代理；不传则不带代理） */
-export async function createWreqSession(mod: WreqModule, engine?: string): Promise<WreqSession> {
-    const proxy = resolveWreqProxyUrl(engine);
+/** 用配置的 profile 构造会话（引擎名用于解析显式代理；proxyOverride 可传入系统代理等） */
+export async function createWreqSession(mod: WreqModule, engine?: string, proxyOverride?: string): Promise<WreqSession> {
+    const proxy = proxyOverride ?? resolveWreqProxyUrl(engine);
     return mod.createSession({
         browser: config.impersonateBrowser,
         os: config.impersonateOs,
