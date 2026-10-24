@@ -10,6 +10,7 @@ import { searchExa } from './exa/index.js';
 import { searchBrave, resetBraveOfficialApiCooldown } from './brave/index.js';
 import { searchJuejin } from './juejin/index.js';
 import { searchStartpage, resetStartpageCache } from './startpage/startpage.js';
+import { searchYahoo } from './yahoo/yahoo.js';
 import { searchSogou, resetSogouState } from './sogou/sogou.js';
 import { searchGithub } from './github/searchGithub.js';
 import { searchStackOverflow } from './stackoverflow/stackoverflow.js';
@@ -34,6 +35,7 @@ export const SUPPORTED_SEARCH_ENGINES = [
     'brave',
     'juejin',
     'startpage',
+    'yahoo',
     'sogou',
     'github',
     'stackoverflow',
@@ -171,6 +173,20 @@ export const ENGINE_REGISTRY: readonly EngineDescriptor[] = [
         probeUrl: 'https://www.startpage.com/sp/search?query=mcp',
         execute: searchStartpage,
         resetHealth: resetStartpageCache
+    },
+    {
+        name: 'yahoo',
+        label: 'Yahoo',
+        aliases: ['yahoo'],
+        region: 'overseas',
+        // 不配置级联优先级：Yahoo 只作为英文主路由的健康替补（见 queryEngineRouting）与显式引擎，
+        // 避免日常查询与 bing 重复消耗同一份 Bing 索引。
+        cascade: {},
+        supportsNativeSite: true,
+        supportsPlaywright: false,
+        defaultTimeoutMs: 12000,
+        probeUrl: 'https://search.yahoo.com/',
+        execute: searchYahoo
     },
     {
         name: 'sogou',

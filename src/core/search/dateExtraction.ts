@@ -3,7 +3,7 @@ import { normalizePublishedDate } from '../../utils/dateNormalizer.js';
 /**
  * 发布日期抽取（纯本地，零网络请求）。
  *
- * 背景：14 个引擎里只有少数会在结果里带日期，`timeRange` 过滤长期形同虚设。
+ * 背景：15 个引擎里只有少数会在结果里带日期，`timeRange` 过滤长期形同虚设。
  * 但**绝不能**为了拿日期对每条结果发一次网页请求——10 条结果 × 1s 会把 2s 的搜索拖到 12s。
  * 所以这里只从结果自带的 url / title / description 里找线索。
  *

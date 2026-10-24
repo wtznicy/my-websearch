@@ -25,8 +25,8 @@
 
 `my-websearch` is a full-stack search and technical documentation engine built specifically for AI coding agents (**Claude Desktop, Cursor, Cherry Studio, Windsurf, Cline, ZCode**, etc.). Out of the box, ready for multiple mainstream AI clients:
 
-- 🌐 **14-Engine Federated Search & Smart Routing**  
-  Aggregates direct domestic engines (**Bing, Baidu, CSDN, Juejin, Sogou**), global engines (**DuckDuckGo, Brave, Startpage, Exa**), and specialized developer platforms (**GitHub, StackOverflow, Hacker News, arXiv**). Features automatic language-aware routing (`auto`), parallel multi-query execution (`queries: string[]`), URL deduplication, and automatic `minResults` cascading fallback.
+- 🌐 **15-Engine Federated Search & Smart Routing**  
+  Aggregates direct domestic engines (**Bing, Baidu, CSDN, Juejin, Sogou**), global engines (**DuckDuckGo, Brave, Startpage, Yahoo, Exa**), and specialized developer platforms (**GitHub, StackOverflow, Hacker News, arXiv**). Features automatic language-aware routing (`auto`), parallel multi-query execution (`queries: string[]`), URL deduplication, and automatic `minResults` cascading fallback. When DuckDuckGo is unhealthy, **Yahoo automatically joins the English primary group** from the fallback pool.
 - ⚡ **Native Web Protocol & Proof-of-Work Solvers (Zero-Browser Fast Path)**  
   Built on `wreq-js` with native modern TLS/HTTP2 handshake emulation and persistent session cookies. Includes pure-JS/Rust solvers for **Startpage's Anubis SHA-256 PoW challenge** and **DuckDuckGo's `d.js` (`isJsaChallenge`) HTML5/arithmetic challenge**, resolving structured challenge responses in milliseconds without launching a 400MB browser. Request stacks are engine-specific: **DuckDuckGo requires the wreq Chrome profile via GET** (axios POST is challenged with HTTP 202), while **Brave deliberately uses plain HTTP/1.1 (axios)** because CloudFront returns 429 to HTTP/2 impersonation — do not unify them. Note: DuckDuckGo's page-level **HTTP 202 anomaly CAPTCHA** ("select all squares containing a duck") is human verification and is intentionally **not** bypassed — it is reported as `bot_challenge`. Real URL resolution for Sogou redirect links, Baidu `Location`, and Bing Base64 links.
 - 📄 **High-Purity Markdown Article Extraction & Dedicated Site Purifiers**  
@@ -43,7 +43,7 @@
 
 ---
 
-## 🌍 14 Search Engines
+## 🌍 15 Search Engines
 
 | Engine | Mainland China Connectivity | API Key | Core Technology | Best For |
 | :--- | :---: | :---: | :--- | :--- |
@@ -54,6 +54,7 @@
 | **`sogou`** | 🇨🇳 Direct | None | Desktop & mobile dual parsing + redirect link decoding + ad removal | WeChat ecosystem links & long-tail queries |
 | **`duckduckgo`** | 🌐 Proxy in CN | None | Preload `d.js` + **built-in `isJsaChallenge` JS solver** (arithmetic challenge only; page-level HTTP 202 is an anomaly CAPTCHA and is not bypassed) | English technical search & open-source discussions |
 | **`startpage`** | 🌐 Proxy in CN | None | **Multi-worker Anubis SHA-256 PoW solver** (difficulty ≤ 6) + cookie session (no browser needed) | Google-backed high-privacy results |
+| **`yahoo`** | 🌐 Proxy in CN | None | SSR HTML + homepage cookie warm-up + `RU=` redirect decoding; **English fallback pool** (auto-substitutes when DuckDuckGo is unhealthy) | Stable Bing-index English fallback |
 | **`brave`** | 🌐 Proxy in CN | None | **Plain HTTP/1.1 (axios) request path** (wreq/HTTP2 impersonation gets 429 from CloudFront) + strict sponsored ad stripping | Independent English index & technical blogs |
 | **`exa`** | 🌐 Direct API | Optional Free Key | Official semantic search API (skipped if key is unset) | Semantic similarity, AI research & papers |
 | **`github`** | 🌐 Direct API | None | Official GitHub Search REST API + **exact owner/repo fast path** (issues & repositories) | GitHub issues, bug reports, repositories, and exact repo lookup |
@@ -72,7 +73,7 @@
 
 | Tool Name | Purpose | Key Highlights |
 | :--- | :--- | :--- |
-| **`search`** | Federated web & code search (14 engines) | Supports parallel queries, `timeRange: day\|week\|month\|year` date filter, `site: string[]` filter, `fetchTop` preview injection, `code` engine (grep.app); explicit `engines` defaults to `minResults=0` (no unconstrained cascade); returns inline `diagnostics` on failure |
+| **`search`** | Federated web & code search (15 engines) | Supports parallel queries, `timeRange: day\|week\|month\|year` date filter, `site: string[]` filter, `fetchTop` preview injection, `code` engine (grep.app); explicit `engines` defaults to `minResults=0` (no unconstrained cascade); returns inline `diagnostics` on failure |
 | **`fetchWebContent`** | Web page extraction, Markdown & transparent PDF parsing | **All-in-one content extractor**: Built-in disk-level Markdown cache (Node 22 `node:sqlite` / partitioned JSON fallback, 200MB LRU, `cache: default\|reload`); transparent PDF parsing (up to 20MB / 50 pages, `[page N]` tags, scanned doc detection); pagination & `focus` keyword targeting (**`bm25`** relevance-ranked blocks by default, `window` for the legacy fixed window); **`selector`** to scope extraction to a CSS subtree (errors instead of silently returning the whole page); **`extract`** for CSS-selector JSON with no LLM; **`citations`** for numbered references; **`retainLinks`** to strip URLs (-50% on index pages) |
 | **`fetchGithubContent`** | Comprehensive GitHub / Gitee content reader | Fetches README, **one source file** (`/blob/<ref>/<path>`), directory trees (`/tree/`), and Issue / PR discussions; `ref` may be a branch, tag, or commit; not a repo clone; Gitee parity via API (file/tree/issue/PR, optional `GITEE_TOKEN`); returns `warnings` |
 | **`queryDocs`** | All-in-one official library documentation | Directly resolves library names or Context7 IDs; includes low-confidence protection and automatic fallback chain (npm registry → PyPI JSON → GitHub README); returns `source: context7\|npm\|pypi\|github-readme`, `confidence`, and `warnings` |
@@ -296,7 +297,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 
 | Variable | Default | Allowed Values / Description |
 | :--- | :--- | :--- |
-| `DEFAULT_SEARCH_ENGINE` | `auto` | Default engine: `auto` (smart query routing: Chinese `baidu,sogou`, English/foreign `bing,duckduckgo`). Supports all 14 engines: `auto`, `bing`, `baidu`, `sogou`, `duckduckgo`, `brave`, `csdn`, `juejin`, `startpage`, `exa`, `github`, `stackoverflow`, `hackernews`, `arxiv`, `code` (vertical developer engines can be configured as default, though `auto` or general web engines are recommended for global default) |
+| `DEFAULT_SEARCH_ENGINE` | `auto` | Default engine: `auto` (smart query routing: Chinese `baidu,sogou`, English/foreign `bing,duckduckgo`). Supports all 15 engines: `auto`, `bing`, `baidu`, `sogou`, `duckduckgo`, `brave`, `csdn`, `juejin`, `startpage`, `yahoo`, `exa`, `github`, `stackoverflow`, `hackernews`, `arxiv`, `code` (vertical developer engines can be configured as default, though `auto` or general web engines are recommended for global default) |
 | `ALLOWED_SEARCH_ENGINES` | all | Comma-separated whitelist of allowed search engines (e.g. `bing,baidu,duckduckgo`) |
 | `BING_BASE_URL` | `https://cn.bing.com/search` | Base URL for Bing queries. Overseas users or reverse proxy nodes can set to `https://www.bing.com/search` (legacy alias `OPEN_WEBSEARCH_BING_HOST` supported) |
 | `DEFAULT_MIN_RESULTS` | `5` | Cascade threshold: triggers fallback engines when usable results are fewer than this value |

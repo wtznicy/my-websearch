@@ -58,6 +58,7 @@ function testNormalizeEngineName(): void {
         'brave',
         'juejin',
         'startpage',
+        'yahoo',
         'sogou',
         'github',
         'stackoverflow',

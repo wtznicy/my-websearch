@@ -63,7 +63,9 @@ function applyPrimaryHealthFilter(baseGroup: string[], isChinese: boolean, hasCu
     // 垂直引擎只在查询被判定为代码/学术特征时才由路由显式拉入。
     const fallbackPool = isChinese
         ? ['bing', 'sogou', 'baidu']
-        : [...(hasExaKey ? ['exa'] : []), 'brave', 'duckduckgo', 'bing'];
+        // Yahoo 排第一：DDG 被限流/202 时，Yahoo 只需一次首页 cookie 预热即可稳定返回；
+        // Brave 429 是常态，放在其后由健康过滤自动跳过。
+        : ['yahoo', ...(hasExaKey ? ['exa'] : []), 'brave', 'duckduckgo', 'bing'];
 
     for (const candidate of fallbackPool) {
         if (result.length >= baseGroup.length) {

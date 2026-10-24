@@ -33,6 +33,7 @@ export const ENGINE_DEFINITIONS: readonly EngineDefinition[] = [
     { id: 'duckduckgo', label: 'DuckDuckGo', region: 'overseas', category: 'general' },
     { id: 'brave', label: 'Brave', region: 'overseas', category: 'general' },
     { id: 'startpage', label: 'Startpage', region: 'overseas', category: 'general' },
+    { id: 'yahoo', label: 'Yahoo', region: 'overseas', category: 'general' },
     { id: 'exa', label: 'Exa', region: 'overseas', category: 'general' },
     { id: 'github', label: 'GitHub', region: 'overseas', category: 'vertical', proxyInChina: false },
     { id: 'stackoverflow', label: 'Stack Overflow', region: 'overseas', category: 'vertical', proxyInChina: false },

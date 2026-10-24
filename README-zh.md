@@ -25,8 +25,8 @@
 
 `my-websearch` 是专为 AI Agent（Claude Desktop、Cursor、Cherry Studio、Windsurf、Cline、ZCode 等）打造的**全栈联网检索与技术文档基础设施**。开箱即用，具备全引擎自适应路由与高质量正文提纯能力：
 
-- 🌐 **14 大引擎融合与自适应路由**  
-  聚合国内直连（**Bing、百度、CSDN、掘金、搜狗**）、海外通用（**DuckDuckGo、Brave、Startpage、Exa**）与垂直开发者平台（**GitHub、StackOverflow、Hacker News、arXiv**）。支持中文/英文按语种自动路由（`auto`）、多词并发检索（`queries`）、跨引擎去重排序与 `minResults` 自动级联补位。
+- 🌐 **15 大引擎融合与自适应路由**  
+  聚合国内直连（**Bing、百度、CSDN、掘金、搜狗**）、海外通用（**DuckDuckGo、Brave、Startpage、Yahoo、Exa**）与垂直开发者平台（**GitHub、StackOverflow、Hacker News、arXiv**）。支持中文/英文按语种自动路由（`auto`）、多词并发检索（`queries`）、跨引擎去重排序与 `minResults` 自动级联补位；**DuckDuckGo 不健康时，Yahoo 会从英文替补池自动顶上**。
 - ⚡ **现代 Web 协议栈与前端算力求解（零浏览器轻量直通）**  
   基于 `wreq-js` 原生模拟现代浏览器 TLS/HTTP2 协议握手与长效会话机制；内置算法解析 **Startpage Anubis SHA-256 PoW 算力挑战** 与 **DuckDuckGo `d.js` (`isJsaChallenge`) 动态前端挑战**；真实 URL 快速解析（搜狗跳转页还原、百度 `Location` 直取、Bing Base64 解码）；无需拉起 400MB 浏览器即可稳定高效获取正文。请求栈按引擎区分：**DuckDuckGo 必须用 wreq 的 Chrome profile 发 GET**（axios POST 会吃 202），而 **Brave 固定用 HTTP/1.1（axios）**（wreq/HTTP2 指纹会被 CloudFront 判 429），两者不要统一。注意：DuckDuckGo 页面级的 **HTTP 202 anomaly CAPTCHA**（点选图片的人机验证）属于人工验证，**不会**被绕过，统一报 `bot_challenge`。
 - 📄 **高纯度 Markdown 正文提纯与特色站点规则**  
@@ -42,7 +42,7 @@
 
 ---
 
-## 🌍 14 大搜索引擎一览
+## 🌍 15 大搜索引擎一览
 
 | 引擎标识 | 网络要求 | API Key | 核心技术与优势 | 最擅长场景 |
 | :--- | :---: | :---: | :--- | :--- |
@@ -53,6 +53,7 @@
 | **`sogou`** | 🇨🇳 直连 | 无 | 桌面/移动双栈解析 + 跳转页快速还原 + 自动去推广 | 微信公众号外链、中文长尾问答 |
 | **`duckduckgo`** | 🌐 需代理 | 无 | Preload `d.js` + **内置 `isJsaChallenge` 求解器**（仅处理算术挑战；页面级 HTTP 202 是 anomaly CAPTCHA，不绕过） | 英文技术检索、海外开源讨论 |
 | **`startpage`** | 🌐 需代理 | 无 | **多 Worker Anubis SHA-256 PoW 求解器**（难度 ≤ 6）+ 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
+| **`yahoo`** | 🌐 需代理 | 无 | SSR HTML + 首页 cookie 预热 + `RU=` 重定向还原；**英文替补池第一顺位**（DuckDuckGo 不健康时自动顶上） | 稳定的 Bing 索引英文兜底 |
 | **`brave`** | 🌐 需代理 | 无 | **固定 HTTP/1.1（axios）请求路径**（wreq/HTTP2 指纹会被 CloudFront 判 429）+ 赞助商商业推广深度剥离 | 独立海外英文索引、技术博客 |
 | **`exa`** | 🌐 API直连 | 选配 Key | 官方语义搜索 API（未配置时自动跳过，不阻断级联） | 深度语义相似搜索、学术与技术前沿 |
 | **`github`** | 🌐 直连 API | 无 | 官方 REST API 检索仓库与 Issue；**精确 owner/repo 直取** | 开源项目源码、开源库 Issues 排查、已知仓库查看 |
@@ -71,7 +72,7 @@
 
 | 工具名称 | 功能定位 | 关键特性 |
 | :--- | :--- | :--- |
-| **`search`** | 14 大引擎联合联网与代码检索 | 支持多词并发、`timeRange: day\|week\|month\|year` 时间过滤、`site: string[]` 域名过滤、`fetchTop` 正文前瞻注入、`code` 代码引擎（grep.app）；显式传 `engines` 默认 `minResults=0` 且仅在候选内级联；失败附带网络内联诊断（`diagnostics: { proxy, dns, suggestion }`） |
+| **`search`** | 15 大引擎联合联网与代码检索 | 支持多词并发、`timeRange: day\|week\|month\|year` 时间过滤、`site: string[]` 域名过滤、`fetchTop` 正文前瞻注入、`code` 代码引擎（grep.app）；显式传 `engines` 默认 `minResults=0` 且仅在候选内级联；失败附带网络内联诊断（`diagnostics: { proxy, dns, suggestion }`） |
 | **`fetchWebContent`** | 通用网页正文、Markdown 与透明 PDF 提取 | **全能知识提取网关**：内置磁盘级 Markdown 缓存（Node 22 `node:sqlite` / 分片 JSON 兜底，200MB LRU，`cache: default\|reload` 强制刷新）；透明解析 PDF（上限 20MB / 50 页，带 `[page N]` 标记，纯扫描版明确报错）；统一分页与 `focus` 章节定位（默认 **`bm25`** 按段落相关性选块，`window` 保留旧的固定窗口）；**`selector`** 用 CSS 选择器收窄提取范围（未命中直接报错，不静默回退全页）；**`extract`** 用 CSS schema 直接产出结构化 JSON（无需 LLM）；**`citations`** 把正文链接改写成编号引用 + 末尾 References；**`retainLinks`** 裁剪 URL（列表页实测省 50%） |
 | **`fetchGithubContent`** | 全能 GitHub / Gitee 内容提取网关 | 提取 README、**单个源码文件**（`/blob/<ref>/<path>`）、目录树（`/tree/`）、Issue 与 PR；`ref` 可为分支/tag/commit；不是整仓 clone；Gitee 已与 GitHub 对齐（文件/目录/Issue/PR，可选 `GITEE_TOKEN`）；返回 `warnings` |
 | **`queryDocs`** | 一站式开源框架/库官方文档 | 直接传入库名或 Context7 ID；内置低置信度保护与自动兜底链（npm registry → PyPI JSON → 官方 GitHub README），响应标注 `source: context7\|npm\|pypi\|github-readme`、`confidence` 与 `warnings` |
@@ -258,7 +259,7 @@ my-websearch doctor --reset-health
 
 | 变量名 | 默认值 | 可选值 / 说明 |
 | :--- | :--- | :--- |
-| `DEFAULT_SEARCH_ENGINE` | `auto` | 默认搜索引擎。`auto`（智能感知路由：中文走 `baidu,sogou`，英文走 `bing,duckduckgo`）。支持全部 14 个引擎：`auto`、`bing`、`baidu`、`sogou`、`duckduckgo`、`brave`、`csdn`、`juejin`、`startpage`、`exa`、`github`、`stackoverflow`、`hackernews`、`arxiv`、`code`（垂直开发者引擎可配置为默认，全局默认推荐保持 `auto` 或通用网页引擎） |
+| `DEFAULT_SEARCH_ENGINE` | `auto` | 默认搜索引擎。`auto`（智能感知路由：中文走 `baidu,sogou`，英文走 `bing,duckduckgo`）。支持全部 15 个引擎：`auto`、`bing`、`baidu`、`sogou`、`duckduckgo`、`brave`、`csdn`、`juejin`、`startpage`、`yahoo`、`exa`、`github`、`stackoverflow`、`hackernews`、`arxiv`、`code`（垂直开发者引擎可配置为默认，全局默认推荐保持 `auto` 或通用网页引擎） |
 | `ALLOWED_SEARCH_ENGINES` | 全部 | 限制启用的引擎白名单（逗号分隔，如 `bing,baidu,duckduckgo`） |
 | `BING_BASE_URL` | `https://cn.bing.com/search` | Bing 搜索请求基址。国际用户可改为 `https://www.bing.com/search` 或自定义中转域名（兼容旧变量 `OPEN_WEBSEARCH_BING_HOST`） |
 | `DEFAULT_MIN_RESULTS` | `5` | 级联补位阈值：可用结果数不足该值时，自动调度备用引擎补齐 |

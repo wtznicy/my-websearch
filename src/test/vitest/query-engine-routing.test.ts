@@ -59,6 +59,11 @@ describe('pickDefaultEngineForQuery', () => {
         // 模拟 duckduckgo 近期连续 2 次超时失败（successRate = 0 < 50%）
         metrics.recordEngineSearch('duckduckgo', 10000, false);
         metrics.recordEngineSearch('duckduckgo', 10000, false);
+        // Yahoo 是英文主路由的第一替补：只需要一次首页 cookie 预热，比 429 常态的 Brave 稳。
+        expect(pickDefaultEnginesForQuery('rust tokio select', 'auto')).toEqual(['bing', 'yahoo']);
+
+        // Yahoo 也熔断时，才有 exa（已配 key）补位
+        tripEngineCircuit('yahoo');
         expect(pickDefaultEnginesForQuery('rust tokio select', 'auto')).toEqual(['bing', 'exa']);
 
         // 中文主引擎 sogou 熔断时，用**同类通用引擎**替补（bing），而不是 CSDN/掘金这类垂直站：

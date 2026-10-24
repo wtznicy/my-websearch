@@ -10,6 +10,7 @@ const SUPPORTED_ENGINES = [
     'brave',
     'juejin',
     'startpage',
+    'yahoo',
     'sogou',
     'github',
     'stackoverflow',
