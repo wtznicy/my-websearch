@@ -51,7 +51,7 @@
 | **`csdn`** | 🇨🇳 直连 | 无 | 自动持久化阿里云 WAF Cookie + 空壳响应智能重试 | 中文报错排查、开发踩坑笔记 |
 | **`juejin`** | 🇨🇳 直连 | 无 | 掘金官方接口直调，极速提取干净长文 | 前端/后端现代中文高质量技术博文 |
 | **`sogou`** | 🇨🇳 直连 | 无 | 桌面/移动双栈解析 + 跳转页快速还原 + 自动去推广 | 微信公众号外链、中文长尾问答 |
-| **`duckduckgo`** | 🌐 需代理 | 无 | Preload `d.js` + **内置 `isJsaChallenge` 求解器**（仅处理算术挑战；页面级 HTTP 202 是 anomaly CAPTCHA，不绕过） | 英文技术检索、海外开源讨论 |
+| **`duckduckgo`** | 🌐 需代理 | 无 | **wreq Chrome 指纹 GET HTML 端点**（仅 axios 回退时可能遇到 202 anomaly CAPTCHA）；保留 `d.js` 求解器作为 preload 回退 | 英文技术检索、海外开源讨论 |
 | **`startpage`** | 🌐 需代理 | 无 | **多 Worker Anubis SHA-256 PoW 求解器**（难度 ≤ 6）+ 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
 | **`yahoo`** | 🌐 需代理 | 无 | SSR HTML + 首页 cookie 预热 + `RU=` 重定向还原；**英文替补池第一顺位**（DuckDuckGo 不健康时自动顶上） | 稳定的 Bing 索引英文兜底 |
 | **`brave`** | 🌐 需代理 | 无 | **固定 HTTP/1.1（axios）请求路径**（wreq/HTTP2 指纹会被 CloudFront 判 429）+ 赞助商商业推广深度剥离 | 独立海外英文索引、技术博客 |
@@ -61,6 +61,8 @@
 | **`hackernews`** | 🌐 直连 API | 无 | Algolia HN API，含 points、评论数与作者元信息 | 极客社区讨论、前沿科技热点与观点 |
 | **`arxiv`** | 🌐 直连 API | 无 | 官方 Atom XML API 检索论文标题、作者与摘要 | 计算机科学、AI/ML 与自然科学最新论文 |
 | **`code`** | 🌐 国内需代理 | 无 | grep.app API 实时检索全球 GitHub 代码，含仓库、文件路径与精确代码行 | 源码实现翻查、API 使用范例、开源语法实战 |
+
+> **版本说明**：本 README 跟随当前源码树。**Yahoo**、**DDG 的 wreq GET 路径**、**Brave 的 HTTP/1.1 路径** 随 **1.3.9** 发布；npm 上已发布的 **1.3.8** 仍是 14 个引擎，DDG 也还是旧的 axios POST 路径。
 
 ---
 
@@ -221,7 +223,7 @@ my-websearch doctor --reset-health
      | 代理软件的「系统代理」开关 | 完全不用配置。**1.3.8 起**会自动检测并用于海外引擎和通用抓取。 |
 
 2. **配置了有效代理后，国际引擎依然失败或超时？（逐引擎诊断，不是本地配置错误）**
-   - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：202 响应体是 DDG 的 **anomaly CAPTCHA（人工验证页）**，不是普通按 IP 限流；内置 `d.js` 算术求解器无法绕过。当前 `main`（下个版本）已把 DDG 的默认路径改成 **wreq Chrome 指纹 GET** HTML 端点——即使旧的 axios POST 路径吃 202，这条路径通常也能返回 200；所以在当前 `main` 上，只有 wreq 路径失败、回退到 axios POST 时才会再见到 202。如果你用的是 **1.3.8 或更早**，包里还没有这条 wreq GET 路径，等下个版本升级即可。注意：`SEARCH_MODE=playwright:duckduckgo` 不受支持（DDG 没有浏览器渲染路径），会回退到 HTTP。
+   - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：202 响应体是 DDG 的 **anomaly CAPTCHA（人工验证页）**，不是普通按 IP 限流；内置 `d.js` 算术求解器无法绕过。引擎会先用 **wreq Chrome 指纹 GET** 请求 HTML 端点——即使 axios POST 路径吃 202，这条路径通常也能返回 200；所以现在只有 wreq 路径失败、回退到 axios POST 时才会再见到 202。如果仍看到 202，先确认你的版本包含 wreq GET 路径（**1.3.8 及更早没有**），再重试或检查代理是否真的挂上。注意：`SEARCH_MODE=playwright:duckduckgo` 不受支持（DDG 没有浏览器渲染路径），会回退到 HTTP。
    - **Bing 返回 HTTP 200 但 0 条结果**：wreq 协议路径解析为空时会自动回退到 axios 网页路径；若两条路径都为空，通常是查询词或 IP 受到频控策略限制。
    - **Brave 返回 HTTP 429 (Too Many Requests)**：CloudFront 对出口 IP 的限流通常是**分钟级窗口，不是永久封禁**——冷却后同一节点可恢复 200（实测 429 → 稍后连续 6 次 200），但短时间连打会再次触发。同一节点实测：wreq（HTTP/2 Chrome 指纹）→ **429**，axios/curl（HTTP/1.1）→ **200**，所以当前 `main` 固定走 axios；要稳定使用请配置 `BRAVE_API_KEY`（官方 API，有免费额度）彻底绕开 WAF。
    - **Startpage 请求挂满超时或 Anubis PoW 难度过大**：难度 6 现由最多 4 个 Worker 并行求解（约 3–12s）；难度 >6 会自动跳过；pass-challenge 的 socket 错误/瞬时 5xx 会自动重试。

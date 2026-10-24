@@ -37,7 +37,7 @@
   `fetchGithubContent` (formerly `fetchGithubReadme`) supports both GitHub and Gitee: repository READMEs, any source file (`/blob/...`), directory trees (`/tree/...`), and complete issue / PR discussions.
 - 🌏 **Zero-Config Network Detection & Fake-IP Ready**  
   Auto-detects OS system proxies (Windows Registry / macOS scutil / Linux env). Automatically routes overseas engines through proxy while keeping domestic engines on fast direct lines. Pre-whitelists `198.18.0.0/15` for TUN / Fake-IP compatibility while enforcing strict SSRF security bounds.
-  **No proxy is the supported default**: outside mainland China, leave `USE_PROXY` unset and every engine is queried directly — you don't need Clash/v2ray to use this server.
+  **No proxy is the supported default**: outside mainland China, leave `PROXY_URL` unset and every engine is queried directly — you don't need Clash/v2ray to use this server.
 - 🔌 **Versatile Deployment Modes**  
   Works seamlessly across **MCP STDIO** (Claude Desktop/Cursor), **Streamable HTTP / SSE** (Cherry Studio/remote clients), **CLI one-shot commands**, and a **Local HTTP Daemon** with connection pool reuse and Prometheus `/metrics` monitoring.
 
@@ -52,7 +52,7 @@
 | **`csdn`** | 🇨🇳 Direct | None | WAF cookie jar persistence + empty response auto-retry | Chinese error logs, debugging tutorials |
 | **`juejin`** | 🇨🇳 Direct | None | Direct official API querying for clean long-form articles | Modern frontend/backend technical blogs |
 | **`sogou`** | 🇨🇳 Direct | None | Desktop & mobile dual parsing + redirect link decoding + ad removal | WeChat ecosystem links & long-tail queries |
-| **`duckduckgo`** | 🌐 Proxy in CN | None | Preload `d.js` + **built-in `isJsaChallenge` JS solver** (arithmetic challenge only; page-level HTTP 202 is an anomaly CAPTCHA and is not bypassed) | English technical search & open-source discussions |
+| **`duckduckgo`** | 🌐 Proxy in CN | None | **wreq Chrome-profile GET of the HTML endpoint** (202 anomaly CAPTCHA only on the axios fallback); `d.js` solver retained for the preload fallback | English technical search & open-source discussions |
 | **`startpage`** | 🌐 Proxy in CN | None | **Multi-worker Anubis SHA-256 PoW solver** (difficulty ≤ 6) + cookie session (no browser needed) | Google-backed high-privacy results |
 | **`yahoo`** | 🌐 Proxy in CN | None | SSR HTML + homepage cookie warm-up + `RU=` redirect decoding; **English fallback pool** (auto-substitutes when DuckDuckGo is unhealthy) | Stable Bing-index English fallback |
 | **`brave`** | 🌐 Proxy in CN | None | **Plain HTTP/1.1 (axios) request path** (wreq/HTTP2 impersonation gets 429 from CloudFront) + strict sponsored ad stripping | Independent English index & technical blogs |
@@ -62,6 +62,8 @@
 | **`hackernews`** | 🌐 Direct API | None | Algolia HN Search API with points, comments & author metadata | Tech discussions, startup launches & engineering news |
 | **`arxiv`** | 🌐 Direct API | None | Official arXiv Atom XML API parsing titles, authors & abstracts | Scientific papers, machine learning & AI research |
 | **`code`** | 🌐 Proxy in CN | None | grep.app API search across global GitHub code with repo, path & exact line numbers | Source code implementations, API usage patterns |
+
+> **Version note**: this README tracks the current source tree. **Yahoo**, the **DDG wreq-GET** path and the **Brave HTTP/1.1** path ship in **1.3.9**; the published npm **1.3.8** still has 14 engines and the older DDG axios POST path.
 
 ---
 
@@ -222,7 +224,7 @@ When configuring or diagnosing proxy connectivity, refer to these common edge ca
      | Proxy client's "system proxy" switch | No config at all. Since **1.3.8** it is auto-detected for overseas engines and generic fetches. |
 
 2. **Proxy works, but an overseas engine still fails or times out? (Per-engine diagnosis, not a config error)**
-   - **DuckDuckGo returns HTTP 202 / challenge**: the 202 body is DDG's **anomaly CAPTCHA** (human verification), not a plain per-IP rate limit; the `d.js` arithmetic solver does not bypass it. Current `main` (next release) switches DDG to a **wreq Chrome-profile GET** of the HTML endpoint, which normally returns 200 even when the old axios POST path got 202 — so on current `main` a 202 only appears if that path fails and the axios fallback is used. If you are on **1.3.8 or earlier**, that wreq GET path is not in the package yet; upgrade when the next release ships. Note: `SEARCH_MODE=playwright:duckduckgo` is not supported (DDG has no browser-rendering path), so it falls back to HTTP.
+   - **DuckDuckGo returns HTTP 202 / challenge**: the 202 body is DDG's **anomaly CAPTCHA** (human verification), not a plain per-IP rate limit; the `d.js` arithmetic solver does not bypass it. The engine first requests the HTML endpoint with a **wreq Chrome-profile GET**, which normally returns 200 even when the axios POST path is challenged with 202 — so a 202 now only appears if that path fails and the axios fallback is used. If you still see 202, confirm your build includes the wreq GET path (**1.3.8 and earlier do not**), then retry or check that the proxy is attached. Note: `SEARCH_MODE=playwright:duckduckgo` is not supported (DDG has no browser-rendering path), so it falls back to HTTP.
    - **Bing returns HTTP 200 but 0 results**: the wreq impersonation path now falls back to the axios SERP path automatically when it parses an empty page. If both paths stay empty, the query/IP is likely rate-limited.
    - **Brave returns HTTP 429 Too Many Requests**: CloudFront throttles the exit IP for a minutes-long window. It is **not permanent** — a request after cooldown can return 200 (verified: 429 → later 6/6 × 200 on the same node), but bursts re-trigger it. Measured on the same node: wreq (HTTP/2 Chrome fingerprint) → **429**, axios/curl (HTTP/1.1) → **200** — so the current `main` deliberately uses axios. For a stable path set `BRAVE_API_KEY` (official API, free tier) and skip the WAF entirely.
    - **Startpage times out or Anubis PoW difficulty spikes**: difficulty 6 is now solved inline by up to 4 worker threads (~3–12s); >6 is skipped. Pass-challenge socket errors / transient 5xx are retried automatically.
