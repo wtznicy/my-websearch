@@ -7,13 +7,17 @@ import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { paginateSearch } from '../../utils/pagination.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 import { tripEngineCircuit } from '../../core/search/engineCircuitBreaker.js';
-import { impersonateHttpGet } from '../../utils/impersonateRequest.js';
 import { isBraveBlockedPage } from '../../core/antiBot/antiBotDetection.js';
 import { AppError, extractErrorStatus } from '../../core/errors.js';
 export { isBraveBlockedPage };
 
+/**
+ * Brave 的 CloudFront WAF 对 HTTP/2 浏览器指纹（wreq/primp）反而更容易返回 429：
+ * 实测同一节点、同一时刻，wreq GET → 429，而 axios/curl 的 HTTP/1.1 → 200（连续 6 次）。
+ * 因此 Brave 固定走 axios（Node 原生 HTTP/1.1），不要复用 DDG 的 wreq 路径。
+ */
 const braveHttpGet = (url: string, options: AxiosRequestConfig): Promise<AxiosResponse> =>
-    impersonateHttpGet('brave', url, options);
+    axios.get(url, options);
 
 /** Brave 对数据中心/代理 IP 限流（429）时给出明确提示，而非笼统的 status code 错误 */
 function buildBraveErrorMessage(error: unknown): Error {

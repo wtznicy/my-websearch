@@ -5,6 +5,7 @@ All notable changes to `my-websearch` are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Brave 固定走 HTTP/1.1（axios），不再复用 wreq 指纹路径**：同一节点同一时刻实测 wreq（HTTP/2 Chrome 指纹）→ 429，而 axios/curl 的 HTTP/1.1 → 200（连续 6 次）；CloudFront WAF 对 HTTP/2 指纹更敏感。DDG 的方向相反（必须 wreq），两者不能共用同一请求栈。
 - **DDG 的 202 根因是 TLS/方法组合，不是 IP**：实测同一出口下 axios POST `html.duckduckgo.com` → 202，而 wreq-js 的 Chrome profile **GET** → 200（32KB 结果页）。现在 DDG 优先用 wreq 指纹 GET（显式代理或系统代理），失败才回退 axios；并还原 `//duckduckgo.com/l/?uddg=` 重定向链接，避免结果被 URL 校验丢弃。实测 `--engine duckduckgo` 从 202/0 条变为 3 条、约 2.1s。
 - **DuckDuckGo 202 诊断不再误导**：实测 202 响应体是 `anomaly CAPTCHA`（点选图片的人机验证），不是普通 IP 限流，也不是 `d.js` 算术挑战；内置求解器无法绕过，换节点也只在换到未标记出口时有效。错误文案改为说明这是 anomaly CAPTCHA、建议改用 bing/brave 或配 `BRAVE_API_KEY`/`EXA_API_KEY`，不再承诺"换节点即可"。
 - **`queryDocs` 不再把第三方同名包当官方库（high confidence）**：裸库名 `tailwindcss` 曾解析到 `/catppuccin/tailwindcss`。现在裸库名优先命中官方映射（tailwindlabs、facebook、vuejs 等 22 个高风险库），同名多 owner 命中时置信度最高 `medium`，并附带候选列表与「改用完整 Context7 ID」的 warning；完整 `/owner/repo` 仍精确优先。
