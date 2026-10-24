@@ -255,13 +255,14 @@ export async function assertOverseasEngineUsable(engine: 'duckduckgo' | 'brave' 
             status: 503,
             engine,
             hint: chineseLocale
-                ? 'Turn on your proxy client\'s "system proxy" switch, or set PROXY_URL (e.g. PROXY_URL=http://127.0.0.1:7897).'
+                ? '开启代理软件的「系统代理」（1.3.8+ 自动检测），或在 ~/.my-websearch/config.json 写 "proxy": {"url": "http://127.0.0.1:7897"}，或给 MCP 客户端 env 加 PROXY_URL；改完重启 MCP 服务。'
                 : 'No proxy is configured (normal outside mainland China). Check your connection or try another engine (bing/duckduckgo/brave/github).',
             message: chineseLocale
                 ? `${engine} is unreachable from your current network without a proxy. No system proxy was detected on this machine. ` +
-                'Turn on your proxy client\'s "system proxy" switch, or set PROXY_URL to your proxy address (e.g. PROXY_URL=http://127.0.0.1:7897), ' +
-                'or use domestic engines (bing/baidu/csdn/juejin/sogou) or exa (requires EXA_API_KEY). ' +
-                'Then restart the MCP server so the new environment is picked up.'
+                'Pick one: (1) turn on your proxy client\'s "system proxy" switch — auto-detected since 1.3.8, no other config needed; ' +
+                '(2) add {"proxy":{"url":"http://127.0.0.1:7897"}} to ~/.my-websearch/config.json (recommended; applies to every client); ' +
+                '(3) add PROXY_URL=http://127.0.0.1:7897 to the MCP client\'s env (some clients, e.g. WorkBuddy, change their trust fingerprint when env keys change). ' +
+                'Restart the MCP server after changing it. Alternatively use domestic engines (bing/baidu/csdn/juejin/sogou) or exa (requires EXA_API_KEY).'
                 : `${engine} is unreachable from your current network. No system proxy was detected on this machine. ` +
                 'No proxy is configured, which is the normal setup outside mainland China — so this is usually a local network/DNS problem rather than a missing proxy. ' +
                 'Try another engine (bing/duckduckgo/brave/github) or retry in a moment.'

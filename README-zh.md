@@ -212,6 +212,12 @@ my-websearch doctor --reset-health
    - **排查 `useProxy` 字段**：在 `~/.my-websearch/config.json` 中，若配置了 `"useProxy": false`，根据配置优先级规则，该参数会**显式覆盖并强制禁用 `url`**（产生 `PROXY_URL='false'`），导致代理被静默关闭。请将 `"useProxy"` 改为 `true` 或直接删除该字段（只要存在有效 `url` 即可自动启用代理）。
    - **系统代理会自动检测**：未显式配置代理时，程序会读取系统代理（Windows 注册表 / macOS `scutil` / `HTTPS_PROXY`）并用于海外引擎和通用抓取——只要代理软件开着「系统代理」就不必再配 `PROXY_URL`；只有检测失败或需要固定某个代理时才显式设置。
    - **优先写 `~/.my-websearch/config.json`，不要写客户端 `env`**：把 `proxy.url` 和 API key 放进配置文件。部分 MCP 客户端（如 WorkBuddy）用 `command + args + env 键名集合 + cwd` 计算信任指纹，加一个 `PROXY_URL` 环境变量会改变指纹，服务器可能静默掉线；配置文件在启动时读取，不受影响。
+   - **代理到底写哪里**（旧报错只说 "MCP client config"，确实有歧义）：
+     | 位置 | 适用场景 |
+     | :--- | :--- |
+     | `~/.my-websearch/config.json` → `"proxy": { "url": "http://127.0.0.1:7897" }` | **推荐**。所有客户端（CLI/daemon/MCP）统一生效，且不改变客户端信任指纹。 |
+     | MCP 客户端 `env` → `PROXY_URL` | 单客户端覆盖；需重启客户端，部分客户端会把 env 键名计入信任指纹。 |
+     | 代理软件的「系统代理」开关 | 完全不用配置。**1.3.8 起**会自动检测并用于海外引擎和通用抓取。 |
 
 2. **配置了有效代理后，国际引擎依然失败或超时？（上游 IP 频控限流，非本地配置错误）**
    - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：这是 DDG 的 **anomaly CAPTCHA（人工验证页）**，不是普通按 IP 限流；内置 `d.js` 算术求解器无法绕过，换节点也只在换到未被标记的出口时才有用（实测多节点仍 202）。因为状态码是 202，引擎会记为 `bot_challenge` 并触发熔断冷却。建议改用 `bing`/`brave`，或配置 `BRAVE_API_KEY`/`EXA_API_KEY` 走官方 API。注意：`SEARCH_MODE=playwright:duckduckgo` 不受支持（DDG 没有浏览器渲染路径），会回退到 HTTP 并撞同一个 CAPTCHA。

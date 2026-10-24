@@ -556,7 +556,7 @@ export function formatSanitizedConfigSummary(
             lines.push(`🌐 Proxy engines: all engines`);
         }
     } else {
-        lines.push(`🌐 Proxy: disabled (set PROXY_URL to enable, or using TUN mode)`);
+        lines.push(`🌐 Proxy: disabled (system proxy auto-detected per request; set PROXY_URL / proxy.url to force one, or use TUN mode)`);
     }
     if (cfg.fakeIpCidrs.length > 0) {
         lines.push(`🌐 Fake IP CIDRs: ${cfg.fakeIpCidrs.join(', ')}`);

@@ -213,6 +213,12 @@ When configuring or diagnosing proxy connectivity, refer to these common edge ca
    - **Check `useProxy` flag**: In `~/.my-websearch/config.json`, setting `"useProxy": false` takes precedence and **explicitly overrides and disables `url`** (setting `PROXY_URL='false'`). Change `"useProxy": true` or simply omit the field (providing a valid `url` automatically enables the proxy).
    - **System proxy is auto-detected**: when no explicit proxy is configured, the OS system proxy (Windows registry / macOS `scutil` / `HTTPS_PROXY`) is used for overseas engines and generic fetches — you do **not** need `PROXY_URL` just because a proxy client is running. If detection fails or you want to pin a specific proxy, set `PROXY_URL` (e.g. `http://127.0.0.1:7897`).
    - **Prefer `~/.my-websearch/config.json` over client `env`**: put `proxy.url` and API keys in the config file. Some MCP clients (e.g. WorkBuddy) fingerprint the server by `command + args + env key names + cwd`, so adding a `PROXY_URL` env entry changes the trust fingerprint and the server may silently drop out of the session. Config-file settings are read at startup and avoid that.
+   - **Where to put the proxy** (the error message used to say only "MCP client config", which was ambiguous):
+     | Location | Use it when |
+     | :--- | :--- |
+     | `~/.my-websearch/config.json` → `"proxy": { "url": "http://127.0.0.1:7897" }` | **Recommended.** Applies to every client (CLI, daemon, MCP) and does not change client trust fingerprints. |
+     | MCP client `env` → `PROXY_URL` | Per-client override. Restart the client; some clients include env keys in their trust fingerprint. |
+     | Proxy client's "system proxy" switch | No config at all. Since **1.3.8** it is auto-detected for overseas engines and generic fetches. |
 
 2. **Proxy is configured properly, but overseas engines fail or timeout? (Upstream IP Rate Limiting, NOT a Config Error)**
    - **DuckDuckGo returns HTTP 202 / challenge**: this is DDG's **anomaly CAPTCHA** (human verification), not a plain per-IP rate limit — the `d.js` arithmetic solver cannot bypass it, and switching proxy nodes only helps if the new exit is not flagged (tested: multiple nodes still returned 202). Because it is HTTP 202, the engine records `bot_challenge` and the circuit breaker opens for the cooldown. Use `bing`/`brave`, or configure `BRAVE_API_KEY`/`EXA_API_KEY` for an official API. Note: `SEARCH_MODE=playwright:duckduckgo` is not supported (DDG has no browser-rendering path), so it falls back to HTTP and hits the same CAPTCHA.
