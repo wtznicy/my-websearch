@@ -2,6 +2,11 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **显式 `proxy.engines` 自动补齐 `yahoo` / `bing-news`**：这两个引擎在墙内直连会超时/302；旧配置里的白名单常常没有它们，导致“升级后仍然不可用”。现在配置解析会自动追加，空列表（全部走代理）保持原语义。
+
 ## [1.3.10] - 2026-10-26
 
 ### Fixed

@@ -22,19 +22,25 @@ export interface EngineDefinition {
      * 用户显式把它们写进 PROXY_ENGINES 时仍会走代理（显式配置优先）。
      */
     proxyInChina?: boolean;
+    /**
+     * 墙内是否**必须**走代理（默认 false）。
+     * 这类引擎直连会超时/302，即使显式配置了 proxy.engines，也会被自动补进名单，
+     * 避免用户升级后因为旧白名单缺少新引擎而静默失败。
+     */
+    proxyRequiredInChina?: boolean;
 }
 
 export const ENGINE_DEFINITIONS: readonly EngineDefinition[] = [
     { id: 'baidu', label: 'Baidu', region: 'domestic', category: 'general' },
     { id: 'bing', label: 'Bing', region: 'domestic', category: 'general' },
-    { id: 'bing-news', label: 'Bing News', region: 'overseas', category: 'vertical' },
+    { id: 'bing-news', label: 'Bing News', region: 'overseas', category: 'vertical', proxyRequiredInChina: true },
     { id: 'sogou', label: 'Sogou', region: 'domestic', category: 'general' },
     { id: 'csdn', label: 'CSDN', region: 'domestic', category: 'vertical' },
     { id: 'juejin', label: 'Juejin', region: 'domestic', category: 'vertical' },
     { id: 'duckduckgo', label: 'DuckDuckGo', region: 'overseas', category: 'general' },
     { id: 'brave', label: 'Brave', region: 'overseas', category: 'general' },
     { id: 'startpage', label: 'Startpage', region: 'overseas', category: 'general' },
-    { id: 'yahoo', label: 'Yahoo', region: 'overseas', category: 'general' },
+    { id: 'yahoo', label: 'Yahoo', region: 'overseas', category: 'general', proxyRequiredInChina: true },
     { id: 'exa', label: 'Exa', region: 'overseas', category: 'general' },
     { id: 'github', label: 'GitHub', region: 'overseas', category: 'vertical', proxyInChina: false },
     { id: 'stackoverflow', label: 'Stack Overflow', region: 'overseas', category: 'vertical', proxyInChina: false },

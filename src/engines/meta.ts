@@ -22,6 +22,11 @@ export const PROXY_ENGINE_NAMES: readonly string[] = ENGINE_DEFINITIONS
     .filter((definition) => definition.region === 'overseas' && definition.proxyInChina !== false)
     .map((definition) => definition.id);
 
+/** 墙内必须走代理的引擎（直连超时/302，即使显式白名单也应自动补齐） */
+export const PROXY_REQUIRED_ENGINE_NAMES: readonly string[] = ENGINE_DEFINITIONS
+    .filter((definition) => definition.proxyRequiredInChina === true && definition.proxyInChina !== false)
+    .map((definition) => definition.id);
+
 export type OverseasEngineName = string;
 
 const overseasEngineSet = new Set<string>(OVERSEAS_ENGINE_NAMES);

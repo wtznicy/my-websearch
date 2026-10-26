@@ -252,7 +252,7 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
             const parsedSemi = parseProxyConfig('http://127.0.0.1:7897;duckduckgo,brave');
             expect(parsedSemi.useProxy).toBe(true);
             expect(parsedSemi.proxyUrl).toBe('http://127.0.0.1:7897');
-            expect(parsedSemi.proxyEngines).toEqual(['duckduckgo', 'brave']);
+            expect(parsedSemi.proxyEngines).toEqual(['duckduckgo', 'brave', 'bing-news', 'yahoo']);
 
             const parsedAll = parseProxyConfig('http://127.0.0.1:7897;all');
             expect(parsedAll.useProxy).toBe(true);
@@ -260,7 +260,7 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
 
             const parsedHash = parseProxyConfig('http://127.0.0.1:7897#startpage,exa');
             expect(parsedHash.useProxy).toBe(true);
-            expect(parsedHash.proxyEngines).toEqual(['startpage', 'exa']);
+            expect(parsedHash.proxyEngines).toEqual(['startpage', 'exa', 'bing-news', 'yahoo']);
         });
 
         it('supports disabling proxy with false, none, off, 0, direct', () => {
@@ -293,7 +293,7 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
                 PROXY_ENGINES: 'bing,duckduckgo'
             }, { quiet: true });
             expect(legacyEnginesCfg.useProxy).toBe(true);
-            expect(legacyEnginesCfg.proxyEngines).toEqual(['bing', 'duckduckgo']);
+            expect(legacyEnginesCfg.proxyEngines).toEqual(['bing', 'duckduckgo', 'bing-news', 'yahoo']);
         });
     });
 });

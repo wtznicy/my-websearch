@@ -520,7 +520,7 @@ describe('CLI search failed outcome, configLoader priority & doctor command', ()
 
         expect(reportWithoutExaKey.version).toBe('1.0.23-test');
         expect(reportWithoutExaKey.effectiveConfig.proxyUrl).toBe('http://***:***@127.0.0.1:65531');
-        expect(reportWithoutExaKey.effectiveConfig.proxyEngines).toEqual(['duckduckgo']);
+        expect(reportWithoutExaKey.effectiveConfig.proxyEngines).toEqual(['duckduckgo', 'bing-news', 'yahoo']);
         expect(reportWithoutExaKey.effectiveConfig.proxyUrl).not.toContain('supersecret');
         expect(reportWithoutExaKey.effectiveConfig.apiKeys.context7).toBe('ctx***99');
         expect(reportWithoutExaKey.effectiveConfig.apiKeys.exa).toBeNull();

@@ -1,6 +1,6 @@
 // src/config.ts
 import ipaddr from 'ipaddr.js';
-import { PROXY_ENGINE_NAMES } from './engines/meta.js';
+import { PROXY_ENGINE_NAMES, PROXY_REQUIRED_ENGINE_NAMES } from './engines/meta.js';
 import {
     loadApplicationConfigEnv,
     sanitizePathForLog,
@@ -318,6 +318,17 @@ export function parseProxyConfig(
         finalEngines = inlineEngines;
     } else {
         finalEngines = [...DEFAULT_PROXY_ENGINES];
+    }
+
+    // 兼容旧白名单：yahoo / bing-news 直连会超时/302，必须走代理。
+    // 用户显式 proxy.engines 常常是升级前写的，缺这两个新引擎；自动补齐避免静默失败。
+    // 空数组表示“全部引擎走代理”，无需补齐。
+    if (finalEngines.length > 0) {
+        for (const required of PROXY_REQUIRED_ENGINE_NAMES) {
+            if (!finalEngines.includes(required)) {
+                finalEngines.push(required);
+            }
+        }
     }
 
     let useProxy = false;

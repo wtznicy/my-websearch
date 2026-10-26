@@ -293,7 +293,7 @@ my-websearch doctor --reset-health
 | `FETCH_WEB_INSECURE_TLS`| `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点旧证书链损坏时使用） |
 | `GITHUB_README_CDN_FIRST` | `false` | 为 `true` 时强制跳过 `raw.githubusercontent.com` 直连探测，优先走 jsDelivr CDN 镜像（国内无代理网络加速，免除 3 秒直连探测等待） |
 
-> **自定义代理引擎名单**：如果你在 `~/.my-websearch/config.json` 写了 `proxy.engines`，或用 `PROXY_URL` 的 `;engine1,engine2` 后缀，**务必把 `yahoo` 加进去**。旧版 1.3.7 时代的 8 引擎名单没有 `yahoo`，会让它以**直连**方式请求——实测国内直连 **15–20s 超时**，走代理约 **2s**。推荐直接删掉这份名单：现在的默认名单已包含 Yahoo，并把 GitHub / Stack Overflow / Hacker News / arXiv 这些直连 API 引擎排除在代理之外。
+> **自定义代理引擎名单**：如果你在 `~/.my-websearch/config.json` 写了 `proxy.engines`，或用 `PROXY_URL` 的 `;engine1,engine2` 后缀，**`yahoo` 与 `bing-news` 会被自动补齐**——它们在墙内直连不可用（Yahoo 15–20s 超时；Bing News 返回 302/HTML）。仍然推荐直接删掉这份名单：默认名单已包含它们，并把 GitHub / Stack Overflow / Hacker News / arXiv 这些直连 API 引擎排除在代理之外。
 
 #### 3. 🔐 外部服务凭据与 API Key
 
@@ -361,7 +361,7 @@ my-websearch doctor --reset-health
 ```bash
 npm install
 npm run build
-npm test              # 执行 Vitest 测试套件（当前基线：88 个文件、684 个测试）
+npm test              # 执行 Vitest 测试套件（当前基线：89 个文件、687 个测试）
 npm run test:live     # 执行实时网络集成测试
 npm run eval:live     # 执行 23 用例真实 STDIO JSON-RPC 评测套件
 ```
