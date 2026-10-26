@@ -38,7 +38,7 @@ function buildCookieCacheKey(url: URL): string {
     ].join('|');
 }
 
-function serializeCookieHeader(cookies: Array<{ name?: string; value?: string }>): string {
+export function serializeCookieHeader(cookies: Array<{ name?: string; value?: string }>): string {
     return cookies
         .filter((cookie) => cookie.name && cookie.value !== undefined)
         .map((cookie) => `${cookie.name}=${cookie.value}`)

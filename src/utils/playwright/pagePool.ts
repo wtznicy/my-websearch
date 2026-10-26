@@ -23,7 +23,10 @@ const browserPlaywrightPagePools = new WeakMap<object, Map<string, BrowserPlaywr
 
 export async function getPlaywrightPageTargetId(page: PlaywrightPageLike | unknown): Promise<string> {
     try {
-        const pageCandidate = page as PlaywrightPageLike | null | undefined;
+        const pageCandidate = page as (PlaywrightPageLike & { targetId?: string }) | null | undefined;
+        if (pageCandidate && typeof pageCandidate.targetId === 'string' && pageCandidate.targetId.length > 0) {
+            return pageCandidate.targetId;
+        }
         const context = typeof pageCandidate?.context === 'function' ? pageCandidate.context() : null;
         if (context && typeof context.newCDPSession === 'function') {
             const session = await context.newCDPSession(pageCandidate);

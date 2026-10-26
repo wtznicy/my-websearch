@@ -3,7 +3,9 @@ import { createServer } from 'node:net';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { AppConfig, config, engineShouldUseProxy, getProxyUrl } from '../../config.js';
-import { LoadPlaywrightClientOptions, PlaywrightModule } from './types.js';
+import { LoadPlaywrightClientOptions, PlaywrightBrowserLike, PlaywrightModule } from './types.js';
+import { cdpDriver } from '../browser/cdpDriver.js';
+import { findChromeExecutable } from '../browser/chromeLauncher.js';
 
 const require = createRequire(import.meta.url);
 
@@ -203,47 +205,7 @@ export function normalizeLoadedPlaywrightModule(loaded: unknown): PlaywrightModu
 }
 
 export function getLocalBrowserExecutablePath(): string {
-    if (config.playwrightExecutablePath && existsSync(config.playwrightExecutablePath)) {
-        return config.playwrightExecutablePath;
-    }
-
-    if (cachedBrowserPath) {
-        return cachedBrowserPath;
-    }
-
-    const candidates: string[] = [];
-    candidates.push('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe');
-    candidates.push('C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe');
-    candidates.push('C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe');
-    candidates.push('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
-
-    const pf86 = process.env['PROGRAMFILES(X86)'];
-    const pf = process.env['PROGRAMFILES'];
-    const localAppData = process.env['LOCALAPPDATA'];
-    if (pf86) {
-        candidates.push(`${pf86}\\Microsoft\\Edge\\Application\\msedge.exe`);
-        candidates.push(`${pf86}\\Google\\Chrome\\Application\\chrome.exe`);
-    }
-    if (pf) {
-        candidates.push(`${pf}\\Microsoft\\Edge\\Application\\msedge.exe`);
-        candidates.push(`${pf}\\Google\\Chrome\\Application\\chrome.exe`);
-    }
-    if (localAppData) {
-        candidates.push(`${localAppData}\\Google\\Chrome\\Application\\chrome.exe`);
-    }
-
-    candidates.push('/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/microsoft-edge');
-    candidates.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
-    candidates.push('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
-
-    for (const candidate of [...new Set(candidates)]) {
-        if (existsSync(candidate)) {
-            cachedBrowserPath = candidate;
-            return candidate;
-        }
-    }
-
-    throw new Error('No Chromium-based browser executable was found. Configure PLAYWRIGHT_EXECUTABLE_PATH or install Edge/Chrome.');
+    return findChromeExecutable(config.playwrightExecutablePath);
 }
 
 export function findFreePort(): Promise<number> {
@@ -294,9 +256,53 @@ function emitPlaywrightUnavailableWarning(options?: LoadPlaywrightClientOptions)
     console.warn(playwrightUnavailableMessage);
 }
 
+function createCdpPlaywrightModule(): PlaywrightModule {
+    return {
+        chromium: {
+            async launch(options: Record<string, unknown> = {}): Promise<PlaywrightBrowserLike> {
+                let executablePath: string | undefined;
+                if (typeof options.executablePath === 'string' && options.executablePath) {
+                    executablePath = options.executablePath;
+                } else if (config.playwrightExecutablePath) {
+                    executablePath = config.playwrightExecutablePath;
+                }
+                const session = await cdpDriver.launch({
+                    executablePath,
+                    headless: options.headless !== false,
+                    args: Array.isArray(options.args) ? (options.args as string[]) : undefined,
+                    proxy: options.proxy as { server: string; bypass?: string } | undefined,
+                    timeoutMs: typeof options.timeout === 'number' ? options.timeout : undefined
+                });
+                return session as unknown as PlaywrightBrowserLike;
+            },
+            async connectOverCDP(endpoint: string, options: Record<string, unknown> = {}): Promise<PlaywrightBrowserLike> {
+                const session = await cdpDriver.connectOverCdp(endpoint, {
+                    timeoutMs: typeof options.timeout === 'number' ? options.timeout : undefined
+                });
+                return session as unknown as PlaywrightBrowserLike;
+            },
+            async connect(options: { wsEndpoint: string; timeout?: number }): Promise<PlaywrightBrowserLike> {
+                const session = await cdpDriver.connectOverCdp(options.wsEndpoint, {
+                    timeoutMs: options.timeout
+                });
+                return session as unknown as PlaywrightBrowserLike;
+            }
+        }
+    };
+}
+
 export async function loadPlaywrightClient(options?: LoadPlaywrightClientOptions): Promise<PlaywrightModule | null> {
     if (!playwrightModulePromise) {
         playwrightModulePromise = (async () => {
+            const driverName = (process.env.BROWSER_DRIVER || 'cdp').trim().toLowerCase();
+            if (driverName !== 'playwright') {
+                playwrightModuleSource = 'cdp (chrome-remote-interface)';
+                playwrightUnavailableMessage = null;
+                hasEmittedPlaywrightUnavailableWarning = false;
+                console.error('🧭 Browser client resolved from cdp (chrome-remote-interface)');
+                return createCdpPlaywrightModule();
+            }
+
             const attempts: string[] = [];
 
             for (const candidate of getPlaywrightModuleCandidates()) {

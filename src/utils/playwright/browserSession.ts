@@ -36,6 +36,7 @@ import {
     getLocalBrowserExecutablePath,
     loadPlaywrightClient
 } from './browserDiscovery.js';
+import { closeAllCDPSessions } from '../browser/cdpDriver.js';
 
 export const PLAYWRIGHT_CONNECT_TIMEOUT_MS = Math.max(config.playwrightNavigationTimeoutMs, 30000);
 export const PLAYWRIGHT_LOCAL_CDP_READINESS_TIMEOUT_MS = Math.max(config.playwrightNavigationTimeoutMs * 2, 60000);
@@ -970,7 +971,7 @@ export async function cleanOrphanTempProfilesInBackground(maxAgeMs = 60 * 60 * 1
         }
 
         for (const entry of entries) {
-            if (entry.isDirectory() && entry.name.startsWith('mcp-search-')) {
+            if (entry.isDirectory() && (entry.name.startsWith('mcp-search-') || entry.name.startsWith('my-websearch-cdp-'))) {
                 const fullPath = path.join(tempRoot, entry.name);
                 if (activeTempDirs.has(fullPath)) {
                     continue;
@@ -1136,7 +1137,7 @@ async function tryReusePersistedLocalBrowserSession(
     const endpoint = `http://127.0.0.1:${reusableDebugPort}`;
     let browser: PlaywrightBrowserLike;
     try {
-        browser = await connectOverCdpWhenReady(playwright, endpoint);
+        browser = await probeLocalCdpReadiness(playwright, endpoint, 2000);
     } catch {
         console.error(`🧹 Persisted browser session (PID ${reusableBrowserPid}, port ${reusableDebugPort}) is no longer reachable, cleaning up`);
         createForceKill(reusableBrowserPid, metadata.tempDir, undefined, domainKey)();
@@ -1634,6 +1635,7 @@ export async function shutdownLocalPlaywrightBrowserSessions(): Promise<void> {
             cachedLocalBrowserSessionOptions = null;
         }
     }
+    await closeAllCDPSessions().catch(() => undefined);
 }
 
 export async function getOrCreateLocalBrowserSession(
