@@ -1750,7 +1750,7 @@ export async function openPlaywrightBrowser(
 ): Promise<PlaywrightBrowserSession> {
     const playwright = await loadPlaywrightClient();
     if (!playwright) {
-        throw new Error('Playwright client is not available. Install `playwright` or `playwright-core`, or configure PLAYWRIGHT_EXECUTABLE_PATH / PLAYWRIGHT_CDP_ENDPOINT.');
+        throw new Error('Browser driver is not available. Install Chrome/Edge, or configure PLAYWRIGHT_EXECUTABLE_PATH / PLAYWRIGHT_CDP_ENDPOINT. (BROWSER_DRIVER=playwright additionally requires a manually installed playwright-core.)');
     }
 
     if (config.playwrightCdpEndpoint) {

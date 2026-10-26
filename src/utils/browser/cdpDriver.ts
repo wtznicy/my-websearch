@@ -146,7 +146,7 @@ export class CDPSession implements BrowserSession {
 
         for (const page of this.openPages) {
             try {
-                await page.close();
+                await settleWithin(page.close(), 1500);
             } catch {
                 // ignore
             }
@@ -155,14 +155,34 @@ export class CDPSession implements BrowserSession {
 
         if (this.rootClient) {
             try {
-                await this.rootClient.close();
+                await settleWithin(this.rootClient.close(), 1000);
             } catch {
                 // ignore
             }
         }
 
         if (this.launched) {
-            await this.launched.cleanup();
+            await settleWithin(this.launched.cleanup(), 4000);
+        }
+    }
+}
+
+/** 清理阶段不能因为某条 CDP 命令不返回而把 CLI/daemon 卡死 */
+async function settleWithin(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+        await Promise.race([
+            promise.catch(() => undefined),
+            new Promise<void>((resolve) => {
+                timer = setTimeout(resolve, timeoutMs);
+                if (typeof timer === 'object' && 'unref' in timer) {
+                    timer.unref();
+                }
+            })
+        ]);
+    } finally {
+        if (timer) {
+            clearTimeout(timer);
         }
     }
 }

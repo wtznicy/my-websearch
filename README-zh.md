@@ -275,7 +275,7 @@ my-websearch doctor --reset-health
 | `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | 引擎首次熔断冷却（429 / 202 / 验证状态）。连续失败指数退避（30s → 60s → 120s…）。 |
 | `ENGINE_CIRCUIT_MAX_COOLDOWN_MS` | `300000` | 熔断指数退避上限（默认 5 分钟）。 |
 | `SEARCH_AUTHORITY_DOMAINS` | 空 | 结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单） |
-| `SEARCH_MODE` | `auto` | 检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`playwright`（全强走浏览器）<br/>• **一种方式多选引擎**：`playwright:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`playwright:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP） |
+| `SEARCH_MODE` | `auto` | 检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`playwright`（全强走浏览器；旧值名，底层为 CDP）<br/>• **一种方式多选引擎**：`playwright:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`playwright:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP） |
 | `AUTO_ROUTE_EN_ENGINES` | `bing,duckduckgo` | 英文查询默认自动路由引擎列表（逗号分隔） |
 | `AUTO_ROUTE_ZH_ENGINES` | `baidu,sogou` | 中文查询默认自动路由引擎列表（逗号分隔） |
 
@@ -320,17 +320,18 @@ my-websearch doctor --reset-health
 | `SECURITY_AUDIT` | `false` | 是否开启安全审计日志（输出 SSRF 拦截详情与主机头放行记录） |
 | `OPEN_WEBSEARCH_ALLOWED_HOSTS` | 本地回环 | HTTP 服务允许的 Host 域名白名单（DNS Rebinding 安全防护，逗号分隔） |
 
-#### 5. 🧭 Playwright 浏览器高级控制
+#### 5. 🧭 CDP 浏览器高级控制（保留 Playwright 旧变量名）
 
 > [!NOTE]
-> 原有的 `BING_PLAYWRIGHT_FALLBACK` 与 `STARTPAGE_PLAYWRIGHT_FALLBACK` 已全面合并收敛至 `SEARCH_MODE`（如 `SEARCH_MODE=bing` 或 `SEARCH_MODE=request`），底层已自动保持静默向后兼容。
+> 浏览器兜底已改为 **raw Chrome DevTools Protocol**（`chrome-remote-interface`），直接启动系统已安装的 Chrome/Edge。`PLAYWRIGHT_*` 变量名与 `SEARCH_MODE=playwright` 仅为向后兼容保留，底层由 CDP 驱动。
 
 | 变量名 | 默认值 | 可选值 / 说明 |
 | :--- | :--- | :--- |
-| `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 远程 Chrome/Edge CDP 调试端点（如 `http://127.0.0.1:9222` 或 `ws://...`） |
-| `PLAYWRIGHT_EXECUTABLE_PATH` | 自动探测 | 自定义浏览器二进制可执行文件绝对路径（默认自动探测 Edge/Chrome） |
-| `PLAYWRIGHT_HEADLESS` | `true` | 是否无头运行（Windows 下自动使用隐身独立桌面，绝不弹窗打扰用户） |
-| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`| `20000` | Playwright 页面导航硬超时（毫秒） |
+| `BROWSER_DRIVER` | `cdp` | 浏览器后端：`cdp`（默认，raw CDP）；`playwright` 为旧版逃生口，需要你自行安装 `playwright-core`，不再随包提供 |
+| `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 远程 Chrome/Edge CDP 调试端点（如 `http://127.0.0.1:9222` 或 `ws://...`）；旧变量名，由 CDP 驱动使用 |
+| `PLAYWRIGHT_EXECUTABLE_PATH` | 自动探测 | 自定义浏览器二进制可执行文件绝对路径（默认自动探测 Edge/Chrome）；旧变量名 |
+| `PLAYWRIGHT_HEADLESS` | `true` | 是否无头运行（Windows 下自动使用隐身独立桌面）；旧变量名 |
+| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`| `20000` | 页面导航硬超时（毫秒）；旧变量名，作用于 CDP 导航 |
 
 #### 6. 🛠️ 应用目录与工具微调
 
@@ -344,8 +345,7 @@ my-websearch doctor --reset-health
 
 > 💡 **零配置升级说明（已精简移除的冗余变量）**：
 > - **CORS 跨域开关**（`ENABLE_CORS`/`CORS_ORIGIN`）：默认**关闭 CORS**；仅在浏览器跨域调用时显式开启，并限制允许来源。
-> - **Playwright 包选择**（`PLAYWRIGHT_PACKAGE`/`PLAYWRIGHT_MODULE_PATH`）：现已实现**100% 自动探测**系统自带浏览器与已装包。
-> - **远程调试端点**（`PLAYWRIGHT_WS_ENDPOINT`）：统一收敛为标准 `PLAYWRIGHT_CDP_ENDPOINT`。
+> - **浏览器后端**：改用 `chrome-remote-interface` 的 raw CDP；`playwright-core` 不再随包提供。`PLAYWRIGHT_*` 与 `SEARCH_MODE=playwright` 仅作为兼容别名保留。
 > - **Emoji 开关**（`OPEN_WEBSEARCH_NO_EMOJI`）：代码页自动探测（非 UTF-8 自动平滑降级为 ASCII 标签），不再需要开关。
 > - **独立调试变量**（`OPEN_WEBSEARCH_DEBUG`）：全面收敛为标准化 `LOG_LEVEL=debug`。
 > - **Cookie 保鲜期**（`MYWEBSEARCH_COOKIE_TTL_DAYS`）：固化为标准 30 天，到期自动续期。
@@ -361,7 +361,7 @@ my-websearch doctor --reset-health
 ```bash
 npm install
 npm run build
-npm test              # 执行 Vitest 测试套件（当前基线：87 个文件、667 个测试）
+npm test              # 执行 Vitest 测试套件（当前基线：88 个文件、684 个测试）
 npm run test:live     # 执行实时网络集成测试
 npm run eval:live     # 执行 23 用例真实 STDIO JSON-RPC 评测套件
 ```

@@ -100,14 +100,17 @@ async function main() {
   });
 
   if (cliExitCode !== null) {
-    // best-effort 清理：shutdown 失败不应覆盖 CLI 本身的退出码
+    // best-effort 清理：shutdown 失败或临时 profile 删除较慢时，不能把整个 CLI 卡住。
+    // 先让关闭流程跑一小段预算，然后强制退出；后台 FS 清理由下次启动继续。
     try {
-      await shutdownLocalPlaywrightBrowserSessions();
+      await Promise.race([
+        shutdownLocalPlaywrightBrowserSessions(),
+        new Promise((resolve) => setTimeout(resolve, 6000))
+      ]);
     } catch (error) {
       console.error('Failed to shut down local Playwright browser sessions:', error);
     }
-    process.exitCode = cliExitCode;
-    return;
+    process.exit(cliExitCode);
   }
 
   // MODE 非法值此前是"静默空转"：stdio 分支只认 undefined/both/stdio，HTTP 分支只认 both/http，
@@ -142,7 +145,10 @@ async function main() {
     }
 
     try {
-      await shutdownLocalPlaywrightBrowserSessions();
+      await Promise.race([
+        shutdownLocalPlaywrightBrowserSessions(),
+        new Promise((resolve) => setTimeout(resolve, 5000))
+      ]);
     } catch {
       // ignore
     }

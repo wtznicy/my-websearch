@@ -345,7 +345,7 @@ export async function fetchPageHtmlWithBrowser(
         throw new AppError({
             code: 'missing_optional_dependency',
             retryable: false,
-            message: 'Playwright client is not available for browser HTML fetch'
+            message: 'Browser driver is not available for browser HTML fetch (raw CDP requires Chrome/Edge).'
         });
     }
 

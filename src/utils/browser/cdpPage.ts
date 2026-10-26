@@ -74,19 +74,17 @@ export class CDPPage implements BrowserPage {
         const { Page } = this.client;
 
         let timer: NodeJS.Timeout | undefined;
-        let unsubscribe: (() => void) | undefined;
-
-        const waitPromise = new Promise<void>((resolve, reject) => {
+        const timeoutPromise = new Promise<never>((_, reject) => {
             timer = setTimeout(() => {
                 reject(new Error(`Navigation to ${url} timed out after ${timeoutMs}ms (waitUntil: ${waitUntil})`));
             }, timeoutMs);
+        });
 
+        const eventPromise = new Promise<void>((resolve) => {
             if (waitUntil === 'domcontentloaded') {
-                const handler = () => {
-                    resolve();
-                };
+                const handler = () => resolve();
                 Page.domContentEventFired(handler);
-                unsubscribe = () => { /* event listener cleanup */ };
+                this.pageEventCleanup = () => this.removeListener('Page.domContentEventFired', handler);
             } else if (waitUntil === 'networkidle') {
                 const interval = setInterval(() => {
                     if (this.inFlightRequests === 0 && Date.now() - this.lastRequestTime >= 500) {
@@ -94,32 +92,41 @@ export class CDPPage implements BrowserPage {
                         resolve();
                     }
                 }, 100);
-                unsubscribe = () => clearInterval(interval);
+                this.pageEventCleanup = () => clearInterval(interval);
             } else {
-                const handler = () => {
-                    resolve();
-                };
+                const handler = () => resolve();
                 Page.loadEventFired(handler);
-                unsubscribe = () => { /* event listener cleanup */ };
+                this.pageEventCleanup = () => this.removeListener('Page.loadEventFired', handler);
             }
         });
 
         try {
-            const navResult = await Page.navigate({ url });
+            const navResult = await Promise.race([
+                Page.navigate({ url }),
+                timeoutPromise
+            ]);
             if (navResult.errorText) {
                 throw new Error(`Navigation to ${url} failed: ${navResult.errorText}`);
             }
             this.currentUrl = url;
-            await waitPromise;
+            await Promise.race([eventPromise, timeoutPromise]);
             return { status: 200, url: this.currentUrl };
         } finally {
             if (timer) {
                 clearTimeout(timer);
             }
-            if (unsubscribe) {
-                unsubscribe();
-            }
+            this.pageEventCleanup?.();
+            this.pageEventCleanup = undefined;
         }
+    }
+
+    private pageEventCleanup?: () => void;
+
+    private removeListener(event: string, handler: (...args: unknown[]) => void): void {
+        const client = this.client as unknown as {
+            removeListener?: (eventName: string, listener: (...args: unknown[]) => void) => void;
+        };
+        client.removeListener?.(event, handler);
     }
 
     public async content(): Promise<string> {
@@ -481,10 +488,16 @@ export class CDPPage implements BrowserPage {
         try {
             const { Target } = this.client;
             if (this.targetId) {
-                await Target.closeTarget({ targetId: this.targetId }).catch(() => undefined);
+                await Promise.race([
+                    Target.closeTarget({ targetId: this.targetId }).catch(() => undefined),
+                    new Promise<void>((resolve) => setTimeout(resolve, 1500))
+                ]);
             }
         } finally {
-            await this.client.close().catch(() => undefined);
+            await Promise.race([
+                this.client.close().catch(() => undefined),
+                new Promise<void>((resolve) => setTimeout(resolve, 1000))
+            ]);
         }
     }
 }

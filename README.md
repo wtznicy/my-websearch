@@ -293,7 +293,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `FETCH_WEB_DEADLINE_MS` | `45000` | Hard deadline for one `fetchWebContent` call (cookie + browser + retries combined) |
 | `GITHUB_CONTENT_CDN_FIRST` | `false` | Prefer jsDelivr over `raw.githubusercontent.com` for **README and source files** (public repos only). Legacy alias `GITHUB_README_CDN_FIRST` still works. |
 | `GITHUB_CONTENT_BUDGET_MS` | `12000` (`6000` in CDN-first) | Total time budget for one `fetchGithubContent` call; per-attempt timeout is capped at 4.5s. |
-| `BING_PLAYWRIGHT_BUDGET_MS` | `6000` | Budget for the Bing Playwright fallback before the HTTP results are kept |
+| `BING_PLAYWRIGHT_BUDGET_MS` | `6000` | Legacy name retained for compatibility: budget for the Bing browser fallback (now backed by raw CDP) before HTTP results are kept |
 | `MYWEBSEARCH_NO_AUTO_BOOTSTRAP` | unset | Set to `1` to stop copying API keys out of other apps' MCP configs on first run |
 
 #### 1. 🔍 Search & Routing Orchestration
@@ -311,7 +311,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | First circuit-breaker cooldown for an engine (429 / 202 / bot_challenge). Repeated failures back off exponentially (30s → 60s → 120s…). |
 | `ENGINE_CIRCUIT_MAX_COOLDOWN_MS` | `300000` | Upper bound for the exponential circuit-breaker backoff (default 5 minutes). |
 | `SEARCH_AUTHORITY_DOMAINS` | empty | Additional authority domain whitelist for result re-ranking (comma-separated, appended to built-in list) |
-| `SEARCH_MODE` | `auto` | Search mode and browser policy. Supports single mode, multi-engine per mode, and compound multi-mode combinations:<br/>• **Global mode**: `auto` (default fallback), `request`/`none` (pure HTTP), `playwright` (force browser)<br/>• **Single mode, multiple engines**: `playwright:bing,startpage`, `auto:bing,startpage`, `bing,startpage`<br/>• **Compound multiple modes**: `playwright:bing;auto:startpage` (bing forces browser, startpage uses auto fallback), `auto;request:startpage` (global auto but startpage uses pure HTTP) |
+| `SEARCH_MODE` | `auto` | Search mode and browser policy. Supports single mode, multi-engine per mode, and compound multi-mode combinations:<br/>• **Global mode**: `auto` (default fallback), `request`/`none` (pure HTTP), `playwright` (force browser; legacy value name, now backed by CDP)<br/>• **Single mode, multiple engines**: `playwright:bing,startpage`, `auto:bing,startpage`, `bing,startpage`<br/>• **Compound multiple modes**: `playwright:bing;auto:startpage` (bing forces browser, startpage uses auto fallback), `auto;request:startpage` (global auto but startpage uses pure HTTP) |
 | `AUTO_ROUTE_EN_ENGINES` | `bing,duckduckgo` | Comma-separated engines for default English auto-routing |
 | `AUTO_ROUTE_ZH_ENGINES` | `baidu,sogou` | Comma-separated engines for default Chinese auto-routing |
 
@@ -356,17 +356,18 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `SECURITY_AUDIT` | `false` | Enable SSRF blocking and host header security audit logging |
 | `OPEN_WEBSEARCH_ALLOWED_HOSTS` | loopback | Host header whitelist for HTTP server (DNS Rebinding protection, comma-separated) |
 
-#### 5. 🧭 Playwright Browser & Stealth Controls
+#### 5. 🧭 CDP Browser & Stealth Controls (legacy Playwright env names kept)
 
 > [!NOTE]
-> `BING_PLAYWRIGHT_FALLBACK` and `STARTPAGE_PLAYWRIGHT_FALLBACK` have been consolidated into `SEARCH_MODE` (e.g. `SEARCH_MODE=bing` or `SEARCH_MODE=request`). Backward compatibility is automatically preserved.
+> The browser fallback now uses **raw Chrome DevTools Protocol** via `chrome-remote-interface`; it launches the Chrome/Edge already installed on your system. The `PLAYWRIGHT_*` env names and `SEARCH_MODE=playwright` value are kept for backward compatibility only. `BING_PLAYWRIGHT_FALLBACK` and `STARTPAGE_PLAYWRIGHT_FALLBACK` have been consolidated into `SEARCH_MODE`.
 
 | Variable | Default | Allowed Values / Description |
 | :--- | :--- | :--- |
-| `PLAYWRIGHT_CDP_ENDPOINT` | empty | Remote Chrome/Edge CDP endpoint URL (e.g. `http://127.0.0.1:9222` or `ws://...`) |
-| `PLAYWRIGHT_EXECUTABLE_PATH` | auto | Absolute path to browser executable (auto-detects system Edge/Chrome by default) |
-| `PLAYWRIGHT_HEADLESS` | `true` | Run headless (on Windows, automatically utilizes an isolated hidden desktop window) |
-| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`| `20000` | Hard page navigation timeout for Playwright (milliseconds) |
+| `BROWSER_DRIVER` | `cdp` | Browser backend. `cdp` (default, raw CDP). `playwright` is a legacy escape hatch and requires you to install `playwright-core` manually; it is no longer bundled. |
+| `PLAYWRIGHT_CDP_ENDPOINT` | empty | Remote Chrome/Edge CDP endpoint URL (e.g. `http://127.0.0.1:9222` or `ws://...`); legacy name, used by the CDP driver |
+| `PLAYWRIGHT_EXECUTABLE_PATH` | auto | Absolute path to the browser executable (auto-detects system Edge/Chrome by default); legacy name |
+| `PLAYWRIGHT_HEADLESS` | `true` | Run headless (on Windows, an isolated hidden desktop window is used); legacy name |
+| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`| `20000` | Hard page navigation timeout (milliseconds); legacy name, applied to CDP navigation |
 
 #### 6. 🛠️ Application Directory & Tool Customization
 
@@ -380,8 +381,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 
 > 💡 **Zero-Config Upgrades (Redundant Variables Removed)**:
 > - **CORS Switches** (`ENABLE_CORS`/`CORS_ORIGIN`): CORS is **disabled by default**; enable it explicitly and restrict origins when browser clients need cross-origin access.
-> - **Playwright Package Selection** (`PLAYWRIGHT_PACKAGE`/`PLAYWRIGHT_MODULE_PATH`): Now **100% automated** via intelligent client and system binary discovery.
-> - **Remote Browser Endpoint** (`PLAYWRIGHT_WS_ENDPOINT`): Unified into standard `PLAYWRIGHT_CDP_ENDPOINT`.
+> - **Browser Backend**: raw CDP via `chrome-remote-interface`; `playwright-core` is no longer bundled. `PLAYWRIGHT_*` names and `SEARCH_MODE=playwright` remain as compatibility aliases.
 > - **Emoji Switch** (`OPEN_WEBSEARCH_NO_EMOJI`): Automatic console code page detection smoothly falls back to ASCII tags on legacy terminals.
 > - **Fragmented Debug Flag** (`OPEN_WEBSEARCH_DEBUG`): Unified into standard `LOG_LEVEL=debug`.
 > - **Cookie Persistence TTL** (`MYWEBSEARCH_COOKIE_TTL_DAYS`): Solidified to 30 days with automated sliding renewal.
@@ -397,7 +397,7 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run the Vitest suite (87 files, 667 tests at the current baseline)
+npm test              # Run the Vitest suite (88 files, 684 tests at the current baseline)
 npm run test:live     # Run bounded-concurrency live integration tests
 npm run eval:live     # Run 23-case live STDIO JSON-RPC evaluation suite
 ```

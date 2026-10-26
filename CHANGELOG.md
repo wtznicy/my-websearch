@@ -10,7 +10,12 @@ All notable changes to `my-websearch` are documented in this file.
 - **Yahoo / Bing News 错误提示**：直连超时或被挑战时，提示明确要求开启系统代理/`PROXY_URL`，并在使用显式 `proxy.engines` 时把对应引擎加进去。
 
 ### Changed
+- **浏览器后端从 Playwright 切换为 raw CDP**：新增 `src/utils/browser/` 适配层（`chrome-remote-interface`），直接启动系统 Chrome/Edge，移除 `playwright-core` 依赖；Bing/Startpage 兜底、Cookie 获取、doctor 探测、daemon 关闭全部走 CDP。`PLAYWRIGHT_*` 变量名与 `SEARCH_MODE=playwright` 仅作为兼容别名保留；`BROWSER_DRIVER=playwright` 需要手动安装 playwright-core。
+- **CDP 导航超时与清理**：`Page.navigate` 不再可能无限挂起（命令级 timeout + 事件监听清理）；CLI 关闭浏览器设置 6s 预算并强制退出，避免临时 profile 删除拖住进程。
 - **DDG 文档改为 best-effort**：wreq GET 仍可能间歇性遇到 anomaly CAPTCHA；README 明确“不要当 SLA”，稳定场景用 Bing/Startpage 或官方 API key。
+
+### Fixed
+- **pnpm 严格依赖构建**：显式声明 `domhandler`（此前只是 cheerio 传递依赖，pnpm 下 TS2307，Glama/Docker 构建失败）。
 
 ## [1.3.9] - 2026-10-24
 
