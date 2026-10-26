@@ -342,7 +342,15 @@ export class CDPPage implements BrowserPage {
             async press(key: string): Promise<void> {
                 await page.evaluate(`(() => {
                     const el = document.querySelector(${JSON.stringify(selector)});
-                    if (el instanceof HTMLElement) el.focus();
+                    if (el instanceof HTMLElement) {
+                        el.focus();
+                        el.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, code: ${JSON.stringify(key)}, keyCode: 13, which: 13, bubbles: true }));
+                        if (${JSON.stringify(key)} === 'Enter' && el instanceof HTMLInputElement && el.form) {
+                            if (typeof el.form.requestSubmit === 'function') {
+                                el.form.requestSubmit();
+                            }
+                        }
+                    }
                 })()`).catch(() => undefined);
                 return page.keyboard.press(key);
             },
@@ -427,8 +435,28 @@ export class CDPPage implements BrowserPage {
     private async handleKeyboardPress(key: string): Promise<void> {
         const { Input } = this.client;
         if (key === 'Enter') {
-            await Input.dispatchKeyEvent({ type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
-            await Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+            await Input.dispatchKeyEvent({
+                type: 'rawKeyDown',
+                key: 'Enter',
+                code: 'Enter',
+                windowsVirtualKeyCode: 13,
+                unmodifiedText: '\r',
+                text: '\r'
+            });
+            await Input.dispatchKeyEvent({
+                type: 'char',
+                key: 'Enter',
+                code: 'Enter',
+                windowsVirtualKeyCode: 13,
+                unmodifiedText: '\r',
+                text: '\r'
+            });
+            await Input.dispatchKeyEvent({
+                type: 'keyUp',
+                key: 'Enter',
+                code: 'Enter',
+                windowsVirtualKeyCode: 13
+            });
         } else if (key === 'Backspace') {
             await Input.dispatchKeyEvent({ type: 'rawKeyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 });
             await Input.dispatchKeyEvent({ type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 });
