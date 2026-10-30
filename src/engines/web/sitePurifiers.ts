@@ -320,6 +320,87 @@ export function purifyCnblogsArticle(html: string): SitePurificationResult | und
 }
 
 /**
+ * Reddit 帖子专用提纯器（old.reddit / shreddit）：
+ * - 提取标题、作者、正文
+ * - 提取高赞评论并按分数排序（最多 10 条），保留缩进层级
+ * - 剔除侧栏、广告、推荐流与登录提示
+ */
+export function purifyRedditThread(html: string): SitePurificationResult | undefined {
+    const $ = cheerio.load(html);
+    $('script, style, noscript, .side, .promoted, .ad, shreddit-ad, .recommended, .login-modal').remove();
+
+    const shredditPost = $('shreddit-post').first();
+    const oldPost = $('div.thing.link, #siteTable .thing').first();
+    const title = shredditPost.attr('post-title')?.trim()
+        || oldPost.find('a.title').first().text().trim()
+        || $('meta[property="og:title"]').attr('content')?.trim()
+        || $('h1').first().text().trim()
+        || undefined;
+    if (!title) {
+        return undefined;
+    }
+
+    const author = shredditPost.attr('author')?.trim()
+        || oldPost.find('a.author').first().text().trim()
+        || undefined;
+    const postScore = shredditPost.attr('score')?.trim()
+        || oldPost.find('.score.unvoted').first().text().trim()
+        || undefined;
+
+    const postBody = shredditPost.find('[slot="text-body"], .text-body').first().text().trim()
+        || oldPost.find('.expando .usertext-body .md, .usertext-body .md').first().text().trim()
+        || '';
+
+    const comments: Array<{ author: string; score: number; depth: number; body: string }> = [];
+    const commentNodes = $('shreddit-comment').length > 0
+        ? $('shreddit-comment').toArray()
+        : $('.commentarea .thing.comment').toArray();
+
+    for (const node of commentNodes) {
+        const element = $(node);
+        const isShreddit = node.tagName.toLowerCase() === 'shreddit-comment';
+        const body = (isShreddit
+            ? element.find('[slot="comment"]').first().text()
+            : element.find('.usertext-body .md').first().text()).replace(/\s+/g, ' ').trim();
+        if (!body) continue;
+        const rawScore = isShreddit ? element.attr('score') : element.find('.score.unvoted').first().text();
+        const score = Number(String(rawScore ?? '').replace(/[^\d-]/g, '')) || 0;
+        const depth = Number(isShreddit ? element.attr('depth') : element.attr('data-depth')) || 0;
+        const commentAuthor = (isShreddit ? element.attr('author') : element.find('a.author').first().text())?.trim() || 'anonymous';
+        comments.push({ author: commentAuthor, score, depth, body });
+    }
+
+    comments.sort((left, right) => right.score - left.score);
+    const topComments = comments.slice(0, 10);
+
+    const textParts = [
+        `# ${title}`,
+        [author ? `u/${author}` : '', postScore ? `score ${postScore}` : ''].filter(Boolean).join(' · '),
+        postBody,
+        topComments.length > 0 ? '## Top comments' : '',
+        ...topComments.map((comment) => `${'  '.repeat(Math.min(comment.depth, 5))}[${comment.score}] u/${comment.author}: ${comment.body}`)
+    ].filter(Boolean);
+
+    const escapeHtml = (value: string) => value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const postHtml = shredditPost.length > 0 ? shredditPost.html() ?? '' : oldPost.html() ?? '';
+    const commentsHtml = topComments.length > 0
+        ? `<h2>Top comments</h2>${topComments.map((comment) => `<p>[${comment.score}] u/${escapeHtml(comment.author)}: ${escapeHtml(comment.body)}</p>`).join('')}`
+        : '';
+
+    return {
+        title,
+        html: `${postHtml}${commentsHtml}`,
+        text: textParts.join('\n\n'),
+        author,
+        siteName: 'Reddit'
+    };
+}
+
+/**
  * 专用站点嗅探分发入口：命中特定技术/文章站点时返回提纯结果，否则返回 undefined
  */
 export function purifySiteContent(url: string, html: string): SitePurificationResult | undefined {
@@ -352,6 +433,10 @@ export function purifySiteContent(url: string, html: string): SitePurificationRe
         if ((host === 'cnblogs.com' || host.endsWith('.cnblogs.com'))
             && (pathname.includes('/p/') || pathname.includes('/archive/'))) {
             return purifyCnblogsArticle(html);
+        }
+
+        if ((host === 'reddit.com' || host.endsWith('.reddit.com')) && pathname.includes('/comments/')) {
+            return purifyRedditThread(html);
         }
 
         return undefined;

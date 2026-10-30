@@ -19,6 +19,8 @@ import {
 export interface ExecuteCascadeOptions {
     cleanQuery: string;
     searchQuery: string;
+    /** Optional per-engine query rewrite (native site/filetype vs plain keyword). */
+    queryForEngine?: (engine: string) => string;
     minResults: number;
     initialMerged: SearchResult[];
     initialEngineResults: SearchResult[][];
@@ -185,6 +187,7 @@ export async function executeCascade(
     const {
         cleanQuery,
         searchQuery,
+        queryForEngine,
         minResults,
         initialMerged,
         initialEngineResults,
@@ -303,7 +306,7 @@ export async function executeCascade(
 
             (async () => {
                 const results = await withEngineConcurrencySlot(candidate, deadlineAt, controller.signal, () =>
-                    engineMap[candidate]!(searchQuery, gap, {
+                    engineMap[candidate]!(queryForEngine?.(candidate) ?? searchQuery, gap, {
                         searchMode: effectiveSearchMode,
                         signal: controller.signal,
                         timeRange: options.timeRange,

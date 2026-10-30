@@ -8,6 +8,7 @@ import { registerFetchWebTool } from './handlers/fetchWebTool.js';
 import { registerFetchGithubTool } from './handlers/fetchGithubTool.js';
 import { registerQueryDocsTool } from './handlers/queryDocsTool.js';
 import { registerPrompts } from './prompts.js';
+import { registerResources } from './resources.js';
 
 export { normalizeEngineName };
 
@@ -24,4 +25,5 @@ export const setupTools = (server: McpServer, runtime: MyWebSearchRuntime): void
     registerFetchGithubTool(server, runtime);
     registerQueryDocsTool(server, runtime);
     registerPrompts(server);
+    registerResources(server);
 };

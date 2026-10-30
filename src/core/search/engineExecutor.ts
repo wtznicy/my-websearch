@@ -117,6 +117,8 @@ import type { RequestContext } from '../requestContext.js';
 export interface ExecutePrimaryEnginesOptions {
     query: string;
     searchQuery: string;
+    /** Optional per-engine query rewrite (native site/filetype vs plain keyword). */
+    queryForEngine?: (engine: string) => string;
     executableEngines: string[];
     limits: number[];
     effectiveSearchMode?: AppConfig['searchMode'];
@@ -266,6 +268,7 @@ export async function executePrimaryEngines(
 ): Promise<ExecutePrimaryEnginesResult> {
     const {
         searchQuery,
+        queryForEngine,
         executableEngines,
         limits,
         effectiveSearchMode,
@@ -322,7 +325,7 @@ export async function executePrimaryEngines(
             }
             try {
                 const results = await withEngineConcurrencySlot(engine, deadlineAt, signal, () =>
-                    executor(searchQuery, engineLimit, {
+                    executor(queryForEngine?.(engine) ?? searchQuery, engineLimit, {
                         searchMode: effectiveSearchMode,
                         signal,
                         timeRange,

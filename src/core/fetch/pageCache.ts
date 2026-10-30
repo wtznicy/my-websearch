@@ -167,6 +167,7 @@ interface StorageBackend {
     delete(key: string): void;
     clear(): void;
     close(): void;
+    list(limit: number): PageCacheRecord[];
 }
 
 class SqliteStorageBackend implements StorageBackend {
@@ -188,6 +189,8 @@ class SqliteStorageBackend implements StorageBackend {
     private stmtTotalBytes: any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private stmtLruPrune: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private stmtList: any;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(DatabaseSync: any, dbPath: string) {
@@ -261,6 +264,7 @@ class SqliteStorageBackend implements StorageBackend {
         this.stmtClear = this.db.prepare('DELETE FROM page_cache');
         this.stmtTotalBytes = this.db.prepare('SELECT COALESCE(SUM(byte_size), 0) AS total FROM page_cache');
         this.stmtLruPrune = this.db.prepare('SELECT url_hash, byte_size FROM page_cache ORDER BY last_accessed_at ASC LIMIT 50');
+        this.stmtList = this.db.prepare('SELECT * FROM page_cache WHERE expires_at > ? ORDER BY fetched_at DESC LIMIT ?');
     }
 
     get(key: string): PageCacheRecord | null {
@@ -332,6 +336,29 @@ class SqliteStorageBackend implements StorageBackend {
 
     clear(): void {
         this.stmtClear.run();
+    }
+
+    list(limit: number): PageCacheRecord[] {
+        const rows = this.stmtList.all(Date.now(), Math.max(1, Math.min(limit, 200))) as Array<Record<string, unknown>>;
+        return rows.map((row) => ({
+            urlHash: String(row.url_hash),
+            normalizedUrl: String(row.normalized_url),
+            format: String(row.format),
+            markdown: String(row.markdown),
+            title: String(row.title),
+            etag: row.etag ? String(row.etag) : undefined,
+            lastModified: row.last_modified ? String(row.last_modified) : undefined,
+            publishedAt: row.published_at ? String(row.published_at) : undefined,
+            fetchedAt: Number(row.fetched_at),
+            expiresAt: Number(row.expires_at),
+            contentHash: String(row.content_hash),
+            totalLength: Number(row.total_length),
+            byteSize: Number(row.byte_size),
+            isNotFound: Boolean(row.is_not_found),
+            siteName: row.site_name ? String(row.site_name) : undefined,
+            isPdf: Boolean(row.is_pdf),
+            pdfPages: row.pdf_pages ? Number(row.pdf_pages) : undefined
+        }));
     }
 
     close(): void {
@@ -486,6 +513,20 @@ class JsonFileStorageBackend implements StorageBackend {
         this.memoryIndex.clear();
     }
 
+    list(limit: number): PageCacheRecord[] {
+        const records: PageCacheRecord[] = [];
+        const now = Date.now();
+        for (const key of this.memoryIndex.keys()) {
+            const record = this.get(key);
+            if (record && record.expiresAt > now) {
+                records.push(record);
+            }
+        }
+        return records
+            .sort((left, right) => right.fetchedAt - left.fetchedAt)
+            .slice(0, Math.max(1, Math.min(limit, 200)));
+    }
+
     private pruneLru(): void {
         let total = 0;
         for (const meta of this.memoryIndex.values()) {
@@ -543,6 +584,17 @@ export class PageCacheService {
 
         // Deep clone on read to prevent cache pollution
         return structuredClone(record);
+    }
+
+    /** Read a record by its opaque cache hash (used by MCP resources). */
+    public getByHash(urlHash: string): PageCacheRecord | null {
+        const record = this.backend.get(urlHash);
+        return record ? structuredClone(record) : null;
+    }
+
+    /** List non-expired cache entries, newest first. */
+    public list(limit = 50): PageCacheRecord[] {
+        return this.backend.list(limit).map((record) => structuredClone(record));
     }
 
     public isExpired(record: PageCacheRecord): boolean {

@@ -737,12 +737,15 @@ async function fetchGithubTree(
         }
 
         const totalItemsCount = items.length;
+        const treeNoisePattern = /(^|\/)(node_modules|dist|build|target|coverage|\.next|\.nuxt|out|vendor|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|composer\.lock|Cargo\.lock)(\/|$)/i;
+        const filteredNoiseCount = items.filter((item) => treeNoisePattern.test(item.path)).length;
+        items = items.filter((item) => !treeNoisePattern.test(item.path));
         const maxTreeItems = 150;
         const isCapped = totalItemsCount > maxTreeItems;
         const displayItems = isCapped ? items.slice(0, maxTreeItems) : items;
 
         const renderedTree = renderAsciiTree(displayItems);
-        const header = `# Directory Tree: ${owner}/${repo} @ ${ref}${normalizedDirPath ? ` (subpath: /${normalizedDirPath})` : ''}\n\nTotal items: ${totalItemsCount}${isCapped ? ` (showing first ${maxTreeItems})` : ''}\n\n`;
+        const header = `# Directory Tree: ${owner}/${repo} @ ${ref}${normalizedDirPath ? ` (subpath: /${normalizedDirPath})` : ''}\n\nTotal items: ${totalItemsCount}${filteredNoiseCount > 0 ? ` (filtered ${filteredNoiseCount} build/lock artifacts)` : ''}${isCapped ? ` (showing first ${maxTreeItems})` : ''}\n\n`;
         const truncationNotice = isCapped ? `\n\n... and ${totalItemsCount - maxTreeItems} more items.` : '';
 
         return { status: 'ok', content: `${header}\`\`\`\n${renderedTree}\n\`\`\`${truncationNotice}` };
@@ -759,7 +762,7 @@ async function fetchGithubTree(
  * @param githubUrl GitHub / Gitee URL
  * @returns 格式化后的 Markdown 内容字符串，失败或 404 返回 null
  */
-export async function fetchGithubContent(githubUrl: string, lineRange?: LineRange): Promise<string | null> {
+export async function fetchGithubContent(githubUrl: string, lineRange?: LineRange, releaseLimit = 10): Promise<string | null> {
     console.error(`\n--- Processing URL: ${githubUrl} ---`);
 
     if (!githubUrl?.trim()) {
@@ -790,7 +793,7 @@ export async function fetchGithubContent(githubUrl: string, lineRange?: LineRang
     }
     const giteeReleasesMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?gitee\.com\/([^\/\s]+)\/([^\/\s]+)\/releases(?:\/tag\/([^/?#\s]+))?/i);
     if (giteeReleasesMatch?.[1] && giteeReleasesMatch[2]) {
-        return fetchGiteeReleases(giteeReleasesMatch[1], giteeReleasesMatch[2], giteeReleasesMatch[3]);
+        return fetchGiteeReleases(giteeReleasesMatch[1], giteeReleasesMatch[2], giteeReleasesMatch[3], releaseLimit);
     }
 
     // 0. Gitee 与 GitHub 同款资源（blob / tree / issue / pull request）
@@ -843,7 +846,7 @@ export async function fetchGithubContent(githubUrl: string, lineRange?: LineRang
     }
     const githubReleasesMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+)\/releases(?:\/(?:tag\/)?([^/?#\s]+))?/i);
     if (githubReleasesMatch?.[1] && githubReleasesMatch[2]) {
-        return fetchGithubReleases(githubReleasesMatch[1], githubReleasesMatch[2], githubReleasesMatch[3]);
+        return fetchGithubReleases(githubReleasesMatch[1], githubReleasesMatch[2], githubReleasesMatch[3], releaseLimit);
     }
 
     // 2. 匹配 GitHub blob 源码文件链接：https://github.com/{owner}/{repo}/blob/{branch}/{path}

@@ -4,7 +4,9 @@ import { AppConfig, config } from '../../config.js';
 import { SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
 import { rankSearchResults } from './resultRanking.js';
 import { isEngineCircuitOpen, getEngineCircuitRemainingMs } from './engineCircuitBreaker.js';
-import { quoteModelLikeTerms, preprocessSearchQuery } from '../../utils/queryPreprocess.js';
+import { preprocessSearchQuery } from '../../utils/queryPreprocess.js';
+import { buildEngineQuery, matchesSearchOperators, parseSearchOperators } from '../../utils/searchOperators.js';
+import { ENGINE_REGISTRY } from '../../engines/registry.js';
 import { extractSiteDomains, matchesSiteDomains } from '../../engines/bing/bing.js';
 import { metrics } from '../metrics.js';
 import { classifyFailureRetryable, AppError } from '../errors.js';
@@ -359,8 +361,16 @@ export function createSearchService(
                 });
             }
 
-            const searchQuery = preprocessSearchQuery(cleanQuery);
-            const cacheInput: SearchExecutionInput = { query: searchQuery, engines, limit, searchMode, minResults, timeRange, site, requestedEngines };
+            const operators = parseSearchOperators(cleanQuery);
+            const baseQuery = preprocessSearchQuery(operators.text);
+            let effectiveOperators = operators;
+            const nativeSiteEngines = new Set<string>(
+                ENGINE_REGISTRY.filter((entry) => entry.supportsNativeSite).map((entry) => entry.name)
+            );
+            const queryForEngine = (engine: string): string =>
+                buildEngineQuery(effectiveOperators, nativeSiteEngines.has(engine));
+            const searchQuery = baseQuery;
+            const cacheInput: SearchExecutionInput = { query: cleanQuery, engines, limit, searchMode, minResults, timeRange, site, requestedEngines };
 
             const cached = ttlCache.get(cacheInput);
             if (cached) {
@@ -423,7 +433,12 @@ export function createSearchService(
 
                     const extractedSites = extractSiteDomains(cleanQuery);
                     const explicitSites = Array.isArray(site) ? site : (site ? [site] : []);
-                    const siteDomains = [...new Set([...extractedSites, ...explicitSites.map((s) => s.trim().toLowerCase())])].filter(Boolean);
+                    const siteDomains = [...new Set([
+                        ...operators.siteDomains,
+                        ...extractedSites,
+                        ...explicitSites.map((s) => s.trim().toLowerCase())
+                    ])].filter(Boolean);
+                    effectiveOperators = { ...operators, siteDomains };
 
                     const perEngineTimeoutMs = Math.min(Math.floor(deadlineMs * 0.5), 10000);
 
@@ -431,6 +446,7 @@ export function createSearchService(
                     const primary = await executePrimaryEngines({
                         query: cleanQuery,
                         searchQuery,
+                        queryForEngine,
                         executableEngines,
                         limits,
                         effectiveSearchMode,
@@ -444,7 +460,7 @@ export function createSearchService(
                             ? undefined
                             : (minResults && minResults > 0 ? minResults : limit),
                         // P1-10：早退计数必须用「过滤后的净结果」，与最终合并口径一致
-                        countableResult: (item) => !isPlaceholderResult(item) && matchesSiteDomains(item.url, siteDomains),
+                        countableResult: (item) => !isPlaceholderResult(item) && matchesSearchOperators(item, effectiveOperators),
                         signal: effectiveSignal,
                         timeRange,
                         site: siteDomains,
@@ -456,12 +472,13 @@ export function createSearchService(
 
                     let merged = mergeSearchResults(primary.engineResults)
                         .filter((result) => !isPlaceholderResult(result))
-                        .filter((result) => matchesSiteDomains(result.url, siteDomains));
+                        .filter((result) => matchesSearchOperators(result, effectiveOperators));
 
                     // 管道第 2 阶段：级联补位执行器（结果不足时按批补位）
                     const cascade = await executeCascade({
                         cleanQuery,
                         searchQuery,
+                        queryForEngine,
                         minResults: minResults ?? 0,
                         initialMerged: merged,
                         initialEngineResults: primary.engineResults,
@@ -482,7 +499,7 @@ export function createSearchService(
                         requestContext: rc
                     });
 
-                    merged = cascade.merged.filter((result) => matchesSiteDomains(result.url, siteDomains));
+                    merged = cascade.merged.filter((result) => matchesSearchOperators(result, effectiveOperators));
                     allFailures.push(...cascade.cascadeFailures);
                     allMetrics.push(...cascade.cascadeMetrics);
 
@@ -513,6 +530,16 @@ export function createSearchService(
                                 description: item.description,
                                 url: item.url
                             });
+                        }
+                    }
+
+                    // after:/before: 需要 publishedAt；放到日期抽取之后再过滤一次。
+                    if (effectiveOperators.after || effectiveOperators.before) {
+                        const beforeOperatorFilter = merged.length;
+                        merged = merged.filter((item) => matchesSearchOperators(item, effectiveOperators));
+                        const droppedByOperator = beforeOperatorFilter - merged.length;
+                        if (droppedByOperator > 0) {
+                            warnings.push(`${droppedByOperator} results were dropped by after:/before: date operators.`);
                         }
                     }
 

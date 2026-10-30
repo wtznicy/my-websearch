@@ -395,8 +395,9 @@ export async function fetchGiteeCompare(owner: string, repo: string, base: strin
     }, base, head);
 }
 
-export async function fetchGiteeReleases(owner: string, repo: string, tag?: string): Promise<string | null> {
-    const url = `${GITEE_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases?per_page=10`;
+export async function fetchGiteeReleases(owner: string, repo: string, tag?: string, limit = 10): Promise<string | null> {
+    const perPage = Math.max(1, Math.min(Math.floor(limit) || 10, 30));
+    const url = `${GITEE_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases?per_page=${perPage}`;
     const res = await giteeGet(url, 'releases');
     if (res.status === 404) {
         return null;

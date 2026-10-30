@@ -5,6 +5,10 @@ All notable changes to `my-websearch` are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **搜索语法跨引擎转译与后置过滤**：`search` 现在解析 `site:`、`filetype:`、`after:`、`before:` 与 `-排除词`；通用引擎重建原生查询，垂直/API 引擎只收纯关键词，最终按域名、后缀、排除词与 `publishedAt` 本地过滤。
+- **MCP Resources**：只读暴露 `websearch://cache/pages` / `websearch://cache/docs` 索引及 `{id}` 单条 Markdown 资源；只读取已缓存内容，不触发网络抓取。
+- **Reddit 帖子提纯**：`purifyRedditThread` 支持 old.reddit 与 shreddit，按分数格式化前 10 条评论并保留缩进。
+- **GitHub Releases 数量控制**：`fetchGithubContent` 新增 `releaseLimit`（1–30）；目录树自动过滤 `node_modules/dist/build/lock` 等产物。
 - **MCP Prompts**：注册 `deep-research` 与 `code-lookup` 两个服务端 Prompt 模板；只返回提示词，不自动触发工具，兼容支持 MCP Prompts 的客户端。
 - **Maven Central 文档兜底**：`queryDocs` 在 npm/PyPI/crates.io/Go 之后支持 `groupId:artifactId[:version]`，从 Maven Search API + POM 的 SCM 地址解析 GitHub/Gitee 仓库并抓取 README。
 - **知乎 / 博客园专用正文提纯**：`sitePurifiers.ts` 新增 `purifyZhihuContent` 与 `purifyCnblogsArticle`，剥离登录弹窗、推荐流、评论与页脚版权；微信公众号 purifier 已存在，本次未重复添加。

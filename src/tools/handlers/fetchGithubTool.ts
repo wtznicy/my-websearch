@@ -20,23 +20,25 @@ export function registerFetchGithubTool(server: McpServer, runtime: MyWebSearchR
     server.registerTool(
         fetchGithubToolName,
         {
-            description: "Fetch GitHub/Gitee by URL: README, source file (/blob/, with lines), tree, issue, PR, commit, compare, or releases. Example: https://github.com/o/r/blob/main/src/index.ts — ref can be branch/tag/commit; not a repo clone.",
+            description: "Fetch GitHub/Gitee by URL: README, source file (/blob/, with lines), tree, issue, PR, commit, compare, or releases (releaseLimit for recent N). Example: https://github.com/o/r/blob/main/src/index.ts — ref can be branch/tag/commit; not a repo clone.",
             inputSchema: z.object({
                 url: z.string().min(1).max(2048).refine(
                     (url) => validateGithubRepositoryUrl(url),
                     "URL must be a valid GitHub or Gitee repository, file, directory tree, issue, or pull request URL (supports HTTPS, SSH formats)"
                 ),
                 lines: z.string().regex(/^L?\d+(?:\s*[-–]\s*L?\d+)?$/i, 'lines must look like "120-180" or "120"').optional()
-                    .describe('Optional source-file line range, 1-based inclusive (e.g. "120-180"). Only valid for /blob/ URLs; URL hash #L120-L180 also works.')
+                    .describe('Optional source-file line range, 1-based inclusive (e.g. "120-180"). Only valid for /blob/ URLs; URL hash #L120-L180 also works.'),
+                releaseLimit: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(1).max(30).optional())
+                    .describe('Optional number of releases to return for /releases URLs (1-30, default 10).')
             }).passthrough(),
             annotations: TOOL_ANNOTATION_HINTS
         },
         async (rawArgs) => {
-            const { url, lines } = rawArgs as { url: string; lines?: string } & Record<string, unknown>;
-            const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, ['url', 'lines']);
+            const { url, lines, releaseLimit } = rawArgs as { url: string; lines?: string; releaseLimit?: number } & Record<string, unknown>;
+            const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, ['url', 'lines', 'releaseLimit']);
             try {
                 logTool(`Fetching GitHub content: ${url}${lines ? ` (lines ${lines})` : ''}`);
-                const result = await runtime.services.fetchGithubReadme.execute({ url, lines });
+                const result = await runtime.services.fetchGithubReadme.execute({ url, lines, releaseLimit });
 
                 if (result) {
                     return {

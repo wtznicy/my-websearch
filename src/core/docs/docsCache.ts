@@ -148,6 +148,46 @@ export function getDocsCache(key: string): DocsCacheValue | null {
     return { text: entry.text, source: entry.source, confidence: entry.confidence, cachedAt: entry.cachedAt };
 }
 
+export interface DocsCacheListEntry {
+    key: string;
+    value: DocsCacheValue;
+    expiresAt: number;
+}
+
+/** List non-expired docs cache entries, newest first (used by MCP resources). */
+export function listDocsCache(limit = 50): DocsCacheListEntry[] {
+    const now = Date.now();
+    const max = Math.max(1, Math.min(limit, 200));
+    const db = openSqlite();
+    if (db) {
+        try {
+            const rows = db.prepare(
+                'SELECT key, value, expires_at FROM query_docs_cache WHERE expires_at > ? ORDER BY created_at DESC LIMIT ?'
+            ).all(now, max) as Array<{ key?: string; value?: string; expires_at?: number }>;
+            return rows.flatMap((row) => {
+                if (!row.key || !row.value || typeof row.expires_at !== 'number') return [];
+                try {
+                    return [{ key: row.key, value: JSON.parse(row.value) as DocsCacheValue, expiresAt: row.expires_at }];
+                } catch {
+                    return [];
+                }
+            });
+        } catch {
+            return [];
+        }
+    }
+    loadJson();
+    return [...jsonEntries.entries()]
+        .filter(([, entry]) => entry.expiresAt > now)
+        .sort((left, right) => right[1].cachedAt - left[1].cachedAt)
+        .slice(0, max)
+        .map(([key, entry]) => ({
+            key,
+            value: { text: entry.text, source: entry.source, confidence: entry.confidence, cachedAt: entry.cachedAt },
+            expiresAt: entry.expiresAt
+        }));
+}
+
 export function setDocsCache(key: string, value: DocsCacheValue): void {
     const expiresAt = Date.now() + DOCS_CACHE_TTL_MS;
     const db = openSqlite();

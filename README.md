@@ -76,14 +76,16 @@
 
 | Tool Name | Purpose | Key Highlights |
 | :--- | :--- | :--- |
-| **`search`** | Federated web & code search (16 engines) | Supports parallel queries, `timeRange: day\|week\|month\|year` date filter, `site: string[]` filter, `fetchTop` preview injection, `code` engine (grep.app); explicit `engines` defaults to `minResults=0` (no unconstrained cascade); returns inline `diagnostics` on failure |
+| **`search`** | Federated web & code search (16 engines) | Supports parallel queries, `timeRange: day\|week\|month\|year` date filter, `site: string[]` filter, and query operators (`site:`, `filetype:`, `after:`, `before:`, `-exclude`) translated per engine with local post-filtering; `fetchTop` preview injection, `code` engine (grep.app); explicit `engines` defaults to `minResults=0` (no unconstrained cascade); returns inline `diagnostics` on failure |
 | **`fetchWebContent`** | Web page extraction, Markdown & transparent PDF parsing | **All-in-one content extractor**: Built-in disk-level Markdown cache (Node 22 `node:sqlite` / partitioned JSON fallback, 200MB LRU, `cache: default\|reload`); transparent PDF parsing (up to 20MB / 50 pages, `[page N]` tags, scanned doc detection); pagination & `focus` keyword targeting (**`bm25`** relevance-ranked blocks by default, `window` for the legacy fixed window); **`selector`** to scope extraction to a CSS subtree (errors instead of silently returning the whole page); **`extract`** for CSS-selector JSON with no LLM; **`citations`** for numbered references; **`retainLinks`** to strip URLs (-50% on index pages) |
-| **`fetchGithubContent`** | Comprehensive GitHub / Gitee content reader | Fetches README, **one source file** (`/blob/<ref>/<path>`, optional `lines`/`#L120-L180` slicing with a 400-line cap), directory trees (`/tree/`), Issue / PR discussions, commits (`/commit/<sha>`), compare (`/compare/a...b`, capped patch + lockfile filtering), and releases (`/releases[/tag/<tag>]`); `ref` may be a branch, tag, or commit; Gitee parity via API (optional `GITEE_TOKEN`); returns `warnings` |
+| **`fetchGithubContent`** | Comprehensive GitHub / Gitee content reader | Fetches README, **one source file** (`/blob/<ref>/<path>`, optional `lines`/`#L120-L180` slicing with a 400-line cap), directory trees (`/tree/`, lock/build artifacts filtered), Issue / PR discussions, commits (`/commit/<sha>`), compare (`/compare/a...b`, capped patch + lockfile filtering), and releases (`/releases[/tag/<tag>]`, `releaseLimit` 1-30); `ref` may be a branch, tag, or commit; Gitee parity via API (optional `GITEE_TOKEN`); returns `warnings` |
 | **`queryDocs`** | All-in-one official library documentation | Resolves library names or Context7 IDs; optional **`version`** pins Context7/npm/PyPI; **24h local cache** (`cache: reload` bypasses it); fallback chain npm → PyPI → **crates.io → Go module proxy → Maven Central** → GitHub README; returns `source`, `confidence`, and `warnings` |
 
 > 💡 **Backward Compatibility**: Legacy `fetchCsdnArticle` and `fetchJuejinArticle` are automatically routed under `fetchWebContent`; legacy `resolveLibraryId` is merged into `queryDocs` (which accepts a `library` name or the legacy `libraryId` alias). The separate legacy tools were removed — the `REGISTER_LEGACY_ARTICLE_TOOLS` switch is gone, because keeping three unregistered handlers around still cost tool-description budget for nothing.
 
 > 🧩 **MCP Prompts**: `deep-research` (multi-source research with citations) and `code-lookup` (official docs + source + release notes) are registered as server-side prompt templates; clients that support MCP Prompts can invoke them directly.
+
+> 🗂️ **MCP Resources**: read-only `websearch://cache/pages` / `websearch://cache/docs` indexes plus per-entry Markdown resources expose already-cached content without another tool call. Resources never trigger network fetches.
 
 ---
 
@@ -399,7 +401,7 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run the Vitest suite (90 files, 697 tests at the current baseline)
+npm test              # Run the Vitest suite (93 files, 707 tests at the current baseline)
 npm run test:live     # Run bounded-concurrency live integration tests
 npm run eval:live     # Run 23-case live STDIO JSON-RPC evaluation suite
 ```

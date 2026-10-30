@@ -6,6 +6,7 @@ import {
     purifyJuejinArticle,
     purifyZhihuContent,
     purifyCnblogsArticle,
+    purifyRedditThread,
     purifySiteContent
 } from '../../engines/web/sitePurifiers.js';
 
@@ -190,6 +191,27 @@ describe('Site Purifiers (mp.weixin.qq.com & stackoverflow.com)', () => {
             expect(res?.author).toBe('李四');
             expect(res?.text).toContain('依赖注入是一种控制反转');
             expect(res?.html).not.toContain('版权声明');
+        });
+    });
+
+    describe('Reddit threads', () => {
+        it('formats the post and top comments by score', () => {
+            const html = `
+                <html><body>
+                    <shreddit-post post-title="What is the best Rust async runtime?" author="alice" score="42">
+                        <div slot="text-body">I am comparing Tokio and async-std.</div>
+                    </shreddit-post>
+                    <shreddit-comment author="bob" score="12" depth="0"><div slot="comment">Tokio is the most widely used.</div></shreddit-comment>
+                    <shreddit-comment author="carol" score="30" depth="1"><div slot="comment">Consider smol for small binaries.</div></shreddit-comment>
+                </body></html>
+            `;
+            const res = purifyRedditThread(html);
+            expect(res).toBeDefined();
+            expect(res?.title).toBe('What is the best Rust async runtime?');
+            expect(res?.text).toContain('## Top comments');
+            expect(res?.text).toContain('[30] u/carol');
+            const text = res?.text ?? '';
+            expect(text.indexOf('[30] u/carol')).toBeLessThan(text.indexOf('[12] u/bob'));
         });
     });
 

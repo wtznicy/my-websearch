@@ -267,9 +267,10 @@ export async function fetchGithubCompare(owner: string, repo: string, base: stri
     }, base, head);
 }
 
-export async function fetchGithubReleases(owner: string, repo: string, tag?: string): Promise<string | null> {
+export async function fetchGithubReleases(owner: string, repo: string, tag?: string, limit = 10): Promise<string | null> {
     const base = `${GITHUB_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases`;
     if (!tag) {
+        const perPage = Math.max(1, Math.min(Math.floor(limit) || 10, 30));
         const data = await githubGet<Array<{
             tag_name?: string;
             name?: string;
@@ -277,7 +278,7 @@ export async function fetchGithubReleases(owner: string, repo: string, tag?: str
             html_url?: string;
             body?: string;
             assets?: Array<{ name?: string; browser_download_url?: string }>;
-        }>>(`${base}?per_page=10`, 'GitHub releases API');
+        }>>(`${base}?per_page=${perPage}`, 'GitHub releases API');
         if (!data) {
             return null;
         }

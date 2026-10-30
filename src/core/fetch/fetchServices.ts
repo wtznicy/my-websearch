@@ -13,7 +13,7 @@ import { parseLineRangeInput, type LineRange } from '../../engines/github/lineRa
 
 export type ArticleFetchOptions = { format?: 'text' | 'markdown' };
 export type ArticleFetcher = (url: string, options?: ArticleFetchOptions) => Promise<{ content: string; title?: string }>;
-export type GithubReadmeFetcher = (url: string, lineRange?: LineRange) => Promise<string | null>;
+export type GithubReadmeFetcher = (url: string, lineRange?: LineRange, releaseLimit?: number) => Promise<string | null>;
 export type StackOverflowQuestionFetcher = (url: string) => Promise<{ title: string; content: string } | null>;
 export type WebFetcher = (url: string, maxChars: number, options?: FetchWebContentOptions) => Promise<FetchWebContentResult>;
 
@@ -40,7 +40,7 @@ export function createArticleFetchService(
 
 export function createGithubReadmeService(fetcher: GithubReadmeFetcher) {
     return {
-        async execute({ url, lines }: { url: string; lines?: string }): Promise<string | null> {
+        async execute({ url, lines, releaseLimit }: { url: string; lines?: string; releaseLimit?: number }): Promise<string | null> {
             if (!validateGithubRepositoryUrl(url)) {
                 throw new AppError({
                     code: 'invalid_arguments',
@@ -50,7 +50,7 @@ export function createGithubReadmeService(fetcher: GithubReadmeFetcher) {
                 });
             }
 
-            return fetcher(url, parseLineRangeInput(lines));
+            return fetcher(url, parseLineRangeInput(lines), releaseLimit);
         }
     };
 }
