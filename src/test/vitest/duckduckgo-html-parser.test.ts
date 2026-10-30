@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDuckDuckGoHtmlResults, resolveDuckDuckGoResultUrl } from '../../engines/duckduckgo/searchDuckDuckGo.js';
+import { parseDuckDuckGoHtmlResults, resolveDuckDuckGoResultUrl } from '../../engines/duckduckgo/duckduckgo.js';
 
 /**
  * 回归：DDG HTML 结果的 href 是协议相对的重定向链接

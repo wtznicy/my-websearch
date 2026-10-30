@@ -2,9 +2,9 @@ import { config, AppConfig } from '../config.js';
 import { ENGINE_REGISTRY, SearchEngineExecutorMap } from '../engines/registry.js';
 import { fetchCsdnArticle } from '../engines/csdn/fetchCsdnArticle.js';
 import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
-import { fetchGithubReadme } from '../engines/github/index.js';
+import { fetchGithubReadme } from '../engines/github/github.js';
 import { fetchStackOverflowQuestion } from '../engines/stackoverflow/fetchStackOverflow.js';
-import { fetchWebContent } from '../engines/web/index.js';
+import { fetchWebContent } from '../engines/web/fetchWebContent.js';
 import { createContext7Services } from '../core/context7/context7Service.js';
 import { createSearchService, configureGlobalConcurrencyLimit } from '../core/search/searchService.js';
 import {

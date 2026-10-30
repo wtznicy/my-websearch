@@ -3,7 +3,7 @@ import {
     parseDuckDuckGoJsonpPayload,
     parseDuckDuckGoHtmlResults,
     solveDuckDuckGoJsaChallenge
-} from '../../engines/duckduckgo/searchDuckDuckGo.js';
+} from '../../engines/duckduckgo/duckduckgo.js';
 
 const JSONP_PAYLOAD = `DDG.pageLayout.load('d', [{"t":"<b>MCP</b> title","u":"https://example.com/one","a":"desc with <b>bold</b>","i":"example.com"},{"t":"Second","u":"https://example.com/two","a":"<b>second</b> desc","sn":"source-org"},{"n":true,"t":"navigation item"}]);`;
 

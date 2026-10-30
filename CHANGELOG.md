@@ -4,6 +4,10 @@ All notable changes to `my-websearch` are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **引擎目录去桶化**：删除 11 个单行 `src/engines/*/index.ts`，registry/运行时/测试改为直接导入具体实现；删除 `github/searchGithub.ts` 单行转发，统一到 `githubSearch.ts`；`searchDuckDuckGo.ts` 重命名为 `duckduckgo.ts`。
+- **测试目录整理**：`runCurrentTests.ts` / `runDeterministicTests.ts` 移到 `src/test/runners/`；31 个旧式自校验脚本集中到 `src/test/legacy/`，`src/test/` 根目录不再混放测试与调度器。Vitest 仍是 CI 的唯一入口，旧脚本继续由 `test:live` / `test:deterministic` 显式运行。
+
 ### Fixed
 - **显式 `proxy.engines` 自动补齐 `yahoo` / `bing-news`**：这两个引擎在墙内直连会超时/302；旧配置里的白名单常常没有它们，导致“升级后仍然不可用”。现在配置解析会自动追加，空列表（全部走代理）保持原语义。
 

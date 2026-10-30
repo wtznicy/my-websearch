@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import axios from 'axios';
-import { parseGitHubRepoSpec, searchGithub } from '../../engines/github/searchGithub.js';
+import { parseGitHubRepoSpec, searchGithub } from '../../engines/github/githubSearch.js';
 
 afterEach(() => {
     vi.restoreAllMocks();

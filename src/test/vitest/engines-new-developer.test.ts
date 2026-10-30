@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import axios from 'axios';
-import { searchGithub } from '../../engines/github/searchGithub.js';
+import { searchGithub } from '../../engines/github/githubSearch.js';
 import { searchStackOverflow } from '../../engines/stackoverflow/stackoverflow.js';
 import { searchHackerNews } from '../../engines/hackernews/hackernews.js';
 import { searchArxiv } from '../../engines/arxiv/arxiv.js';
