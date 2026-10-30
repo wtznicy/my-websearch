@@ -1,7 +1,7 @@
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 
 export type PackageDocsFallbackResult = {
-    source: 'npm' | 'pypi' | 'crates' | 'go' | 'github-readme';
+    source: 'npm' | 'pypi' | 'crates' | 'go' | 'maven' | 'github-readme';
     confidence: 'high' | 'medium' | 'low';
     libraryId: string;
     repositoryUrl: string;
@@ -27,6 +27,7 @@ export function normalizeGitRepositoryUrl(raw: string): string | null {
     }
 
     s = s.replace(/^git\+/, '');
+    s = s.replace(/^scm:git:/, '');
     s = s.replace(/^ssh:\/\/git@github\.com[/:]/, 'https://github.com/');
     s = s.replace(/^git@github\.com:/, 'https://github.com/');
     s = s.replace(/^git:\/\/github\.com\//, 'https://github.com/');
@@ -219,6 +220,118 @@ export async function resolveCratesRepository(packageName: string, signal?: Abor
 }
 
 /**
+ * 解析 Maven 坐标：groupId:artifactId[:version]。
+ * 仅接受标准坐标形态，避免把 npm scope（@scope/pkg）误判为 Maven。
+ */
+export function parseMavenCoordinates(raw: string): { groupId: string; artifactId: string; version?: string } | null {
+    const parts = raw.trim().split(':').map((part) => part.trim());
+    if (parts.length < 2 || parts.length > 3) {
+        return null;
+    }
+    const [groupId, artifactId, version] = parts;
+    const valid = /^[A-Za-z0-9_.-]+$/;
+    if (!groupId || !artifactId || !valid.test(groupId) || !valid.test(artifactId)) {
+        return null;
+    }
+    if (version && !/^[A-Za-z0-9_.+-]+$/.test(version)) {
+        return null;
+    }
+    return { groupId, artifactId, version };
+}
+
+/**
+ * 从 Maven POM 中提取 SCM 仓库地址。
+ * 优先 scm.url，其次 connection/developerConnection，最后 project.url（仅 Git 托管）。
+ */
+export function extractMavenScmRepository(pom: string): string | null {
+    const decode = (value: string) => value
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .trim();
+
+    const scmBlock = pom.match(/<scm>([\s\S]*?)<\/scm>/i)?.[1] ?? '';
+    const candidates: string[] = [];
+    for (const tag of ['url', 'connection', 'developerConnection']) {
+        const match = scmBlock.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'i'));
+        if (match?.[1]) {
+            candidates.push(decode(match[1]));
+        }
+    }
+    const projectUrl = pom.match(/<url>([\s\S]*?)<\/url>/i)?.[1];
+    if (projectUrl) {
+        candidates.push(decode(projectUrl));
+    }
+
+    for (const candidate of candidates) {
+        const normalized = normalizeGitRepositoryUrl(candidate);
+        if (normalized) {
+            return normalized;
+        }
+    }
+    return null;
+}
+
+/**
+ * 从 Maven Central 查询 group:artifact 的最新版本，再读取 POM 的 SCM 地址。
+ * 版本显式传入时直接读对应 POM，不做 search API 请求。
+ */
+export async function resolveMavenRepository(
+    packageName: string,
+    signal?: AbortSignal,
+    version?: string
+): Promise<string | null> {
+    const coordinates = parseMavenCoordinates(packageName);
+    if (!coordinates) {
+        return null;
+    }
+
+    let resolvedVersion = version || coordinates.version;
+    try {
+        if (!resolvedVersion) {
+            const searchUrl = `https://search.maven.org/solrsearch/select?q=g:%22${encodeURIComponent(coordinates.groupId)}%22+AND+a:%22${encodeURIComponent(coordinates.artifactId)}%22&rows=1&wt=json`;
+            const search = await requestDirectFirst(
+                'GET',
+                searchUrl,
+                (forceDirect) => buildAxiosRequestOptions({
+                    timeout: 5000,
+                    responseType: 'json',
+                    signal,
+                    forceDirect
+                }),
+                'Maven Central search'
+            );
+            const docs = (search.data as { response?: { docs?: Array<{ latestVersion?: string }> } })?.response?.docs;
+            resolvedVersion = docs?.[0]?.latestVersion;
+            if (!resolvedVersion) {
+                return null;
+            }
+        }
+
+        const groupPath = coordinates.groupId.split('.').map(encodeURIComponent).join('/');
+        const pomUrl = `https://repo1.maven.org/maven2/${groupPath}/${encodeURIComponent(coordinates.artifactId)}/${encodeURIComponent(resolvedVersion)}/${encodeURIComponent(coordinates.artifactId)}-${encodeURIComponent(resolvedVersion)}.pom`;
+        const pom = await requestDirectFirst(
+            'GET',
+            pomUrl,
+            (forceDirect) => buildAxiosRequestOptions({
+                timeout: 5000,
+                responseType: 'text',
+                signal,
+                forceDirect
+            }),
+            'Maven Central POM'
+        );
+        if (pom.status !== 200 || typeof pom.data !== 'string') {
+            return null;
+        }
+        return extractMavenScmRepository(pom.data);
+    } catch {
+        return null;
+    }
+}
+
+/**
  * 通过 Go module proxy 校验模块并推导仓库地址。
  * pkg.go.dev 没有官方 JSON API；这里只承诺 module 元数据兜底 + 可推导的 GitHub/GitLab 仓库 README。
  */
@@ -365,6 +478,28 @@ export async function fetchPackageDocsFallback(options: {
         }
     } catch {
         // Go module fallback failed
+    }
+
+    // 5. 尝试 Maven Central（Java/Kotlin/Scala）
+    try {
+        const mavenRepo = await resolveMavenRepository(cleanTarget, options.signal, version);
+        if (mavenRepo) {
+            const readme = await options.fetchGithub(mavenRepo);
+            if (readme && readme.trim().length > 50) {
+                return {
+                    source: 'maven',
+                    confidence: 'high',
+                    libraryId: displayTarget,
+                    repositoryUrl: mavenRepo,
+                    readme: readme.trim(),
+                    warnings: [
+                        `Context7 match confidence was low or library was not found in Context7. Fallback to Maven Central repository (${mavenRepo}) README${version ? ` (requested version ${version})` : ''}.`
+                    ]
+                };
+            }
+        }
+    } catch {
+        // Maven Central fallback failed
     }
 
     return null;

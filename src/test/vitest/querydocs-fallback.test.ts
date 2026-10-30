@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
     normalizeGitRepositoryUrl,
-    fetchPackageDocsFallback
+    fetchPackageDocsFallback,
+    parseMavenCoordinates,
+    extractMavenScmRepository
 } from '../../core/docs/packageDocsFallback.js';
 import { formatQueryDocsMarkdown } from '../../tools/handlers/queryDocsTool.js';
 
@@ -33,6 +35,32 @@ describe('queryDocs Package Fallback & Markdown Formatting', () => {
         it('returns null for empty or invalid strings', () => {
             expect(normalizeGitRepositoryUrl('')).toBeNull();
             expect(normalizeGitRepositoryUrl('invalid-no-slash')).toBeNull();
+        });
+    });
+
+    describe('Maven coordinates and SCM extraction', () => {
+        it('parses group:artifact and optional version', () => {
+            expect(parseMavenCoordinates('org.springframework:spring-core'))
+                .toEqual({ groupId: 'org.springframework', artifactId: 'spring-core', version: undefined });
+            expect(parseMavenCoordinates('com.google.guava:guava:33.0.0-jre'))
+                .toEqual({ groupId: 'com.google.guava', artifactId: 'guava', version: '33.0.0-jre' });
+        });
+
+        it('rejects npm scopes and malformed coordinates', () => {
+            expect(parseMavenCoordinates('@types/node')).toBeNull();
+            expect(parseMavenCoordinates('only-one-part')).toBeNull();
+            expect(parseMavenCoordinates('a:b:c:d')).toBeNull();
+        });
+
+        it('extracts SCM URL or project URL from a POM', () => {
+            const scmPom = `<project><scm><url>https://github.com/spring-projects/spring-framework</url></scm></project>`;
+            expect(extractMavenScmRepository(scmPom)).toBe('https://github.com/spring-projects/spring-framework');
+
+            const connectionPom = `<project><scm><connection>scm:git:git://github.com/owner/repo.git</connection></scm></project>`;
+            expect(extractMavenScmRepository(connectionPom)).toBe('https://github.com/owner/repo');
+
+            const plainPom = `<project><url>https://example.com/docs</url></project>`;
+            expect(extractMavenScmRepository(plainPom)).toBeNull();
         });
     });
 

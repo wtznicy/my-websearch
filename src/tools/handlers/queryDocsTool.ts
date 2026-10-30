@@ -17,7 +17,7 @@ import {
 export type QueryDocsFormattedInput = {
     libraryId: string;
     query?: string;
-    source?: 'context7' | 'npm' | 'pypi' | 'crates' | 'go' | 'github-readme';
+    source?: 'context7' | 'npm' | 'pypi' | 'crates' | 'go' | 'maven' | 'github-readme';
     confidence?: 'high' | 'medium' | 'low';
     warnings?: string[];
     resolvedFrom?: string;

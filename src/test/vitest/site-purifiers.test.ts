@@ -4,6 +4,8 @@ import {
     purifyStackOverflowQuestion,
     purifyCsdnArticle,
     purifyJuejinArticle,
+    purifyZhihuContent,
+    purifyCnblogsArticle,
     purifySiteContent
 } from '../../engines/web/sitePurifiers.js';
 
@@ -147,6 +149,50 @@ describe('Site Purifiers (mp.weixin.qq.com & stackoverflow.com)', () => {
         });
     });
 
+    describe('Zhihu articles and answers', () => {
+        it('extracts RichText content and removes login/recommendation noise', () => {
+            const html = `
+                <html><body>
+                    <h1 class="QuestionHeader-title">如何理解 Rust 所有权？</h1>
+                    <div class="AuthorInfo-name">张三</div>
+                    <div class="RichText ztext">
+                        <p>所有权是 Rust 内存安全的核心机制。</p>
+                        <div class="ContentItem-actions">赞同 123</div>
+                        <div class="Recommendations">相关推荐</div>
+                    </div>
+                    <div class="LoginModal">登录后继续</div>
+                </body></html>
+            `;
+            const res = purifyZhihuContent(html);
+            expect(res).toBeDefined();
+            expect(res?.title).toBe('如何理解 Rust 所有权？');
+            expect(res?.author).toBe('张三');
+            expect(res?.text).toContain('所有权是 Rust 内存安全的核心机制');
+            expect(res?.html).not.toContain('相关推荐');
+        });
+    });
+
+    describe('Cnblogs articles', () => {
+        it('extracts post body and removes footer noise', () => {
+            const html = `
+                <html><body>
+                    <h1 id="cb_post_title_url">深入理解 .NET 依赖注入</h1>
+                    <div id="post_author">李四</div>
+                    <div id="cnblogs_post_body">
+                        <p>依赖注入是一种控制反转的实现方式。</p>
+                        <div class="postDesc">版权声明</div>
+                    </div>
+                </body></html>
+            `;
+            const res = purifyCnblogsArticle(html);
+            expect(res).toBeDefined();
+            expect(res?.title).toBe('深入理解 .NET 依赖注入');
+            expect(res?.author).toBe('李四');
+            expect(res?.text).toContain('依赖注入是一种控制反转');
+            expect(res?.html).not.toContain('版权声明');
+        });
+    });
+
     describe('purifySiteContent dispatcher', () => {
         it('routes mp.weixin.qq.com correctly', () => {
             const html = '<div id="js_content"><p>Wechat content</p></div>';
@@ -174,6 +220,20 @@ describe('Site Purifiers (mp.weixin.qq.com & stackoverflow.com)', () => {
             const res = purifySiteContent('https://juejin.cn/post/7234567890123456789', html);
             expect(res).toBeDefined();
             expect(res?.title).toBe('Juejin Title');
+        });
+
+        it('routes zhihu question and cnblogs article pages', () => {
+            const zhihu = purifySiteContent(
+                'https://www.zhihu.com/question/123/answer/456',
+                '<h1 class="QuestionHeader-title">Zhihu Q</h1><div class="RichText ztext"><p>知乎正文内容</p></div>'
+            );
+            expect(zhihu?.text).toContain('知乎正文内容');
+
+            const cnblogs = purifySiteContent(
+                'https://www.cnblogs.com/user/p/123.html',
+                '<h1 id="cb_post_title_url">Cnblogs T</h1><div id="cnblogs_post_body"><p>博客园正文</p></div>'
+            );
+            expect(cnblogs?.text).toContain('博客园正文');
         });
 
         it('returns undefined for other hosts', () => {

@@ -218,6 +218,108 @@ export function purifyJuejinArticle(html: string): SitePurificationResult | unde
 }
 
 /**
+ * 知乎文章/回答专用正文提纯器：
+ * - 覆盖 zhuanlan.zhihu.com/p/<id> 与 zhihu.com/question/<id>/answer/<id>
+ * - 提取标题、作者与 RichText 正文
+ * - 剔除登录弹窗、推荐流、评论区、操作栏
+ */
+export function purifyZhihuContent(html: string): SitePurificationResult | undefined {
+    const $ = cheerio.load(html);
+    const selectors = [
+        '.Post-RichText',
+        '.RichText.ztext',
+        '.RichContent-inner',
+        '.QuestionAnswer-content'
+    ];
+
+    let container: ReturnType<typeof $> | null = null;
+    for (const selector of selectors) {
+        const found = $(selector).first();
+        if (found.length > 0 && found.text().trim().length > 0) {
+            container = found;
+            break;
+        }
+    }
+    if (!container || container.length === 0) {
+        return undefined;
+    }
+
+    const title = $('h1.QuestionHeader-title').first().text().trim() ||
+        $('.Post-Title').first().text().trim() ||
+        $('h1').first().text().trim() ||
+        $('meta[property="og:title"]').attr('content')?.trim() ||
+        undefined;
+    const author = $('.AuthorInfo-name').first().text().trim() ||
+        $('.UserLink-link').first().text().trim() ||
+        $('meta[name="author"]').attr('content')?.trim() ||
+        undefined;
+
+    container.find('script, style, noscript, .ContentItem-actions, .RichContent-actions, .Recommendations, .Pc-feedAd-container, .Modal, .LoginModal, .CornerButtons, .Comments-container, .CommentList, .Reward').remove();
+
+    const cleanHtml = container.html()?.trim() || '';
+    const cleanText = container.text().replace(/\s+/g, ' ').trim();
+    if (!cleanText) {
+        return undefined;
+    }
+
+    return {
+        title,
+        html: cleanHtml,
+        text: cleanText,
+        author,
+        siteName: author ? `知乎: ${author}` : '知乎'
+    };
+}
+
+/**
+ * 博客园文章 (cnblogs.com/*\/p/*.html) 专用正文提纯器：
+ * - 提取 #cnblogs_post_body 正文
+ * - 剔除文章底部版权、评论、推荐与登录提示
+ */
+export function purifyCnblogsArticle(html: string): SitePurificationResult | undefined {
+    const $ = cheerio.load(html);
+    const selectors = ['#cnblogs_post_body', '.postBody', '.blogpost-body'];
+
+    let container: ReturnType<typeof $> | null = null;
+    for (const selector of selectors) {
+        const found = $(selector).first();
+        if (found.length > 0 && found.text().trim().length > 0) {
+            container = found;
+            break;
+        }
+    }
+    if (!container || container.length === 0) {
+        return undefined;
+    }
+
+    const title = $('#cb_post_title_url').first().text().trim() ||
+        $('h1.postTitle').first().text().trim() ||
+        $('h1').first().text().trim() ||
+        $('meta[property="og:title"]').attr('content')?.trim() ||
+        undefined;
+    const author = $('#post_author').first().text().trim() ||
+        $('.postDesc a').first().text().trim() ||
+        $('meta[name="author"]').attr('content')?.trim() ||
+        undefined;
+
+    container.find('script, style, noscript, .postDesc, #blog_post_info, .clear, .post-foot, .cnblogs_code_toolbar, .recommend, .commentform, #commentform').remove();
+
+    const cleanHtml = container.html()?.trim() || '';
+    const cleanText = container.text().replace(/\s+/g, ' ').trim();
+    if (!cleanText) {
+        return undefined;
+    }
+
+    return {
+        title,
+        html: cleanHtml,
+        text: cleanText,
+        author,
+        siteName: author ? `博客园: ${author}` : '博客园'
+    };
+}
+
+/**
  * 专用站点嗅探分发入口：命中特定技术/文章站点时返回提纯结果，否则返回 undefined
  */
 export function purifySiteContent(url: string, html: string): SitePurificationResult | undefined {
@@ -240,6 +342,16 @@ export function purifySiteContent(url: string, html: string): SitePurificationRe
 
         if ((host === 'juejin.cn' || host.endsWith('.juejin.cn') || host === 'juejin.im') && pathname.includes('/post/')) {
             return purifyJuejinArticle(html);
+        }
+
+        if ((host === 'zhuanlan.zhihu.com' || host === 'www.zhihu.com' || host === 'zhihu.com')
+            && (pathname.includes('/p/') || pathname.includes('/question/') || pathname.includes('/answer/'))) {
+            return purifyZhihuContent(html);
+        }
+
+        if ((host === 'cnblogs.com' || host.endsWith('.cnblogs.com'))
+            && (pathname.includes('/p/') || pathname.includes('/archive/'))) {
+            return purifyCnblogsArticle(html);
         }
 
         return undefined;

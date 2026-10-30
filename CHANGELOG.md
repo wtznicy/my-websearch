@@ -4,6 +4,11 @@ All notable changes to `my-websearch` are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **MCP Prompts**：注册 `deep-research` 与 `code-lookup` 两个服务端 Prompt 模板；只返回提示词，不自动触发工具，兼容支持 MCP Prompts 的客户端。
+- **Maven Central 文档兜底**：`queryDocs` 在 npm/PyPI/crates.io/Go 之后支持 `groupId:artifactId[:version]`，从 Maven Search API + POM 的 SCM 地址解析 GitHub/Gitee 仓库并抓取 README。
+- **知乎 / 博客园专用正文提纯**：`sitePurifiers.ts` 新增 `purifyZhihuContent` 与 `purifyCnblogsArticle`，剥离登录弹窗、推荐流、评论与页脚版权；微信公众号 purifier 已存在，本次未重复添加。
+
 ### Changed
 - **引擎目录去桶化**：删除 11 个单行 `src/engines/*/index.ts`，registry/运行时/测试改为直接导入具体实现；删除 `github/searchGithub.ts` 单行转发，统一到 `githubSearch.ts`；`searchDuckDuckGo.ts` 重命名为 `duckduckgo.ts`。
 - **测试目录整理**：`runCurrentTests.ts` / `runDeterministicTests.ts` 移到 `src/test/runners/`；旧式自校验脚本按用途拆到 `src/test/legacy/`（17 个确定性）与 `src/test/live/`（14 个联网 smoke），`src/test/` 根目录不再混放测试与调度器。Vitest 仍是 CI 的唯一入口，旧脚本继续由 `test:live` / `test:deterministic` 显式运行。
