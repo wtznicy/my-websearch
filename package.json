@@ -34,6 +34,8 @@
   ],
   "scripts": {
     "check:ci": "npm run typecheck:strict && npm run check:manifests && npm run lint && npm test && npm run build && npm run test:deterministic",
+    "check:release": "npm run check:ci && npm run test:timing",
+    "test:timing": "node tools/repeat-vitest.mjs 10 src/test/vitest/search-outcome-and-doctor.test.ts",
     "typecheck:strict": "tsc --project tsconfig.strict.json",
     "check:manifests": "node tools/check-manifests.mjs",
     "build": "node -e \"require('fs').rmSync('build', { recursive: true, force: true })\" && tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
