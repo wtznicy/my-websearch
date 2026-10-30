@@ -203,6 +203,7 @@ export async function tryRequestWithBrowserCookies(
  */
 export function createBrowserBudget(label: string, budgetMs = FETCH_WEB_BROWSER_BUDGET_MS, parentSignal?: AbortSignal) {
     let deadline: number | null = null;
+    let exhausted = false;
     return function withinBudget<T>(task: (signal: AbortSignal) => Promise<T>, step: string): Promise<T> {
         if (parentSignal?.aborted) {
             return Promise.reject(
@@ -219,7 +220,8 @@ export function createBrowserBudget(label: string, budgetMs = FETCH_WEB_BROWSER_
             deadline = Date.now() + budgetMs;
         }
         const remaining = deadline - Date.now();
-        if (remaining <= 0) {
+        if (exhausted || remaining <= 0) {
+            exhausted = true;
             return Promise.reject(new AppError({
                 code: 'network_timeout',
                 retryable: true,
@@ -240,6 +242,7 @@ export function createBrowserBudget(label: string, budgetMs = FETCH_WEB_BROWSER_
 
         return new Promise<T>((resolve, reject) => {
             const timer = setTimeout(() => {
+                exhausted = true;
                 const timeoutError = new AppError({
                     code: 'network_timeout',
                     retryable: true,

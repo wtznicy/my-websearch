@@ -2,6 +2,11 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
+## [1.3.12] - 2026-10-30
+
+### Fixed
+- **浏览器阶段预算耗尽后的确定性拒绝**：`createBrowserBudget` 增加 `exhausted` 状态；预算计时器一旦超时，后续 `withinBudget` 调用必定在任务工厂执行前拒绝，不再依赖 `Date.now()` 与定时器的毫秒级竞态。修复 `search-outcome-and-doctor` 在 CI 上偶发通过的 flaky 测试。
+
 ## [1.3.11] - 2026-10-30
 
 ### Added
