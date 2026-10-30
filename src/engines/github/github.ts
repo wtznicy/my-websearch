@@ -736,16 +736,17 @@ async function fetchGithubTree(
             return { status: 'notfound' };
         }
 
-        const totalItemsCount = items.length;
+        const originalItemsCount = items.length;
         const treeNoisePattern = /(^|\/)(node_modules|dist|build|target|coverage|\.next|\.nuxt|out|vendor|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|composer\.lock|Cargo\.lock)(\/|$)/i;
         const filteredNoiseCount = items.filter((item) => treeNoisePattern.test(item.path)).length;
         items = items.filter((item) => !treeNoisePattern.test(item.path));
+        const totalItemsCount = items.length;
         const maxTreeItems = 150;
         const isCapped = totalItemsCount > maxTreeItems;
         const displayItems = isCapped ? items.slice(0, maxTreeItems) : items;
 
         const renderedTree = renderAsciiTree(displayItems);
-        const header = `# Directory Tree: ${owner}/${repo} @ ${ref}${normalizedDirPath ? ` (subpath: /${normalizedDirPath})` : ''}\n\nTotal items: ${totalItemsCount}${filteredNoiseCount > 0 ? ` (filtered ${filteredNoiseCount} build/lock artifacts)` : ''}${isCapped ? ` (showing first ${maxTreeItems})` : ''}\n\n`;
+        const header = `# Directory Tree: ${owner}/${repo} @ ${ref}${normalizedDirPath ? ` (subpath: /${normalizedDirPath})` : ''}\n\nTotal items: ${originalItemsCount}${filteredNoiseCount > 0 ? ` (filtered ${filteredNoiseCount} build/lock artifacts; showing ${totalItemsCount})` : ''}${isCapped ? ` (showing first ${maxTreeItems})` : ''}\n\n`;
         const truncationNotice = isCapped ? `\n\n... and ${totalItemsCount - maxTreeItems} more items.` : '';
 
         return { status: 'ok', content: `${header}\`\`\`\n${renderedTree}\n\`\`\`${truncationNotice}` };

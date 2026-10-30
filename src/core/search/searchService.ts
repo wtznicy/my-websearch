@@ -365,7 +365,11 @@ export function createSearchService(
             const baseQuery = preprocessSearchQuery(operators.text);
             let effectiveOperators = operators;
             const nativeSiteEngines = new Set<string>(
-                ENGINE_REGISTRY.filter((entry) => entry.supportsNativeSite).map((entry) => entry.name)
+                ENGINE_REGISTRY
+                    // cn.bing.com ignores site: and Bing explicitly errors when it detects the
+                    // mismatch; let Bing search the clean keywords and enforce site: locally.
+                    .filter((entry) => entry.supportsNativeSite && entry.name !== 'bing')
+                    .map((entry) => entry.name)
             );
             const queryForEngine = (engine: string): string =>
                 buildEngineQuery(effectiveOperators, nativeSiteEngines.has(engine));
@@ -514,8 +518,7 @@ export function createSearchService(
                             return cleaned;
                         })
                         .map((result) => normalizeSearchResult(result))
-                        .filter((result): result is SearchResult => result !== null)
-                        .slice(0, limit);
+                        .filter((result): result is SearchResult => result !== null);
 
                     // 日期归一化（publishedAt）与 timeRange 过滤
                     const warnings: string[] = [];
@@ -564,6 +567,11 @@ export function createSearchService(
                         }
                         merged = filtered;
                     }
+
+                    // Truncate after all local filters so after/before/timeRange cannot
+                    // leave the caller with fewer than `limit` results while valid
+                    // lower-ranked results were discarded too early.
+                    merged = merged.slice(0, limit);
 
                     const { outcome, retryable } = computeSearchOutcome(
                         merged.length,

@@ -64,7 +64,7 @@
 | **`arxiv`** | 🌐 Direct API | None | Official arXiv Atom XML API parsing titles, authors & abstracts | Scientific papers, machine learning & AI research |
 | **`code`** | 🌐 Proxy in CN | None | grep.app API search across global GitHub code with repo, path & exact line numbers | Source code implementations, API usage patterns |
 
-> **Version note**: this README tracks the current source tree (**1.3.10**). **Yahoo**, **Bing News**, the **DDG wreq-GET** path, the **Brave HTTP/1.1** path, and the **raw-CDP browser fallback** ship in **1.3.10**; npm latest may lag until the package is published.
+> **Version note**: this README tracks the current source tree (**1.3.11**). **Search operators**, **MCP Prompts/Resources**, **Maven docs fallback**, **Reddit/Zhihu/Cnblogs purifiers**, and the **raw-CDP browser fallback** ship in **1.3.11**; npm latest may lag until the package is published.
 
 ---
 

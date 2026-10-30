@@ -2,7 +2,7 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
-## [Unreleased]
+## [1.3.11] - 2026-10-30
 
 ### Added
 - **搜索语法跨引擎转译与后置过滤**：`search` 现在解析 `site:`、`filetype:`、`after:`、`before:` 与 `-排除词`；通用引擎重建原生查询，垂直/API 引擎只收纯关键词，最终按域名、后缀、排除词与 `publishedAt` 本地过滤。
@@ -18,6 +18,9 @@ All notable changes to `my-websearch` are documented in this file.
 - **测试目录整理**：`runCurrentTests.ts` / `runDeterministicTests.ts` 移到 `src/test/runners/`；旧式自校验脚本按用途拆到 `src/test/legacy/`（17 个确定性）与 `src/test/live/`（14 个联网 smoke），`src/test/` 根目录不再混放测试与调度器。Vitest 仍是 CI 的唯一入口，旧脚本继续由 `test:live` / `test:deterministic` 显式运行。
 
 ### Fixed
+- **Bing 的 `site:` 不再误报 engine_error**：cn.bing HTTP 会忽略 `site:` 并让 Bing 自己抛错；现在 Bing 改收纯关键词，`site:` 由本地后置过滤执行。
+- **过滤后不再过早截断**：`after:`/`before:` 与 `timeRange` 在 `slice(limit)` 之前执行，避免日期过滤把本可补位的后续结果提前丢掉。
+- **目录树截断计数**：构建产物过滤后再计算 `isCapped`，header 不再出现“显示 150 项”但实际不足的情况。
 - **显式 `proxy.engines` 自动补齐 `yahoo` / `bing-news`**：这两个引擎在墙内直连会超时/302；旧配置里的白名单常常没有它们，导致“升级后仍然不可用”。现在配置解析会自动追加，空列表（全部走代理）保持原语义。
 
 ## [1.3.10] - 2026-10-26
