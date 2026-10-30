@@ -19,8 +19,8 @@ type RunningTest = {
 };
 
 const rootDir = process.cwd();
-const sourceTestDir = path.join(rootDir, 'src', 'test', 'legacy');
-const compiledTestDir = path.join(rootDir, 'build', 'test', 'legacy');
+const sourceTestDir = path.join(rootDir, 'src', 'test', 'live');
+const compiledTestDir = path.join(rootDir, 'build', 'test', 'live');
 
 function fail(message: string): never {
     console.error(message);
