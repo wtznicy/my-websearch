@@ -26,7 +26,7 @@ function formatCodeSymbol(result: CodeSymbolResult): string {
         for (const definition of result.definitions) {
             lines.push(
                 '',
-                `### \`${definition.path}:${definition.startLine}\` (${definition.kind})`,
+                `### \`${definition.path}:${definition.startLine}\` (${definition.kind})${definition.via ? ` — via \`${definition.via}\`` : ''}`,
                 '',
                 '```' + definition.language,
                 definition.code,

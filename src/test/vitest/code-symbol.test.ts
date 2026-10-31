@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+    buildRawFileUrls,
     detectCodeLanguage,
     extractCodeDefinitions,
+    findReExportTargets,
     parseGitHubRepoSpec
 } from '../../core/codeIntel/remoteCodeIntel.js';
 
@@ -76,5 +78,67 @@ describe('remote code intelligence', () => {
         const source = 'export class Depends {}\nexport function Depends() {}\n';
         expect(extractCodeDefinitions(source, 'x.ts', 'Depends', 'class')).toHaveLength(1);
         expect(extractCodeDefinitions(source, 'x.ts', 'Missing')).toEqual([]);
+    });
+
+    it('keeps multi-line signatures and parameter types', () => {
+        const source = [
+            'export async function findCodeSymbol(',
+            '    input: CodeSymbolInput,',
+            '    options?: RequestOptions',
+            '): Promise<CodeSymbolResult> {',
+            '    return null as unknown as CodeSymbolResult;',
+            '}'
+        ].join('\n');
+        const definition = extractCodeDefinitions(source, 'src/remote.ts', 'findCodeSymbol')[0];
+        expect(definition?.signature).toContain('input: CodeSymbolInput');
+        expect(definition?.signature).toContain('options?: RequestOptions');
+        expect(definition?.signature).toContain('Promise<CodeSymbolResult>');
+        expect(definition?.endLine).toBe(6);
+    });
+
+    it('includes Python decorators in the signature and code block', () => {
+        const source = [
+            '@router.get("/items/{item_id}", response_model=ItemResponse)',
+            '@require_auth(Role.ADMIN)',
+            'def read_item(item_id: int):',
+            '    return item_id'
+        ].join('\n');
+        const definition = extractCodeDefinitions(source, 'app/routes.py', 'read_item')[0];
+        expect(definition?.startLine).toBe(1);
+        expect(definition?.signature).toContain('@router.get');
+        expect(definition?.signature).toContain('@require_auth');
+        expect(definition?.code).toContain('@router.get');
+    });
+
+    it('ignores braces in strings, comments and regex literals', () => {
+        const source = [
+            'function Depends() {',
+            '    const text = "}";',
+            '    // }',
+            '    const re = /{/;',
+            '    /* } */',
+            '    return 1;',
+            '}'
+        ].join('\n');
+        const definition = extractCodeDefinitions(source, 'src/braces.ts', 'Depends')[0];
+        expect(definition?.endLine).toBe(7);
+    });
+
+    it('marks truncated code blocks explicitly', () => {
+        const body = Array.from({ length: 70 }, (_, index) => `    const value${index} = ${index};`).join('\n');
+        const source = `function Depends() {\n${body}\n}`;
+        const definition = extractCodeDefinitions(source, 'src/long.ts', 'Depends')[0];
+        expect(definition?.truncated).toBe(true);
+        expect(definition?.code).toContain('[truncated');
+    });
+
+    it('resolves re-export targets and builds raw/CDN URLs', () => {
+        const targets = findReExportTargets("export { Depends } from './params.js';", 'src/index.ts', 'Depends');
+        expect(targets).toContain('src/params.ts');
+        expect(targets).toContain('src/params/index.ts');
+
+        const urls = buildRawFileUrls('fastapi', 'fastapi', 'master', 'fastapi/params.py');
+        expect(urls[0]).toContain('raw.githubusercontent.com/fastapi/fastapi/master');
+        expect(urls[1]).toContain('cdn.jsdelivr.net/gh/fastapi/fastapi@master');
     });
 });

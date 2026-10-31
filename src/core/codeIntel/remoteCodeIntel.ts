@@ -1,6 +1,7 @@
 import { AppError } from '../errors.js';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
+import path from 'node:path';
 
 export type CodeSymbolKind = 'class' | 'function' | 'interface' | 'type' | 'method' | 'const' | 'enum' | 'struct' | 'trait';
 
@@ -21,6 +22,9 @@ export interface CodeSymbolDefinition {
     startLine: number;
     endLine: number;
     code: string;
+    /** Present when the symbol was found through an `export { ... } from` re-export. */
+    via?: string;
+    truncated?: boolean;
 }
 
 export interface CodeSymbolReference {
@@ -131,20 +135,145 @@ function declarationPatterns(language: string, symbol: string): Array<{ kind: st
 function braceEndLine(lines: string[], startIndex: number): number {
     let depth = 0;
     let seenBrace = false;
-    for (let index = startIndex; index < Math.min(lines.length, startIndex + 200); index += 1) {
-        for (const char of lines[index] ?? '') {
+    let mode = 'normal';
+    let regexAllowed = true;
+
+    for (let index = startIndex; index < Math.min(lines.length, startIndex + 400); index += 1) {
+        const line = lines[index] ?? '';
+        for (let cursor = 0; cursor < line.length; cursor += 1) {
+            const char = line.charAt(cursor);
+            const next = line.charAt(cursor + 1);
+
+            if (mode === 'line') break;
+            if (mode === 'block') {
+                if (char === '*' && next === '/') {
+                    mode = 'normal';
+                    cursor += 1;
+                }
+                continue;
+            }
+            if (mode === 'single' || mode === 'double' || mode === 'template') {
+                if (char === '\\') {
+                    cursor += 1;
+                } else if ((mode === 'single' && char === "'") || (mode === 'double' && char === '"') || (mode === 'template' && char === '`')) {
+                    mode = 'normal';
+                }
+                continue;
+            }
+            if (char === '/' && next === '/') {
+                mode = 'line';
+                break;
+            }
+            if (char === '/' && next === '*') {
+                mode = 'block';
+                cursor += 1;
+                continue;
+            }
+            if (char === "'") {
+                mode = 'single';
+                continue;
+            }
+            if (char === '"') {
+                mode = 'double';
+                continue;
+            }
+            if (char === '`') {
+                mode = 'template';
+                continue;
+            }
+
+            if (char === '/' && regexAllowed) {
+                let scan = cursor + 1;
+                let inClass = false;
+                let closed = false;
+                for (; scan < line.length; scan += 1) {
+                    const regexChar = line[scan];
+                    if (regexChar === '\\') {
+                        scan += 1;
+                    } else if (regexChar === '[') {
+                        inClass = true;
+                    } else if (regexChar === ']') {
+                        inClass = false;
+                    } else if (regexChar === '/' && !inClass) {
+                        closed = true;
+                        break;
+                    }
+                }
+                if (closed) {
+                    cursor = scan;
+                    regexAllowed = false;
+                    continue;
+                }
+            }
+
             if (char === '{') {
                 depth += 1;
                 seenBrace = true;
             } else if (char === '}') {
                 depth -= 1;
+                if (seenBrace && depth === 0) {
+                    return index;
+                }
+            }
+
+            if (!/\s/.test(char)) {
+                const before = line.slice(0, cursor);
+                regexAllowed = /[=(:,![{;?&|+\-*%^~<>]/.test(char)
+                    || /\b(return|case|throw|typeof|void|delete|in|of|yield|await)\s*$/.test(before);
             }
         }
-        if (seenBrace && depth <= 0) {
-            return index;
+
+        if (mode === 'single' || mode === 'double') {
+            mode = 'normal';
+        }
+        if (mode === 'line') {
+            mode = 'normal';
         }
     }
+
     return Math.min(lines.length - 1, startIndex + 40);
+}
+
+function decoratorStart(lines: string[], declarationIndex: number, language: string): number {
+    if (language !== 'python') {
+        return declarationIndex;
+    }
+    let start = declarationIndex;
+    while (start > 0 && lines[start - 1]?.trim().startsWith('@')) {
+        start -= 1;
+    }
+    return start;
+}
+
+function collectSignature(lines: string[], startIndex: number, language: string): string {
+    const parts: string[] = [];
+    for (let index = startIndex; index < Math.min(lines.length, startIndex + 20); index += 1) {
+        const raw = (lines[index] ?? '').trim();
+        if (!raw) continue;
+
+        if (language === 'python') {
+            if (raw.startsWith('@')) {
+                parts.push(raw);
+                continue;
+            }
+            parts.push(raw.endsWith(':') ? raw.slice(0, -1).trim() : raw);
+            if (raw.endsWith(':')) break;
+            continue;
+        }
+
+        const braceIndex = raw.indexOf('{');
+        if (braceIndex >= 0) {
+            const beforeBrace = raw.slice(0, braceIndex).trim();
+            if (beforeBrace) parts.push(beforeBrace);
+            break;
+        }
+        parts.push(raw);
+        if (raw.endsWith(';')) break;
+        if (parts.join(' ').length > 500) break;
+    }
+
+    const signature = parts.join(' ').replace(/\s+/g, ' ').trim();
+    return signature.length > 500 ? `${signature.slice(0, 500)}…` : signature;
 }
 
 function pythonBlockEndLine(lines: string[], startIndex: number): number {
@@ -162,6 +291,52 @@ function pythonBlockEndLine(lines: string[], startIndex: number): number {
     return end;
 }
 
+function resolveModuleCandidates(filePath: string, specifier: string): string[] {
+    if (!specifier.startsWith('.')) return [];
+    const base = path.posix.dirname(filePath);
+    const target = path.posix.normalize(path.posix.join(base, specifier));
+    const withoutExtension = target.replace(/\.(?:js|jsx|mjs|cjs|ts|tsx)$/i, '');
+    const candidates = new Set<string>([target]);
+    for (const extension of ['.ts', '.tsx', '.d.ts', '.js', '.jsx']) {
+        candidates.add(`${withoutExtension}${extension}`);
+        candidates.add(path.posix.join(withoutExtension, `index${extension}`));
+    }
+    return [...candidates];
+}
+
+/** Resolve `export { X } from './module'` / `export * from './module'` targets. */
+export function findReExportTargets(content: string, filePath: string, symbol: string): string[] {
+    const targets: string[] = [];
+    const lines = content.split(/\r?\n/);
+    for (const line of lines) {
+        const named = line.match(/^\s*export\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/);
+        if (named?.[1] && named[2]) {
+            const names = named[1].split(',').map((item) => item.trim()).filter(Boolean);
+            const matches = names.some((item) => {
+                const [imported, exported] = item.split(/\s+as\s+/).map((part) => part.trim());
+                return imported === symbol || exported === symbol;
+            });
+            if (matches) targets.push(...resolveModuleCandidates(filePath, named[2]));
+            continue;
+        }
+        const star = line.match(/^\s*export\s*\*\s*from\s*['"]([^'"]+)['"]/);
+        if (star?.[1]) {
+            targets.push(...resolveModuleCandidates(filePath, star[1]));
+        }
+    }
+    return [...new Set(targets)];
+}
+
+export function buildRawFileUrls(owner: string, repo: string, ref: string, filePath: string): string[] {
+    const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+    const encodedOwner = encodeURIComponent(owner);
+    const encodedRepo = encodeURIComponent(repo);
+    return [
+        `https://raw.githubusercontent.com/${encodedOwner}/${encodedRepo}/${encodeURIComponent(ref)}/${encodedPath}`,
+        `https://cdn.jsdelivr.net/gh/${encodedOwner}/${encodedRepo}@${encodeURIComponent(ref)}/${encodedPath}`
+    ];
+}
+
 export function extractCodeDefinitions(
     content: string,
     filePath: string,
@@ -177,17 +352,29 @@ export function extractCodeDefinitions(
         const line = lines[index] ?? '';
         for (const { kind: declaredKind, pattern } of patterns) {
             if (!pattern.test(line)) continue;
+            const startIndex = decoratorStart(lines, index, language);
             const endIndex = language === 'python'
                 ? pythonBlockEndLine(lines, index)
                 : braceEndLine(lines, index);
+            const codeLines = lines.slice(startIndex, endIndex + 1);
+            const maxLines = 60;
+            const truncatedByLines = codeLines.length > maxLines;
+            let code = codeLines.slice(0, maxLines).join('\n');
+            const truncatedByChars = code.length > 8000;
+            if (truncatedByChars) code = code.slice(0, 8000);
+            if (truncatedByLines || truncatedByChars) {
+                const comment = language === 'python' ? '#' : '//';
+                code += `\n${comment} ... [truncated: showing ${Math.min(codeLines.length, maxLines)} of ${codeLines.length} lines]`;
+            }
             definitions.push({
                 path: filePath,
                 language,
                 kind: declaredKind,
-                signature: line.trim().slice(0, 300),
-                startLine: index + 1,
+                signature: collectSignature(lines, startIndex, language),
+                startLine: startIndex + 1,
                 endLine: endIndex + 1,
-                code: lines.slice(index, Math.min(endIndex + 1, index + 60)).join('\n').slice(0, 8000)
+                code,
+                truncated: truncatedByLines || truncatedByChars
             });
             break;
         }
@@ -278,25 +465,28 @@ async function fetchRawFile(
     path: string,
     signal?: AbortSignal
 ): Promise<string | null> {
-    const encodedPath = path.split('/').map(encodeURIComponent).join('/');
-    const url = `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(ref)}/${encodedPath}`;
-    try {
-        const response = await requestDirectFirst(
-            'GET',
-            url,
-            (forceDirect) => buildAxiosRequestOptions({
-                headers: { 'User-Agent': DEFAULT_DESKTOP_UA },
-                timeout: 8000,
-                responseType: 'text',
-                signal,
-                forceDirect
-            }),
-            'GitHub raw file'
-        );
-        return response.status === 200 && typeof response.data === 'string' ? response.data : null;
-    } catch {
-        return null;
+    for (const url of buildRawFileUrls(owner, repo, ref, path)) {
+        try {
+            const response = await requestDirectFirst(
+                'GET',
+                url,
+                (forceDirect) => buildAxiosRequestOptions({
+                    headers: { 'User-Agent': DEFAULT_DESKTOP_UA },
+                    timeout: 8000,
+                    responseType: 'text',
+                    signal,
+                    forceDirect
+                }),
+                url.includes('cdn.jsdelivr.net') ? 'jsDelivr raw file' : 'GitHub raw file'
+            );
+            if (response.status === 200 && typeof response.data === 'string') {
+                return response.data;
+            }
+        } catch {
+            // Try the next CDN.
+        }
     }
+    return null;
 }
 
 export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbolResult> {
@@ -326,21 +516,39 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
     const references: CodeSymbolReference[] = [];
     let filesScanned = 0;
 
-    for (const path of paths.slice(0, 8)) {
+    type WorkItem = { path: string; via?: string; depth: number };
+    const queue: WorkItem[] = paths.slice(0, 8).map((filePath) => ({ path: filePath, depth: 0 }));
+    const visited = new Set<string>();
+
+    while (queue.length > 0 && filesScanned < 12) {
+        const item = queue.shift()!;
+        if (visited.has(item.path)) continue;
+        visited.add(item.path);
+
         let content: string | null = null;
         for (const ref of refsToTry) {
-            content = await fetchRawFile(parsed.owner, parsed.repo, ref, path, input.signal);
+            content = await fetchRawFile(parsed.owner, parsed.repo, ref, item.path, input.signal);
             if (content !== null) {
                 break;
             }
         }
         if (content === null) {
-            warnings.push(`Could not fetch ${path}.`);
+            warnings.push(`Could not fetch ${item.path}.`);
             continue;
         }
         filesScanned += 1;
-        const found = extractCodeDefinitions(content, path, symbol, input.kind);
+        const found = extractCodeDefinitions(content, item.path, symbol, input.kind)
+            .map((definition) => item.via ? { ...definition, via: item.via } : definition);
         definitions.push(...found);
+
+        if (found.length === 0 && item.depth < 2) {
+            const targets = findReExportTargets(content, item.path, symbol);
+            for (const target of targets.slice(0, 4)) {
+                if (!visited.has(target)) {
+                    queue.push({ path: target, via: item.path, depth: item.depth + 1 });
+                }
+            }
+        }
 
         const lines = content.split(/\r?\n/);
         const mentionLines = lines
@@ -350,12 +558,14 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
             .filter((lineNumber) => !found.some((definition) =>
                 lineNumber >= definition.startLine && lineNumber <= definition.endLine));
         if (mentionLines.length > 0) {
-            references.push({ path, lines: mentionLines.slice(0, 20) });
+            references.push({ path: item.path, lines: mentionLines.slice(0, 20) });
         }
     }
 
     if (definitions.length === 0) {
         warnings.push('No declaration matched. Try a different kind or pass the exact symbol name.');
+    } else if (definitions.some((definition) => definition.via)) {
+        warnings.push('Definition was resolved through a re-export; the `via` field records the entry file.');
     }
 
     return {
