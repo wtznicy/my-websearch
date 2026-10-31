@@ -2,6 +2,11 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`codeSymbol` 远程符号查询**：通过 GitHub Code Search 定位符号，按需拉取 raw 文件，提取 TypeScript/JavaScript/Python/Go/Rust/Java/C# 的声明签名、限长代码块与引用行；需要 `GITHUB_TOKEN`，仅语法级，不做跨仓库类型推导。
+
 ## [1.3.12] - 2026-10-30
 
 ### Fixed

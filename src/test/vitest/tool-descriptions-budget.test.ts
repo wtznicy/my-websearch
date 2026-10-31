@@ -14,8 +14,9 @@ describe('Tool Description Token Budget & Length Limit', () => {
         const registeredTools = (server as unknown as { _registeredTools: Record<string, { description?: string }> })._registeredTools;
         const toolNames = Object.keys(registeredTools);
 
-        // 必须严格是 4 个工具
+        // 必须严格是 5 个工具
         expect(toolNames.sort()).toEqual([
+            'codeSymbol',
             'fetchGithubContent',
             'fetchWebContent',
             'queryDocs',
@@ -29,8 +30,8 @@ describe('Tool Description Token Budget & Length Limit', () => {
             totalLength += desc.length;
         }
 
-        // 总字符数 <= 1000 字符（约 200-250 tokens，远低于 1.5k token 预算）
-        expect(totalLength, `Total tool descriptions length (${totalLength}) must be <= 1000`).toBeLessThanOrEqual(1000);
+        // 5 个工具的总字符数 <= 1200 字符（约 250-300 tokens）；新增 codeSymbol 后从 1000 上调。
+        expect(totalLength, `Total tool descriptions length (${totalLength}) must be <= 1200`).toBeLessThanOrEqual(1200);
 
         // 首次使用可发现性：名称不能再暗示"只能读 README"，描述必须给出 /blob/ 示例与"非整仓 clone"边界
         const githubDesc = registeredTools['fetchGithubContent']?.description || '';

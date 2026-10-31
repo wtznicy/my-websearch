@@ -69,7 +69,7 @@
 
 <a id="mcp-tools"></a>
 
-## 🛠️ 4 大核心 MCP 工具（极简高效，低 Token 消耗）
+## 🛠️ 5 大核心 MCP 工具（极简高效，低 Token 消耗）
 
 > 💡 **Token 预算与瘦身**：所有工具描述均严格控制在 250 字符以内（总描述字符 ≤ 1000），更详细的路由策略已移入 `McpServer({ instructions })`，大幅降低宿主 LLM 的 Context 开销。
 
@@ -79,6 +79,7 @@
 | **`fetchWebContent`** | 通用网页正文、Markdown 与透明 PDF 提取 | **全能知识提取网关**：内置磁盘级 Markdown 缓存（Node 22 `node:sqlite` / 分片 JSON 兜底，200MB LRU，`cache: default\|reload` 强制刷新）；透明解析 PDF（上限 20MB / 50 页，带 `[page N]` 标记，纯扫描版明确报错）；统一分页与 `focus` 章节定位（默认 **`bm25`** 按段落相关性选块，`window` 保留旧的固定窗口）；**`selector`** 用 CSS 选择器收窄提取范围（未命中直接报错，不静默回退全页）；**`extract`** 用 CSS schema 直接产出结构化 JSON（无需 LLM）；**`citations`** 把正文链接改写成编号引用 + 末尾 References；**`retainLinks`** 裁剪 URL（列表页实测省 50%） |
 | **`fetchGithubContent`** | 全能 GitHub / Gitee 内容提取网关 | 提取 README、**单个源码文件**（`/blob/<ref>/<path>`，支持 `lines`/`#L120-L180` 切片，上限 400 行）、目录树（`/tree/`，自动过滤 lock/build 产物）、Issue 与 PR、Commit（`/commit/<sha>`）、Compare（`/compare/a...b`，patch 限长 + lockfile 过滤）、Release（`/releases[/tag/<tag>]`，`releaseLimit` 1–30）；`ref` 可为分支/tag/commit；Gitee 已对齐（可选 `GITEE_TOKEN`）；返回 `warnings` |
 | **`queryDocs`** | 一站式开源框架/库官方文档 | 支持库名或 Context7 ID；可选 **`version`** 钉定 Context7/npm/PyPI 版本；**24h 本地缓存**（`cache: reload` 强制刷新）；兜底链 npm → PyPI → **crates.io → Go module proxy → Maven Central** → GitHub README；返回 `source`、`confidence` 与 `warnings` |
+| **`codeSymbol`** | 远程 GitHub 符号查询 | 通过 GitHub Code Search + raw 文件返回声明签名、限长代码块与引用行；覆盖 TypeScript/JavaScript/Python/Go/Rust/Java/C# 语法；需要 `GITHUB_TOKEN`；仅语法级，不做跨仓库类型推导 |
 
 > 💡 **向后兼容说明**：原独立的 `fetchCsdnArticle` 与 `fetchJuejinArticle` 已平滑下沉并收口进通用的 `fetchWebContent`（按域名自动采用最佳专有提取引擎）；原 `resolveLibraryId` 已合并入 `queryDocs`（支持直接传 `library` 库名或旧版 `libraryId` 别名自动解析定位）。独立的 legacy 工具已移除 —— `REGISTER_LEGACY_ARTICLE_TOOLS` 开关一并删除，因为保留三个永不注册的 handler 依然要占工具描述预算。
 
@@ -365,7 +366,7 @@ my-websearch doctor --reset-health
 ```bash
 npm install
 npm run build
-npm test              # 执行 Vitest 测试套件（当前基线：93 个文件、707 个测试）
+npm test              # 执行 Vitest 测试套件（当前基线：94 个文件、713 个测试）
 npm run test:live     # 执行实时网络集成测试
 npm run eval:live     # 执行 23 用例真实 STDIO JSON-RPC 评测套件
 ```
