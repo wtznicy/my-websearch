@@ -42,6 +42,13 @@ function formatCodeSymbol(result: CodeSymbolResult): string {
         }
     }
 
+    if (result.callSites.length > 0) {
+        lines.push('', '## Call sites (syntactic)');
+        for (const site of result.callSites) {
+            lines.push(`- \`${site.path}:${site.line}\`${site.caller ? ` in \`${site.caller}\`` : ''}: \`${site.snippet}\``);
+        }
+    }
+
     if (result.warnings.length > 0) {
         lines.push('', '## Warnings');
         for (const warning of result.warnings) {

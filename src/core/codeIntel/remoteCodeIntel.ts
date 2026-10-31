@@ -2,6 +2,7 @@ import { AppError } from '../errors.js';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 import path from 'node:path';
+import { extractDefinitionsWithTreeSitter, findCallSitesWithTreeSitter, type CodeSymbolCallSite } from './treeSitter.js';
 
 export type CodeSymbolKind = 'class' | 'function' | 'interface' | 'type' | 'method' | 'const' | 'enum' | 'struct' | 'trait';
 
@@ -38,6 +39,7 @@ export interface CodeSymbolResult {
     ref: string;
     definitions: CodeSymbolDefinition[];
     references: CodeSymbolReference[];
+    callSites: CodeSymbolCallSite[];
     filesScanned: number;
     warnings: string[];
 }
@@ -291,10 +293,14 @@ function pythonBlockEndLine(lines: string[], startIndex: number): number {
     return end;
 }
 
-function resolveModuleCandidates(filePath: string, specifier: string): string[] {
-    if (!specifier.startsWith('.')) return [];
-    const base = path.posix.dirname(filePath);
-    const target = path.posix.normalize(path.posix.join(base, specifier));
+export interface TsconfigPathAlias {
+    prefix: string;
+    suffix: string;
+    targets: string[];
+    baseUrl: string;
+}
+
+function resolveCandidateExtensions(target: string): string[] {
     const withoutExtension = target.replace(/\.(?:js|jsx|mjs|cjs|ts|tsx)$/i, '');
     const candidates = new Set<string>([target]);
     for (const extension of ['.ts', '.tsx', '.d.ts', '.js', '.jsx']) {
@@ -304,9 +310,63 @@ function resolveModuleCandidates(filePath: string, specifier: string): string[] 
     return [...candidates];
 }
 
+function resolveModuleCandidates(filePath: string, specifier: string): string[] {
+    if (!specifier.startsWith('.')) return [];
+    const base = path.posix.dirname(filePath);
+    return resolveCandidateExtensions(path.posix.normalize(path.posix.join(base, specifier)));
+}
+
+export function parseTsconfigPathAliases(raw: string): TsconfigPathAlias[] {
+    try {
+        const withoutComments = raw
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/(^|[^:])\/\/.*$/gm, '$1')
+            .replace(/,\s*([}\]])/g, '$1');
+        const parsed = JSON.parse(withoutComments) as {
+            compilerOptions?: {
+                baseUrl?: string;
+                paths?: Record<string, string[]>;
+            };
+        };
+        const baseUrl = parsed.compilerOptions?.baseUrl?.replace(/^\.\//, '') || '.';
+        return Object.entries(parsed.compilerOptions?.paths ?? {}).map(([pattern, targets]) => {
+            const starIndex = pattern.indexOf('*');
+            return {
+                prefix: starIndex >= 0 ? pattern.slice(0, starIndex) : pattern,
+                suffix: starIndex >= 0 ? pattern.slice(starIndex + 1) : '',
+                targets: Array.isArray(targets) ? targets : [],
+                baseUrl
+            };
+        });
+    } catch {
+        return [];
+    }
+}
+
 /** Resolve `export { X } from './module'` / `export * from './module'` targets. */
-export function findReExportTargets(content: string, filePath: string, symbol: string): string[] {
+export function findReExportTargets(
+    content: string,
+    filePath: string,
+    symbol: string,
+    aliases: TsconfigPathAlias[] = []
+): string[] {
     const targets: string[] = [];
+    const resolveSpecifier = (specifier: string): string[] => {
+        if (specifier.startsWith('.')) {
+            return resolveModuleCandidates(filePath, specifier);
+        }
+        for (const alias of aliases) {
+            if (!specifier.startsWith(alias.prefix) || !specifier.endsWith(alias.suffix)) continue;
+            const middle = specifier.slice(alias.prefix.length, specifier.length - alias.suffix.length);
+            for (const target of alias.targets) {
+                const resolved = target.replace('*', middle);
+                const base = alias.baseUrl === '.' ? '' : alias.baseUrl;
+                targets.push(...resolveCandidateExtensions(path.posix.normalize(path.posix.join(base, resolved))));
+            }
+        }
+        return [];
+    };
+
     const lines = content.split(/\r?\n/);
     for (const line of lines) {
         const named = line.match(/^\s*export\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/);
@@ -316,12 +376,12 @@ export function findReExportTargets(content: string, filePath: string, symbol: s
                 const [imported, exported] = item.split(/\s+as\s+/).map((part) => part.trim());
                 return imported === symbol || exported === symbol;
             });
-            if (matches) targets.push(...resolveModuleCandidates(filePath, named[2]));
+            if (matches) targets.push(...resolveSpecifier(named[2]));
             continue;
         }
         const star = line.match(/^\s*export\s*\*\s*from\s*['"]([^'"]+)['"]/);
         if (star?.[1]) {
-            targets.push(...resolveModuleCandidates(filePath, star[1]));
+            targets.push(...resolveSpecifier(star[1]));
         }
     }
     return [...new Set(targets)];
@@ -466,6 +526,7 @@ async function fetchRawFile(
     signal?: AbortSignal
 ): Promise<string | null> {
     for (const url of buildRawFileUrls(owner, repo, ref, path)) {
+        if (signal?.aborted) return null;
         try {
             const response = await requestDirectFirst(
                 'GET',
@@ -486,7 +547,49 @@ async function fetchRawFile(
             // Try the next CDN.
         }
     }
+
+    // Private repositories are not served by raw.githubusercontent.com/jsDelivr;
+    // use the authenticated Contents API as the last resort.
+    const token = process.env.GITHUB_TOKEN?.trim();
+    if (!token) return null;
+    try {
+        const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+        const apiUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`;
+        const response = await requestDirectFirst(
+            'GET',
+            apiUrl,
+            (forceDirect) => buildAxiosRequestOptions({
+                headers: githubHeaders(),
+                timeout: 10000,
+                responseType: 'json',
+                signal,
+                forceDirect
+            }),
+            'GitHub contents API'
+        );
+        const data = response.data as { content?: string; encoding?: string };
+        if (response.status === 200 && data?.content && data.encoding === 'base64') {
+            return Buffer.from(data.content.replace(/\s+/g, ''), 'base64').toString('utf8');
+        }
+    } catch {
+        // fall through
+    }
     return null;
+}
+
+async function loadTsconfigAliases(
+    owner: string,
+    repo: string,
+    refsToTry: string[],
+    signal?: AbortSignal
+): Promise<TsconfigPathAlias[]> {
+    for (const ref of refsToTry) {
+        const content = await fetchRawFile(owner, repo, ref, 'tsconfig.json', signal);
+        if (content) {
+            return parseTsconfigPathAliases(content);
+        }
+    }
+    return [];
 }
 
 export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbolResult> {
@@ -511,9 +614,11 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
     const maxResults = Math.min(Math.max(input.maxResults ?? 5, 1), 10);
     const paths = await searchGitHubCode(parsed.owner, parsed.repo, symbol, maxResults, input.signal);
     const refsToTry = input.ref ? [input.ref] : ['main', 'master'];
+    const aliases = await loadTsconfigAliases(parsed.owner, parsed.repo, refsToTry, input.signal);
     const warnings: string[] = [];
     const definitions: CodeSymbolDefinition[] = [];
     const references: CodeSymbolReference[] = [];
+    const callSites: CodeSymbolCallSite[] = [];
     let filesScanned = 0;
 
     type WorkItem = { path: string; via?: string; depth: number };
@@ -537,12 +642,19 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
             continue;
         }
         filesScanned += 1;
-        const found = extractCodeDefinitions(content, item.path, symbol, input.kind)
+        const language = detectCodeLanguage(item.path);
+        const astDefinitions = await extractDefinitionsWithTreeSitter(content, item.path, language, symbol, input.kind);
+        const found = (astDefinitions ?? extractCodeDefinitions(content, item.path, symbol, input.kind))
             .map((definition) => item.via ? { ...definition, via: item.via } : definition);
         definitions.push(...found);
 
-        if (found.length === 0 && item.depth < 2) {
-            const targets = findReExportTargets(content, item.path, symbol);
+        const astCalls = await findCallSitesWithTreeSitter(content, item.path, language, symbol);
+        if (astCalls) {
+            callSites.push(...astCalls);
+        }
+
+        if (found.length === 0 && item.depth < 4) {
+            const targets = findReExportTargets(content, item.path, symbol, aliases);
             for (const target of targets.slice(0, 4)) {
                 if (!visited.has(target)) {
                     queue.push({ path: target, via: item.path, depth: item.depth + 1 });
@@ -574,6 +686,7 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
         ref: input.ref ?? (paths.length > 0 ? 'default branch' : 'unknown'),
         definitions: definitions.slice(0, maxResults),
         references,
+        callSites: callSites.slice(0, 30),
         filesScanned,
         warnings
     };

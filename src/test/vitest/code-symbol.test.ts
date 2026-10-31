@@ -4,7 +4,8 @@ import {
     detectCodeLanguage,
     extractCodeDefinitions,
     findReExportTargets,
-    parseGitHubRepoSpec
+    parseGitHubRepoSpec,
+    parseTsconfigPathAliases
 } from '../../core/codeIntel/remoteCodeIntel.js';
 
 describe('remote code intelligence', () => {
@@ -140,5 +141,16 @@ describe('remote code intelligence', () => {
         const urls = buildRawFileUrls('fastapi', 'fastapi', 'master', 'fastapi/params.py');
         expect(urls[0]).toContain('raw.githubusercontent.com/fastapi/fastapi/master');
         expect(urls[1]).toContain('cdn.jsdelivr.net/gh/fastapi/fastapi@master');
+    });
+
+    it('resolves tsconfig path aliases in re-exports', () => {
+        const aliases = parseTsconfigPathAliases(JSON.stringify({
+            compilerOptions: {
+                baseUrl: '.',
+                paths: { '@/*': ['src/*'] }
+            }
+        }));
+        const targets = findReExportTargets("export { Depends } from '@/params.js';", 'src/index.ts', 'Depends', aliases);
+        expect(targets).toContain('src/params.ts');
     });
 });
