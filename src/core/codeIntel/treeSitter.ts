@@ -41,7 +41,8 @@ const KIND_BY_NODE: Record<string, string> = {
 };
 
 let parserInit: Promise<void> | null = null;
-const languageCache = new Map<string, Promise<Language | null>>();
+const languageCache = new Map<string, Language>();
+const grammarPromises = new Map<string, Promise<string | null>>();
 
 function runtimeWasmPath(): string {
     const require = createRequire(import.meta.url);
@@ -72,7 +73,7 @@ async function downloadGrammar(fileName: string): Promise<string | null> {
             `${GRAMMAR_BASE}/${fileName}`,
             (forceDirect) => buildAxiosRequestOptions({
                 headers: { 'User-Agent': DEFAULT_DESKTOP_UA },
-                timeout: 15000,
+                timeout: 4000,
                 responseType: 'arraybuffer',
                 forceDirect
             }),
@@ -94,6 +95,14 @@ async function downloadGrammar(fileName: string): Promise<string | null> {
     }
 }
 
+function ensureGrammar(fileName: string): Promise<string | null> {
+    const existing = grammarPromises.get(fileName);
+    if (existing) return existing;
+    const promise = downloadGrammar(fileName);
+    grammarPromises.set(fileName, promise);
+    return promise;
+}
+
 async function getLanguage(language: string, filePath: string): Promise<Language | null> {
     const grammarKey = filePath.toLowerCase().endsWith('.tsx') || filePath.toLowerCase().endsWith('.jsx')
         ? 'tsx'
@@ -104,17 +113,39 @@ async function getLanguage(language: string, filePath: string): Promise<Language
     const cached = languageCache.get(grammarKey);
     if (cached) return cached;
 
-    const promise = (async () => {
-        const grammarPath = await downloadGrammar(fileName);
-        if (!grammarPath) return null;
-        try {
-            return await Language.load(fs.readFileSync(grammarPath));
-        } catch {
+    const grammarPath = path.join(grammarCacheDir(), fileName);
+    let available = false;
+    try {
+        available = fs.existsSync(grammarPath) && fs.statSync(grammarPath).size > 1000;
+    } catch {
+        available = false;
+    }
+
+    if (!available) {
+        const download = ensureGrammar(fileName);
+        if (process.env.CODE_SYMBOL_TREE_SITTER_WAIT === '1') {
+            await download;
+            try {
+                available = fs.existsSync(grammarPath) && fs.statSync(grammarPath).size > 1000;
+            } catch {
+                available = false;
+            }
+        } else {
+            // Never block the MCP tool on a cold grammar download. The scanner
+            // answers this request; the next call can use the cached grammar.
+            void download;
             return null;
         }
-    })();
-    languageCache.set(grammarKey, promise);
-    return promise;
+    }
+
+    if (!available) return null;
+    try {
+        const loaded = await Language.load(fs.readFileSync(grammarPath));
+        languageCache.set(grammarKey, loaded);
+        return loaded;
+    } catch {
+        return null;
+    }
 }
 
 async function getParser(language: string, filePath: string): Promise<Parser | null> {
@@ -160,6 +191,13 @@ export interface CodeSymbolCallSite {
     snippet: string;
 }
 
+const GENERIC_METHOD_NAMES = new Set([
+    'get', 'set', 'init', 'parse', 'validate', 'run', 'call', 'apply', 'map', 'filter',
+    'find', 'push', 'pop', 'update', 'render', 'load', 'save', 'open', 'close', 'read',
+    'write', 'has', 'add', 'remove', 'delete', 'clear', 'reset', 'start', 'stop',
+    'create', 'build', 'process', 'handle', 'execute', 'toString', 'valueOf'
+]);
+
 function enclosingCallerName(node: SyntaxNode): string | undefined {
     let current: SyntaxNode | null = node.parent;
     while (current) {
@@ -176,67 +214,23 @@ function enclosingCallerName(node: SyntaxNode): string | undefined {
     return undefined;
 }
 
-/** Find direct call sites for a symbol (syntactic; no receiver type inference). */
-export async function findCallSitesWithTreeSitter(
-    content: string,
-    filePath: string,
-    language: string,
-    symbol: string
-): Promise<CodeSymbolCallSite[] | null> {
-    const parser = await getParser(language, filePath);
-    if (!parser) return null;
-    try {
-        const tree = parser.parse(content);
-        if (!tree) return null;
-        const sites: CodeSymbolCallSite[] = [];
-        const seen = new Set<number>();
-
-        const walk = (node: SyntaxNode): void => {
-            if (sites.length >= 30) return;
-            const callNodeTypes = new Set(['call_expression', 'call', 'method_invocation']);
-            if (callNodeTypes.has(node.type)) {
-                const fn = node.childForFieldName('function')
-                    ?? node.childForFieldName('name');
-                const called = fn?.text ?? '';
-                const matches = called === symbol
-                    || called.endsWith(`.${symbol}`)
-                    || called.endsWith(`?.${symbol}`)
-                    || called.endsWith(`::${symbol}`);
-                if (matches && !seen.has(node.startPosition.row)) {
-                    seen.add(node.startPosition.row);
-                    sites.push({
-                        path: filePath,
-                        line: node.startPosition.row + 1,
-                        caller: enclosingCallerName(node),
-                        snippet: content.slice(node.startIndex, Math.min(node.endIndex, node.startIndex + 240)).replace(/\s+/g, ' ').trim()
-                    });
-                }
-            }
-            for (const child of node.namedChildren) walk(child);
-        };
-
-        walk(tree.rootNode);
-        tree.delete();
-        return sites;
-    } catch {
-        return null;
-    } finally {
-        parser.delete();
-    }
+export interface TreeSitterAnalysis {
+    definitions: CodeSymbolDefinition[];
+    callSites: CodeSymbolCallSite[];
 }
 
 /**
- * Optional Tree-sitter backend. It downloads only the language grammar on first
- * use and caches it; if web-tree-sitter or the grammar is unavailable, callers
- * fall back to the dependency-free scanner.
+ * Parse once and extract both definitions and call sites.
+ * Grammar downloads happen in the background; a cold call falls back to the
+ * scanner immediately and a later call can use the cached grammar.
  */
-export async function extractDefinitionsWithTreeSitter(
+export async function analyzeWithTreeSitter(
     content: string,
     filePath: string,
     language: string,
     symbol: string,
     kind?: CodeSymbolKind
-): Promise<CodeSymbolDefinition[] | null> {
+): Promise<TreeSitterAnalysis | null> {
     const parser = await getParser(language, filePath);
     if (!parser) return null;
 
@@ -244,7 +238,8 @@ export async function extractDefinitionsWithTreeSitter(
         const tree = parser.parse(content);
         if (!tree) return null;
         const definitions: CodeSymbolDefinition[] = [];
-        const seen = new Set<string>();
+        const rawCalls: Array<{ node: SyntaxNode; called: string }> = [];
+        const seenDefinitions = new Set<string>();
         let visited = 0;
 
         const walk = (node: SyntaxNode): void => {
@@ -254,8 +249,8 @@ export async function extractDefinitionsWithTreeSitter(
             const nameNode = node.childForFieldName('name');
             const declaredKind = KIND_BY_NODE[node.type];
             if (nameNode?.text === symbol && declaredKind && (!kind || declaredKind === kind)) {
-                if (!seen.has(`${node.startIndex}:${node.endIndex}`)) {
-                    seen.add(`${node.startIndex}:${node.endIndex}`);
+                if (!seenDefinitions.has(`${node.startIndex}:${node.endIndex}`)) {
+                    seenDefinitions.add(`${node.startIndex}:${node.endIndex}`);
                     const parent = node.parent;
                     const startNode = parent?.type === 'export_statement' || parent?.type === 'decorated_definition'
                         ? parent
@@ -276,6 +271,12 @@ export async function extractDefinitionsWithTreeSitter(
                 }
             }
 
+            if (node.type === 'call_expression' || node.type === 'call' || node.type === 'method_invocation') {
+                const fn = node.childForFieldName('function')
+                    ?? node.childForFieldName('name');
+                if (fn?.text) rawCalls.push({ node, called: fn.text });
+            }
+
             for (const child of node.namedChildren) {
                 walk(child);
             }
@@ -283,10 +284,61 @@ export async function extractDefinitionsWithTreeSitter(
 
         walk(tree.rootNode);
         tree.delete();
-        return definitions.length > 0 ? definitions : null;
+
+        const hasMethodDefinition = definitions.some((definition) => definition.kind === 'method');
+        const genericMethod = GENERIC_METHOD_NAMES.has(symbol.toLowerCase());
+        const callSites: CodeSymbolCallSite[] = [];
+        const seenCallLines = new Set<number>();
+
+        for (const { node, called } of rawCalls) {
+            const bare = called === symbol;
+            const member = called.endsWith(`.${symbol}`)
+                || called.endsWith(`?.${symbol}`)
+                || called.endsWith(`::${symbol}`);
+            const thisMember = called === `this.${symbol}`;
+            const allowMember = (kind === 'method' || hasMethodDefinition) && !genericMethod;
+            if (!(bare || (member && allowMember) || (thisMember && hasMethodDefinition))) {
+                continue;
+            }
+            if (seenCallLines.has(node.startPosition.row)) continue;
+            seenCallLines.add(node.startPosition.row);
+            callSites.push({
+                path: filePath,
+                line: node.startPosition.row + 1,
+                caller: enclosingCallerName(node),
+                snippet: content.slice(node.startIndex, Math.min(node.endIndex, node.startIndex + 240)).replace(/\s+/g, ' ').trim()
+            });
+            if (callSites.length >= 30) break;
+        }
+
+        return { definitions, callSites };
     } catch {
         return null;
     } finally {
         parser.delete();
     }
+}
+
+/** Compatibility wrapper: one parse for definitions only. */
+export async function extractDefinitionsWithTreeSitter(
+    content: string,
+    filePath: string,
+    language: string,
+    symbol: string,
+    kind?: CodeSymbolKind
+): Promise<CodeSymbolDefinition[] | null> {
+    const analysis = await analyzeWithTreeSitter(content, filePath, language, symbol, kind);
+    return analysis?.definitions.length ? analysis.definitions : null;
+}
+
+/** Compatibility wrapper: one parse for call sites only. */
+export async function findCallSitesWithTreeSitter(
+    content: string,
+    filePath: string,
+    language: string,
+    symbol: string,
+    kind?: CodeSymbolKind
+): Promise<CodeSymbolCallSite[] | null> {
+    const analysis = await analyzeWithTreeSitter(content, filePath, language, symbol, kind);
+    return analysis?.callSites ?? null;
 }

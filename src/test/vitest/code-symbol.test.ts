@@ -4,8 +4,10 @@ import {
     detectCodeLanguage,
     extractCodeDefinitions,
     findReExportTargets,
+    isCodeFilePath,
     parseGitHubRepoSpec,
-    parseTsconfigPathAliases
+    parseTsconfigPathAliases,
+    rankCodePaths
 } from '../../core/codeIntel/remoteCodeIntel.js';
 
 describe('remote code intelligence', () => {
@@ -152,5 +154,33 @@ describe('remote code intelligence', () => {
         }));
         const targets = findReExportTargets("export { Depends } from '@/params.js';", 'src/index.ts', 'Depends', aliases);
         expect(targets).toContain('src/params.ts');
+    });
+
+    it('resolves package-level tsconfig aliases relative to the config directory', () => {
+        const aliases = parseTsconfigPathAliases(JSON.stringify({
+            compilerOptions: { baseUrl: '.', paths: { '@/*': ['src/*'] } }
+        }), 'packages/api');
+        const targets = findReExportTargets("export { Depends } from '@/params.js';", 'packages/api/index.ts', 'Depends', aliases);
+        expect(targets).toContain('packages/api/src/params.ts');
+    });
+
+    it('never treats Markdown prose as a function declaration', () => {
+        const markdown = '- **Easier unions**. Use the `or` method to ZodType (the base class for all Zod types)';
+        expect(extractCodeDefinitions(markdown, 'packages/docs/MIGRATION.md', 'ZodType')).toEqual([]);
+        expect(isCodeFilePath('MIGRATION.md')).toBe(false);
+        expect(isCodeFilePath('src/index.ts')).toBe(true);
+    });
+
+    it('ranks src/index code above docs, tests and generated files', () => {
+        const ranked = rankCodePaths([
+            'packages/docs/snippets/how-z-compile-works.mdx',
+            'scripts/compile-fuzz.ts',
+            'packages/treeshake/zod-full.ts',
+            'packages/zod/src/index.ts',
+            'packages/zod/dist/index.js'
+        ]);
+        expect(ranked[0]).toBe('packages/zod/src/index.ts');
+        expect(ranked).not.toContain('packages/docs/snippets/how-z-compile-works.mdx');
+        expect(ranked).not.toContain('packages/zod/dist/index.js');
     });
 });

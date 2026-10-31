@@ -2,7 +2,7 @@ import { AppError } from '../errors.js';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 import path from 'node:path';
-import { extractDefinitionsWithTreeSitter, findCallSitesWithTreeSitter, type CodeSymbolCallSite } from './treeSitter.js';
+import { analyzeWithTreeSitter, type CodeSymbolCallSite } from './treeSitter.js';
 
 export type CodeSymbolKind = 'class' | 'function' | 'interface' | 'type' | 'method' | 'const' | 'enum' | 'struct' | 'trait';
 
@@ -82,6 +82,34 @@ export function detectCodeLanguage(filePath: string): string {
     return map[extension] ?? (extension || 'unknown');
 }
 
+const CODE_EXTENSIONS = new Set([
+    'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'py', 'go', 'rs', 'java', 'kt', 'cs', 'cpp', 'cc', 'cxx', 'h', 'hpp'
+]);
+const LOW_PRIORITY_PATH = /(^|\/)(docs?|documentation|examples?|test|tests|__tests__|spec|specs|scripts|fixtures?|benchmarks?|e2e|mocks?)(\/|$)/i;
+const GENERATED_PATH = /(^|\/)(dist|build|vendor|node_modules|coverage|\.next)(\/|$)/i;
+
+export function isCodeFilePath(filePath: string): boolean {
+    const extension = filePath.toLowerCase().split('.').pop() ?? '';
+    return CODE_EXTENSIONS.has(extension);
+}
+
+/** Rank code-search hits so src/index files are scanned before docs/tests/generated files. */
+export function rankCodePaths(paths: string[]): string[] {
+    const score = (filePath: string): number => {
+        if (!isCodeFilePath(filePath) || GENERATED_PATH.test(filePath)) return Number.NEGATIVE_INFINITY;
+        let value = 0;
+        if (/(^|\/)(src|lib)(\/|$)/i.test(filePath)) value += 100;
+        if (/(^|\/)(packages|apps|libs)\/[^/]+\/(src|lib)(\/|$)/i.test(filePath)) value += 80;
+        if (/(^|\/)(index|main|mod)\.(ts|tsx|js|py|go|rs)$/i.test(filePath)) value += 70;
+        if (LOW_PRIORITY_PATH.test(filePath)) value -= 120;
+        return value;
+    };
+
+    return [...new Set(paths)]
+        .filter((filePath) => Number.isFinite(score(filePath)))
+        .sort((left, right) => score(right) - score(left) || left.localeCompare(right));
+}
+
 function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -127,10 +155,9 @@ function declarationPatterns(language: string, symbol: string): Array<{ kind: st
                 { kind: 'enum', pattern: new RegExp(`^\\s*(?:public\\s+|private\\s+|protected\\s+|internal\\s+)?enum\\s+${name}\\b`) }
             ];
         default:
-            return [
-                { kind: 'function', pattern: new RegExp(`\\b${name}\\s*\\(`) },
-                { kind: 'class', pattern: new RegExp(`\\b(?:class|struct|interface)\\s+${name}\\b`) }
-            ];
+            // Unknown/non-code files must never fall through to a loose
+            // "symbol(" regex: Markdown prose would be reported as a function.
+            return [];
     }
 }
 
@@ -316,7 +343,7 @@ function resolveModuleCandidates(filePath: string, specifier: string): string[] 
     return resolveCandidateExtensions(path.posix.normalize(path.posix.join(base, specifier)));
 }
 
-export function parseTsconfigPathAliases(raw: string): TsconfigPathAlias[] {
+export function parseTsconfigPathAliases(raw: string, configDir = ''): TsconfigPathAlias[] {
     try {
         const withoutComments = raw
             .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -328,7 +355,10 @@ export function parseTsconfigPathAliases(raw: string): TsconfigPathAlias[] {
                 paths?: Record<string, string[]>;
             };
         };
-        const baseUrl = parsed.compilerOptions?.baseUrl?.replace(/^\.\//, '') || '.';
+        const baseUrl = path.posix.normalize(path.posix.join(
+            configDir.replace(/^\.\//, ''),
+            parsed.compilerOptions?.baseUrl?.replace(/^\.\//, '') || '.'
+        ));
         return Object.entries(parsed.compilerOptions?.paths ?? {}).map(([pattern, targets]) => {
             const starIndex = pattern.indexOf('*');
             return {
@@ -351,6 +381,8 @@ export function findReExportTargets(
     aliases: TsconfigPathAlias[] = []
 ): string[] {
     const targets: string[] = [];
+    const namedTargets: string[] = [];
+    const starTargets: string[] = [];
     const resolveSpecifier = (specifier: string): string[] => {
         if (specifier.startsWith('.')) {
             return resolveModuleCandidates(filePath, specifier);
@@ -376,14 +408,15 @@ export function findReExportTargets(
                 const [imported, exported] = item.split(/\s+as\s+/).map((part) => part.trim());
                 return imported === symbol || exported === symbol;
             });
-            if (matches) targets.push(...resolveSpecifier(named[2]));
+            if (matches) namedTargets.push(...resolveSpecifier(named[2]));
             continue;
         }
         const star = line.match(/^\s*export\s*\*\s*from\s*['"]([^'"]+)['"]/);
         if (star?.[1]) {
-            targets.push(...resolveSpecifier(star[1]));
+            starTargets.push(...resolveSpecifier(star[1]));
         }
     }
+    targets.push(...namedTargets, ...starTargets);
     return [...new Set(targets)];
 }
 
@@ -512,10 +545,10 @@ async function searchGitHubCode(
     }
 
     const data = response.data as GitHubCodeSearchResponse;
-    return [...new Set((data.items ?? [])
+    return rankCodePaths((data.items ?? [])
         .map((item) => item.path)
         .filter((path): path is string => Boolean(path))
-    )];
+    );
 }
 
 async function fetchRawFile(
@@ -577,19 +610,81 @@ async function fetchRawFile(
     return null;
 }
 
+async function fetchTsconfigPaths(owner: string, repo: string, ref: string, signal?: AbortSignal): Promise<string[]> {
+    try {
+        const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(ref)}?recursive=1`;
+        const response = await requestDirectFirst(
+            'GET',
+            url,
+            (forceDirect) => buildAxiosRequestOptions({
+                headers: githubHeaders(),
+                timeout: 10000,
+                responseType: 'json',
+                signal,
+                forceDirect
+            }),
+            'GitHub tree for tsconfig discovery'
+        );
+        if (response.status !== 200) return [];
+        const data = response.data as { tree?: Array<{ path?: string }> };
+        return (data.tree ?? [])
+            .map((entry) => entry.path)
+            .filter((filePath): filePath is string => typeof filePath === 'string')
+            .filter((filePath) =>
+                /(^|\/)tsconfig(?:\.[^/]+)?\.json$/i.test(filePath)
+                && !filePath.includes('node_modules/')
+            )
+            .sort((left, right) => {
+                const leftPriority = /(^|\/)(packages|apps|libs)\//.test(left) ? 0 : 1;
+                const rightPriority = /(^|\/)(packages|apps|libs)\//.test(right) ? 0 : 1;
+                return leftPriority - rightPriority || left.localeCompare(right);
+            })
+            .slice(0, 20);
+    } catch {
+        return [];
+    }
+}
+
 async function loadTsconfigAliases(
     owner: string,
     repo: string,
     refsToTry: string[],
     signal?: AbortSignal
 ): Promise<TsconfigPathAlias[]> {
-    for (const ref of refsToTry) {
-        const content = await fetchRawFile(owner, repo, ref, 'tsconfig.json', signal);
-        if (content) {
-            return parseTsconfigPathAliases(content);
+    const aliases: TsconfigPathAlias[] = [];
+    const seen = new Set<string>();
+    const addAliases = (parsed: TsconfigPathAlias[]): void => {
+        for (const alias of parsed) {
+            const key = `${alias.baseUrl}|${alias.prefix}|${alias.suffix}|${alias.targets.join(',')}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                aliases.push(alias);
+            }
         }
+    };
+
+    for (const ref of refsToTry) {
+        const root = await fetchRawFile(owner, repo, ref, 'tsconfig.json', signal);
+        const base = await fetchRawFile(owner, repo, ref, 'tsconfig.base.json', signal);
+        if (root) addAliases(parseTsconfigPathAliases(root));
+        if (base) addAliases(parseTsconfigPathAliases(base));
+
+        const shouldDiscoverPackages = !root || root.includes('"references"') || aliases.length === 0;
+        if (!shouldDiscoverPackages) {
+            return aliases;
+        }
+
+        const configPaths = await fetchTsconfigPaths(owner, repo, ref, signal);
+        for (const configPath of configPaths) {
+            if (configPath === 'tsconfig.json' || configPath === 'tsconfig.base.json') continue;
+            const content = await fetchRawFile(owner, repo, ref, configPath, signal);
+            if (!content) continue;
+            const configDir = path.posix.dirname(configPath);
+            addAliases(parseTsconfigPathAliases(content, configDir === '.' ? '' : configDir));
+        }
+        return aliases;
     }
-    return [];
+    return aliases;
 }
 
 export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbolResult> {
@@ -622,11 +717,13 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
     let filesScanned = 0;
 
     type WorkItem = { path: string; via?: string; depth: number };
-    const queue: WorkItem[] = paths.slice(0, 8).map((filePath) => ({ path: filePath, depth: 0 }));
+    const directQueue: WorkItem[] = paths.slice(0, 12).map((filePath) => ({ path: filePath, depth: 0 }));
+    const reexportQueue: WorkItem[] = [];
     const visited = new Set<string>();
 
-    while (queue.length > 0 && filesScanned < 12) {
-        const item = queue.shift()!;
+    while ((directQueue.length > 0 || reexportQueue.length > 0) && filesScanned < 18) {
+        // Scan every direct code-search hit before spending budget on barrels.
+        const item = directQueue.shift() ?? reexportQueue.shift()!;
         if (visited.has(item.path)) continue;
         visited.add(item.path);
 
@@ -643,21 +740,20 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
         }
         filesScanned += 1;
         const language = detectCodeLanguage(item.path);
-        const astDefinitions = await extractDefinitionsWithTreeSitter(content, item.path, language, symbol, input.kind);
-        const found = (astDefinitions ?? extractCodeDefinitions(content, item.path, symbol, input.kind))
+        const analysis = await analyzeWithTreeSitter(content, item.path, language, symbol, input.kind);
+        const found = (analysis?.definitions.length ? analysis.definitions : extractCodeDefinitions(content, item.path, symbol, input.kind))
             .map((definition) => item.via ? { ...definition, via: item.via } : definition);
         definitions.push(...found);
 
-        const astCalls = await findCallSitesWithTreeSitter(content, item.path, language, symbol);
-        if (astCalls) {
-            callSites.push(...astCalls);
+        if (analysis?.callSites) {
+            callSites.push(...analysis.callSites);
         }
 
         if (found.length === 0 && item.depth < 4) {
             const targets = findReExportTargets(content, item.path, symbol, aliases);
             for (const target of targets.slice(0, 4)) {
                 if (!visited.has(target)) {
-                    queue.push({ path: target, via: item.path, depth: item.depth + 1 });
+                    reexportQueue.push({ path: target, via: item.path, depth: item.depth + 1 });
                 }
             }
         }
@@ -678,6 +774,9 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
         warnings.push('No declaration matched. Try a different kind or pass the exact symbol name.');
     } else if (definitions.some((definition) => definition.via)) {
         warnings.push('Definition was resolved through a re-export; the `via` field records the entry file.');
+    }
+    if (reexportQueue.length > 0) {
+        warnings.push(`Stopped after scanning ${filesScanned} files; ${reexportQueue.length} re-export targets remain unscanned.`);
     }
 
     return {

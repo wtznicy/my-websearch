@@ -9,7 +9,8 @@ All notable changes to `my-websearch` are documented in this file.
 
 ### Changed
 - **`codeSymbol` 解析质量**：支持多行签名、Python 装饰器、字符串/注释/正则感知的花括号匹配、jsDelivr raw 降级、截断标记，以及 `export { X } from` 的 re-export 追踪。
-- **`codeSymbol` 远程代码智能**：新增可选 Tree-sitter WASM 后端（按语言下载并缓存 grammar，失败回退扫描器）、语法级 call sites、tsconfig path alias re-export、私有仓库 Contents API 回退。Tree-sitter 只能提供语法树，仍不做语义类型推导。
+- **`codeSymbol` 远程代码智能**：新增可选 Tree-sitter WASM 后端（按语言后台下载并缓存 grammar，冷启动立即回退扫描器；文件只解析一次同时产出定义与调用点）、tsconfig path alias/monorepo `references` 发现、私有仓库 Contents API 回退；通用方法名的成员调用不再无条件计入 call sites；直接搜索命中优先于 re-export 扫描，避免 `export *` 扇出吃光配额。
+- **`codeSymbol` 正确性修复**：GitHub Code Search 结果先过滤非代码文件并按 `src/lib/index` 优先、docs/test/scripts/generated 降级；未知语言不再套用宽松 `symbol(` 正则，Markdown 文档不会被误报为函数。
 
 ## [1.3.12] - 2026-10-30
 
