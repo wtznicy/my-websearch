@@ -69,7 +69,7 @@ export function registerCodeSymbolTool(server: McpServer, _runtime: MyWebSearchR
             inputSchema: z.object({
                 repo: z.string().min(1).max(500).describe('GitHub repository: owner/repo or https://github.com/owner/repo'),
                 symbol: z.string().min(1).max(200).describe('Exact symbol name (class/function/interface/type/const)'),
-                kind: z.enum(['class', 'function', 'interface', 'type', 'method', 'const', 'enum', 'struct', 'trait']).optional()
+                kind: z.enum(['class', 'function', 'interface', 'type', 'method', 'const', 'enum', 'struct', 'trait', 'namespace']).optional()
                     .describe('Optional declaration kind filter'),
                 ref: z.string().min(1).max(200).optional().describe('Optional branch/tag/commit for raw file fetch'),
                 maxResults: z.preprocess((value) => (value === undefined || value === '' ? undefined : Number(value)), z.number().int().min(1).max(10).optional())

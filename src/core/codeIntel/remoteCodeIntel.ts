@@ -4,7 +4,7 @@ import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 import path from 'node:path';
 import { analyzeWithTreeSitter, type CodeSymbolCallSite } from './treeSitter.js';
 
-export type CodeSymbolKind = 'class' | 'function' | 'interface' | 'type' | 'method' | 'const' | 'enum' | 'struct' | 'trait';
+export type CodeSymbolKind = 'class' | 'function' | 'interface' | 'type' | 'method' | 'const' | 'enum' | 'struct' | 'trait' | 'namespace';
 
 export interface CodeSymbolInput {
     repo: string;
@@ -373,6 +373,53 @@ export function parseTsconfigPathAliases(raw: string, configDir = ''): TsconfigP
     }
 }
 
+/** Detect `import * as z ...; export { z }` / aliased imports as a symbol binding. */
+export function findReExportBinding(
+    content: string,
+    filePath: string,
+    symbol: string
+): CodeSymbolDefinition | null {
+    const imports = new Map<string, { kind: 'namespace' | 'const' }>();
+    const lines = content.split(/\r?\n/);
+
+    for (const line of lines) {
+        const namespace = line.match(/^\s*import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+['"][^'"]+['"]/);
+        if (namespace?.[1]) imports.set(namespace[1], { kind: 'namespace' });
+        const named = line.match(/^\s*import\s*\{([^}]*)\}\s*from\s*['"][^'"]+['"]/);
+        if (named?.[1]) {
+            for (const item of named[1].split(',')) {
+                const [imported, alias] = item.trim().split(/\s+as\s+/);
+                const local = alias ?? imported;
+                if (local) imports.set(local.trim(), { kind: 'const' });
+            }
+        }
+    }
+
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index] ?? '';
+        const exported = line.match(/^\s*export\s*\{([^}]*)\}\s*;?\s*$/);
+        if (!exported?.[1]) continue;
+        const items = exported[1].split(',').map((item) => item.trim()).filter(Boolean);
+        const matched = items.some((item) => {
+            const [imported, alias] = item.split(/\s+as\s+/).map((part) => part.trim());
+            return imported === symbol || alias === symbol;
+        });
+        if (!matched) continue;
+        const kind = imports.get(symbol)?.kind === 'namespace' ? 'namespace' : 'const';
+        return {
+            path: filePath,
+            language: detectCodeLanguage(filePath),
+            kind,
+            signature: line.trim(),
+            startLine: index + 1,
+            endLine: index + 1,
+            code: line.trim(),
+            truncated: false
+        };
+    }
+    return null;
+}
+
 /** Resolve `export { X } from './module'` / `export * from './module'` targets. */
 export function findReExportTargets(
     content: string,
@@ -512,7 +559,8 @@ async function searchGitHubCode(
     }
 
     const query = `${symbol} repo:${owner}/${repo}`;
-    const url = `https://api.github.com/search/code?q=${encodeURIComponent(query)}&per_page=${Math.min(Math.max(maxResults * 3, 10), 50)}`;
+    const perPage = Math.min(Math.max(maxResults * 10, 50), 100);
+    const url = `https://api.github.com/search/code?q=${encodeURIComponent(query)}&per_page=${perPage}`;
     const response = await requestDirectFirst(
         'GET',
         url,
@@ -645,7 +693,7 @@ async function fetchTsconfigPaths(owner: string, repo: string, ref: string, sign
     }
 }
 
-async function loadTsconfigAliases(
+async function loadTsconfigAliasesUncached(
     owner: string,
     repo: string,
     refsToTry: string[],
@@ -687,6 +735,40 @@ async function loadTsconfigAliases(
     return aliases;
 }
 
+const tsconfigAliasCache = new Map<string, Promise<TsconfigPathAlias[]>>();
+
+function loadTsconfigAliases(
+    owner: string,
+    repo: string,
+    refsToTry: string[],
+    signal?: AbortSignal
+): Promise<TsconfigPathAlias[]> {
+    const cacheKey = `${owner}/${repo}@${refsToTry.join(',')}`;
+    const cached = tsconfigAliasCache.get(cacheKey);
+    if (cached) return cached;
+    const promise = loadTsconfigAliasesUncached(owner, repo, refsToTry, signal);
+    tsconfigAliasCache.set(cacheKey, promise);
+    return promise;
+}
+
+async function mapWithConcurrency<T, R>(
+    items: T[],
+    limit: number,
+    task: (item: T) => Promise<R>
+): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (cursor < items.length) {
+            const index = cursor;
+            cursor += 1;
+            results[index] = await task(items[index]!);
+        }
+    });
+    await Promise.all(workers);
+    return results;
+}
+
 export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbolResult> {
     const parsed = parseGitHubRepoSpec(input.repo);
     if (!parsed) {
@@ -707,9 +789,24 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
     }
 
     const maxResults = Math.min(Math.max(input.maxResults ?? 5, 1), 10);
+    const debug = process.env.CODE_SYMBOL_DEBUG === '1';
+    const debugStarted = Date.now();
+    const debugLog = (stage: string): void => {
+        if (debug) console.error(`[codeSymbol] ${stage} +${Date.now() - debugStarted}ms`);
+    };
+    debugLog('start');
     const paths = await searchGitHubCode(parsed.owner, parsed.repo, symbol, maxResults, input.signal);
+    debugLog(`search paths=${paths.length}`);
     const refsToTry = input.ref ? [input.ref] : ['main', 'master'];
-    const aliases = await loadTsconfigAliases(parsed.owner, parsed.repo, refsToTry, input.signal);
+    let aliases: TsconfigPathAlias[] = [];
+    let aliasesPromise: Promise<TsconfigPathAlias[]> | null = null;
+    const ensureAliases = async (): Promise<TsconfigPathAlias[]> => {
+        if (!aliasesPromise) {
+            aliasesPromise = loadTsconfigAliases(parsed.owner, parsed.repo, refsToTry, input.signal);
+        }
+        aliases = await aliasesPromise;
+        return aliases;
+    };
     const warnings: string[] = [];
     const definitions: CodeSymbolDefinition[] = [];
     const references: CodeSymbolReference[] = [];
@@ -720,6 +817,18 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
     const directQueue: WorkItem[] = paths.slice(0, 12).map((filePath) => ({ path: filePath, depth: 0 }));
     const reexportQueue: WorkItem[] = [];
     const visited = new Set<string>();
+    const fetchWithRefs = async (filePath: string): Promise<string | null> => {
+        for (const ref of refsToTry) {
+            const content = await fetchRawFile(parsed.owner, parsed.repo, ref, filePath, input.signal);
+            if (content !== null) return content;
+        }
+        return null;
+    };
+    const directContents = new Map<string, string | null>();
+    await mapWithConcurrency(directQueue, 4, async (item) => {
+        directContents.set(item.path, await fetchWithRefs(item.path));
+    });
+    debugLog('direct fetch complete');
 
     while ((directQueue.length > 0 || reexportQueue.length > 0) && filesScanned < 18) {
         // Scan every direct code-search hit before spending budget on barrels.
@@ -727,13 +836,9 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
         if (visited.has(item.path)) continue;
         visited.add(item.path);
 
-        let content: string | null = null;
-        for (const ref of refsToTry) {
-            content = await fetchRawFile(parsed.owner, parsed.repo, ref, item.path, input.signal);
-            if (content !== null) {
-                break;
-            }
-        }
+        const content = directContents.has(item.path)
+            ? directContents.get(item.path) ?? null
+            : await fetchWithRefs(item.path);
         if (content === null) {
             warnings.push(`Could not fetch ${item.path}.`);
             continue;
@@ -743,19 +848,28 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
         const analysis = await analyzeWithTreeSitter(content, item.path, language, symbol, input.kind);
         const found = (analysis?.definitions.length ? analysis.definitions : extractCodeDefinitions(content, item.path, symbol, input.kind))
             .map((definition) => item.via ? { ...definition, via: item.via } : definition);
-        definitions.push(...found);
+        if (found.length > 0) {
+            definitions.push(...found);
+        } else {
+            const binding = findReExportBinding(content, item.path, symbol);
+            if (binding && (!input.kind || binding.kind === input.kind)) {
+                definitions.push(binding);
+            } else if (item.depth < 4) {
+                let targets = findReExportTargets(content, item.path, symbol, aliases);
+                if (targets.length === 0 && /from\s*['"][^./][^'"]*['"]/.test(content)) {
+                    await ensureAliases();
+                    targets = findReExportTargets(content, item.path, symbol, aliases);
+                }
+                for (const target of targets.slice(0, 4)) {
+                    if (!visited.has(target)) {
+                        reexportQueue.push({ path: target, via: item.path, depth: item.depth + 1 });
+                    }
+                }
+            }
+        }
 
         if (analysis?.callSites) {
             callSites.push(...analysis.callSites);
-        }
-
-        if (found.length === 0 && item.depth < 4) {
-            const targets = findReExportTargets(content, item.path, symbol, aliases);
-            for (const target of targets.slice(0, 4)) {
-                if (!visited.has(target)) {
-                    reexportQueue.push({ path: target, via: item.path, depth: item.depth + 1 });
-                }
-            }
         }
 
         const lines = content.split(/\r?\n/);
@@ -778,6 +892,7 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
     if (reexportQueue.length > 0) {
         warnings.push(`Stopped after scanning ${filesScanned} files; ${reexportQueue.length} re-export targets remain unscanned.`);
     }
+    debugLog('scan complete');
 
     return {
         repo: `${parsed.owner}/${parsed.repo}`,

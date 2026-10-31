@@ -3,6 +3,7 @@ import {
     buildRawFileUrls,
     detectCodeLanguage,
     extractCodeDefinitions,
+    findReExportBinding,
     findReExportTargets,
     isCodeFilePath,
     parseGitHubRepoSpec,
@@ -154,6 +155,18 @@ describe('remote code intelligence', () => {
         }));
         const targets = findReExportTargets("export { Depends } from '@/params.js';", 'src/index.ts', 'Depends', aliases);
         expect(targets).toContain('src/params.ts');
+    });
+
+    it('detects namespace import/export bindings (zod-style z)', () => {
+        const index = [
+            'import * as z from "./v4/classic/external.js";',
+            'export * from "./v4/classic/external.js";',
+            'export { z, z as default };'
+        ].join('\n');
+        const binding = findReExportBinding(index, 'packages/zod/src/index.ts', 'z');
+        expect(binding?.kind).toBe('namespace');
+        expect(binding?.startLine).toBe(3);
+        expect(binding?.signature).toContain('export { z, z as default }');
     });
 
     it('resolves package-level tsconfig aliases relative to the config directory', () => {
