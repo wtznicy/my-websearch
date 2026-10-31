@@ -7,6 +7,7 @@ import {
     findReExportTargets,
     isCodeFilePath,
     parseGitHubRepoSpec,
+    parseTsconfigExtends,
     parseTsconfigPathAliases,
     rankCodePaths
 } from '../../core/codeIntel/remoteCodeIntel.js';
@@ -175,6 +176,14 @@ describe('remote code intelligence', () => {
         }), 'packages/api');
         const targets = findReExportTargets("export { Depends } from '@/params.js';", 'packages/api/index.ts', 'Depends', aliases);
         expect(targets).toContain('packages/api/src/params.ts');
+    });
+
+    it('parses local tsconfig extends chains', () => {
+        expect(parseTsconfigExtends('{"extends": "../../tsconfig.base.json"}'))
+            .toEqual(['../../tsconfig.base.json']);
+        expect(parseTsconfigExtends('{"extends": ["./a.json", "./b.json"]}'))
+            .toEqual(['./a.json', './b.json']);
+        expect(parseTsconfigExtends('not json')).toEqual([]);
     });
 
     it('never treats Markdown prose as a function declaration', () => {

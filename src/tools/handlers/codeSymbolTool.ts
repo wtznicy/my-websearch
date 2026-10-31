@@ -26,7 +26,18 @@ function formatCodeSymbol(result: CodeSymbolResult): string {
         for (const definition of result.definitions) {
             lines.push(
                 '',
-                `### \`${definition.path}:${definition.startLine}\` (${definition.kind})${definition.via ? ` — via \`${definition.via}\`` : ''}`,
+                `### \`${definition.path}:${definition.startLine}\` (${definition.kind})${definition.via ? ` — via \`${definition.via}\`` : ''}`
+            );
+            if (definition.typeInfo?.returnType) {
+                lines.push(`> Return: \`${definition.typeInfo.returnType}\``);
+            }
+            if (definition.typeInfo?.parameters?.length) {
+                lines.push(`> Params: ${definition.typeInfo.parameters.map((parameter) => `\`${parameter}\``).join(', ')}`);
+            }
+            if (definition.typeInfo?.type) {
+                lines.push(`> Type: \`${definition.typeInfo.type}\``);
+            }
+            lines.push(
                 '',
                 '```' + definition.language,
                 definition.code,

@@ -3,6 +3,7 @@ import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRe
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 import path from 'node:path';
 import { analyzeWithTreeSitter, type CodeSymbolCallSite } from './treeSitter.js';
+import { inferTypeInfo, type CodeTypeInfo } from './typeInference.js';
 
 export type CodeSymbolKind = 'class' | 'function' | 'interface' | 'type' | 'method' | 'const' | 'enum' | 'struct' | 'trait' | 'namespace';
 
@@ -26,6 +27,8 @@ export interface CodeSymbolDefinition {
     /** Present when the symbol was found through an `export { ... } from` re-export. */
     via?: string;
     truncated?: boolean;
+    /** Best-effort TypeScript/JavaScript semantic type info. */
+    typeInfo?: CodeTypeInfo;
 }
 
 export interface CodeSymbolReference {
@@ -693,6 +696,20 @@ async function fetchTsconfigPaths(owner: string, repo: string, ref: string, sign
     }
 }
 
+export function parseTsconfigExtends(raw: string): string[] {
+    try {
+        const withoutComments = raw
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/(^|[^:])\/\/.*$/gm, '$1')
+            .replace(/,\s*([}\]])/g, '$1');
+        const parsed = JSON.parse(withoutComments) as { extends?: string | string[] };
+        if (typeof parsed.extends === 'string') return [parsed.extends];
+        return Array.isArray(parsed.extends) ? parsed.extends.filter((item): item is string => typeof item === 'string') : [];
+    } catch {
+        return [];
+    }
+}
+
 async function loadTsconfigAliasesUncached(
     owner: string,
     repo: string,
@@ -712,24 +729,62 @@ async function loadTsconfigAliasesUncached(
     };
 
     for (const ref of refsToTry) {
-        const root = await fetchRawFile(owner, repo, ref, 'tsconfig.json', signal);
-        const base = await fetchRawFile(owner, repo, ref, 'tsconfig.base.json', signal);
-        if (root) addAliases(parseTsconfigPathAliases(root));
-        if (base) addAliases(parseTsconfigPathAliases(base));
+        const contentCache = new Map<string, string | null>();
+        const aliasesCache = new Map<string, Promise<TsconfigPathAlias[]>>();
+        const visiting = new Set<string>();
+        const loadContent = async (configPath: string): Promise<string | null> => {
+            if (contentCache.has(configPath)) return contentCache.get(configPath) ?? null;
+            const content = await fetchRawFile(owner, repo, ref, configPath, signal);
+            contentCache.set(configPath, content);
+            return content;
+        };
 
-        const shouldDiscoverPackages = !root || root.includes('"references"') || aliases.length === 0;
+        const loadConfig = async (configPath: string, depth = 0): Promise<TsconfigPathAlias[]> => {
+            if (aliasesCache.has(configPath)) return aliasesCache.get(configPath)!;
+            if (visiting.has(configPath)) return [];
+            visiting.add(configPath);
+            const promise = (async () => {
+                const content = await loadContent(configPath);
+                if (!content) return [];
+                const inherited: TsconfigPathAlias[] = [];
+                if (depth < 5) {
+                    for (const specifier of parseTsconfigExtends(content)) {
+                        if (!specifier.startsWith('.')) continue;
+                        const baseDir = path.posix.dirname(configPath);
+                        const target = path.posix.normalize(path.posix.join(baseDir, specifier));
+                        for (const candidate of [target, `${target}.json`]) {
+                            if (candidate.endsWith('.json')) {
+                                inherited.push(...await loadConfig(candidate, depth + 1));
+                                break;
+                            }
+                        }
+                    }
+                }
+                const configDir = path.posix.dirname(configPath);
+                const own = parseTsconfigPathAliases(content, configDir === '.' ? '' : configDir);
+                return [...inherited, ...own];
+            })().finally(() => {
+                visiting.delete(configPath);
+            });
+            aliasesCache.set(configPath, promise);
+            return promise;
+        };
+
+        const rootContent = await loadContent('tsconfig.json');
+        if (rootContent) addAliases(await loadConfig('tsconfig.json'));
+        if (await loadContent('tsconfig.base.json')) addAliases(await loadConfig('tsconfig.base.json'));
+
+        const shouldDiscoverPackages = !rootContent || rootContent.includes('"references"') || aliases.length === 0;
         if (!shouldDiscoverPackages) {
             return aliases;
         }
 
         const configPaths = await fetchTsconfigPaths(owner, repo, ref, signal);
-        for (const configPath of configPaths) {
-            if (configPath === 'tsconfig.json' || configPath === 'tsconfig.base.json') continue;
-            const content = await fetchRawFile(owner, repo, ref, configPath, signal);
-            if (!content) continue;
-            const configDir = path.posix.dirname(configPath);
-            addAliases(parseTsconfigPathAliases(content, configDir === '.' ? '' : configDir));
-        }
+        const packageConfigs = configPaths
+            .filter((configPath) => configPath !== 'tsconfig.json' && configPath !== 'tsconfig.base.json')
+            .slice(0, 8);
+        const loaded = await Promise.all(packageConfigs.map((configPath) => loadConfig(configPath)));
+        for (const parsed of loaded) addAliases(parsed);
         return aliases;
     }
     return aliases;
@@ -846,9 +901,13 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
         filesScanned += 1;
         const language = detectCodeLanguage(item.path);
         const analysis = await analyzeWithTreeSitter(content, item.path, language, symbol, input.kind);
-        const found = (analysis?.definitions.length ? analysis.definitions : extractCodeDefinitions(content, item.path, symbol, input.kind))
+        let found = (analysis?.definitions.length ? analysis.definitions : extractCodeDefinitions(content, item.path, symbol, input.kind))
             .map((definition) => item.via ? { ...definition, via: item.via } : definition);
         if (found.length > 0) {
+            const typeInfo = inferTypeInfo(content, item.path, symbol);
+            if (typeInfo) {
+                found = found.map((definition) => ({ ...definition, typeInfo }));
+            }
             definitions.push(...found);
         } else {
             const binding = findReExportBinding(content, item.path, symbol);

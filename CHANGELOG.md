@@ -11,6 +11,7 @@ All notable changes to `my-websearch` are documented in this file.
 - **`codeSymbol` 解析质量**：支持多行签名、Python 装饰器、字符串/注释/正则感知的花括号匹配、jsDelivr raw 降级、截断标记，以及 `export { X } from` 的 re-export 追踪。
 - **`codeSymbol` 远程代码智能**：新增可选 Tree-sitter WASM 后端（按语言后台下载并缓存 grammar，冷启动立即回退扫描器；文件只解析一次同时产出定义与调用点）、tsconfig path alias/monorepo `references` 发现、私有仓库 Contents API 回退；通用方法名的成员调用不再无条件计入 call sites；直接搜索命中优先于 re-export 扫描，避免 `export *` 扇出吃光配额。
 - **`codeSymbol` 正确性修复**：GitHub Code Search 结果先过滤非代码文件并按 `src/lib/index` 优先、docs/test/scripts/generated 降级；未知语言不再套用宽松 `symbol(` 正则，Markdown 文档不会被误报为函数；支持 `import * as z; export { z }` 这类 namespace re-export 绑定；Code Search 拉取 50 条后再排序，避免短符号（如 zod 的 `z`）前 15 条全是 docs/tests；直接文件并行预取，tsconfig alias 改为按需加载。
+- **`codeSymbol` monorepo extends 与语义类型**：递归合并本地 `extends` 链（含 cycle guard），package tsconfig 的 baseUrl/paths 生效；TypeScript/JavaScript 通过 TypeScript checker 补充 return/parameter/variable 类型，未拉取的 import 明确退化为 `any`。
 
 ## [1.3.12] - 2026-10-30
 
