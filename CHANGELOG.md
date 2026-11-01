@@ -15,7 +15,7 @@ All notable changes to `my-websearch` are documented in this file.
 - **`codeSymbol` 缓存、预算与语言类型**：symbol 结果、文件内容、文件分析三层 TTL 缓存；默认 8s 软预算，超时返回 partial 结果而不是空结果；直接文件并行预取/分析；Python/Go/Rust 从签名提取参数和返回类型（注解级，不执行语言运行时）。
 - **CDP 设备 profile**：新增 `BROWSER_PROFILE`（Windows/macOS/随机），通过 CDP Emulation 覆盖 UA、屏幕/DPR、时区、语言；仅作用于浏览器路径，不改变 DDG/Brave 的 HTTP 请求指纹。
 - **DDG 202 浏览器回退**：DuckDuckGo 的 HTTP 路径返回 202/CAPTCHA 时，改用 CDP 浏览器抓取 `html.duckduckgo.com` 并解析；默认开启，`DDG_BROWSER_FALLBACK=0` 可关闭。
-- **Brave 无 key 改走 Windows curl/Schannel**：axios HTTP/1.1 在新加坡节点 0/10 全 429；curl HTTP/1.1 前 7/10 成功，随后 429。curl 429 后用 .NET Schannel HTTP/2 重试同 URL 0/3、新 URL 0/3，因此不再做 H2 回退；Windows 改为 curl 优先、axios 回退，`BRAVE_CURL=0` 可关闭。
+- **Brave 无 key 固定走 curl/Schannel**：axios HTTP/1.1 在新加坡节点 0/10 全 429；curl HTTP/1.1 前 7/10 成功，随后 429。curl 429 后用 .NET Schannel HTTP/2 重试同 URL 0/3、新 URL 0/3，因此不再做 H2 回退，也不再回退 axios；Brave 网页路径固定 curl。
 
 ## [1.3.12] - 2026-10-30
 

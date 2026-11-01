@@ -12,10 +12,9 @@ export interface CurlResponse {
 }
 
 /**
- * Windows curl uses Schannel for TLS. In the current Brave/CloudFront tests
- * this survives far longer than Node's OpenSSL axios stack (7/10 vs 0/10),
- * while .NET Schannel HTTP/2 did not rescue a curl 429 (0/3 same URL, 0/3
- * fresh URL). Keep this as the primary no-key web path on Windows.
+ * Brave 无 key 的网页路径固定使用 curl HTTP/1.1。
+ * Windows 的 curl 使用 Schannel；Node OpenSSL/axios 和 wreq HTTP/2 实测都 429。
+ * curl 一旦 429，重试 .NET Schannel HTTP/2 也无效（同 URL 0/3、新 URL 0/3）。
  */
 export async function braveHttpGetWithCurl(
     url: string,
@@ -23,10 +22,6 @@ export async function braveHttpGetWithCurl(
     headers: Record<string, string>,
     signal?: AbortSignal
 ): Promise<CurlResponse | null> {
-    if (process.platform !== 'win32' || process.env.BRAVE_CURL === '0') {
-        return null;
-    }
-
     const tempFile = path.join(
         os.tmpdir(),
         `mywebsearch-brave-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.html`
@@ -51,7 +46,8 @@ export async function braveHttpGetWithCurl(
     args.push(url);
 
     try {
-        const { stdout } = await execFileAsync('curl.exe', args, {
+        const command = process.platform === 'win32' ? 'curl.exe' : 'curl';
+        const { stdout } = await execFileAsync(command, args, {
             timeout: 25_000,
             maxBuffer: 2 * 1024 * 1024,
             windowsHide: true,

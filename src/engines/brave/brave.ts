@@ -15,9 +15,9 @@ import { braveHttpGetWithCurl } from '../../utils/braveCurl.js';
 export { isBraveBlockedPage };
 
 /**
- * Brave 的 CloudFront WAF 对 HTTP/2 浏览器指纹（wreq/primp）反而更容易返回 429：
- * 实测同一节点、同一时刻，wreq GET → 429，而 curl 的 HTTP/1.1 → 200。
- * Windows 上 curl 使用 Schannel；当前优先 curl，失败才回退 axios。
+ * Brave 的 CloudFront WAF 对 HTTP/2 浏览器指纹（wreq/primp）和 Node OpenSSL/axios
+ * 都会返回 429；实测 curl HTTP/1.1（Windows Schannel）明显更耐久（7/10 后才 429）。
+ * 因此 Brave 无 key 的网页路径固定走 curl，不再回退 axios。
  */
 const braveHttpGet = async (url: string, options: AxiosRequestConfig): Promise<AxiosResponse> => {
     const proxyUrl = getProxyUrl() ?? getSystemProxyFallbackUrl('brave');
@@ -27,23 +27,23 @@ const braveHttpGet = async (url: string, options: AxiosRequestConfig): Promise<A
         if (value !== undefined) headers[key] = String(value);
     }
     const curl = await braveHttpGetWithCurl(url, proxyUrl, headers, options.signal as AbortSignal | undefined);
-    if (curl) {
-        if (curl.status >= 400) {
-            const error = new Error(`Brave returned HTTP ${curl.status}`) as Error & {
-                response?: { status: number; data: string };
-            };
-            error.response = { status: curl.status, data: curl.data };
-            throw error;
-        }
-        return {
-            data: curl.data,
-            status: curl.status,
-            statusText: '',
-            headers: {},
-            config: options
-        } as AxiosResponse;
+    if (!curl) {
+        throw new Error('Brave web request failed: curl is unavailable or the request was aborted');
     }
-    return axios.get(url, options);
+    if (curl.status >= 400) {
+        const error = new Error(`Brave returned HTTP ${curl.status}`) as Error & {
+            response?: { status: number; data: string };
+        };
+        error.response = { status: curl.status, data: curl.data };
+        throw error;
+    }
+    return {
+        data: curl.data,
+        status: curl.status,
+        statusText: '',
+        headers: {},
+        config: options
+    } as AxiosResponse;
 };
 
 /** Brave 对数据中心/代理 IP 限流（429）时给出明确提示，而非笼统的 status code 错误 */
