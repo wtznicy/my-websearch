@@ -55,7 +55,7 @@
 | **`duckduckgo`** | 🌐 需代理 | 无 | **wreq Chrome 指纹 GET HTML 端点**（仅 axios 回退时可能遇到 202 anomaly CAPTCHA）；保留 `d.js` 求解器作为 preload 回退 | 英文技术检索、海外开源讨论 |
 | **`startpage`** | 🌐 需代理 | 无 | **多 Worker Anubis SHA-256 PoW 求解器**（难度 ≤ 6）+ 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
 | **`yahoo`** | 🌐 需代理 | 无 | SSR HTML + 首页 cookie 预热 + `RU=` 重定向还原；**英文替补池第一顺位**（DuckDuckGo 不健康时自动顶上） | 稳定的 Bing 索引英文兜底 |
-| **`brave`** | 🌐 需代理 | 无 | **固定 HTTP/1.1（axios）请求路径**（wreq/HTTP2 指纹会被 CloudFront 判 429）+ 赞助商商业推广深度剥离 | 独立海外英文索引、技术博客 |
+| **`brave`** | 🌐 需代理 | 无 | **固定 HTTP/1.1（axios）请求路径**；Windows 上遇到 429 时用 **Schannel HTTP/2** 重试（wreq/HTTP2 指纹单独会被 CloudFront 判 429）+ 赞助商商业推广深度剥离 | 独立海外英文索引、技术博客 |
 | **`exa`** | 🌐 建议代理 | 选配 Key | 官方语义搜索 API（未配置时自动跳过，不阻断级联）；直连也可用，但实测代理约 0.77s、直连约 1.17s | 深度语义相似搜索、学术与技术前沿 |
 | **`github`** | 🌐 直连 API | 无 | 官方 REST API 检索仓库与 Issue；**精确 owner/repo 直取** | 开源项目源码、开源库 Issues 排查、已知仓库查看 |
 | **`stackoverflow`**| 🌐 直连 API | 无 | StackExchange 2.3 官方 API + HTML 实体智能解码 | 编程报错排错、高质量代码问答 |
@@ -231,7 +231,7 @@ my-websearch doctor --reset-health
 2. **配置了有效代理后，国际引擎依然失败或超时？（逐引擎诊断，不是本地配置错误）**
    - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：202 响应体是 DDG 的 **anomaly CAPTCHA（人工验证页）**，不是普通按 IP 限流；内置 `d.js` 算术求解器无法绕过。引擎会先用 **wreq Chrome 指纹 GET** 请求 HTML 端点——即使 axios POST 路径吃 202，这条路径通常也能返回 200；所以现在只有 wreq 路径失败、回退到 axios POST 时才会再见到 202。如果仍看到 202，先确认你的版本包含 wreq GET 路径（**1.3.8 及更早没有**），再重试或检查代理是否真的挂上。**DDG 仍是 best-effort**：同一出口也可能间歇性被挑战，不要把它当 SLA；要稳定请用 Bing/Startpage 或配置 `BRAVE_API_KEY`/`EXA_API_KEY`。注意：`SEARCH_MODE=playwright:duckduckgo` 不受支持（DDG 没有浏览器渲染路径），会回退到 HTTP。
    - **Bing 返回 HTTP 200 但 0 条结果**：wreq 协议路径解析为空时会自动回退到 axios 网页路径；若两条路径都为空，通常是查询词或 IP 受到频控策略限制。
-   - **Brave 返回 HTTP 429 (Too Many Requests)**：CloudFront 对出口 IP 的限流通常是**分钟级窗口，不是永久封禁**——冷却后同一节点可恢复 200（实测 429 → 稍后连续 6 次 200），但短时间连打会再次触发。同一节点实测：wreq（HTTP/2 Chrome 指纹）→ **429**，axios/curl（HTTP/1.1）→ **200**，所以当前 `main` 固定走 axios；要稳定使用请配置 `BRAVE_API_KEY`（官方 API，有免费额度）彻底绕开 WAF。
+   - **Brave 返回 HTTP 429 (Too Many Requests)**：CloudFront 对出口 IP 的限流通常是**分钟级窗口，不是永久封禁**——冷却后同一节点可恢复 200，但短时间连打会再次触发。同一节点实测：wreq（HTTP/2 Chrome 指纹）→ **429**；axios（Node OpenSSL，HTTP/1.1）→ 当前环境 **429**；curl（Schannel，HTTP/1.1）→ **200**；.NET Schannel HTTP/2 → **200/429 混合**；Windows Schannel HTTP/2 回退在无 key 的 5/5 次搜索中返回 **200**。当前路径先用 axios HTTP/1.1，仅在 Windows 上对 429 用 Schannel HTTP/2 重试（`BRAVE_SCHANNEL_FALLBACK=0` 关闭）。这仍是 best-effort；要稳定使用请配置 `BRAVE_API_KEY`（官方 API，有免费额度）彻底绕开 WAF。
    - **Startpage 请求挂满超时或 Anubis PoW 难度过大**：难度 6 现由最多 4 个 Worker 并行求解（约 3–12s）；难度 >6 会自动跳过；pass-challenge 的 socket 错误/瞬时 5xx 会自动重试。
    - 💡 **解决方案**：这些是上游反爬/频控行为，不是 MCP 配置坏了。按引擎分别处理：DDG 202 → 升级/重试（wreq GET 路径；`auto` 模式下 Yahoo 也会从替补池顶替不健康的 DDG）；Brave 429 → 等分钟级窗口过去，或配 `BRAVE_API_KEY`；Bing 0 条 → 重试或换查询词；Startpage PoW → 重试。只有引擎特定的步骤都无效时再换出口 IP。最后才用 `engines: ["bing", "baidu"]` 降级，或配置官方 Key（`BRAVE_API_KEY` / `EXA_API_KEY`）走 SLA 通道。
 
@@ -335,6 +335,7 @@ my-websearch doctor --reset-health
 | `BROWSER_DRIVER` | `cdp` | 浏览器后端：`cdp`（默认，raw CDP）；`playwright` 为旧版逃生口，需要你自行安装 `playwright-core`，不再随包提供 |
 | `BROWSER_PROFILE` | `off` | CDP 设备 profile：`off`、`windows-chrome-8`、`windows-chrome-16`、`macos-chrome-8` 或 `random`。对浏览器会话应用 UA、屏幕/DPR、时区、语言；不会影响 DuckDuckGo/Brave 等纯 HTTP 引擎。 |
 | `DDG_BROWSER_FALLBACK` | `1` | DuckDuckGo 的 HTTP 路径返回 202/CAPTCHA 时，改用 CDP 浏览器请求 HTML 端点（会应用 `BROWSER_PROFILE`）；设为 `0` 关闭。 |
+| `BRAVE_SCHANNEL_FALLBACK` | `1` | 仅 Windows：Brave 的 axios 路径收到 429 后，改用 .NET Schannel HTTP/2 重试；设为 `0` 关闭。 |
 | `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 远程 Chrome/Edge CDP 调试端点（如 `http://127.0.0.1:9222` 或 `ws://...`）；旧变量名，由 CDP 驱动使用 |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | 自动探测 | 自定义浏览器二进制可执行文件绝对路径（默认自动探测 Edge/Chrome）；旧变量名 |
 | `PLAYWRIGHT_HEADLESS` | `true` | 是否无头运行（Windows 下自动使用隐身独立桌面）；旧变量名 |

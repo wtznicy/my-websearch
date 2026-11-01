@@ -9,6 +9,9 @@ import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 import { tripEngineCircuit } from '../../core/search/engineCircuitBreaker.js';
 import { isBraveBlockedPage } from '../../core/antiBot/antiBotDetection.js';
 import { AppError, extractErrorStatus } from '../../core/errors.js';
+import { getProxyUrl } from '../../config.js';
+import { getSystemProxyFallbackUrl } from '../../utils/systemProxy.js';
+import { braveHttpGetWithSchannel } from '../../utils/braveSchannel.js';
 export { isBraveBlockedPage };
 
 /**
@@ -16,8 +19,29 @@ export { isBraveBlockedPage };
  * 实测同一节点、同一时刻，wreq GET → 429，而 axios/curl 的 HTTP/1.1 → 200（连续 6 次）。
  * 因此 Brave 固定走 axios（Node 原生 HTTP/1.1），不要复用 DDG 的 wreq 路径。
  */
-const braveHttpGet = (url: string, options: AxiosRequestConfig): Promise<AxiosResponse> =>
-    axios.get(url, options);
+const braveHttpGet = async (url: string, options: AxiosRequestConfig): Promise<AxiosResponse> => {
+    try {
+        return await axios.get(url, options);
+    } catch (error) {
+        if (extractErrorStatus(error) !== 429) throw error;
+        // Windows Schannel + HTTP/2 is the only stack that currently bypasses
+        // Brave's CloudFront 429 in the same environment; fall back only after
+        // the normal axios HTTP/1.1 path is rejected.
+        const fallback = await braveHttpGetWithSchannel(
+            url,
+            getProxyUrl() ?? getSystemProxyFallbackUrl('brave'),
+            BROWSER_USER_AGENT
+        );
+        if (!fallback) throw error;
+        return {
+            data: fallback.data,
+            status: fallback.status,
+            statusText: '',
+            headers: {},
+            config: options
+        } as AxiosResponse;
+    }
+};
 
 /** Brave 对数据中心/代理 IP 限流（429）时给出明确提示，而非笼统的 status code 错误 */
 function buildBraveErrorMessage(error: unknown): Error {
