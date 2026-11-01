@@ -432,6 +432,16 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
   try {
     return await searchDuckDuckGoHtml(query, limit, signal, timeRange);
   } catch (htmlError) {
+    if (process.env.DDG_BROWSER_FALLBACK !== '0' && shouldUseDuckDuckGoBrowserFallback(htmlError)) {
+      try {
+        const browserResults = await searchDuckDuckGoWithBrowser(query, limit, signal);
+        if (browserResults.length > 0) {
+          return browserResults;
+        }
+      } catch (browserError) {
+        console.warn('DDG browser fallback failed:', browserError instanceof Error ? browserError.message : String(browserError));
+      }
+    }
     if (preloadError instanceof Error && htmlError instanceof Error) {
       const publicCode = isAppError(htmlError) ? htmlError.code : (normalizePublicErrorCode(extractErrorCode(htmlError)) ?? 'network_error');
       throw new AppError({
@@ -446,6 +456,33 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
     }
     throw htmlError;
   }
+  }
+
+  function shouldUseDuckDuckGoBrowserFallback(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = isAppError(error) ? error.code : extractErrorCode(error);
+    return code === 'bot_challenge' || code === 'rate_limited' || /202|anomaly|captcha|challenge/i.test(message);
+  }
+
+  async function searchDuckDuckGoWithBrowser(
+    query: string,
+    limit: number,
+    signal?: AbortSignal
+  ): Promise<SearchResult[]> {
+    const { fetchPageHtmlWithBrowser } = await import('../../utils/browserCookies.js');
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const page = await fetchPageHtmlWithBrowser(url, signal);
+    const parsed = parseDuckDuckGoHtmlResults(page.html, limit, new Set());
+    if (parsed.results.length === 0) {
+      throw new AppError({
+        code: 'bot_challenge',
+        retryable: false,
+        engine: 'duckduckgo',
+        hint: DDG_BLOCK_HINT,
+        message: 'DuckDuckGo browser fallback returned no parsable results (likely CAPTCHA).'
+      });
+    }
+    return parsed.results;
   }
 
   /**
