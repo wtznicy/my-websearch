@@ -1,6 +1,6 @@
 import type { Client } from 'chrome-remote-interface';
 import { BrowserKeyboard, BrowserLocator, BrowserPage, Cookie, LocatorOptions } from './driver.js';
-import { buildDeviceProfileScript, type DeviceProfile } from './deviceProfile.js';
+import { type DeviceProfile } from './deviceProfile.js';
 
 export class CDPPage implements BrowserPage {
     private client: Client;
@@ -416,7 +416,7 @@ export class CDPPage implements BrowserPage {
     }
 
     public async applyDeviceProfile(profile: DeviceProfile): Promise<void> {
-        const { Emulation, Network, Page } = this.client;
+        const { Emulation, Network } = this.client;
         await Emulation.setUserAgentOverride({
             userAgent: profile.userAgent,
             acceptLanguage: profile.acceptLanguage,
@@ -444,9 +444,6 @@ export class CDPPage implements BrowserPage {
             headers: {
                 'Accept-Language': profile.acceptLanguage
             }
-        });
-        await Page.addScriptToEvaluateOnNewDocument({
-            source: buildDeviceProfileScript(profile)
         });
     }
 

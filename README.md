@@ -369,7 +369,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | Variable | Default | Allowed Values / Description |
 | :--- | :--- | :--- |
 | `BROWSER_DRIVER` | `cdp` | Browser backend. `cdp` (default, raw CDP). `playwright` is a legacy escape hatch and requires you to install `playwright-core` manually; it is no longer bundled. |
-| `BROWSER_PROFILE` | `off` | CDP device profile: `off`, `windows-chrome-8`, `windows-chrome-16`, `macos-chrome-8`, or `random`. Applies UA, screen/DPR, timezone, locale, `hardwareConcurrency`, `deviceMemory` and WebGL vendor/renderer to browser sessions. It does not affect HTTP-only engines such as DuckDuckGo/Brave. |
+| `BROWSER_PROFILE` | `off` | CDP device profile: `off`, `windows-chrome-8`, `windows-chrome-16`, `macos-chrome-8`, or `random`. Applies UA, screen/DPR, timezone and locale to browser sessions. It does not affect HTTP-only engines such as DuckDuckGo/Brave. |
 | `DDG_BROWSER_FALLBACK` | `1` | When DuckDuckGo's HTTP paths return 202/CAPTCHA, retry the HTML endpoint through the CDP browser (honors `BROWSER_PROFILE`). Set `0` to disable. |
 | `PLAYWRIGHT_CDP_ENDPOINT` | empty | Remote Chrome/Edge CDP endpoint URL (e.g. `http://127.0.0.1:9222` or `ws://...`); legacy name, used by the CDP driver |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | auto | Absolute path to the browser executable (auto-detects system Edge/Chrome by default); legacy name |
@@ -404,7 +404,7 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run the Vitest suite (97 files, 736 tests at the current baseline)
+npm test              # Run the Vitest suite (97 files, 735 tests at the current baseline)
 npm run test:live     # Run bounded-concurrency live integration tests
 npm run eval:live     # Run 23-case live STDIO JSON-RPC evaluation suite
 ```
