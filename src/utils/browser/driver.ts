@@ -5,6 +5,8 @@
  * 提供轻量统一的页面控制、导航、求值与 Cookie 接口。
  */
 
+import type { DeviceProfile } from './deviceProfile.js';
+
 export interface LaunchOptions {
     headless?: boolean;
     executablePath?: string;
@@ -72,6 +74,7 @@ export interface BrowserPage {
         close(): Promise<void>;
     };
     addInitScript(script: string | (() => void)): Promise<void>;
+    applyDeviceProfile?(profile: DeviceProfile): Promise<void>;
     setViewportSize(size: { width: number; height: number }): Promise<void>;
     setExtraHTTPHeaders(headers: Record<string, string>): Promise<void>;
     route?(pattern: string, handler: (route: unknown) => Promise<void>): Promise<void>;

@@ -1,6 +1,7 @@
 import { isIP } from 'node:net';
 import { config, getProxyUrl } from '../config.js';
 import { prepareStealthPage, getStealthUserAgent } from './browserStealth.js';
+import { selectDeviceProfile, type DeviceProfile } from './browser/deviceProfile.js';
 import { openPlaywrightBrowser, loadPlaywrightClient } from './playwrightClient.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from './urlSafety.js';
 import {
@@ -145,6 +146,7 @@ type CookiePage = {
     context?(): { cookies?(urls?: string[]): Promise<Array<{ name: string; value: string }>> };
     route?(pattern: string, handler: (route: CookieRoute) => Promise<void>): Promise<void>;
     addInitScript(script: () => void): Promise<void>;
+    applyDeviceProfile?(profile: DeviceProfile): Promise<void>;
     setViewportSize?(size: { width: number; height: number }): Promise<void>;
     setExtraHTTPHeaders(headers: Record<string, string>): Promise<void>;
 };
@@ -367,6 +369,9 @@ export async function fetchPageHtmlWithBrowser(
             await installNavigationGuard(page);
             // 注入 stealth 指纹伪装，降低被 JS 反爬站点识别的概率
             await prepareStealthPage(page);
+            if (process.env.BROWSER_PROFILE && process.env.BROWSER_PROFILE !== 'off' && page.applyDeviceProfile) {
+                await page.applyDeviceProfile(selectDeviceProfile(process.env.BROWSER_PROFILE));
+            }
 
             // 模拟人类访问间隔（300-1200ms）
             if (typeof page.waitForTimeout === 'function') {

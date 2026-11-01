@@ -1,5 +1,6 @@
 import type { Client } from 'chrome-remote-interface';
 import { BrowserKeyboard, BrowserLocator, BrowserPage, Cookie, LocatorOptions } from './driver.js';
+import { buildDeviceProfileScript, type DeviceProfile } from './deviceProfile.js';
 
 export class CDPPage implements BrowserPage {
     private client: Client;
@@ -412,6 +413,41 @@ export class CDPPage implements BrowserPage {
         const { Page } = this.client;
         const source = typeof script === 'function' ? `(${script.toString()})()` : script;
         await Page.addScriptToEvaluateOnNewDocument({ source });
+    }
+
+    public async applyDeviceProfile(profile: DeviceProfile): Promise<void> {
+        const { Emulation, Network, Page } = this.client;
+        await Emulation.setUserAgentOverride({
+            userAgent: profile.userAgent,
+            acceptLanguage: profile.acceptLanguage,
+            platform: profile.platform
+        });
+        await Emulation.setDeviceMetricsOverride({
+            width: profile.screen.width,
+            height: profile.screen.height,
+            screenWidth: profile.screen.width,
+            screenHeight: profile.screen.height,
+            deviceScaleFactor: profile.screen.dpr,
+            mobile: false
+        });
+        try {
+            await Emulation.setTimezoneOverride({ timezoneId: profile.timezone });
+        } catch {
+            // Older Chrome versions may not expose timezone emulation.
+        }
+        try {
+            await Emulation.setLocaleOverride({ locale: profile.locale });
+        } catch {
+            // Older Chrome versions may not expose locale emulation.
+        }
+        await Network.setExtraHTTPHeaders({
+            headers: {
+                'Accept-Language': profile.acceptLanguage
+            }
+        });
+        await Page.addScriptToEvaluateOnNewDocument({
+            source: buildDeviceProfileScript(profile)
+        });
     }
 
     public context(): {
