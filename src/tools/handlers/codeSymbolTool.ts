@@ -16,7 +16,9 @@ import { detectUnknownParameters } from '../../utils/toolValidation.js';
 function formatCodeSymbol(result: CodeSymbolResult): string {
     const lines: string[] = [
         `# Symbol: ${result.symbol}`,
-        `> Repository: ${result.repo} | Ref: ${result.ref} | Files scanned: ${result.filesScanned}`
+        `> Repository: ${result.repo} | Ref: ${result.ref} | Files scanned: ${result.filesScanned}`,
+        ...(result.cached ? ['> Cached: yes'] : []),
+        ...(result.partial ? ['> Partial: yes (codeSymbol budget reached)'] : [])
     ];
 
     if (result.definitions.length === 0) {

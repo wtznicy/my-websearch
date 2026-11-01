@@ -32,6 +32,31 @@ describe('semantic type inference', () => {
     });
 
     it('returns null for unsupported languages', () => {
-        expect(inferTypeInfo('def foo(): pass', 'src/foo.py', 'foo')).toBeNull();
+        expect(inferTypeInfo('plain text', 'src/notes.txt', 'foo')).toBeNull();
+    });
+
+    it('extracts Python annotations', () => {
+        const source = [
+            '@router.get("/items/{item_id}")',
+            'def read_item(item_id: int, q: str = "x") -> bool:',
+            '    return True'
+        ].join('\n');
+        const info = inferTypeInfo(source, 'app/routes.py', 'read_item');
+        expect(info?.returnType).toBe('bool');
+        expect(info?.parameters).toEqual(['item_id: int', 'q: str']);
+    });
+
+    it('extracts Go signatures', () => {
+        const source = 'func Add(left int, right int) (int, error) {\n    return left + right, nil\n}';
+        const info = inferTypeInfo(source, 'math.go', 'Add');
+        expect(info?.parameters).toEqual(['left int', 'right int']);
+        expect(info?.returnType).toContain('int, error');
+    });
+
+    it('extracts Rust signatures', () => {
+        const source = 'pub fn add(left: i32, right: i32) -> i32 {\n    left + right\n}';
+        const info = inferTypeInfo(source, 'src/math.rs', 'add');
+        expect(info?.parameters).toEqual(['left: i32', 'right: i32']);
+        expect(info?.returnType).toBe('i32');
     });
 });

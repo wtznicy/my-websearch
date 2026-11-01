@@ -39,7 +39,7 @@ export function inferTypeInfo(
 ): CodeTypeInfo | null {
     const extension = path.extname(filePath).toLowerCase();
     if (!['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts'].includes(extension)) {
-        return null;
+        return inferSyntaxTypeInfo(content, extension, symbol);
     }
 
     try {
@@ -116,4 +116,112 @@ export function inferTypeInfo(
     } catch {
         return null;
     }
+}
+
+function splitTopLevel(value: string): string[] {
+    const parts: string[] = [];
+    let current = '';
+    let depth = 0;
+    for (const char of value) {
+        if ('([{<'.includes(char)) depth += 1;
+        if (')]}>'.includes(char)) depth = Math.max(0, depth - 1);
+        if (char === ',' && depth === 0) {
+            parts.push(current.trim());
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+    if (current.trim()) parts.push(current.trim());
+    return parts;
+}
+
+function parenthesized(text: string, openIndex: number): { inner: string; end: number } | null {
+    if (text[openIndex] !== '(') return null;
+    let depth = 0;
+    for (let index = openIndex; index < text.length; index += 1) {
+        if (text[index] === '(') depth += 1;
+        if (text[index] === ')') {
+            depth -= 1;
+            if (depth === 0) {
+                return { inner: text.slice(openIndex + 1, index), end: index };
+            }
+        }
+    }
+    return null;
+}
+
+function syntaxTypeInfo(type: string | undefined, returnType?: string, parameters?: string[]): CodeTypeInfo | null {
+    if (!type && !returnType && (!parameters || parameters.length === 0)) return null;
+    return {
+        ...(type ? { type } : {}),
+        ...(returnType ? { returnType } : {}),
+        ...(parameters && parameters.length > 0 ? { parameters } : {})
+    };
+}
+
+function inferSyntaxTypeInfo(content: string, extension: string, symbol: string): CodeTypeInfo | null {
+    const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    if (extension === '.py') {
+        const classMatch = content.match(new RegExp(`^\\s*class\\s+${escaped}\\b`, 'm'));
+        if (classMatch) return syntaxTypeInfo(symbol);
+        const functionMatch = content.match(new RegExp(`^\\s*(?:async\\s+)?def\\s+${escaped}\\s*\\(`, 'm'));
+        if (!functionMatch || functionMatch.index === undefined) return null;
+        const open = content.indexOf('(', functionMatch.index);
+        const params = parenthesized(content, open);
+        if (!params) return null;
+        const after = content.slice(params.end + 1);
+        const returnMatch = after.match(/^\s*->\s*([^:\n]+)/);
+        const parameters = splitTopLevel(params.inner).map((part) => {
+            const declaration = part.split('=')[0] ?? part;
+            const [name, ...typeParts] = declaration.split(':');
+            return typeParts.length > 0 ? `${name?.trim()}: ${typeParts.join(':').trim()}` : name?.trim() || part;
+        }).filter(Boolean);
+        return syntaxTypeInfo(
+            `(${parameters.join(', ')})${returnMatch?.[1] ? ` -> ${returnMatch[1].trim()}` : ''}`,
+            returnMatch?.[1]?.trim(),
+            parameters
+        );
+    }
+
+    if (extension === '.go') {
+        if (new RegExp(`^\\s*type\\s+${escaped}\\s+(?:struct|interface)\\b`, 'm').test(content)) {
+            return syntaxTypeInfo(symbol);
+        }
+        const match = content.match(new RegExp(`^\\s*func\\s+(?:\\([^)]*\\)\\s*)?${escaped}\\s*\\(`, 'm'));
+        if (!match || match.index === undefined) return null;
+        const open = content.indexOf('(', match.index);
+        const params = parenthesized(content, open);
+        if (!params) return null;
+        const after = content.slice(params.end + 1).split('\n')[0] ?? '';
+        const result = after.split('{')[0]?.trim();
+        const parameters = splitTopLevel(params.inner);
+        return syntaxTypeInfo(
+            `func(${parameters.join(', ')})${result ? ` ${result}` : ''}`,
+            result || undefined,
+            parameters
+        );
+    }
+
+    if (extension === '.rs') {
+        if (new RegExp(`^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(?:struct|enum|trait)\\s+${escaped}\\b`, 'm').test(content)) {
+            return syntaxTypeInfo(symbol);
+        }
+        const match = content.match(new RegExp(`^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(?:async\\s+)?fn\\s+${escaped}\\s*[<(]`, 'm'));
+        if (!match || match.index === undefined) return null;
+        const open = content.indexOf('(', match.index);
+        const params = parenthesized(content, open);
+        if (!params) return null;
+        const after = content.slice(params.end + 1).split('{')[0]?.split('where')[0]?.trim() ?? '';
+        const returnMatch = after.match(/->\s*(.+)$/);
+        const parameters = splitTopLevel(params.inner).map((part) => part.trim()).filter(Boolean);
+        return syntaxTypeInfo(
+            `fn(${parameters.join(', ')})${returnMatch?.[1] ? ` -> ${returnMatch[1].trim()}` : ''}`,
+            returnMatch?.[1]?.trim(),
+            parameters
+        );
+    }
+
+    return null;
 }
