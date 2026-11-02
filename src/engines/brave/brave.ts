@@ -56,23 +56,25 @@ const braveHttpGet = async (url: string, options: AxiosRequestConfig): Promise<A
     } as AxiosResponse;
 };
 
-/** Brave 对数据中心/代理 IP 限流（429）时给出明确提示，而非笼统的 status code 错误 */
+/** Brave 返回 HTTP 429 人机挑战页时给出准确提示，而非笼统的 status code 错误 */
 function buildBraveErrorMessage(error: unknown): Error {
     const status = extractErrorStatus(error);
     if (status === 429) {
-        // 实测 429 响应体为 CloudFront/WAF 返回的人机验证拦截页（包含 schedule a captcha + Argon2 challengeSet）：
-        // 出口 IP 被风控挑战后在窗口期内会持续返回 429 人机挑战，单纯冷却重试或换客户端栈大概率仍被拦截；
-        // 标记不可重试并触发熔断，避免无意义的重试风暴浪费耗时；
-        // 若要高可用推荐配置 BRAVE_API_KEY 走官方 API 渠道，或更换未受风控的出口 IP。
+        // 实测 429 响应体是 Brave 的反爬人机验证页（schedule a captcha + Argon2 challengeSet，经 CloudFront 边缘返回），
+        // 不是普通配额计数；出口 IP 被挑战后在窗口期内会持续 429，换客户端栈也大概率继续被拦。
+        // 走到这里说明浏览器兜底也失败了（或已被 BRAVE_BROWSER_FALLBACK=0 关闭），故标记不可重试并熔断，避免重试风暴。
         const err = new AppError({
             code: 'rate_limited',
             retryable: false,
             status: 429,
             engine: 'brave',
             hint: 'Set BRAVE_API_KEY (free tier) to use the official API, or switch exit node / wait for IP challenge to clear.',
-            message: 'Brave returned HTTP 429 / anti-bot challenge: CloudFront/WAF served a captcha & Argon2 challenge page for this exit IP. ' +
-                'When actively challenged, retrying or changing HTTP stacks often continues to be blocked. ' +
-                'For a stable path configure BRAVE_API_KEY (official API, free tier) instead of scraping, or switch exit node.'
+            message: 'Brave returned HTTP 429 with an anti-bot challenge page (captcha + Argon2 PoW) for this exit IP. '
+                + (process.env.BRAVE_BROWSER_FALLBACK === '0'
+                    ? 'The disguised headless browser fallback is disabled (BRAVE_BROWSER_FALLBACK=0). '
+                    : 'The disguised headless browser fallback also failed to pass this challenge. ')
+                + 'Retrying or changing the HTTP stack usually keeps getting challenged. '
+                + 'Configure BRAVE_API_KEY (official API, free tier) for a stable path, wait for the challenge to clear, or switch exit node.'
         });
         tripEngineCircuit('brave');
         return err;
@@ -384,8 +386,9 @@ export function shouldUseBraveBrowserFallback(error: unknown): boolean {
 }
 
 /**
- * Brave 遭遇 429 / 人机挑战时的无头浏览器尽力回退（best-effort）。
- * 深度伪装桌面指纹、视口与真实硬件环境，在出现 PoW 验证按钮时自动交互触发，避免被降级判定为滑块验证。
+ * Brave 遭遇 429 / 人机挑战时的无头浏览器兜底（best-effort）。
+ * 用桌面指纹、视口与真实硬件参数渲染页面，并在出现 PoW「验证」按钮时自动点击触发 Argon2 挑战。
+ * 实测：在 curl 前后都持续 429 的硬封禁出口上可稳定拿到结果（8/8，约 4–6s/次）；若被下发交互式滑块验证仍会失败。
  */
 export async function searchBraveWithBrowser(
     query: string,
