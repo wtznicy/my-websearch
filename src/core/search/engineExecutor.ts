@@ -409,10 +409,13 @@ export async function executePrimaryEngines(
         const controller = controllers[index];
         const remaining = deadlineAt - Date.now();
         const isSingleEngine = executableEngines.length === 1;
+        // brave 的 429 回退要拉起无头浏览器并等待 PoW 渲染（冷启动约 10–14s），
+        // 因此给 2x 预算；bing/startpage 的浏览器兜底更快，维持 1.5x。
+        const browserBudgetMultiplier = engine === 'brave' ? 2 : 1.5;
         const engineBudget = isSingleEngine
             ? Math.max(perEngineTimeoutMs, remaining - 1000)
             : (['startpage', 'bing', 'brave'].includes(engine)
-                ? Math.max(perEngineTimeoutMs, Math.min(remaining - 500, Math.round(perEngineTimeoutMs * 1.5)))
+                ? Math.max(perEngineTimeoutMs, Math.min(remaining - 500, Math.round(perEngineTimeoutMs * browserBudgetMultiplier)))
                 : perEngineTimeoutMs);
         const wait = Math.max(0, Math.min(remaining, engineBudget));
         return new Promise<SearchResult[]>((resolve) => {

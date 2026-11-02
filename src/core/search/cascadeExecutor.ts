@@ -267,8 +267,10 @@ export async function executeCascade(
         const runCandidate = (candidate: string): Promise<{ results: SearchResult[]; timedOut: boolean; cancelledBySatisfaction?: boolean }> => new Promise((resolve, reject) => {
             let done = false;
             const cascadeStartedAt = Date.now();
+            // brave 的 429 回退要拉起无头浏览器并等待 PoW 渲染（冷启动约 10–14s），给 2x 预算；
+            // bing/startpage 的浏览器兜底更快，维持 1.5x。
             const candidateBudget = ['startpage', 'bing', 'brave'].includes(candidate)
-                ? Math.max(perEngineTimeoutMs, Math.min(remaining - 500, Math.round(perEngineTimeoutMs * 1.5)))
+                ? Math.max(perEngineTimeoutMs, Math.min(remaining - 500, Math.round(perEngineTimeoutMs * (candidate === 'brave' ? 2 : 1.5))))
                 : perEngineTimeoutMs;
             const wait = Math.max(0, Math.min(remaining, candidateBudget));
             const controller = new AbortController();
