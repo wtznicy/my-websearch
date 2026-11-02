@@ -37,6 +37,7 @@ import {
     loadPlaywrightClient
 } from './browserDiscovery.js';
 import { closeAllCDPSessions } from '../browser/cdpDriver.js';
+import { DEFAULT_DESKTOP_UA } from '../userAgents.js';
 
 export const PLAYWRIGHT_CONNECT_TIMEOUT_MS = Math.max(config.playwrightNavigationTimeoutMs, 30000);
 export const PLAYWRIGHT_LOCAL_CDP_READINESS_TIMEOUT_MS = Math.max(config.playwrightNavigationTimeoutMs * 2, 60000);
@@ -346,6 +347,15 @@ export function buildLocalBrowserProcessArgs(
 
     if (headless) {
         args.push('--headless=new');
+        if (!launchArgs.some((arg) => arg.startsWith('--disable-blink-features='))) {
+            args.push('--disable-blink-features=AutomationControlled');
+        }
+        if (!launchArgs.some((arg) => arg.startsWith('--user-agent='))) {
+            args.push(`--user-agent=${DEFAULT_DESKTOP_UA}`);
+        }
+        if (!launchArgs.some((arg) => arg.startsWith('--window-size='))) {
+            args.push('--window-size=1920,1080');
+        }
     }
 
     args.push('--edge-skip-compat-layer-relaunch');

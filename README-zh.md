@@ -55,7 +55,7 @@
 | **`duckduckgo`** | 🌐 需代理 | 无 | **wreq Chrome 指纹 GET HTML 端点**（仅 axios 回退时可能遇到 202 anomaly CAPTCHA）；保留 `d.js` 求解器作为 preload 回退 | 英文技术检索、海外开源讨论 |
 | **`startpage`** | 🌐 需代理 | 无 | **多 Worker Anubis SHA-256 PoW 求解器**（难度 ≤ 6）+ 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
 | **`yahoo`** | 🌐 需代理 | 无 | SSR HTML + 首页 cookie 预热 + `RU=` 重定向还原；**英文替补池第一顺位**（DuckDuckGo 不健康时自动顶上） | 稳定的 Bing 索引英文兜底 |
-| **`brave`** | 🌐 需代理 | 无 | **curl HTTP/1.1**（Windows 为 Schannel；实测 curl 7/10 后才 429；axios 0/10；wreq HTTP/2 429）+ 赞助商商业推广深度剥离；兼容 Windows 旧版 curl（不依赖 `--compressed`）；429 后等待/换节点/配 `BRAVE_API_KEY` | 独立海外英文索引、技术博客 |
+| **`brave`** | 🌐 需代理 | 无 | **curl HTTP/1.1**（Windows 为 Schannel；实测 curl 7/10 后才 429；axios 0/10；wreq HTTP/2 429）+ 赞助商商业推广深度剥离；兼容 Windows 旧版 curl（不依赖 `--compressed`）；429 后自动真机无头伪装回退 / 等待 / 换节点 / 配 `BRAVE_API_KEY` | 独立海外英文索引、技术博客 |
 | **`exa`** | 🌐 建议代理 | 选配 Key | 官方语义搜索 API（未配置时自动跳过，不阻断级联）；直连也可用，但实测代理约 0.77s、直连约 1.17s | 深度语义相似搜索、学术与技术前沿 |
 | **`github`** | 🌐 直连 API | 无 | 官方 REST API 检索仓库与 Issue；**精确 owner/repo 直取** | 开源项目源码、开源库 Issues 排查、已知仓库查看 |
 | **`stackoverflow`**| 🌐 直连 API | 无 | StackExchange 2.3 官方 API + HTML 实体智能解码 | 编程报错排错、高质量代码问答 |
@@ -231,7 +231,7 @@ my-websearch doctor --reset-health
 2. **配置了有效代理后，国际引擎依然失败或超时？（逐引擎诊断，不是本地配置错误）**
    - **DuckDuckGo 返回 HTTP 202 / 验证挑战**：202 响应体是 DDG 的 **anomaly CAPTCHA（人工验证页）**，不是普通按 IP 限流；内置 `d.js` 算术求解器无法绕过。引擎会先用 **wreq Chrome 指纹 GET** 请求 HTML 端点——即使 axios POST 路径吃 202，这条路径通常也能返回 200；所以现在只有 wreq 路径失败、回退到 axios POST 时才会再见到 202。如果仍看到 202，先确认你的版本包含 wreq GET 路径（**1.3.8 及更早没有**），再重试或检查代理是否真的挂上。**DDG 仍是 best-effort**：同一出口也可能间歇性被挑战，不要把它当 SLA；要稳定请用 Bing/Startpage 或配置 `BRAVE_API_KEY`/`EXA_API_KEY`。注意：`SEARCH_MODE=playwright:duckduckgo` 不受支持（DDG 没有浏览器渲染路径），会回退到 HTTP。
    - **Bing 返回 HTTP 200 但 0 条结果**：wreq 协议路径解析为空时会自动回退到 axios 网页路径；若两条路径都为空，通常是查询词或 IP 受到频控策略限制。
-   - **Brave 返回 HTTP 429 (Too Many Requests)**：CloudFront 会在请求若干次后限流出口 IP，但第一次是否成功很大程度取决于客户端 TLS/HTTP 栈。新节点实测：**axios（Node OpenSSL，HTTP/1.1）→ 0/10，全 429**；**curl（Schannel，HTTP/1.1）→ 7/10，随后 3/3 429**；**wreq（HTTP/2 Chrome）→ 429**；**.NET Schannel HTTP/2 → 200/429 混合**。curl 触发 429 后，再用 .NET Schannel HTTP/2 重试：同 URL **0/3**，新 URL **0/3**——额度耗尽后换客户端栈无效。现在 Brave 网页路径固定用 curl（Windows 为 Schannel，不再回退 axios）；429 后应等待冷却、换出口 IP 或配置 `BRAVE_API_KEY`。这仍是 best-effort，官方 API 才是稳定路径。
+   - **Brave 返回 HTTP 429 (Too Many Requests)**：CloudFront 会在请求若干次后限流出口 IP，但第一次是否成功很大程度取决于客户端 TLS/HTTP 栈。新节点实测：**axios（Node OpenSSL，HTTP/1.1）→ 0/10，全 429**；**curl（Schannel，HTTP/1.1）→ 7/10，随后 3/3 429**；**wreq（HTTP/2 Chrome）→ 429**；**.NET Schannel HTTP/2 → 200/429 混合**。curl 触发 429 后，再用 .NET Schannel HTTP/2 重试：同 URL **0/3**，新 URL **0/3**——额度耗尽后换客户端栈无效。现在 Brave 网页路径固定用 curl（Windows 为 Schannel，不再回退 axios）；遇到 429 或人机挑战时，默认自动回退至深度伪装为有头桌面浏览器的无头 CDP 浏览器尝试检索（跳过滑块验证，可设 `BRAVE_BROWSER_FALLBACK=0` 关闭）；若依然受限则建议等待冷却、换出口 IP 或配置 `BRAVE_API_KEY`。这仍是 best-effort，官方 API 才是稳定路径。
    - **Startpage 请求挂满超时或 Anubis PoW 难度过大**：难度 6 现由最多 4 个 Worker 并行求解（约 3–12s）；难度 >6 会自动跳过；pass-challenge 的 socket 错误/瞬时 5xx 会自动重试。
    - 💡 **解决方案**：这些是上游反爬/频控行为，不是 MCP 配置坏了。按引擎分别处理：DDG 202 → 升级/重试（wreq GET 路径；`auto` 模式下 Yahoo 也会从替补池顶替不健康的 DDG）；Brave 429 → 等分钟级窗口过去，或配 `BRAVE_API_KEY`；Bing 0 条 → 重试或换查询词；Startpage PoW → 重试。只有引擎特定的步骤都无效时再换出口 IP。最后才用 `engines: ["bing", "baidu"]` 降级，或配置官方 Key（`BRAVE_API_KEY` / `EXA_API_KEY`）走 SLA 通道。
 
@@ -281,6 +281,7 @@ my-websearch doctor --reset-health
 | `ENGINE_CIRCUIT_MAX_COOLDOWN_MS` | `300000` | 熔断指数退避上限（默认 5 分钟）。 |
 | `SEARCH_AUTHORITY_DOMAINS` | 空 | 结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单） |
 | `SEARCH_MODE` | `auto` | 检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`playwright`（全强走浏览器；旧值名，底层为 CDP）<br/>• **一种方式多选引擎**：`playwright:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`playwright:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP） |
+| `BRAVE_BROWSER_FALLBACK` | `1` | Brave 无 Key 网页路径遇到 HTTP 429 或人机挑战时，是否自动回退至桌面指纹无头浏览器检索（`1` 启用，`0` 禁用） |
 | `AUTO_ROUTE_EN_ENGINES` | `bing,duckduckgo` | 英文查询默认自动路由引擎列表（逗号分隔） |
 | `AUTO_ROUTE_ZH_ENGINES` | `baidu,sogou` | 中文查询默认自动路由引擎列表（逗号分隔） |
 

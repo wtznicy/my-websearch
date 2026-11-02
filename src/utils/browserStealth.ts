@@ -174,10 +174,17 @@ export async function setupAntiDetection(page: StealthPage): Promise<void> {
             };
         }
 
-        const viewportWidth = window.innerWidth || 1920;
-        const viewportHeight = window.innerHeight || 1080;
-        Object.defineProperty(window, 'outerWidth', { get: () => viewportWidth });
-        Object.defineProperty(window, 'outerHeight', { get: () => viewportHeight });
+        const screenWidth = 1920;
+        const screenHeight = 1080;
+        Object.defineProperty(screen, 'width', { get: () => screenWidth });
+        Object.defineProperty(screen, 'height', { get: () => screenHeight });
+        Object.defineProperty(screen, 'availWidth', { get: () => screenWidth });
+        Object.defineProperty(screen, 'availHeight', { get: () => screenHeight - 48 });
+        Object.defineProperty(window, 'innerWidth', { get: () => 1902 });
+        Object.defineProperty(window, 'innerHeight', { get: () => 984 });
+        Object.defineProperty(window, 'outerWidth', { get: () => screenWidth });
+        Object.defineProperty(window, 'outerHeight', { get: () => screenHeight });
+        Object.defineProperty(window, 'devicePixelRatio', { get: () => 1.25 });
 
         if (!('connection' in navigator)) {
             Object.defineProperty(navigator, 'connection', {

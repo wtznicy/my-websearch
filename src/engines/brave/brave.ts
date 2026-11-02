@@ -8,7 +8,7 @@ import { paginateSearch } from '../../utils/pagination.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 import { tripEngineCircuit } from '../../core/search/engineCircuitBreaker.js';
 import { isBraveBlockedPage } from '../../core/antiBot/antiBotDetection.js';
-import { AppError, extractErrorStatus } from '../../core/errors.js';
+import { AppError, extractErrorCode, extractErrorStatus, isAppError } from '../../core/errors.js';
 import { getProxyUrl } from '../../config.js';
 import { getSystemProxyFallbackUrl } from '../../utils/systemProxy.js';
 import { braveHttpGetWithCurl } from '../../utils/braveCurl.js';
@@ -365,10 +365,54 @@ export async function searchBraveOfficial(
     });
 }
 
+/** 检查 Brave 报错是否应当触发无头浏览器伪装回退 */
+export function shouldUseBraveBrowserFallback(error: unknown): boolean {
+    if (process.env.BRAVE_BROWSER_FALLBACK === '0') {
+        return false;
+    }
+    const code = isAppError(error) ? error.code : extractErrorCode(error);
+    if (code === 'aborted') {
+        return false;
+    }
+    const status = extractErrorStatus(error);
+    const message = error instanceof Error ? error.message : String(error);
+    if (/aborted/i.test(message)) {
+        return false;
+    }
+    return status === 429 || code === 'rate_limited' || code === 'bot_challenge' || /429|rate limited|verification|anti-bot|captcha/i.test(message);
+}
+
 /**
- * Brave 网页端（SvelteKit SSR）抓取搜索实现（无 API Key 时的默认路径，或官方 API 故障/密钥错误/配额耗尽时的回退路径）。
+ * Brave 429 / 验证码风控时的深度伪装无头浏览器回退。
+ * 注入 windows-chrome-8 设备 Profile 与桌面 UA，避开滑块惩罚直接提取搜索结果。
  */
-export async function searchBraveWeb(
+export async function searchBraveWithBrowser(
+    query: string,
+    limit: number,
+    options?: { signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }
+): Promise<SearchResult[]> {
+    const signal = options?.signal;
+    const timeRange = options?.timeRange;
+    const freshnessMap: Record<string, string> = { day: 'pd', week: 'pw', month: 'pm', year: 'py' };
+    const freshness = timeRange ? freshnessMap[timeRange] : undefined;
+    const url = `https://search.brave.com/search?q=${encodeURIComponent(query)}&source=web${freshness ? `&freshness=${freshness}` : ''}`;
+
+    const { fetchPageHtmlWithBrowser } = await import('../../utils/browserCookies.js');
+    const profile = process.env.BROWSER_PROFILE || 'windows-chrome-8';
+    const page = await fetchPageHtmlWithBrowser(url, signal, profile);
+    const results = parseBraveResults(page.html, new Set());
+    if (results.length === 0) {
+        throw new AppError({
+            code: 'bot_challenge',
+            retryable: false,
+            engine: 'brave',
+            message: 'Brave browser fallback returned no parsable results (likely blocked).'
+        });
+    }
+    return results.slice(0, limit);
+}
+
+async function executeBraveHttpSearch(
     query: string,
     limit: number,
     options?: { signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }
@@ -405,13 +449,7 @@ export async function searchBraveWeb(
         limit,
         signal,
         fetchPage: async (pageIndex) => {
-            let response;
-            try {
-                response = await braveHttpGet(`https://search.brave.com/search?q=${encodedQuery}&source=web&offset=${pageIndex}${freshness ? `&freshness=${freshness}` : ''}`, requestOptions);
-            } catch (error) {
-                throw buildBraveErrorMessage(error);
-            }
-
+            const response = await braveHttpGet(`https://search.brave.com/search?q=${encodedQuery}&source=web&offset=${pageIndex}${freshness ? `&freshness=${freshness}` : ''}`, requestOptions);
             const html = String(response.data || '');
             const $ = cheerio.load(html);
 
@@ -420,6 +458,7 @@ export async function searchBraveWeb(
                 throw new AppError({
                     code: 'bot_challenge',
                     retryable: false,
+                    status: 429,
                     engine: 'brave',
                     message: 'Brave returned a verification or anti-bot page (access denied / captcha)'
                 });
@@ -428,6 +467,32 @@ export async function searchBraveWeb(
             return parseBraveResults(html, seenUrls, $);
         }
     });
+}
+
+/**
+ * Brave 网页端（SvelteKit SSR）抓取搜索实现（无 API Key 时的默认路径，或官方 API 故障/密钥错误/配额耗尽时的回退路径）。
+ * 当 HTTP 路径遭遇 429 限流或人机拦截时，自动回退到深度伪装的无头浏览器。
+ */
+export async function searchBraveWeb(
+    query: string,
+    limit: number,
+    options?: { signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }
+): Promise<SearchResult[]> {
+    try {
+        return await executeBraveHttpSearch(query, limit, options);
+    } catch (httpError) {
+        if (shouldUseBraveBrowserFallback(httpError)) {
+            try {
+                const browserResults = await searchBraveWithBrowser(query, limit, options);
+                if (browserResults.length > 0) {
+                    return browserResults;
+                }
+            } catch (browserError) {
+                console.warn('Brave browser fallback failed:', browserError instanceof Error ? browserError.message : String(browserError));
+            }
+        }
+        throw buildBraveErrorMessage(httpError);
+    }
 }
 
 export async function searchBrave(query: string, limit: number, options?: { signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }): Promise<SearchResult[]> {

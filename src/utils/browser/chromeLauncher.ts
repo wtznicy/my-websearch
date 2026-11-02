@@ -3,6 +3,7 @@ import fs, { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { LaunchOptions } from './driver.js';
+import { DEFAULT_DESKTOP_UA } from '../userAgents.js';
 
 let cachedExecutablePath: string | null = null;
 
@@ -147,6 +148,16 @@ export function buildChromeArgs(options: LaunchOptions, tempDir: string): string
     // 不要默认加 --no-sandbox，仅在明确配置或 root 环境使用
     if (process.env.CHROME_NO_SANDBOX === 'true' || (typeof process.getuid === 'function' && process.getuid() === 0)) {
         flags.push('--no-sandbox');
+    }
+
+    if (options.headless !== false) {
+        flags.push(
+            '--disable-blink-features=AutomationControlled',
+            '--window-size=1920,1080'
+        );
+        if (!options.args?.some((arg) => arg.startsWith('--user-agent='))) {
+            flags.push(`--user-agent=${DEFAULT_DESKTOP_UA}`);
+        }
     }
 
     if (options.args && options.args.length > 0) {

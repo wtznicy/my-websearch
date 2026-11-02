@@ -6,8 +6,10 @@ import {
     isBraveOfficialApiDisabled,
     disableBraveOfficialApi,
     resetBraveOfficialApiCooldown,
-    getBraveOfficialApiCooldownRemainingMs
+    getBraveOfficialApiCooldownRemainingMs,
+    shouldUseBraveBrowserFallback
 } from '../../engines/brave/brave.js';
+import { AppError } from '../../core/errors.js';
 
 // Brave 用 SvelteKit SSR：.snippet > .result-content > a(.search-snippet-title + .site-name-wrapper) + .generic-snippet
 const NORMAL_PAGE = `<!DOCTYPE html>
@@ -271,5 +273,65 @@ describe('Brave official API cooldown and fallback state', () => {
 
     it('cleanBraveApiText should handle &apos; and &#x27; entities properly', () => {
         expect(cleanBraveApiText('It&apos;s a user&#x27;s search')).toBe("It's a user's search");
+    });
+});
+
+describe('shouldUseBraveBrowserFallback', () => {
+    const originalFallback = process.env.BRAVE_BROWSER_FALLBACK;
+
+    beforeEach(() => {
+        if (originalFallback !== undefined) {
+            process.env.BRAVE_BROWSER_FALLBACK = originalFallback;
+        } else {
+            delete process.env.BRAVE_BROWSER_FALLBACK;
+        }
+    });
+
+    it('should trigger browser fallback for HTTP 429 error', () => {
+        const error = new Error('Request failed with status code 429') as Error & { response: { status: number } };
+        error.response = { status: 429 };
+        expect(shouldUseBraveBrowserFallback(error)).toBe(true);
+    });
+
+    it('should trigger browser fallback for rate_limited or bot_challenge AppError', () => {
+        const rateLimitErr = new AppError({
+            code: 'rate_limited',
+            status: 429,
+            engine: 'brave',
+            message: 'Brave rate limited',
+            retryable: true
+        });
+        expect(shouldUseBraveBrowserFallback(rateLimitErr)).toBe(true);
+
+        const challengeErr = new AppError({
+            code: 'bot_challenge',
+            status: 403,
+            engine: 'brave',
+            message: 'Verification challenge page',
+            retryable: false
+        });
+        expect(shouldUseBraveBrowserFallback(challengeErr)).toBe(true);
+    });
+
+    it('should not trigger browser fallback when aborted', () => {
+        const abortErr = new AppError({
+            code: 'aborted',
+            engine: 'brave',
+            message: 'Search aborted by signal',
+            retryable: false
+        });
+        expect(shouldUseBraveBrowserFallback(abortErr)).toBe(false);
+    });
+
+    it('should not trigger browser fallback when BRAVE_BROWSER_FALLBACK=0', () => {
+        process.env.BRAVE_BROWSER_FALLBACK = '0';
+        const error = new Error('HTTP 429') as Error & { response: { status: number } };
+        error.response = { status: 429 };
+        expect(shouldUseBraveBrowserFallback(error)).toBe(false);
+    });
+
+    it('should not trigger browser fallback for unrelated errors', () => {
+        const error = new Error('Internal Server Error 500');
+        expect(shouldUseBraveBrowserFallback(error)).toBe(false);
     });
 });
