@@ -27,13 +27,17 @@ const braveHttpGet = async (url: string, options: AxiosRequestConfig): Promise<A
         if (value !== undefined) headers[key] = String(value);
     }
     const curl = await braveHttpGetWithCurl(url, proxyUrl, headers, options.signal as AbortSignal | undefined);
-    if (!curl) {
+    if ('error' in curl) {
         throw new AppError({
-            code: 'engine_error',
+            code: curl.aborted ? 'aborted' : 'engine_error',
             retryable: false,
             engine: 'brave',
-            hint: 'Install curl (Windows: curl.exe) or set BRAVE_API_KEY to use the official API.',
-            message: 'Brave web request failed: curl is unavailable or the request was aborted'
+            hint: curl.notFound
+                ? 'Install curl (Windows: curl.exe) or set BRAVE_API_KEY to use the official API.'
+                : 'Check the curl error above; if it is a TLS/proxy failure, set BRAVE_API_KEY or switch exit node.',
+            message: curl.aborted
+                ? 'Brave curl request aborted'
+                : `Brave curl request failed: ${curl.error}`
         });
     }
     if (curl.status >= 400) {

@@ -2,6 +2,11 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Windows 旧版 curl 兼容**：移除 `--compressed`（Windows 自带 curl 8.4.0 Schannel 构建可能未编译压缩支持，会以 exit 2 退出）；curl 失败时不再误报“curl 不可用”，而是返回真实 stderr/退出原因。
+
 ## [1.4.0] - 2026-11-01
 
 ### Added

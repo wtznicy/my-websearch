@@ -11,6 +11,14 @@ export interface CurlResponse {
     data: string;
 }
 
+export interface CurlFailure {
+    error: string;
+    notFound: boolean;
+    aborted: boolean;
+}
+
+export type CurlResult = CurlResponse | CurlFailure;
+
 /**
  * Brave 无 key 的网页路径固定使用 curl HTTP/1.1。
  * Windows 的 curl 使用 Schannel；Node OpenSSL/axios 和 wreq HTTP/2 实测都 429。
@@ -21,15 +29,16 @@ export async function braveHttpGetWithCurl(
     proxyUrl: string | undefined,
     headers: Record<string, string>,
     signal?: AbortSignal
-): Promise<CurlResponse | null> {
+): Promise<CurlResult> {
     const tempFile = path.join(
         os.tmpdir(),
         `mywebsearch-brave-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.html`
     );
+    // Do not pass --compressed: some Windows Schannel libcurl builds (e.g. 8.4.0)
+    // were compiled without compression support and exit with status 2.
     const args = [
         '-sS',
         '--http1.1',
-        '--compressed',
         '--max-time', '20',
         '--connect-timeout', '10',
         '-o', tempFile,
@@ -54,11 +63,19 @@ export async function braveHttpGetWithCurl(
             signal
         });
         const status = Number.parseInt(stdout.trim(), 10);
-        if (!Number.isFinite(status)) return null;
+        if (!Number.isFinite(status)) {
+            return { error: `curl returned an invalid status: ${stdout.trim()}`, notFound: false, aborted: false };
+        }
         const data = await fs.readFile(tempFile, 'utf8');
         return { status, data };
-    } catch {
-        return null;
+    } catch (error) {
+        const err = error as NodeJS.ErrnoException & { stderr?: Buffer | string };
+        const stderr = typeof err.stderr === 'string' ? err.stderr : err.stderr?.toString('utf8');
+        return {
+            error: stderr?.trim() || err.message || 'curl invocation failed',
+            notFound: err.code === 'ENOENT',
+            aborted: Boolean(signal?.aborted) || err.code === 'ABORT_ERR'
+        };
     } finally {
         await fs.unlink(tempFile).catch(() => undefined);
     }

@@ -55,7 +55,7 @@
 | **`duckduckgo`** | 🌐 需代理 | 无 | **wreq Chrome 指纹 GET HTML 端点**（仅 axios 回退时可能遇到 202 anomaly CAPTCHA）；保留 `d.js` 求解器作为 preload 回退 | 英文技术检索、海外开源讨论 |
 | **`startpage`** | 🌐 需代理 | 无 | **多 Worker Anubis SHA-256 PoW 求解器**（难度 ≤ 6）+ 隐私直通 | 谷歌同源高质量检索（隐私高保真） |
 | **`yahoo`** | 🌐 需代理 | 无 | SSR HTML + 首页 cookie 预热 + `RU=` 重定向还原；**英文替补池第一顺位**（DuckDuckGo 不健康时自动顶上） | 稳定的 Bing 索引英文兜底 |
-| **`brave`** | 🌐 需代理 | 无 | **curl HTTP/1.1**（Windows 为 Schannel；实测 curl 7/10 后才 429；axios 0/10；wreq HTTP/2 429）+ 赞助商商业推广深度剥离；429 后等待/换节点/配 `BRAVE_API_KEY` | 独立海外英文索引、技术博客 |
+| **`brave`** | 🌐 需代理 | 无 | **curl HTTP/1.1**（Windows 为 Schannel；实测 curl 7/10 后才 429；axios 0/10；wreq HTTP/2 429）+ 赞助商商业推广深度剥离；兼容 Windows 旧版 curl（不依赖 `--compressed`）；429 后等待/换节点/配 `BRAVE_API_KEY` | 独立海外英文索引、技术博客 |
 | **`exa`** | 🌐 建议代理 | 选配 Key | 官方语义搜索 API（未配置时自动跳过，不阻断级联）；直连也可用，但实测代理约 0.77s、直连约 1.17s | 深度语义相似搜索、学术与技术前沿 |
 | **`github`** | 🌐 直连 API | 无 | 官方 REST API 检索仓库与 Issue；**精确 owner/repo 直取** | 开源项目源码、开源库 Issues 排查、已知仓库查看 |
 | **`stackoverflow`**| 🌐 直连 API | 无 | StackExchange 2.3 官方 API + HTML 实体智能解码 | 编程报错排错、高质量代码问答 |
