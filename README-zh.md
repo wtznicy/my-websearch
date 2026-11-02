@@ -63,7 +63,7 @@
 | **`arxiv`** | 🌐 直连 API | 无 | 官方 Atom XML API 检索论文标题、作者与摘要 | 计算机科学、AI/ML 与自然科学最新论文 |
 | **`code`** | 🌐 国内需代理 | 无 | grep.app API 实时检索全球 GitHub 代码，含仓库、文件路径与精确代码行 | 源码实现翻查、API 使用范例、开源语法实战 |
 
-> **版本说明**：本 README 跟随当前源码树（**1.3.12**）。**搜索语法**、**MCP Prompts/Resources**、**Maven 文档兜底**、**Reddit/知乎/博客园提纯**、**raw CDP 浏览器兜底** 随 **1.3.11** 发布；**1.3.12** 修复浏览器阶段预算的 flaky 测试/确定性拒绝；npm latest 可能滞后到包发布完成。
+> **版本说明**：本 README 跟随当前源码树（**1.4.0**）。**搜索语法**、**MCP Prompts/Resources**、**Maven 文档兜底**、**Reddit/知乎/博客园提纯**、**raw CDP 浏览器兜底** 随 **1.3.11** 发布；**1.3.12** 修复浏览器阶段预算的 flaky 测试/确定性拒绝；**1.4.0** 新增 `codeSymbol`、CDP 设备 profile、DDG 202 浏览器回退与 Brave curl/Schannel；npm latest 可能滞后到包发布完成。
 
 ---
 
@@ -334,7 +334,7 @@ my-websearch doctor --reset-health
 | :--- | :--- | :--- |
 | `BROWSER_DRIVER` | `cdp` | 浏览器后端：`cdp`（默认，raw CDP）；`playwright` 为旧版逃生口，需要你自行安装 `playwright-core`，不再随包提供 |
 | `BROWSER_PROFILE` | `off` | CDP 设备 profile：`off`、`windows-chrome-8`、`windows-chrome-16`、`macos-chrome-8` 或 `random`。对浏览器会话应用 UA、屏幕/DPR、时区、语言；不会影响 DuckDuckGo/Brave 等纯 HTTP 引擎。 |
-| `DDG_BROWSER_FALLBACK` | `1` | DuckDuckGo 的 HTTP 路径返回 202/CAPTCHA 时，改用 CDP 浏览器请求 HTML 端点（会应用 `BROWSER_PROFILE`）；设为 `0` 关闭。 |
+| `DDG_BROWSER_FALLBACK` | `1` | DuckDuckGo 的 HTTP 路径返回 202/CAPTCHA 时，改用 CDP 浏览器请求 HTML 端点；显式设置 `BROWSER_PROFILE` 时使用它，否则使用一致的 `windows-chrome-8` 默认 profile；设为 `0` 关闭。 |
 | `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 远程 Chrome/Edge CDP 调试端点（如 `http://127.0.0.1:9222` 或 `ws://...`）；旧变量名，由 CDP 驱动使用 |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | 自动探测 | 自定义浏览器二进制可执行文件绝对路径（默认自动探测 Edge/Chrome）；旧变量名 |
 | `PLAYWRIGHT_HEADLESS` | `true` | 是否无头运行（Windows 下自动使用隐身独立桌面）；旧变量名 |
@@ -368,7 +368,7 @@ my-websearch doctor --reset-health
 ```bash
 npm install
 npm run build
-npm test              # 执行 Vitest 测试套件（当前基线：97 个文件、735 个测试）
+npm test              # 执行 Vitest 测试套件（当前基线：97 个文件、739 个测试）
 npm run test:live     # 执行实时网络集成测试
 npm run eval:live     # 执行 23 用例真实 STDIO JSON-RPC 评测套件
 ```

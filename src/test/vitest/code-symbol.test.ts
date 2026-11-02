@@ -6,6 +6,7 @@ import {
     findReExportBinding,
     findReExportTargets,
     isCodeFilePath,
+    isKindCompatible,
     parseGitHubRepoSpec,
     parseTsconfigExtends,
     parseTsconfigPathAliases,
@@ -204,5 +205,39 @@ describe('remote code intelligence', () => {
         expect(ranked[0]).toBe('packages/zod/src/index.ts');
         expect(ranked).not.toContain('packages/docs/snippets/how-z-compile-works.mdx');
         expect(ranked).not.toContain('packages/zod/dist/index.js');
+    });
+
+    it('ranks exact symbol-named files above generic barrel index files', () => {
+        const ranked = rankCodePaths([
+            'adapters/bun/src/index.ts',
+            'src/client/index.ts',
+            'src/hono.ts',
+            'src/index.ts'
+        ], 'Hono');
+        expect(ranked[0]).toBe('src/hono.ts');
+    });
+
+    it('resolves multi-step import and export in barrel files', () => {
+        const content = [
+            "import { Hono } from './hono'",
+            "export type { Env } from './types'",
+            "export { Hono }"
+        ].join('\n');
+        const targets = findReExportTargets(content, 'src/index.ts', 'Hono');
+        expect(targets).toContain('src/hono.ts');
+    });
+
+    it('allows const-factory declarations when searching for function or class', () => {
+        expect(isKindCompatible('const', 'function')).toBe(true);
+        expect(isKindCompatible('const', 'class')).toBe(true);
+        expect(isKindCompatible('struct', 'class')).toBe(true);
+        expect(isKindCompatible('interface', 'type')).toBe(true);
+        expect(isKindCompatible('type', 'interface')).toBe(true);
+        expect(isKindCompatible('enum', 'type')).toBe(true);
+
+        const source = 'export const createSlice = /* @__PURE__ */ buildCreateSlice();\n';
+        const definitions = extractCodeDefinitions(source, 'src/createSlice.ts', 'createSlice', 'function');
+        expect(definitions).toHaveLength(1);
+        expect(definitions[0]?.kind).toBe('const');
     });
 });

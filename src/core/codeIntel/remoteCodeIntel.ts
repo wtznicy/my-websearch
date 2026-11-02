@@ -99,11 +99,55 @@ export function isCodeFilePath(filePath: string): boolean {
     return CODE_EXTENSIONS.has(extension);
 }
 
+export function isKindCompatible(declaredKind: string, requestedKind?: CodeSymbolKind): boolean {
+    if (!requestedKind) return true;
+    if (declaredKind === requestedKind) return true;
+    if (requestedKind === 'function' && (declaredKind === 'method' || declaredKind === 'const')) {
+        return true;
+    }
+    if (requestedKind === 'class' && (declaredKind === 'struct' || declaredKind === 'const')) {
+        return true;
+    }
+    if (requestedKind === 'type' && (declaredKind === 'interface' || declaredKind === 'struct' || declaredKind === 'enum')) {
+        return true;
+    }
+    if (requestedKind === 'interface' && (declaredKind === 'type' || declaredKind === 'class')) {
+        return true;
+    }
+    if (requestedKind === 'method' && declaredKind === 'function') {
+        return true;
+    }
+    return false;
+}
+
 /** Rank code-search hits so src/index files are scanned before docs/tests/generated files. */
-export function rankCodePaths(paths: string[]): string[] {
+export function rankCodePaths(paths: string[], symbol?: string): string[] {
+    const normalizedSymbol = symbol?.trim().toLowerCase();
+    const kebabSymbol = symbol
+        ?.trim()
+        .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+        .replace(/([A-Z]+)([A-Z][a-z0-9])/g, '$1-$2')
+        .toLowerCase();
+    const snakeSymbol = symbol
+        ?.trim()
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .toLowerCase();
+
     const score = (filePath: string): number => {
         if (!isCodeFilePath(filePath) || GENERATED_PATH.test(filePath)) return Number.NEGATIVE_INFINITY;
         let value = 0;
+        const ext = path.posix.extname(filePath);
+        const baseName = path.posix.basename(filePath, ext).toLowerCase();
+
+        // Exact or strong basename match with symbol name gets the highest priority boost
+        if (normalizedSymbol) {
+            if (baseName === normalizedSymbol || (kebabSymbol && baseName === kebabSymbol) || (snakeSymbol && baseName === snakeSymbol)) {
+                value += 300;
+            } else if (baseName.includes(normalizedSymbol) || (kebabSymbol && baseName.includes(kebabSymbol))) {
+                value += 120;
+            }
+        }
+
         if (/(^|\/)(src|lib)(\/|$)/i.test(filePath)) value += 100;
         if (/(^|\/)(packages|apps|libs)\/[^/]+\/(src|lib)(\/|$)/i.test(filePath)) value += 80;
         if (/(^|\/)(index|main|mod)\.(ts|tsx|js|py|go|rs)$/i.test(filePath)) value += 70;
@@ -453,8 +497,28 @@ export function findReExportTargets(
     };
 
     const lines = content.split(/\r?\n/);
+    const importedFrom = new Map<string, string>();
+    let exportsSymbol = false;
+
     for (const line of lines) {
-        const named = line.match(/^\s*export\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/);
+        // Track: import { X } from './mod' / import X from './mod' / import * as X from './mod'
+        const importNamed = line.match(/^\s*import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/);
+        if (importNamed?.[1] && importNamed[2]) {
+            const names = importNamed[1].split(',').map((item) => item.trim()).filter(Boolean);
+            for (const item of names) {
+                const [imported, local] = item.split(/\s+as\s+/).map((part) => part.trim());
+                const effectiveLocal = local || imported;
+                if (effectiveLocal) importedFrom.set(effectiveLocal, importNamed[2]);
+            }
+        }
+        const importDefaultOrStar = line.match(/^\s*import\s*(?:type\s*)?(?:\*\s+as\s+([\w$]+)|([\w$]+))\s*from\s*['"]([^'"]+)['"]/);
+        if (importDefaultOrStar?.[3]) {
+            const local = importDefaultOrStar[1] || importDefaultOrStar[2];
+            if (local) importedFrom.set(local, importDefaultOrStar[3]);
+        }
+
+        // Direct re-export: export { X } from './mod'
+        const named = line.match(/^\s*export\s*(?:type\s*)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/);
         if (named?.[1] && named[2]) {
             const names = named[1].split(',').map((item) => item.trim()).filter(Boolean);
             const matches = names.some((item) => {
@@ -464,11 +528,36 @@ export function findReExportTargets(
             if (matches) namedTargets.push(...resolveSpecifier(named[2]));
             continue;
         }
+
+        // Wildcard re-export: export * from './mod'
         const star = line.match(/^\s*export\s*\*\s*from\s*['"]([^'"]+)['"]/);
         if (star?.[1]) {
             starTargets.push(...resolveSpecifier(star[1]));
+            continue;
+        }
+
+        // Multi-step re-export: export { X } (without from)
+        const exportOnly = line.match(/^\s*export\s*(?:type\s*)?\{([^}]*)\}\s*(?:;|$)/);
+        if (exportOnly?.[1]) {
+            const names = exportOnly[1].split(',').map((item) => item.trim()).filter(Boolean);
+            if (names.some((item) => {
+                const [local, exported] = item.split(/\s+as\s+/).map((part) => part.trim());
+                return local === symbol || exported === symbol;
+            })) {
+                exportsSymbol = true;
+            }
+        }
+        const exportDefault = line.match(/^\s*export\s+default\s+([\w$]+)\s*(?:;|$)/);
+        if (exportDefault?.[1] && exportDefault[1] === symbol) {
+            exportsSymbol = true;
         }
     }
+
+    if (exportsSymbol && importedFrom.has(symbol)) {
+        const specifier = importedFrom.get(symbol)!;
+        namedTargets.push(...resolveSpecifier(specifier));
+    }
+
     targets.push(...namedTargets, ...starTargets);
     return [...new Set(targets)];
 }
@@ -491,7 +580,7 @@ export function extractCodeDefinitions(
 ): CodeSymbolDefinition[] {
     const language = detectCodeLanguage(filePath);
     const lines = content.split(/\r?\n/);
-    const patterns = declarationPatterns(language, symbol).filter(({ kind: declaredKind }) => !kind || declaredKind === kind);
+    const patterns = declarationPatterns(language, symbol).filter(({ kind: declaredKind }) => isKindCompatible(declaredKind, kind));
     const definitions: CodeSymbolDefinition[] = [];
 
     for (let index = 0; index < lines.length; index += 1) {
@@ -525,6 +614,14 @@ export function extractCodeDefinitions(
             break;
         }
     }
+    definitions.sort((a, b) => {
+        if (kind) {
+            const aExact = a.kind === kind ? 1 : 0;
+            const bExact = b.kind === kind ? 1 : 0;
+            if (bExact !== aExact) return bExact - aExact;
+        }
+        return 0;
+    });
     return definitions;
 }
 
@@ -601,7 +698,8 @@ async function searchGitHubCode(
     const data = response.data as GitHubCodeSearchResponse;
     return rankCodePaths((data.items ?? [])
         .map((item) => item.path)
-        .filter((path): path is string => Boolean(path))
+        .filter((path): path is string => Boolean(path)),
+        symbol
     );
 }
 
@@ -778,17 +876,21 @@ async function loadTsconfigAliasesUncached(
         if (await loadContent('tsconfig.base.json')) addAliases(await loadConfig('tsconfig.base.json'));
 
         const shouldDiscoverPackages = !rootContent || rootContent.includes('"references"') || aliases.length === 0;
-        if (!shouldDiscoverPackages) {
+        let configPaths: string[] = [];
+        if (shouldDiscoverPackages) {
+            configPaths = await fetchTsconfigPaths(owner, repo, ref, signal);
+            const packageConfigs = configPaths
+                .filter((configPath) => configPath !== 'tsconfig.json' && configPath !== 'tsconfig.base.json')
+                .slice(0, 8);
+            const loaded = await Promise.all(packageConfigs.map((configPath) => loadConfig(configPath)));
+            for (const parsed of loaded) addAliases(parsed);
+        }
+        // If main/master was requested but the branch does not exist, continue
+        // to the next ref. Returning immediately here made master-only repos
+        // silently lose all tsconfig aliases.
+        if (rootContent !== null || aliases.length > 0 || configPaths.length > 0) {
             return aliases;
         }
-
-        const configPaths = await fetchTsconfigPaths(owner, repo, ref, signal);
-        const packageConfigs = configPaths
-            .filter((configPath) => configPath !== 'tsconfig.json' && configPath !== 'tsconfig.base.json')
-            .slice(0, 8);
-        const loaded = await Promise.all(packageConfigs.map((configPath) => loadConfig(configPath)));
-        for (const parsed of loaded) addAliases(parsed);
-        return aliases;
     }
     return aliases;
 }
@@ -967,7 +1069,7 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
         const found = analyzed.found.map((definition) => item.via ? { ...definition, via: item.via } : definition);
         if (found.length > 0) {
             definitions.push(...found);
-        } else if (analyzed.binding && (!input.kind || analyzed.binding.kind === input.kind)) {
+        } else if (analyzed.binding && isKindCompatible(analyzed.binding.kind, input.kind)) {
             definitions.push(item.via ? { ...analyzed.binding, via: item.via } : analyzed.binding);
         } else if (item.depth < 4) {
             let targets = findReExportTargets(content, item.path, symbol, aliases);

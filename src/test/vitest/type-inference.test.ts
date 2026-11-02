@@ -53,6 +53,13 @@ describe('semantic type inference', () => {
         expect(info?.returnType).toContain('int, error');
     });
 
+    it('extracts Go method signatures without treating the receiver as parameters', () => {
+        const source = 'func (r *Repo) Find(id int) (*User, error) {\n    return nil, nil\n}';
+        const info = inferTypeInfo(source, 'repo.go', 'Find');
+        expect(info?.parameters).toEqual(['id int']);
+        expect(info?.returnType).toContain('*User');
+    });
+
     it('extracts Rust signatures', () => {
         const source = 'pub fn add(left: i32, right: i32) -> i32 {\n    left + right\n}';
         const info = inferTypeInfo(source, 'src/math.rs', 'add');

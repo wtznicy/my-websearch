@@ -471,7 +471,10 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
   ): Promise<SearchResult[]> {
     const { fetchPageHtmlWithBrowser } = await import('../../utils/browserCookies.js');
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const page = await fetchPageHtmlWithBrowser(url, signal);
+    // DDG's HTML anomaly check is sensitive to a generic browser fingerprint;
+    // use the coordinate default even when BROWSER_PROFILE is unset.
+    const profile = process.env.BROWSER_PROFILE || 'windows-chrome-8';
+    const page = await fetchPageHtmlWithBrowser(url, signal, profile);
     const parsed = parseDuckDuckGoHtmlResults(page.html, limit, new Set());
     if (parsed.results.length === 0) {
       throw new AppError({

@@ -333,7 +333,8 @@ export async function getBrowserCookieHeader(
 
 export async function fetchPageHtmlWithBrowser(
     urlInput: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    profileSelector?: string
 ): Promise<{ html: string; finalUrl: string; title: string }> {
     if (signal?.aborted) {
         throw signal.reason instanceof Error
@@ -369,8 +370,9 @@ export async function fetchPageHtmlWithBrowser(
             await installNavigationGuard(page);
             // 注入 stealth 指纹伪装，降低被 JS 反爬站点识别的概率
             await prepareStealthPage(page);
-            if (process.env.BROWSER_PROFILE && process.env.BROWSER_PROFILE !== 'off' && page.applyDeviceProfile) {
-                await page.applyDeviceProfile(selectDeviceProfile(process.env.BROWSER_PROFILE));
+            const selector = profileSelector ?? process.env.BROWSER_PROFILE;
+            if (selector && selector !== 'off' && page.applyDeviceProfile) {
+                await page.applyDeviceProfile(selectDeviceProfile(selector));
             }
 
             // 模拟人类访问间隔（300-1200ms）

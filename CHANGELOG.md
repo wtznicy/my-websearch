@@ -2,10 +2,10 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
-## [Unreleased]
+## [1.4.0] - 2026-11-01
 
 ### Added
-- **`codeSymbol` 远程符号查询**：通过 GitHub Code Search 定位符号，按需拉取 raw 文件，提取 TypeScript/JavaScript/Python/Go/Rust/Java/C# 的声明签名、限长代码块与引用行；需要 `GITHUB_TOKEN`，仅语法级，不做跨仓库类型推导。
+- **`codeSymbol` 远程符号查询**：通过 GitHub Code Search 定位符号，按需拉取 raw 文件，提取 TypeScript/JavaScript/Python/Go/Rust/Java/C# 的声明签名、限长代码块与引用行；需要 `GITHUB_TOKEN`。
 
 ### Changed
 - **`codeSymbol` 解析质量**：支持多行签名、Python 装饰器、字符串/注释/正则感知的花括号匹配、jsDelivr raw 降级、截断标记，以及 `export { X } from` 的 re-export 追踪。
@@ -16,6 +16,9 @@ All notable changes to `my-websearch` are documented in this file.
 - **CDP 设备 profile**：新增 `BROWSER_PROFILE`（Windows/macOS/随机），通过 CDP Emulation 覆盖 UA、屏幕/DPR、时区、语言；仅作用于浏览器路径，不改变 DDG/Brave 的 HTTP 请求指纹。
 - **DDG 202 浏览器回退**：DuckDuckGo 的 HTTP 路径返回 202/CAPTCHA 时，改用 CDP 浏览器抓取 `html.duckduckgo.com` 并解析；默认开启，`DDG_BROWSER_FALLBACK=0` 可关闭。
 - **Brave 无 key 固定走 curl/Schannel**：axios HTTP/1.1 在新加坡节点 0/10 全 429；curl HTTP/1.1 前 7/10 成功，随后 429。curl 429 后用 .NET Schannel HTTP/2 重试同 URL 0/3、新 URL 0/3，因此不再做 H2 回退，也不再回退 axios；Brave 网页路径固定 curl。
+- **DDG 回退与 Go 签名修复**：DDG 浏览器回退未显式配置 `BROWSER_PROFILE` 时使用 `windows-chrome-8` 默认 profile，避免无 profile 时 0 结果；Go 方法签名不再把 receiver 当成参数。
+- **`codeSymbol` 分支回退修复**：仓库默认分支为 `master`（`main` 不存在）时，tsconfig alias 加载会继续尝试下一个 ref；此前会提前返回空结果。
+- **`codeSymbol` 路径提权与类型兼容**：符号同名文件（如 `hono.ts` 对应 `Hono`）优先级加 300 权重，避免被通用 `index.ts` 占满扫描配额；支持两步式 `import` + `export` re-export 穿透；`isKindCompatible` 兼容 `const` 工厂函数/构造器与 `interface/type/struct` 跨类型映射。
 
 ## [1.3.12] - 2026-10-30
 

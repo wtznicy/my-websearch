@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Language, Parser, type Node as SyntaxNode } from 'web-tree-sitter';
-import type { CodeSymbolDefinition, CodeSymbolKind } from './remoteCodeIntel.js';
+import { isKindCompatible, type CodeSymbolDefinition, type CodeSymbolKind } from './remoteCodeIntel.js';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 
@@ -248,7 +248,7 @@ export async function analyzeWithTreeSitter(
 
             const nameNode = node.childForFieldName('name');
             const declaredKind = KIND_BY_NODE[node.type];
-            if (nameNode?.text === symbol && declaredKind && (!kind || declaredKind === kind)) {
+            if (nameNode?.text === symbol && declaredKind && isKindCompatible(declaredKind, kind)) {
                 if (!seenDefinitions.has(`${node.startIndex}:${node.endIndex}`)) {
                     seenDefinitions.add(`${node.startIndex}:${node.endIndex}`);
                     const parent = node.parent;
@@ -310,6 +310,15 @@ export async function analyzeWithTreeSitter(
             });
             if (callSites.length >= 30) break;
         }
+
+        definitions.sort((a, b) => {
+            if (kind) {
+                const aExact = a.kind === kind ? 1 : 0;
+                const bExact = b.kind === kind ? 1 : 0;
+                if (bExact !== aExact) return bExact - aExact;
+            }
+            return 0;
+        });
 
         return { definitions, callSites };
     } catch {

@@ -191,15 +191,15 @@ function inferSyntaxTypeInfo(content: string, extension: string, symbol: string)
         }
         const match = content.match(new RegExp(`^\\s*func\\s+(?:\\([^)]*\\)\\s*)?${escaped}\\s*\\(`, 'm'));
         if (!match || match.index === undefined) return null;
-        const open = content.indexOf('(', match.index);
+        const nameIndex = content.indexOf(symbol, match.index);
+        const open = content.indexOf('(', nameIndex >= 0 ? nameIndex : match.index);
         const params = parenthesized(content, open);
         if (!params) return null;
-        const after = content.slice(params.end + 1).split('\n')[0] ?? '';
-        const result = after.split('{')[0]?.trim();
+        const after = content.slice(params.end + 1).split('{')[0]?.trim() ?? '';
         const parameters = splitTopLevel(params.inner);
         return syntaxTypeInfo(
-            `func(${parameters.join(', ')})${result ? ` ${result}` : ''}`,
-            result || undefined,
+            `func(${parameters.join(', ')})${after ? ` ${after}` : ''}`,
+            after || undefined,
             parameters
         );
     }
