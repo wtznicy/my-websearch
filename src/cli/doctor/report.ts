@@ -213,11 +213,12 @@ export function formatDoctorHumanReadable(report: DoctorReport): string {
 
     for (const eng of report.engines) {
         const extra = eng.detail ? ` (${eng.detail})` : '';
+        const challengeInfo = eng.challengeKind ? ` challenge=${eng.challengeKind}` : '';
         const cacheInfo = eng.probeKind === 'http_search'
             ? ` probe=${eng.probeKind} cached=${eng.cached ? 'yes' : 'no'} ttl=${eng.ttlMs}ms`
             : ` probe=${eng.probeKind}`;
         lines.push(
-            `  - ${eng.engine.padEnd(11)} status=${eng.status.padEnd(21)} stage=${eng.stage.padEnd(14)} proxyTcp=${eng.proxyTcp.padEnd(11)} http=${eng.http.padEnd(11)} app=${eng.application.padEnd(15)} route=${eng.usesProxy ? 'proxy' : 'direct'}${cacheInfo}${extra}`
+            `  - ${eng.engine.padEnd(11)} status=${eng.status.padEnd(21)} stage=${eng.stage.padEnd(14)} proxyTcp=${eng.proxyTcp.padEnd(11)} http=${eng.http.padEnd(11)} app=${eng.application.padEnd(15)} route=${eng.usesProxy ? 'proxy' : 'direct'}${cacheInfo}${challengeInfo}${extra}`
         );
     }
 

@@ -131,6 +131,31 @@ export function isBraveBlockedPage(html: string, $doc?: cheerio.CheerioAPI): boo
 }
 
 /**
+ * Brave 人机挑战页（HTTP 429 响应体）检测。
+ *
+ * 与「429 配额限流」区分：Brave 的挑战页由 SvelteKit 渲染，内含
+ * `schedule a captcha` 文案与 Argon2 PoW 的 `challengeSet` 数据（部分区域为
+ * 「拖动滑块」/「切换到传统验证码」）。命中即说明需要人机验证，而不是配额用完，
+ * 单纯等待或重试通常无效。
+ */
+const BRAVE_CAPTCHA_CHALLENGE_MARKERS = [
+    'schedule a captcha',
+    'challengeset',
+    'switch to traditional captcha',
+    '切换到传统验证码',
+    '正在验证您不是机器人',
+    '拖动滑块'
+];
+
+export function isBraveCaptchaChallengePage(body: string): boolean {
+    if (!body || typeof body !== 'string') {
+        return false;
+    }
+    const normalized = body.toLowerCase().replace(/\s+/g, ' ');
+    return BRAVE_CAPTCHA_CHALLENGE_MARKERS.some((marker) => normalized.includes(marker.toLowerCase()));
+}
+
+/**
  * 搜狗验证码/拦截页检测
  */
 export function isSogouChallengePage(html: string, $doc?: cheerio.CheerioAPI): boolean {

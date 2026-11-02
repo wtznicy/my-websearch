@@ -53,6 +53,8 @@ export type EngineNetworkProbeResult = {
     http?: 'reachable' | 'unreachable';
     application?: 'ok' | 'challenge' | 'parse_error' | 'unchecked';
     stage?: DoctorEngineProbeStage;
+    /** 挑战类型：captcha=需要人机验证（非配额）；quota=配额/频控窗口 */
+    challengeKind?: 'captcha' | 'quota';
     latencyMs: number;
     probeDuration?: number;
     probeUserAgent?: string;
@@ -108,6 +110,8 @@ export type DoctorEngineStatus = {
     ttlMs: number;
     probeKind: 'http_search' | 'config_only';
     detail?: string;
+    /** 挑战类型：captcha=需要人机验证（非配额）；quota=配额/频控窗口 */
+    challengeKind?: 'captcha' | 'quota';
 };
 
 export type DoctorReport = {

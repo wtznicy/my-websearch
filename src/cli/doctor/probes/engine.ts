@@ -4,6 +4,7 @@ import {
     isBaiduAntiBotPage,
     isBingAntiBotPage,
     isBraveBlockedPage,
+    isBraveCaptchaChallengePage,
     isSogouChallengePage,
     isStartpageCaptchaPage,
     looksLikeBotChallengePage
@@ -114,6 +115,11 @@ export function verifyEngineProbeResponseStructure(
     return { stage: 'http_reachable', application: 'parse_error' };
 }
 
+/** 区分 Brave 的两种 429：人机验证页 vs 配额/频控（doctor 输出用） */
+export function classifyBraveChallenge(body: string): 'captcha' | 'quota' {
+    return isBraveCaptchaChallengePage(body) ? 'captcha' : 'quota';
+}
+
 export async function probeEngineHttpEndpoint(
     engine: string,
     _appConfig: AppConfig,
@@ -145,6 +151,17 @@ export async function probeEngineHttpEndpoint(
             : JSON.stringify(response.data ?? '');
         const latencyMs = Date.now() - startedAt;
         if (isEngineProbeChallengeResponse(engine, response.status, body)) {
+            // Brave 的 429 既可能是「配额/频控」，也可能是「人机验证页」，两者处置完全不同：
+            // 读响应体特征给出明确结论，避免把验证页误诊成限流。
+            const braveCaptcha = engine === 'brave' && classifyBraveChallenge(body) === 'captcha';
+            const challengeKind: EngineNetworkProbeResult['challengeKind'] = engine === 'brave'
+                ? (braveCaptcha ? 'captcha' : 'quota')
+                : undefined;
+            const challengeError = engine === 'brave'
+                ? (braveCaptcha
+                    ? `Brave human-verification captcha challenge (HTTP ${response.status}) — not a quota limit; retrying usually stays challenged, configure BRAVE_API_KEY or switch exit IP`
+                    : `Brave HTTP ${response.status} rate limiting without a captcha page — quota window, retry after cooldown`)
+                : `Upstream anti-bot challenge detected (HTTP ${response.status})`;
             return {
                 reachable: false,
                 http: 'reachable',
@@ -154,7 +171,8 @@ export async function probeEngineHttpEndpoint(
                 probeDuration: latencyMs,
                 probeUserAgent,
                 checkedAt,
-                error: `Upstream anti-bot challenge detected (HTTP ${response.status})`
+                error: challengeError,
+                ...(challengeKind ? { challengeKind } : {})
             };
         }
         const verified = verifyEngineProbeResponseStructure(engine, response.status, body);
@@ -460,6 +478,7 @@ export async function evaluateEnginesDoctor(
                     cached: Boolean(netProbe.cached),
                     ttlMs: netProbe.ttlMs ?? options.okCacheTtlMs,
                     probeKind: netProbe.probeKind ?? 'http_search',
+                    ...(netProbe.challengeKind ? { challengeKind: netProbe.challengeKind } : {}),
                     ...(netProbe.error ? { detail: netProbe.error } : {})
                 };
             }

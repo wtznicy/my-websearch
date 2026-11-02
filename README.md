@@ -212,7 +212,7 @@ my-websearch doctor --network --engine bing,duckduckgo --json
 my-websearch doctor --reset-health
 ```
 
-The report separates configuration, proxy TCP reachability, HTTP reachability, application parsing, browser launch, and challenge verification status. Network mode performs real requests and should not be used as a high-frequency health check.
+The report separates configuration, proxy TCP reachability, HTTP reachability, application parsing, browser launch, and challenge verification status. For Brave, a 429 is additionally classified as `captcha` (human verification — retrying usually stays challenged) or `quota` (rate-limit window) in both the text report (`challenge=...`) and `--json` (`challengeKind`). Network mode performs real requests and should not be used as a high-frequency health check.
 
 ### 🌐 Proxy Troubleshooting & Upstream Rate Limiting
 

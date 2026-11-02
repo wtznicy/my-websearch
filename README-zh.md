@@ -211,7 +211,7 @@ my-websearch doctor --network --engine bing,duckduckgo --json
 my-websearch doctor --reset-health
 ```
 
-报告会区分配置状态、代理 TCP 连通性、HTTP 连通性、应用层解析、浏览器启动和交互验证状态。网络模式会发起真实请求，不建议高频执行。
+报告会区分配置状态、代理 TCP 连通性、HTTP 连通性、应用层解析、浏览器启动和交互验证状态。对 Brave，429 还会进一步区分为 `captcha`（人机验证，重试通常仍被拦）或 `quota`（配额/频控窗口）：文本报告显示为 `challenge=...`，`--json` 里是 `challengeKind`。网络模式会发起真实请求，不建议高频执行。
 
 ### 🌐 代理排障与上游频控辨析
 

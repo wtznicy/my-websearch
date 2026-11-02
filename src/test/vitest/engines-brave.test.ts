@@ -10,6 +10,8 @@ import {
     shouldUseBraveBrowserFallback
 } from '../../engines/brave/brave.js';
 import { AppError } from '../../core/errors.js';
+import { isBraveCaptchaChallengePage } from '../../core/antiBot/antiBotDetection.js';
+import { classifyBraveChallenge } from '../../cli/doctor/probes/engine.js';
 
 // Brave 用 SvelteKit SSR：.snippet > .result-content > a(.search-snippet-title + .site-name-wrapper) + .generic-snippet
 const NORMAL_PAGE = `<!DOCTYPE html>
@@ -333,5 +335,30 @@ describe('shouldUseBraveBrowserFallback', () => {
     it('should not trigger browser fallback for unrelated errors', () => {
         const error = new Error('Internal Server Error 500');
         expect(shouldUseBraveBrowserFallback(error)).toBe(false);
+    });
+});
+
+describe('Brave 429 挑战页与配额限流区分', () => {
+    it('detects the captcha challenge page body markers', () => {
+        const bodies = [
+            'Your request has been flagged as being suspicious and Brave Search decided to schedule a captcha for you.',
+            '{"challengeSet":{"set_token":"c1a8","tokens":["2a01"]}}',
+            '<button>Switch to traditional CAPTCHA</button>',
+            '<button>切换到传统验证码</button>',
+            '<p>正在验证您不是机器人</p>',
+            '<p>拖动滑块完成验证</p>'
+        ];
+        for (const body of bodies) {
+            expect(isBraveCaptchaChallengePage(body), body).toBe(true);
+            expect(classifyBraveChallenge(body)).toBe('captcha');
+        }
+    });
+
+    it('treats a plain quota / rate-limit response as quota, not captcha', () => {
+        const plain429 = '<html><head><title>Brave Search</title></head><body>Too Many Requests</body></html>';
+        expect(isBraveCaptchaChallengePage(plain429)).toBe(false);
+        expect(classifyBraveChallenge(plain429)).toBe('quota');
+        expect(isBraveCaptchaChallengePage('')).toBe(false);
+        expect(classifyBraveChallenge('')).toBe('quota');
     });
 });

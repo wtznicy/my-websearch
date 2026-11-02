@@ -7,7 +7,7 @@ import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { paginateSearch } from '../../utils/pagination.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 import { tripEngineCircuit } from '../../core/search/engineCircuitBreaker.js';
-import { isBraveBlockedPage } from '../../core/antiBot/antiBotDetection.js';
+import { isBraveBlockedPage, isBraveCaptchaChallengePage } from '../../core/antiBot/antiBotDetection.js';
 import { AppError, extractErrorCode, extractErrorStatus, isAppError } from '../../core/errors.js';
 import { getProxyUrl } from '../../config.js';
 import { getSystemProxyFallbackUrl } from '../../utils/systemProxy.js';
@@ -56,25 +56,39 @@ const braveHttpGet = async (url: string, options: AxiosRequestConfig): Promise<A
     } as AxiosResponse;
 };
 
-/** Brave 返回 HTTP 429 人机挑战页时给出准确提示，而非笼统的 status code 错误 */
+/** 从 axios 风格错误里取出响应体（curl 路径会把 body 放在 response.data） */
+function extractBraveResponseBody(error: unknown): string {
+    const data = (error as { response?: { data?: unknown } } | null)?.response?.data;
+    return typeof data === 'string' ? data : '';
+}
+
+/**
+ * Brave 返回 HTTP 429 时给出准确诊断：
+ * - 响应体命中验证页特征 → bot_challenge（人机验证，不是限流）
+ * - 否则 → rate_limited（配额/频控窗口）
+ */
 function buildBraveErrorMessage(error: unknown): Error {
     const status = extractErrorStatus(error);
     if (status === 429) {
-        // 实测 429 响应体是 Brave 的反爬人机验证页（schedule a captcha + Argon2 challengeSet，经 CloudFront 边缘返回），
-        // 不是普通配额计数；出口 IP 被挑战后在窗口期内会持续 429，换客户端栈也大概率继续被拦。
         // 走到这里说明浏览器兜底也失败了（或已被 BRAVE_BROWSER_FALLBACK=0 关闭），故标记不可重试并熔断，避免重试风暴。
+        const isCaptchaChallenge = isBraveCaptchaChallengePage(extractBraveResponseBody(error));
+        const fallbackState = process.env.BRAVE_BROWSER_FALLBACK === '0'
+            ? 'The disguised headless browser fallback is disabled (BRAVE_BROWSER_FALLBACK=0). '
+            : 'The disguised headless browser fallback also failed to pass this challenge. ';
         const err = new AppError({
-            code: 'rate_limited',
+            code: isCaptchaChallenge ? 'bot_challenge' : 'rate_limited',
             retryable: false,
             status: 429,
             engine: 'brave',
-            hint: 'Set BRAVE_API_KEY (free tier) to use the official API, or switch exit node / wait for IP challenge to clear.',
-            message: 'Brave returned HTTP 429 with an anti-bot challenge page (captcha + Argon2 PoW) for this exit IP. '
-                + (process.env.BRAVE_BROWSER_FALLBACK === '0'
-                    ? 'The disguised headless browser fallback is disabled (BRAVE_BROWSER_FALLBACK=0). '
-                    : 'The disguised headless browser fallback also failed to pass this challenge. ')
-                + 'Retrying or changing the HTTP stack usually keeps getting challenged. '
-                + 'Configure BRAVE_API_KEY (official API, free tier) for a stable path, wait for the challenge to clear, or switch exit node.'
+            hint: isCaptchaChallenge
+                ? 'Configure BRAVE_API_KEY (free tier) for the official API, or switch to an exit IP that is not challenged.'
+                : 'Set BRAVE_API_KEY (free tier) for the official API, wait for the quota window, or switch exit node.',
+            message: isCaptchaChallenge
+                ? 'Brave requires human verification: HTTP 429 with an anti-bot captcha page (Argon2 PoW / slider), not a rate limit. '
+                    + fallbackState
+                    + 'Retrying or changing the HTTP stack keeps getting challenged; configure BRAVE_API_KEY or switch exit node.'
+                : 'Brave rate limited this exit IP (HTTP 429 quota window, no captcha page in the response). '
+                    + 'Wait for the window to reset, switch exit node, or configure BRAVE_API_KEY (official API, free tier).'
         });
         tripEngineCircuit('brave');
         return err;
