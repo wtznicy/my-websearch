@@ -129,7 +129,6 @@ export function buildChromeArgs(options: LaunchOptions, tempDir: string): string
         '--disable-background-networking',
         '--disable-sync',
         '--disable-extensions',
-        '--disable-gpu',
         '--disable-default-apps',
         '--disable-translate',
         '--metrics-recording-only',

@@ -385,7 +385,7 @@ export function shouldUseBraveBrowserFallback(error: unknown): boolean {
 
 /**
  * Brave 遭遇 429 / 人机挑战时的无头浏览器尽力回退（best-effort）。
- * 尝试通过桌面指纹与视口伪装渲染页面；若目标站点处于强交互滑块人机验证，仍可能无法提取结果。
+ * 深度伪装桌面指纹、视口与真实硬件环境，在出现 PoW 验证按钮时自动交互触发，避免被降级判定为滑块验证。
  */
 export async function searchBraveWithBrowser(
     query: string,
@@ -393,24 +393,126 @@ export async function searchBraveWithBrowser(
     options?: { signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }
 ): Promise<SearchResult[]> {
     const signal = options?.signal;
+    if (signal?.aborted) {
+        throw signal.reason instanceof Error
+            ? signal.reason
+            : new AppError({ code: 'aborted', retryable: false, engine: 'brave', message: 'Brave search aborted' });
+    }
+
     const timeRange = options?.timeRange;
     const freshnessMap: Record<string, string> = { day: 'pd', week: 'pw', month: 'pm', year: 'py' };
     const freshness = timeRange ? freshnessMap[timeRange] : undefined;
     const url = `https://search.brave.com/search?q=${encodeURIComponent(query)}&source=web${freshness ? `&freshness=${freshness}` : ''}`;
 
-    const { fetchPageHtmlWithBrowser } = await import('../../utils/browserCookies.js');
-    const profile = process.env.BROWSER_PROFILE || 'windows-chrome-8';
-    const page = await fetchPageHtmlWithBrowser(url, signal, profile);
-    const results = parseBraveResults(page.html, new Set());
-    if (results.length === 0) {
-        throw new AppError({
-            code: 'bot_challenge',
-            retryable: false,
-            engine: 'brave',
-            message: 'Brave browser fallback returned no parsable results (likely blocked).'
-        });
+    const { openPlaywrightBrowser } = await import('../../utils/playwrightClient.js');
+    const { prepareStealthPage } = await import('../../utils/browserStealth.js');
+    const { selectDeviceProfile } = await import('../../utils/browser/deviceProfile.js');
+
+    const session = await openPlaywrightBrowser(true);
+    try {
+        const b = session.browser as {
+            newContext?: () => Promise<{ newPage: () => Promise<unknown>; close: () => Promise<void> }>;
+            contexts?: () => Array<{ newPage: () => Promise<unknown> }>;
+        };
+        let page: unknown;
+        let cleanupContext: (() => Promise<void>) | undefined;
+
+        if (typeof b.newContext === 'function') {
+            const ctx = await b.newContext();
+            page = await ctx.newPage();
+            cleanupContext = async () => {
+                await ctx.close().catch(() => undefined);
+            };
+        } else if (typeof b.contexts === 'function') {
+            const contexts = b.contexts();
+            const firstCtx = contexts[0];
+            if (!firstCtx) {
+                throw new Error('No browser context available');
+            }
+            page = await firstCtx.newPage();
+        } else {
+            throw new Error('Browser instance does not support creating pages');
+        }
+
+        const p = page as {
+            applyDeviceProfile?: (profile: unknown) => Promise<void>;
+            goto: (url: string, opts?: { waitUntil?: string; timeout?: number }) => Promise<unknown>;
+            evaluate: <T>(fn: () => T) => Promise<T>;
+            content: () => Promise<string>;
+            close: () => Promise<void>;
+        };
+
+        const onAbort = () => {
+            void p.close().catch(() => undefined);
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
+
+        try {
+            if (signal?.aborted) {
+                throw signal.reason instanceof Error
+                    ? signal.reason
+                    : new AppError({ code: 'aborted', retryable: false, engine: 'brave', message: 'Brave search aborted' });
+            }
+
+            await prepareStealthPage(p as never);
+            const selector = process.env.BROWSER_PROFILE || 'windows-chrome-8';
+            if (p.applyDeviceProfile) {
+                await p.applyDeviceProfile(selectDeviceProfile(selector));
+            }
+
+            await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+
+            // 若页面渲染出 PoW「验证」按钮，主动点击触发 Argon2 算力证明计算，避免因超时未响应被降级至滑块验证
+            await p.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('button'));
+                const btn = buttons.find((button) => {
+                    const text = button.innerText || '';
+                    return text.includes('验证') || text.includes('Verify');
+                });
+                if (btn) {
+                    btn.click();
+                }
+            }).catch(() => undefined);
+
+            // 等待结果渲染（出现 .snippet 容器）或直至最长 8s
+            const deadline = Date.now() + 8000;
+            while (Date.now() < deadline && !signal?.aborted) {
+                await new Promise((resolve) => setTimeout(resolve, 500));
+                const hasSnippets = await p.evaluate(() => {
+                    return document.querySelectorAll('.snippet, .result-content').length > 0;
+                }).catch(() => false);
+                if (hasSnippets) {
+                    break;
+                }
+            }
+
+            if (signal?.aborted) {
+                throw signal.reason instanceof Error
+                    ? signal.reason
+                    : new AppError({ code: 'aborted', retryable: false, engine: 'brave', message: 'Brave search aborted' });
+            }
+
+            const html = await p.content();
+            const results = parseBraveResults(html, new Set());
+            if (results.length === 0) {
+                throw new AppError({
+                    code: 'bot_challenge',
+                    retryable: false,
+                    engine: 'brave',
+                    message: 'Brave browser fallback returned no parsable results (likely blocked).'
+                });
+            }
+            return results.slice(0, limit);
+        } finally {
+            signal?.removeEventListener('abort', onAbort);
+            await p.close().catch(() => undefined);
+            if (cleanupContext) {
+                await cleanupContext();
+            }
+        }
+    } finally {
+        await session.release();
     }
-    return results.slice(0, limit);
 }
 
 async function executeBraveHttpSearch(
