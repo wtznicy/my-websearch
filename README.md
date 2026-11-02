@@ -72,7 +72,7 @@
 
 ## 🛠️ 5 Core MCP Tools (Minimal & Token-Efficient)
 
-> 💡 **Token Budget & Slimming**: All tool descriptions are strictly kept within 250 characters (total description characters ≤ 1000). Detailed routing guidance is delegated to `McpServer({ instructions })`, significantly reducing LLM context consumption.
+> 💡 **Token Budget & Slimming**: All tool descriptions are strictly kept within 250 characters (total description characters ≤ 1200), while detailed routing guidance is delegated to `McpServer({ instructions })`, significantly reducing LLM context consumption.
 
 | Tool Name | Purpose | Key Highlights |
 | :--- | :--- | :--- |
@@ -404,7 +404,7 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run the Vitest suite (97 files, 739 tests at the current baseline)
+npm test              # Run the Vitest suite (99 files, 755 tests at the current baseline)
 npm run test:live     # Run bounded-concurrency live integration tests
 npm run eval:live     # Run 23-case live STDIO JSON-RPC evaluation suite
 ```

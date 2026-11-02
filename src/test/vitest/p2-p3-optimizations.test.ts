@@ -12,6 +12,7 @@ import { registerSearchTool } from '../../tools/handlers/searchTool.js';
 import { registerFetchWebTool } from '../../tools/handlers/fetchWebTool.js';
 import { registerFetchGithubTool } from '../../tools/handlers/fetchGithubTool.js';
 import { registerQueryDocsTool } from '../../tools/handlers/queryDocsTool.js';
+import { registerCodeSymbolTool } from '../../tools/handlers/codeSymbolTool.js';
 import { createMyWebSearchRuntime } from '../../runtime/createRuntime.js';
 
 describe('P2 & P3 Optimizations', () => {
@@ -112,7 +113,7 @@ describe('P2 & P3 Optimizations', () => {
     });
 
     describe('P3-3: server.registerTool registration across all MCP tools', () => {
-        it('successfully registers all 4 core tools using server.registerTool', () => {
+        it('successfully registers all 5 core tools using server.registerTool', () => {
             const server = new McpServer({ name: 'test', version: '1.0.0' });
             const runtime = createMyWebSearchRuntime();
 
@@ -120,6 +121,7 @@ describe('P2 & P3 Optimizations', () => {
             registerFetchWebTool(server, runtime);
             registerFetchGithubTool(server, runtime);
             registerQueryDocsTool(server, runtime);
+            registerCodeSymbolTool(server, runtime);
 
             // Verify tools are registered in server
             const registered = (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools;
@@ -128,6 +130,7 @@ describe('P2 & P3 Optimizations', () => {
             expect(registered['fetchWebContent']).toBeDefined();
             expect(registered['fetchGithubContent']).toBeDefined();
             expect(registered['queryDocs']).toBeDefined();
+            expect(registered['codeSymbol']).toBeDefined();
         });
     });
 

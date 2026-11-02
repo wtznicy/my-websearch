@@ -4,7 +4,7 @@ import { setupTools } from '../../tools/setupTools.js';
 import { createMyWebSearchRuntime } from '../../runtime/createRuntime.js';
 
 describe('Tool Description Token Budget & Length Limit', () => {
-    it('all registered tools have description <= 250 chars and total characters <= 1000', () => {
+    it('all registered tools have description <= 250 chars and total characters <= 1200', () => {
         const server = new McpServer({ name: 'test', version: '1.0.0' });
         const runtime = createMyWebSearchRuntime();
         setupTools(server, runtime);

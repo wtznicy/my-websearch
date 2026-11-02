@@ -71,7 +71,7 @@
 
 ## 🛠️ 5 大核心 MCP 工具（极简高效，低 Token 消耗）
 
-> 💡 **Token 预算与瘦身**：所有工具描述均严格控制在 250 字符以内（总描述字符 ≤ 1000），更详细的路由策略已移入 `McpServer({ instructions })`，大幅降低宿主 LLM 的 Context 开销。
+> 💡 **Token 预算与瘦身**：所有工具描述均严格控制在 250 字符以内（总描述字符 ≤ 1200），更详细的路由策略已移入 `McpServer({ instructions })`，大幅降低宿主 LLM 的 Context 开销。
 
 | 工具名称 | 功能定位 | 关键特性 |
 | :--- | :--- | :--- |
@@ -368,7 +368,7 @@ my-websearch doctor --reset-health
 ```bash
 npm install
 npm run build
-npm test              # 执行 Vitest 测试套件（当前基线：97 个文件、739 个测试）
+npm test              # 执行 Vitest 测试套件（当前基线：99 个文件、755 个测试）
 npm run test:live     # 执行实时网络集成测试
 npm run eval:live     # 执行 23 用例真实 STDIO JSON-RPC 评测套件
 ```

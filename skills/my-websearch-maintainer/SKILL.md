@@ -45,9 +45,9 @@ Use this classification as the execution entrypoint. Start by choosing one categ
 ## Change checklist
 
 When adding or changing a search engine:
-- update `src/config.ts`
-- update `src/tools/setupTools.ts`
-- add or update engine tests
+- update `src/engines/definitions.ts` (region/proxy facts) and `src/engines/registry.ts` (descriptor + executor)
+- update `src/config.ts` (`validSearchEngines` and the `defaultSearchEngine` union)
+- add or update engine tests in `src/test/vitest/`
 - update `README.md` and `README-zh.md`
 
 When changing network behavior:
