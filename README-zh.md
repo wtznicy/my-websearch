@@ -63,7 +63,7 @@
 | **`arxiv`** | 🌐 直连 API | 无 | 官方 Atom XML API 检索论文标题、作者与摘要 | 计算机科学、AI/ML 与自然科学最新论文 |
 | **`code`** | 🌐 国内需代理 | 无 | grep.app API 实时检索全球 GitHub 代码，含仓库、文件路径与精确代码行 | 源码实现翻查、API 使用范例、开源语法实战 |
 
-> **版本说明**：本 README 跟随当前源码树（**1.4.0**）。**搜索语法**、**MCP Prompts/Resources**、**Maven 文档兜底**、**Reddit/知乎/博客园提纯**、**raw CDP 浏览器兜底** 随 **1.3.11** 发布；**1.3.12** 修复浏览器阶段预算的 flaky 测试/确定性拒绝；**1.4.0** 新增 `codeSymbol`、CDP 设备 profile、DDG 202 浏览器回退与 Brave curl/Schannel；npm latest 可能滞后到包发布完成。
+> **版本说明**：本 README 跟随当前源码树（**1.4.1**）。**搜索语法**、**MCP Prompts/Resources**、**Maven 文档兜底**、**Reddit/知乎/博客园提纯**、**raw CDP 浏览器兜底** 随 **1.3.11** 发布；**1.3.12** 修复浏览器阶段预算的 flaky 测试/确定性拒绝；**1.4.0** 新增 `codeSymbol`、CDP 设备 profile、DDG 202 浏览器回退与 Brave curl/Schannel；**1.4.1** 修复 Windows 旧版 curl 兼容；npm latest 可能滞后到包发布完成。
 
 ---
 
