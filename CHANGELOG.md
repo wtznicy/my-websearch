@@ -2,6 +2,25 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
+## [1.4.2] - 2026-11-02
+
+### Added
+- **Brave 429 无头浏览器回退（`BRAVE_BROWSER_FALLBACK`，默认开）**：无 Key 网页路径遇到 429 / 反爬挑战后，用桌面指纹伪装的无头 CDP 浏览器重试一次，并自动点击页面上的 Argon2 PoW「验证」按钮。实测在 curl 前后都持续 429 的硬封禁出口上 8/8 成功、每次约 4–6s；`0` 可关闭并快速失败。
+- **Brave 429 分类**：读取响应体区分「人机验证页」（`schedule a captcha` / `challengeSet` / `拖动滑块` / `切换到传统验证码`）与「配额限流」，前者报 `bot_challenge`、后者报 `rate_limited`，不再把验证页误诊成 CloudFront 限流。
+- **`doctor --network --engine brave` 挑战类型**：文本报告新增 `challenge=captcha|quota`，`--json` 新增 `challengeKind`，并给出「需要人机验证，不是配额」的明确结论。
+
+### Changed
+- **无头指纹伪装补齐**：进程级 `--user-agent`（同时作用于 Web Worker，避免泄露 HeadlessChrome）、`--window-size=1920,1080`、CDP `screen` 几何覆盖、移除 `--disable-gpu`；修复 `screen` 800×600 与 `outerWidth` 1920 的矛盾。
+- **Brave 超时预算**：单引擎与级联路径把 brave 纳入 1.5x 预算，避免浏览器回退被 10s 上限掐断。
+- **文档口径**：README/README-zh 的 Brave 行、特性段、429 排障段、版本说明与测试基线按实测重写；补充 `CUSTOM_DNS_SERVERS`。
+
+### Fixed
+- **MCP 自述与文档漂移**：`SERVER_INSTRUCTIONS` 改为 5 个工具并补 `codeSymbol`；Token 预算统一为 ≤1200；`docs/http-api.md` 的 `searchMode` 适用范围修正；维护者 skill 的引擎注册流程改为 `definitions.ts`/`registry.ts`。
+- **`defaultSearchEngine` 类型**：补上 `bing-news` / `yahoo`，与运行时白名单一致。
+
+### Tests
+- 新增 `codeSymbol` 契约测试（注册/入参 schema/校验分支/渲染与错误封套/响应封顶），新增 Brave 429 与挑战页分类用例；基线 **99 个文件 / 762 个用例**。
+
 ## [1.4.1] - 2026-11-02
 
 ### Fixed

@@ -27,8 +27,8 @@
 
 - 🌐 **16 大引擎融合与自适应路由**  
   聚合国内直连（**Bing、百度、CSDN、掘金、搜狗**）、海外通用（**DuckDuckGo、Brave、Startpage、Yahoo、Exa、Bing News**）与垂直开发者平台（**GitHub、StackOverflow、Hacker News、arXiv**）。支持中文/英文按语种自动路由（`auto`）、多词并发检索（`queries`）、跨引擎去重排序与 `minResults` 自动级联补位；**DuckDuckGo 不健康时，Yahoo 会从英文替补池自动顶上**。
-- ⚡ **现代 Web 协议栈与前端算力求解（零浏览器轻量直通）**  
-  基于 `wreq-js` 原生模拟现代浏览器 TLS/HTTP2 协议握手与长效会话机制；内置算法解析 **Startpage Anubis SHA-256 PoW 算力挑战** 与 **DuckDuckGo `d.js` (`isJsaChallenge`) 动态前端挑战**；真实 URL 快速解析（搜狗跳转页还原、百度 `Location` 直取、Bing Base64 解码）；无需拉起 400MB 浏览器即可稳定高效获取正文。请求栈按引擎区分：**DuckDuckGo 必须用 wreq 的 Chrome profile 发 GET**（axios POST 会吃 202），而 **Brave 固定用 curl HTTP/1.1**（Windows 为 Schannel；实测 curl 7/10 后才 429，axios 0/10，wreq HTTP/2 429）。注意：DuckDuckGo 页面级的 **HTTP 202 anomaly CAPTCHA**（点选图片的人机验证）属于人工验证，**不会**被绕过，统一报 `bot_challenge`。
+- ⚡ **现代 Web 协议栈与前端算力求解（零浏览器快车道，必要时浏览器兜底）**  
+  基于 `wreq-js` 原生模拟现代浏览器 TLS/HTTP2 协议握手与长效会话机制；内置算法解析 **Startpage Anubis SHA-256 PoW 算力挑战** 与 **DuckDuckGo `d.js` (`isJsaChallenge`) 动态前端挑战**，多数挑战无需拉起浏览器即可在毫秒级解出；真实 URL 快速解析（搜狗跳转页还原、百度 `Location` 直取、Bing Base64 解码）。请求栈按引擎区分：**DuckDuckGo 必须用 wreq 的 Chrome profile 发 GET**（axios POST 会吃 202），而 **Brave 默认走 curl HTTP/1.1**（Windows 为 Schannel；实测 curl 7/10 后才 429，axios 0/10，wreq HTTP/2 429）。当 Brave 的 429 实为反爬挑战页时，引擎会用桌面指纹伪装的无头 CDP 浏览器重试一次并自动点击 Argon2 PoW「验证」按钮（约 4–6s；实测 HTTP 持续 429 期间 8/8 成功）。注意：DuckDuckGo 页面级的 **HTTP 202 anomaly CAPTCHA**（点选图片的人机验证）属于人工验证，**不会**被绕过，统一报 `bot_challenge`；Brave 的挑战是计算型（Argon2 PoW），由页面自身 JavaScript 求解，不是我们去破解。
 - 📄 **高纯度 Markdown 正文提纯与特色站点规则**  
   整合 Mozilla Readability 与容器级智能降噪，为**微信公众号**（`#js_content` 深度清洗）、**StackOverflow**（问答主体与采纳答案精准提纯）定制专属净化器，针对 **CSDN 与掘金** 自动走专用提取链路；精准保留文章主标题、代码围栏及 GFM 表格；支持长文无缝分页（`startIndex`），并提供三种省 token 模式：**BM25 相关性排序的 `focus`**、**无需 LLM 的 CSS 选择器 `extract` 结构化 JSON**、**编号 `citations` 引用**。
 - 📚 **统一 Context7 官方框架/库文档直查（`queryDocs` 一站式合体）**  
@@ -63,7 +63,7 @@
 | **`arxiv`** | 🌐 直连 API | 无 | 官方 Atom XML API 检索论文标题、作者与摘要 | 计算机科学、AI/ML 与自然科学最新论文 |
 | **`code`** | 🌐 国内需代理 | 无 | grep.app API 实时检索全球 GitHub 代码，含仓库、文件路径与精确代码行 | 源码实现翻查、API 使用范例、开源语法实战 |
 
-> **版本说明**：本 README 跟随当前源码树（**1.4.1**）。**搜索语法**、**MCP Prompts/Resources**、**Maven 文档兜底**、**Reddit/知乎/博客园提纯**、**raw CDP 浏览器兜底** 随 **1.3.11** 发布；**1.3.12** 修复浏览器阶段预算的 flaky 测试/确定性拒绝；**1.4.0** 新增 `codeSymbol`、CDP 设备 profile、DDG 202 浏览器回退与 Brave curl/Schannel；**1.4.1** 修复 Windows 旧版 curl 兼容；npm latest 可能滞后到包发布完成。
+> **版本说明**：本 README 跟随当前源码树（**1.4.2**）。**搜索语法**、**MCP Prompts/Resources**、**Maven 文档兜底**、**Reddit/知乎/博客园提纯**、**raw CDP 浏览器兜底** 随 **1.3.11** 发布；**1.3.12** 修复浏览器阶段预算的 flaky 测试/确定性拒绝；**1.4.0** 新增 `codeSymbol`、CDP 设备 profile、DDG 202 浏览器回退与 Brave curl/Schannel；**1.4.1** 修复 Windows 旧版 curl 兼容；**1.4.2** 新增 Brave 429 挑战分类（`captcha` / `quota`）、桌面指纹伪装的无头 CDP 浏览器回退（自动触发 Argon2 PoW）以及 `doctor` 挑战类型判定；npm latest 可能滞后到包发布完成。
 
 ---
 
@@ -291,6 +291,7 @@ my-websearch doctor --reset-health
 | :--- | :--- | :--- |
 | `PROXY_URL` | 空（关闭） | 统一上游代理配置（已合并原 `USE_PROXY` 与 `PROXY_ENGINES`，TUN 模式无需配置保持直连）。<br/>• **开启默认代理**：传空值 `PROXY_URL=""` 或 `PROXY_URL=true` 即可启用默认 `http://127.0.0.1:7897`（常见本地代理端口如 7897、7890、10809；默认仅国际引擎走代理，国内引擎直连）<br/>• **自定义地址**：`PROXY_URL=http://127.0.0.1:10809`<br/>• **自选引擎**：`PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` 或全部引擎走代理 `PROXY_URL=";all"` |
 | `FAKE_IP_CIDRS` | `198.18.0.0/15` | Fake-IP 虚拟网段白名单，避免误触发 SSRF 本地私网地址拦截 |
+| `CUSTOM_DNS_SERVERS` | `223.5.5.5,119.29.29.29,1.1.1.1,8.8.8.8` | 内部 c-ares 解析器使用的 DNS 服务器（逗号分隔），系统 DNS 被污染时可用；会整体替换内置列表 |
 | `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` 模拟的现代浏览器 TLS/H2 指纹（如 `chrome_149`, `safari_18`） |
 | `IMPERSONATE_OS` | `windows` | 指纹模拟使用的操作系统平台（`windows`, `macos`, `linux`） |
 | `BING_IMPERSONATE` | `true` | 是否启用 Bing 的 Chrome TLS 指纹模拟（连续多次返回 0 条时会自动熔断降级为标准 HTTP） |
@@ -369,7 +370,7 @@ my-websearch doctor --reset-health
 ```bash
 npm install
 npm run build
-npm test              # 执行 Vitest 测试套件（当前基线：99 个文件、755 个测试）
+npm test              # 执行 Vitest 测试套件（当前基线：99 个文件、762 个测试）
 npm run test:live     # 执行实时网络集成测试
 npm run eval:live     # 执行 23 用例真实 STDIO JSON-RPC 评测套件
 ```

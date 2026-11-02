@@ -27,8 +27,8 @@
 
 - 🌐 **16-Engine Federated Search & Smart Routing**  
   Aggregates direct domestic engines (**Bing, Baidu, CSDN, Juejin, Sogou**), global engines (**DuckDuckGo, Brave, Startpage, Yahoo, Exa, Bing News**), and specialized developer platforms (**GitHub, StackOverflow, Hacker News, arXiv**). Features automatic language-aware routing (`auto`), parallel multi-query execution (`queries: string[]`), URL deduplication, and automatic `minResults` cascading fallback. When DuckDuckGo is unhealthy, **Yahoo automatically joins the English primary group** from the fallback pool.
-- ⚡ **Native Web Protocol & Proof-of-Work Solvers (Zero-Browser Fast Path)**  
-  Built on `wreq-js` with native modern TLS/HTTP2 handshake emulation and persistent session cookies. Includes pure-JS/Rust solvers for **Startpage's Anubis SHA-256 PoW challenge** and **DuckDuckGo's `d.js` (`isJsaChallenge`) HTML5/arithmetic challenge**, resolving structured challenge responses in milliseconds without launching a 400MB browser. Request stacks are engine-specific: **DuckDuckGo requires the wreq Chrome profile via GET** (axios POST is challenged with HTTP 202), while **Brave uses curl HTTP/1.1** (Windows Schannel; tested curl 7/10 before rate limiting, axios 0/10, wreq HTTP/2 429). Note: DuckDuckGo's page-level **HTTP 202 anomaly CAPTCHA** ("select all squares containing a duck") is human verification and is intentionally **not** bypassed — it is reported as `bot_challenge`. Real URL resolution for Sogou redirect links, Baidu `Location`, and Bing Base64 links.
+- ⚡ **Native Web Protocol & Proof-of-Work Solvers (Browser-Free Fast Path, Browser Fallback Only When Needed)**  
+  Built on `wreq-js` with native modern TLS/HTTP2 handshake emulation and persistent session cookies. Includes pure-JS/Rust solvers for **Startpage's Anubis SHA-256 PoW challenge** and **DuckDuckGo's `d.js` (`isJsaChallenge`) HTML5/arithmetic challenge**, so most challenges resolve without launching a browser. Request stacks are engine-specific: **DuckDuckGo requires the wreq Chrome profile via GET** (axios POST is challenged with HTTP 202), while **Brave defaults to curl HTTP/1.1** (Windows Schannel; tested curl 7/10 before rate limiting, axios 0/10, wreq HTTP/2 429). When a Brave 429 turns out to be an anti-bot challenge page, the engine retries once through a disguised headless CDP browser that clicks the Argon2 PoW button itself (~4–6s; measured 8/8 while plain HTTP stayed 429). Note: DuckDuckGo's page-level **HTTP 202 anomaly CAPTCHA** ("select all squares containing a duck") is human verification and is intentionally **not** bypassed — it is reported as `bot_challenge`; Brave's challenge is computational (Argon2 PoW) and is solved by the page's own JavaScript, not by us. Real URL resolution for Sogou redirect links, Baidu `Location`, and Bing Base64 links.
 - 📄 **High-Purity Markdown Article Extraction & Dedicated Site Purifiers**  
   Combines Mozilla Readability with intelligent chrome noise stripping. Features dedicated purification rules for **WeChat Official Accounts** (`mp.weixin.qq.com`), **StackOverflow questions & accepted answers**, and transparent internal routing for **CSDN & Juejin**. Removes `<nav>`, `<aside>`, `<footer>`, and breadcrumbs while faithfully preserving article titles, code blocks, and GFM tables. Supports seamless pagination (`startIndex`), plus three token-saving modes: **BM25 relevance-ranked `focus`**, **CSS-selector `extract` to JSON with no LLM**, and **numbered `citations`**.
 - 📚 **Unified Context7 Library Docs Lookup (`queryDocs`)**  
@@ -64,7 +64,7 @@
 | **`arxiv`** | 🌐 Direct API | None | Official arXiv Atom XML API parsing titles, authors & abstracts | Scientific papers, machine learning & AI research |
 | **`code`** | 🌐 Proxy in CN | None | grep.app API search across global GitHub code with repo, path & exact line numbers | Source code implementations, API usage patterns |
 
-> **Version note**: this README tracks the current source tree (**1.4.1**). **Search operators**, **MCP Prompts/Resources**, **Maven docs fallback**, **Reddit/Zhihu/Cnblogs purifiers**, and the **raw-CDP browser fallback** ship in **1.3.11**; **1.3.12** fixes a flaky browser-budget test/behavior; **1.4.0** adds `codeSymbol`, CDP device profiles, DDG 202 browser fallback, and Brave curl/Schannel; **1.4.1** fixes Windows curl 8.4 compatibility. npm latest may lag until the package is published.
+> **Version note**: this README tracks the current source tree (**1.4.2**). **Search operators**, **MCP Prompts/Resources**, **Maven docs fallback**, **Reddit/Zhihu/Cnblogs purifiers**, and the **raw-CDP browser fallback** ship in **1.3.11**; **1.3.12** fixes a flaky browser-budget test/behavior; **1.4.0** adds `codeSymbol`, CDP device profiles, DDG 202 browser fallback, and Brave curl/Schannel; **1.4.1** fixes Windows curl 8.4 compatibility; **1.4.2** adds Brave 429 challenge detection (`captcha` vs `quota`), a disguised headless CDP browser fallback that auto-triggers the Argon2 PoW, and `doctor` challenge classification. npm latest may lag until the package is published.
 
 ---
 
@@ -327,6 +327,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | :--- | :--- | :--- |
 | `PROXY_URL` | empty (off) | Consolidated upstream proxy configuration (merges previous `USE_PROXY` and `PROXY_ENGINES`). Not needed in TUN mode.<br/>• **Default proxy**: passing empty `PROXY_URL=""` or `PROXY_URL=true` activates default `http://127.0.0.1:7897` (common local proxy ports include 7897, 7890, 10809; overseas engines use proxy, domestic engines stay direct)<br/>• **Custom address**: `PROXY_URL=http://127.0.0.1:10809`<br/>• **Custom engines**: `PROXY_URL="http://127.0.0.1:7897;duckduckgo,brave"` or all engines `PROXY_URL=";all"` |
 | `FAKE_IP_CIDRS` | `198.18.0.0/15` | Whitelisted CIDRs for Fake-IP / TUN mode to avoid SSRF false-positive blocking |
+| `CUSTOM_DNS_SERVERS` | `223.5.5.5,119.29.29.29,1.1.1.1,8.8.8.8` | Comma-separated DNS servers used by the internal c-ares resolver (helps when the system DNS is polluted). Overrides the built-in list entirely |
 | `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` browser TLS/H2 fingerprint profile (e.g. `chrome_149`, `safari_18`) |
 | `IMPERSONATE_OS` | `windows` | Operating system platform for fingerprint impersonation (`windows`, `macos`, `linux`) |
 | `BING_IMPERSONATE` | `true` | Toggle Chrome TLS impersonation for Bing HTTP mode (auto-trips circuit breaker after consecutive empty results) |
@@ -405,7 +406,7 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run the Vitest suite (99 files, 755 tests at the current baseline)
+npm test              # Run the Vitest suite (99 files, 762 tests at the current baseline)
 npm run test:live     # Run bounded-concurrency live integration tests
 npm run eval:live     # Run 23-case live STDIO JSON-RPC evaluation suite
 ```
