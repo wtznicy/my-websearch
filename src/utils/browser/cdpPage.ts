@@ -395,6 +395,8 @@ export class CDPPage implements BrowserPage {
         await Emulation.setDeviceMetricsOverride({
             width,
             height,
+            screenWidth: width,
+            screenHeight: height,
             deviceScaleFactor: 1,
             mobile: false
         });

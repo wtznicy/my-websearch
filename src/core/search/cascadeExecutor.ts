@@ -267,7 +267,7 @@ export async function executeCascade(
         const runCandidate = (candidate: string): Promise<{ results: SearchResult[]; timedOut: boolean; cancelledBySatisfaction?: boolean }> => new Promise((resolve, reject) => {
             let done = false;
             const cascadeStartedAt = Date.now();
-            const candidateBudget = ['startpage', 'bing'].includes(candidate)
+            const candidateBudget = ['startpage', 'bing', 'brave'].includes(candidate)
                 ? Math.max(perEngineTimeoutMs, Math.min(remaining - 500, Math.round(perEngineTimeoutMs * 1.5)))
                 : perEngineTimeoutMs;
             const wait = Math.max(0, Math.min(remaining, candidateBudget));

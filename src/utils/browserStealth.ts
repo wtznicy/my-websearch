@@ -176,15 +176,23 @@ export async function setupAntiDetection(page: StealthPage): Promise<void> {
 
         const screenWidth = 1920;
         const screenHeight = 1080;
-        Object.defineProperty(screen, 'width', { get: () => screenWidth });
-        Object.defineProperty(screen, 'height', { get: () => screenHeight });
-        Object.defineProperty(screen, 'availWidth', { get: () => screenWidth });
-        Object.defineProperty(screen, 'availHeight', { get: () => screenHeight - 48 });
-        Object.defineProperty(window, 'innerWidth', { get: () => 1902 });
-        Object.defineProperty(window, 'innerHeight', { get: () => 984 });
-        Object.defineProperty(window, 'outerWidth', { get: () => screenWidth });
-        Object.defineProperty(window, 'outerHeight', { get: () => screenHeight });
-        Object.defineProperty(window, 'devicePixelRatio', { get: () => 1.25 });
+        const screenProto = (typeof Screen !== 'undefined' && Screen.prototype) || Object.getPrototypeOf(screen);
+        for (const target of [screenProto, screen]) {
+            if (!target) continue;
+            try {
+                Object.defineProperty(target, 'width', { get: () => screenWidth, configurable: true });
+                Object.defineProperty(target, 'height', { get: () => screenHeight, configurable: true });
+                Object.defineProperty(target, 'availWidth', { get: () => screenWidth, configurable: true });
+                Object.defineProperty(target, 'availHeight', { get: () => screenHeight - 48, configurable: true });
+            } catch {
+                // Ignore if property redefinition is restricted
+            }
+        }
+        Object.defineProperty(window, 'innerWidth', { get: () => 1902, configurable: true });
+        Object.defineProperty(window, 'innerHeight', { get: () => 984, configurable: true });
+        Object.defineProperty(window, 'outerWidth', { get: () => screenWidth, configurable: true });
+        Object.defineProperty(window, 'outerHeight', { get: () => screenHeight, configurable: true });
+        Object.defineProperty(window, 'devicePixelRatio', { get: () => 1.25, configurable: true });
 
         if (!('connection' in navigator)) {
             Object.defineProperty(navigator, 'connection', {

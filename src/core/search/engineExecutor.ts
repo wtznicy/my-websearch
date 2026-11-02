@@ -411,7 +411,7 @@ export async function executePrimaryEngines(
         const isSingleEngine = executableEngines.length === 1;
         const engineBudget = isSingleEngine
             ? Math.max(perEngineTimeoutMs, remaining - 1000)
-            : (['startpage', 'bing'].includes(engine)
+            : (['startpage', 'bing', 'brave'].includes(engine)
                 ? Math.max(perEngineTimeoutMs, Math.min(remaining - 500, Math.round(perEngineTimeoutMs * 1.5)))
                 : perEngineTimeoutMs);
         const wait = Math.max(0, Math.min(remaining, engineBudget));

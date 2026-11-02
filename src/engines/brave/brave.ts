@@ -60,18 +60,19 @@ const braveHttpGet = async (url: string, options: AxiosRequestConfig): Promise<A
 function buildBraveErrorMessage(error: unknown): Error {
     const status = extractErrorStatus(error);
     if (status === 429) {
-        // 实测 429 来自 AWS CloudFront + WAF 的 IP 级限流（响应带 x-cache: Error from cloudfront）：
-        // 被标记的出口 IP 在分钟级窗口内必然持续 429——标记不可重试（避免 3 次重试风暴浪费 5~8 秒）
-        // 并熔断该引擎 5 分钟，让配额平移给其他引擎（见 engineCircuitBreaker）
+        // 实测 429 响应体为 CloudFront/WAF 返回的人机验证拦截页（包含 schedule a captcha + Argon2 challengeSet）：
+        // 出口 IP 被风控挑战后在窗口期内会持续返回 429 人机挑战，单纯冷却重试或换客户端栈大概率仍被拦截；
+        // 标记不可重试并触发熔断，避免无意义的重试风暴浪费耗时；
+        // 若要高可用推荐配置 BRAVE_API_KEY 走官方 API 渠道，或更换未受风控的出口 IP。
         const err = new AppError({
             code: 'rate_limited',
             retryable: false,
             status: 429,
             engine: 'brave',
-            hint: 'Set BRAVE_API_KEY (free tier) to use the official API, or retry after a few minutes / switch exit node.',
-            message: 'Brave rate limited (HTTP 429): CloudFront throttled this exit IP — the block is usually minutes-long, not permanent. ' +
-                'Bursty requests re-trigger it; a single retry after cooldown can succeed. ' +
-                'For a stable path configure BRAVE_API_KEY (official API, free tier) instead of scraping. Retry later, or use startpage/duckduckgo/bing.'
+            hint: 'Set BRAVE_API_KEY (free tier) to use the official API, or switch exit node / wait for IP challenge to clear.',
+            message: 'Brave returned HTTP 429 / anti-bot challenge: CloudFront/WAF served a captcha & Argon2 challenge page for this exit IP. ' +
+                'When actively challenged, retrying or changing HTTP stacks often continues to be blocked. ' +
+                'For a stable path configure BRAVE_API_KEY (official API, free tier) instead of scraping, or switch exit node.'
         });
         tripEngineCircuit('brave');
         return err;
@@ -383,8 +384,8 @@ export function shouldUseBraveBrowserFallback(error: unknown): boolean {
 }
 
 /**
- * Brave 429 / 验证码风控时的深度伪装无头浏览器回退。
- * 注入 windows-chrome-8 设备 Profile 与桌面 UA，避开滑块惩罚直接提取搜索结果。
+ * Brave 遭遇 429 / 人机挑战时的无头浏览器尽力回退（best-effort）。
+ * 尝试通过桌面指纹与视口伪装渲染页面；若目标站点处于强交互滑块人机验证，仍可能无法提取结果。
  */
 export async function searchBraveWithBrowser(
     query: string,
@@ -471,7 +472,7 @@ async function executeBraveHttpSearch(
 
 /**
  * Brave 网页端（SvelteKit SSR）抓取搜索实现（无 API Key 时的默认路径，或官方 API 故障/密钥错误/配额耗尽时的回退路径）。
- * 当 HTTP 路径遭遇 429 限流或人机拦截时，自动回退到深度伪装的无头浏览器。
+ * 当 HTTP 路径遭遇 429 或人机拦截时，尝试自动回退到伪装桌面指纹的无头浏览器检索（best-effort）。
  */
 export async function searchBraveWeb(
     query: string,
