@@ -578,15 +578,17 @@ export function formatSanitizedConfigSummary(
         lines.push('🔐 fetchWebContent TLS verification is enabled');
     }
 
+    const browserDriver = (env.BROWSER_DRIVER || 'cdp').trim().toLowerCase() === 'playwright' ? 'playwright' : 'cdp';
+    lines.push(`🧭 Browser driver: ${browserDriver}${browserDriver === 'cdp' ? ' (chrome-remote-interface)' : ' (playwright-core)'}`);
     if (cfg.playwrightCdpEndpoint) {
-        lines.push(`🧭 Playwright remote CDP endpoint: ${sanitizeUrlForLog(cfg.playwrightCdpEndpoint)}`);
+        lines.push(`🧭 Browser: remote CDP endpoint ${sanitizeUrlForLog(cfg.playwrightCdpEndpoint)}`);
     } else if (cfg.playwrightExecutablePath) {
-        lines.push(`🧭 Playwright executable path: ${sanitizePathForLog(cfg.playwrightExecutablePath)}`);
+        lines.push(`🧭 Browser: executable ${sanitizePathForLog(cfg.playwrightExecutablePath)}`);
     } else {
-        lines.push('🧭 Playwright client: auto-discovery (system browser or installed package)');
+        lines.push('🧭 Browser: auto-detect Chromium-based (Chrome/Edge/Chromium/Brave/Vivaldi/Opera)');
     }
-    lines.push(`🧭 Playwright headless: ${cfg.playwrightHeadless}`);
-    lines.push(`🧭 Playwright navigation timeout: ${cfg.playwrightNavigationTimeoutMs}ms`);
+    lines.push(`🧭 Browser headless: ${cfg.playwrightHeadless}`);
+    lines.push(`🧭 Browser navigation timeout: ${cfg.playwrightNavigationTimeoutMs}ms`);
 
     const mode = env.MODE || (cfg.enableHttpServer ? 'both' : 'stdio');
     lines.push(`🖥️ Server mode: ${mode.toUpperCase()}`);

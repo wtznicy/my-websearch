@@ -1,13 +1,16 @@
 import { ENGINE_REGISTRY } from '../../engines/registry.js';
 import { ConfigValueSource } from '../../configLoader.js';
 
+/**
+ * 只列出**真正会被读取**的环境变量（用于 doctor 展示配置来源）。
+ * 已废弃的历史变量（PLAYWRIGHT_ENGINES / PLAYWRIGHT_WS_ENDPOINT / ENABLE_HTTP_SERVER 等）
+ * 不再列进来：它们不会生效，列出来会让用户误以为配置已生效。
+ */
 export const RECOGNIZED_ENV_KEYS = [
     'DEFAULT_SEARCH_ENGINE',
     'ALLOWED_SEARCH_ENGINES',
     'SEARCH_MODE',
-    'PLAYWRIGHT_ENGINES',
     'PLAYWRIGHT_CDP_ENDPOINT',
-    'PLAYWRIGHT_WS_ENDPOINT',
     'PLAYWRIGHT_EXECUTABLE_PATH',
     'PROXY_URL',
     'USE_PROXY',
@@ -15,7 +18,6 @@ export const RECOGNIZED_ENV_KEYS = [
     'SEARCH_DEADLINE_MS',
     'DEFAULT_SEARCH_LIMIT',
     'DEFAULT_MIN_RESULTS',
-    'ENABLE_HTTP_SERVER',
     'ENABLE_CORS',
     'CORS_ORIGIN',
     'CONTEXT7_API_KEY',

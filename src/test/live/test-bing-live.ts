@@ -89,12 +89,12 @@ async function main(): Promise<void> {
         const message = error instanceof Error ? error.message : String(error);
         console.error('\nLive Bing test failed:', message);
 
-        if (/playwright|chromium/i.test(message)) {
-            console.error('Playwright/Chromium issue detected. Install a client manually if you want browser mode: npm install playwright && npx playwright install chromium');
-            console.error('For an existing external client, set PLAYWRIGHT_MODULE_PATH or PLAYWRIGHT_PACKAGE=playwright-core with PLAYWRIGHT_EXECUTABLE_PATH / PLAYWRIGHT_WS_ENDPOINT / PLAYWRIGHT_CDP_ENDPOINT');
+        if (/playwright|chromium|browser driver/i.test(message)) {
+            console.error('Browser issue detected. The default CDP driver needs Chrome/Edge/Chromium/Brave/Vivaldi/Opera installed (or CHROME_PATH / PLAYWRIGHT_EXECUTABLE_PATH pointing at one, or PLAYWRIGHT_CDP_ENDPOINT for a remote browser).');
+            console.error('Only BROWSER_DRIVER=playwright requires the playwright-core package.');
         }
         if (/EAI_AGAIN|getaddrinfo|TLS|socket|timeout|network/i.test(message)) {
-            console.error('Network/proxy issue detected. If needed, enable proxy: USE_PROXY=true PROXY_URL=http://127.0.0.1:7890');
+            console.error('Network/proxy issue detected. If needed, configure a proxy: PROXY_URL=http://127.0.0.1:7890');
         }
         if (/captcha|verification|blocked|验证码|人机验证/i.test(message)) {
             console.error('Bing anti-bot response detected. You can retry later or try --mode=auto / --mode=playwright if available.');

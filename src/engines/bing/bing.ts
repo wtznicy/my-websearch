@@ -662,7 +662,7 @@ async function searchBingWithPlaywright(query: string, limit: number, signal?: A
             code: 'invalid_config',
             retryable: false,
             engine: 'bing',
-            message: 'Playwright client is not available. Install `playwright`/`playwright-core` manually or configure PLAYWRIGHT_MODULE_PATH.'
+            message: 'Browser driver is not available for the Bing fallback. The default CDP driver needs a Chromium-based browser (Chrome/Edge/Chromium/Brave/Vivaldi/Opera) — install one or set CHROME_PATH; BROWSER_DRIVER=playwright additionally requires the playwright-core package.'
         });
     }
 

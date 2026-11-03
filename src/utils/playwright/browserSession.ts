@@ -1760,7 +1760,7 @@ export async function openPlaywrightBrowser(
 ): Promise<PlaywrightBrowserSession> {
     const playwright = await loadPlaywrightClient();
     if (!playwright) {
-        throw new Error('Browser driver is not available. Install Chrome/Edge, or configure PLAYWRIGHT_EXECUTABLE_PATH / PLAYWRIGHT_CDP_ENDPOINT. (BROWSER_DRIVER=playwright additionally requires a manually installed playwright-core.)');
+        throw new Error('Browser driver is not available. The default CDP driver needs a Chromium-based browser (Chrome/Edge/Chromium/Brave/Vivaldi/Opera) — install one and/or set CHROME_PATH / PLAYWRIGHT_EXECUTABLE_PATH, or connect a remote browser with PLAYWRIGHT_CDP_ENDPOINT. BROWSER_DRIVER=playwright additionally requires the playwright-core package. Firefox is not supported.');
     }
 
     if (config.playwrightCdpEndpoint) {

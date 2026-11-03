@@ -335,6 +335,13 @@ my-websearch doctor --reset-health
 > [!NOTE]
 > 浏览器兜底走 **raw Chrome DevTools Protocol**（`chrome-remote-interface`），因此只支持 **Chromium 系**浏览器：Chrome、Edge、Chromium、Brave、Vivaldi、Opera（**Firefox / WebKit 不支持**）。以上常见安装路径都会自动探测；也可用 `CHROME_PATH` / `BROWSER_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH` 指定路径，或用 `PLAYWRIGHT_CDP_ENDPOINT` 连远程浏览器（本机无需安装）。`my-websearch doctor --browser` 会报告探测到的浏览器以及缺失时的修复方式。`PLAYWRIGHT_*` 变量名与 `SEARCH_MODE=playwright` 仅为向后兼容保留，底层由 CDP 驱动。
 
+两个**互不相关**的维度，别混在一起：
+
+- **`BROWSER_DRIVER`** 决定用哪套「遥控器」：`cdp`（默认，内置 `chrome-remote-interface`）或 `playwright`（遗留逃生口，需要你自行安装 `playwright-core`）。
+- **`PLAYWRIGHT_CDP_ENDPOINT` / `CHROME_PATH` / `BROWSER_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH`** 决定浏览器「从哪来」：连一个已在运行的本地/远程 CDP 端点、指定可执行文件，或交给自动探测。
+
+所有浏览器路径——Bing 兜底、Startpage、DuckDuckGo、Brave、`fetchWebContent`、CSDN 正文抓取、`doctor --browser`——都走同一个入口，所以这些设置对所有场景同时生效。
+
 | 变量名 | 默认值 | 可选值 / 说明 |
 | :--- | :--- | :--- |
 | `BROWSER_DRIVER` | `cdp` | 浏览器后端：`cdp`（默认，raw CDP）；`playwright` 为旧版逃生口，需要你自行安装 `playwright-core`，不再随包提供 |

@@ -371,6 +371,13 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 > [!NOTE]
 > The browser fallback uses **raw Chrome DevTools Protocol** via `chrome-remote-interface`, so it requires a **Chromium-based** browser: Chrome, Edge, Chromium, Brave, Vivaldi or Opera (Firefox/WebKit are **not** supported). Standard install paths for all of these are auto-detected; override with `CHROME_PATH` / `BROWSER_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH`, or connect a remote browser via `PLAYWRIGHT_CDP_ENDPOINT` (no local install needed). `my-websearch doctor --browser` reports which browser was found and how to fix a missing one. The `PLAYWRIGHT_*` env names and `SEARCH_MODE=playwright` value are kept for backward compatibility only. `BING_PLAYWRIGHT_FALLBACK` and `STARTPAGE_PLAYWRIGHT_FALLBACK` have been consolidated into `SEARCH_MODE`.
 
+Two independent knobs — don't mix them up:
+
+- **`BROWSER_DRIVER`** picks the *driver library*: `cdp` (default, built in via `chrome-remote-interface`) or `playwright` (legacy escape hatch that requires you to install `playwright-core`).
+- **`PLAYWRIGHT_CDP_ENDPOINT` / `CHROME_PATH` / `BROWSER_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH`** decide *where the browser comes from*: an already-running local/remote CDP endpoint, an explicit executable, or auto-detection.
+
+Every browser path — Bing fallback, Startpage, DuckDuckGo, Brave, `fetchWebContent`, CSDN article fetch, and `doctor --browser` — goes through the same entry point, so these settings apply to all of them.
+
 | Variable | Default | Allowed Values / Description |
 | :--- | :--- | :--- |
 | `BROWSER_DRIVER` | `cdp` | Browser backend. `cdp` (default, raw CDP). `playwright` is a legacy escape hatch and requires you to install `playwright-core` manually; it is no longer bundled. |

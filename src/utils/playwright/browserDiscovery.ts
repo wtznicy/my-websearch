@@ -326,8 +326,8 @@ export async function loadPlaywrightClient(options?: LoadPlaywrightClientOptions
             }
 
             playwrightUnavailableMessage = [
-                'Playwright client is unavailable, falling back to HTTP-only behavior.',
-                'Install `playwright` or `playwright-core`, or expose an existing client with PLAYWRIGHT_MODULE_PATH.',
+                'Playwright driver is unavailable (BROWSER_DRIVER=playwright).',
+                'Install the `playwright` or `playwright-core` package in this project, or remove BROWSER_DRIVER to use the built-in CDP driver (no extra package needed).',
                 `Attempts: ${attempts.join(' | ')}`
             ].join(' ');
             return null;
