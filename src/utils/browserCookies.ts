@@ -348,7 +348,8 @@ export async function fetchPageHtmlWithBrowser(
         throw new AppError({
             code: 'missing_optional_dependency',
             retryable: false,
-            message: 'Browser driver is not available for browser HTML fetch (raw CDP requires Chrome/Edge).'
+            message: 'Browser driver is not available for browser HTML fetch (raw CDP requires a Chromium-based browser).',
+            hint: 'Install Google Chrome / Microsoft Edge / Chromium / Brave / Vivaldi / Opera, set CHROME_PATH (or PLAYWRIGHT_EXECUTABLE_PATH) to its executable, or connect a remote browser via PLAYWRIGHT_CDP_ENDPOINT. Firefox is not supported. Verify with `my-websearch doctor --browser`.'
         });
     }
 

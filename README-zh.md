@@ -198,8 +198,11 @@ my-websearch cache-clear
 遇到代理、浏览器或引擎问题时，先使用内置 doctor：
 
 ```bash
-# 检查本地配置与浏览器
+# 检查本地配置与浏览器（只查路径；要验证能否真正启动请加 --browser）
 my-websearch doctor
+
+# 验证 Chromium 系浏览器能否真正启动（自动探测 / CHROME_PATH / PLAYWRIGHT_CDP_ENDPOINT）
+my-websearch doctor --browser
 
 # 执行真实代理/引擎探测（会访问上游服务）
 my-websearch doctor --network
@@ -330,7 +333,7 @@ my-websearch doctor --reset-health
 #### 5. 🧭 CDP 浏览器高级控制（保留 Playwright 旧变量名）
 
 > [!NOTE]
-> 浏览器兜底已改为 **raw Chrome DevTools Protocol**（`chrome-remote-interface`），直接启动系统已安装的 Chrome/Edge。`PLAYWRIGHT_*` 变量名与 `SEARCH_MODE=playwright` 仅为向后兼容保留，底层由 CDP 驱动。
+> 浏览器兜底走 **raw Chrome DevTools Protocol**（`chrome-remote-interface`），因此只支持 **Chromium 系**浏览器：Chrome、Edge、Chromium、Brave、Vivaldi、Opera（**Firefox / WebKit 不支持**）。以上常见安装路径都会自动探测；也可用 `CHROME_PATH` / `BROWSER_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH` 指定路径，或用 `PLAYWRIGHT_CDP_ENDPOINT` 连远程浏览器（本机无需安装）。`my-websearch doctor --browser` 会报告探测到的浏览器以及缺失时的修复方式。`PLAYWRIGHT_*` 变量名与 `SEARCH_MODE=playwright` 仅为向后兼容保留，底层由 CDP 驱动。
 
 | 变量名 | 默认值 | 可选值 / 说明 |
 | :--- | :--- | :--- |
@@ -338,7 +341,7 @@ my-websearch doctor --reset-health
 | `BROWSER_PROFILE` | `off` | CDP 设备 profile：`off`、`windows-chrome-8`、`windows-chrome-16`、`macos-chrome-8` 或 `random`。对浏览器会话应用 UA、屏幕/DPR、时区、语言；不会影响 DuckDuckGo/Brave 等纯 HTTP 引擎。 |
 | `DDG_BROWSER_FALLBACK` | `1` | DuckDuckGo 的 HTTP 路径返回 202/CAPTCHA 时，改用 CDP 浏览器请求 HTML 端点；显式设置 `BROWSER_PROFILE` 时使用它，否则使用一致的 `windows-chrome-8` 默认 profile；设为 `0` 关闭。 |
 | `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 远程 Chrome/Edge CDP 调试端点（如 `http://127.0.0.1:9222` 或 `ws://...`）；旧变量名，由 CDP 驱动使用 |
-| `PLAYWRIGHT_EXECUTABLE_PATH` | 自动探测 | 自定义浏览器二进制可执行文件绝对路径（默认自动探测 Edge/Chrome）；旧变量名 |
+| `PLAYWRIGHT_EXECUTABLE_PATH` | 自动探测 | **Chromium 系**浏览器可执行文件的绝对路径；自动探测覆盖 Chrome / Edge / Chromium / Brave / Vivaldi / Opera 的标准安装位置，`CHROME_PATH` 与 `BROWSER_PATH` 优先且等价；旧变量名 |
 | `PLAYWRIGHT_HEADLESS` | `true` | 是否无头运行（Windows 下自动使用隐身独立桌面）；旧变量名 |
 | `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`| `20000` | 页面导航硬超时（毫秒）；旧变量名，作用于 CDP 导航 |
 

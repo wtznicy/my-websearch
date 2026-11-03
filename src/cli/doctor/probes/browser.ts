@@ -47,6 +47,7 @@ export async function probeBrowserLaunch(
         ? options.playwrightClient
         : await loadPlaywrightClient({ silent: true });
     if (!playwright || !playwright.chromium) {
+        const driver = (env.BROWSER_DRIVER || 'cdp').trim().toLowerCase();
         return {
             available: false,
             status: 'unavailable',
@@ -59,7 +60,9 @@ export async function probeBrowserLaunch(
             isolatedProfile: false,
             browserClosed: false,
             latencyMs: null,
-            error: 'Playwright client package is not installed'
+            error: driver === 'playwright'
+                ? 'BROWSER_DRIVER=playwright is set but playwright-core is not installed. Install it (npm i playwright-core) or unset BROWSER_DRIVER to use the CDP driver with a local Chromium-based browser.'
+                : 'No browser driver available. Install Chrome / Edge / Chromium / Brave / Vivaldi / Opera (CDP driver), or connect a remote browser with PLAYWRIGHT_CDP_ENDPOINT. Firefox is not supported.'
         };
     }
 

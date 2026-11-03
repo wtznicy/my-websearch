@@ -199,8 +199,11 @@ my-websearch cache-clear
 Use the built-in doctor command before troubleshooting a proxy, browser, or engine:
 
 ```bash
-# Local configuration and browser checks
+# Local configuration and browser checks (path only; use --browser to verify launch)
 my-websearch doctor
+
+# Verify the Chromium-based browser can actually launch (auto-detected, CHROME_PATH, or PLAYWRIGHT_CDP_ENDPOINT)
+my-websearch doctor --browser
 
 # Real proxy/engine probes (may contact upstream services)
 my-websearch doctor --network
@@ -366,7 +369,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 #### 5. 🧭 CDP Browser & Stealth Controls (legacy Playwright env names kept)
 
 > [!NOTE]
-> The browser fallback now uses **raw Chrome DevTools Protocol** via `chrome-remote-interface`; it launches the Chrome/Edge already installed on your system. The `PLAYWRIGHT_*` env names and `SEARCH_MODE=playwright` value are kept for backward compatibility only. `BING_PLAYWRIGHT_FALLBACK` and `STARTPAGE_PLAYWRIGHT_FALLBACK` have been consolidated into `SEARCH_MODE`.
+> The browser fallback uses **raw Chrome DevTools Protocol** via `chrome-remote-interface`, so it requires a **Chromium-based** browser: Chrome, Edge, Chromium, Brave, Vivaldi or Opera (Firefox/WebKit are **not** supported). Standard install paths for all of these are auto-detected; override with `CHROME_PATH` / `BROWSER_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH`, or connect a remote browser via `PLAYWRIGHT_CDP_ENDPOINT` (no local install needed). `my-websearch doctor --browser` reports which browser was found and how to fix a missing one. The `PLAYWRIGHT_*` env names and `SEARCH_MODE=playwright` value are kept for backward compatibility only. `BING_PLAYWRIGHT_FALLBACK` and `STARTPAGE_PLAYWRIGHT_FALLBACK` have been consolidated into `SEARCH_MODE`.
 
 | Variable | Default | Allowed Values / Description |
 | :--- | :--- | :--- |
@@ -374,7 +377,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `BROWSER_PROFILE` | `off` | CDP device profile: `off`, `windows-chrome-8`, `windows-chrome-16`, `macos-chrome-8`, or `random`. Applies UA, screen/DPR, timezone and locale to browser sessions. It does not affect HTTP-only engines such as DuckDuckGo/Brave. |
 | `DDG_BROWSER_FALLBACK` | `1` | When DuckDuckGo's HTTP paths return 202/CAPTCHA, retry the HTML endpoint through the CDP browser. Uses `BROWSER_PROFILE` when set, otherwise the coherent `windows-chrome-8` default; set `0` to disable. |
 | `PLAYWRIGHT_CDP_ENDPOINT` | empty | Remote Chrome/Edge CDP endpoint URL (e.g. `http://127.0.0.1:9222` or `ws://...`); legacy name, used by the CDP driver |
-| `PLAYWRIGHT_EXECUTABLE_PATH` | auto | Absolute path to the browser executable (auto-detects system Edge/Chrome by default); legacy name |
+| `PLAYWRIGHT_EXECUTABLE_PATH` | auto | Absolute path to a **Chromium-based** browser executable. Auto-detection covers Chrome / Edge / Chromium / Brave / Vivaldi / Opera in standard locations; `CHROME_PATH` and `BROWSER_PATH` are checked first and work as equivalents; legacy name |
 | `PLAYWRIGHT_HEADLESS` | `true` | Run headless (on Windows, an isolated hidden desktop window is used); legacy name |
 | `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`| `20000` | Hard page navigation timeout (milliseconds); legacy name, applied to CDP navigation |
 

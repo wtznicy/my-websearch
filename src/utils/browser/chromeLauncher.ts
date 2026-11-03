@@ -34,7 +34,7 @@ export function findChromeExecutable(customPath?: string): string {
 
     const candidates: string[] = [];
 
-    // Windows 常见路径（优先 Google Chrome，后回退 Microsoft Edge）
+    // Windows 常见路径（优先 Google Chrome，后回退 Microsoft Edge，再依次尝试其它 Chromium 系）
     candidates.push('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
     candidates.push('C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe');
     candidates.push('C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe');
@@ -46,22 +46,45 @@ export function findChromeExecutable(customPath?: string): string {
     if (pf) {
         candidates.push(`${pf}\\Google\\Chrome\\Application\\chrome.exe`);
         candidates.push(`${pf}\\Microsoft\\Edge\\Application\\msedge.exe`);
+        candidates.push(`${pf}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`);
+        candidates.push(`${pf}\\Vivaldi\\Application\\vivaldi.exe`);
+        candidates.push(`${pf}\\Opera\\opera.exe`);
     }
     if (pf86) {
         candidates.push(`${pf86}\\Google\\Chrome\\Application\\chrome.exe`);
         candidates.push(`${pf86}\\Microsoft\\Edge\\Application\\msedge.exe`);
+        candidates.push(`${pf86}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`);
+        candidates.push(`${pf86}\\Vivaldi\\Application\\vivaldi.exe`);
     }
     if (localAppData) {
         candidates.push(`${localAppData}\\Google\\Chrome\\Application\\chrome.exe`);
         candidates.push(`${localAppData}\\Microsoft\\Edge\\Application\\msedge.exe`);
+        // 用户级安装（Brave / Vivaldi / Opera 默认装到 LOCALAPPDATA）
+        candidates.push(`${localAppData}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`);
+        candidates.push(`${localAppData}\\Vivaldi\\Application\\vivaldi.exe`);
+        candidates.push(`${localAppData}\\Programs\\Opera\\opera.exe`);
+        candidates.push(`${localAppData}\\Programs\\Opera GX\\opera.exe`);
     }
 
     // Linux 常见路径
-    candidates.push('/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/microsoft-edge');
+    candidates.push(
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/usr/bin/microsoft-edge',
+        '/usr/bin/brave-browser',
+        '/usr/bin/brave',
+        '/usr/bin/vivaldi-stable',
+        '/usr/bin/opera'
+    );
 
     // macOS 常见路径
     candidates.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
     candidates.push('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
+    candidates.push('/Applications/Brave Browser.app/Contents/MacOS/Brave Browser');
+    candidates.push('/Applications/Vivaldi.app/Contents/MacOS/Vivaldi');
+    candidates.push('/Applications/Opera.app/Contents/MacOS/Opera');
 
     for (const candidate of [...new Set(candidates)]) {
         if (fs.existsSync(candidate)) {
@@ -70,7 +93,12 @@ export function findChromeExecutable(customPath?: string): string {
         }
     }
 
-    throw new Error('No Chromium-based browser executable was found. Set CHROME_PATH, BROWSER_PATH, or install Google Chrome / Microsoft Edge.');
+    throw new Error(
+        'No Chromium-based browser executable was found (Firefox is not supported: the browser driver speaks CDP). '
+        + 'Install Google Chrome, Microsoft Edge, Chromium, Brave, Vivaldi or Opera on this machine, '
+        + 'or point CHROME_PATH / BROWSER_PATH / PLAYWRIGHT_EXECUTABLE_PATH at a Chromium-based executable, '
+        + 'or connect a remote browser with PLAYWRIGHT_CDP_ENDPOINT. Run `my-websearch doctor --browser` to verify.'
+    );
 }
 
 /**
