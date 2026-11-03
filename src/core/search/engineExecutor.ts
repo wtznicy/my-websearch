@@ -4,7 +4,8 @@ import { AppConfig } from '../../config.js';
 import { metrics } from '../metrics.js';
 import { AppError, isRetryableError, extractErrorStatus, extractErrorCode, extractErrorHint, extractErrorDetails } from '../errors.js';
 import { Semaphore } from '../../utils/concurrency.js';
-import type { SearchEngineExecutorMap, SearchExecutionFailure } from './searchTypes.js';
+import type { SearchEngineExecutorMap, SearchExecutionFailure, PerEngineTimeoutMs } from './searchTypes.js';
+import { resolvePerEngineTimeoutMs } from './searchTypes.js';
 import { recordEngineSuccess, tripEngineCircuit } from './engineCircuitBreaker.js';
 import { hintProxyConnectionError } from '../../utils/httpRequest.js';
 import { recordEngineLatency, compactEngineLatencyFile, type EngineLatencySample } from '../engineLatency.js';
@@ -124,7 +125,8 @@ export interface ExecutePrimaryEnginesOptions {
     effectiveSearchMode?: AppConfig['searchMode'];
     engineMap: SearchEngineExecutorMap;
     deadlineAt: number;
-    perEngineTimeoutMs: number;
+    /** 单引擎基础超时：固定值，或按引擎取值（优先 registry 的 defaultTimeoutMs） */
+    perEngineTimeoutMs: PerEngineTimeoutMs;
     /** 满足早退的最小结果数（通常来自 minResults）；未提供时用 limit 总和 */
     satisfiedResults?: number;
     /**
@@ -409,14 +411,16 @@ export async function executePrimaryEngines(
         const controller = controllers[index];
         const remaining = deadlineAt - Date.now();
         const isSingleEngine = executableEngines.length === 1;
+        // 基础预算优先取 registry 的 per-engine defaultTimeoutMs（yahoo 12s、其它 8–10s）
+        const baseTimeoutMs = resolvePerEngineTimeoutMs(perEngineTimeoutMs, engine);
         // brave 的 429 回退要拉起无头浏览器并等待 PoW 渲染（冷启动约 10–14s），
         // 因此给 2x 预算；bing/startpage 的浏览器兜底更快，维持 1.5x。
         const browserBudgetMultiplier = engine === 'brave' ? 2 : 1.5;
         const engineBudget = isSingleEngine
-            ? Math.max(perEngineTimeoutMs, remaining - 1000)
+            ? Math.max(baseTimeoutMs, remaining - 1000)
             : (['startpage', 'bing', 'brave'].includes(engine)
-                ? Math.max(perEngineTimeoutMs, Math.min(remaining - 500, Math.round(perEngineTimeoutMs * browserBudgetMultiplier)))
-                : perEngineTimeoutMs);
+                ? Math.max(baseTimeoutMs, Math.min(remaining - 500, Math.round(baseTimeoutMs * browserBudgetMultiplier)))
+                : baseTimeoutMs);
         const wait = Math.max(0, Math.min(remaining, engineBudget));
         return new Promise<SearchResult[]>((resolve) => {
             let done = false;

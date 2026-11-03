@@ -280,7 +280,7 @@ my-websearch doctor --reset-health
 | `SEARCH_FUSION_RRF_K` | `20` | RRF 常数 k，越小越放大排名差异；仅 `SEARCH_FUSION=rrf` 时生效。 |
 | `GITHUB_CONTENT_CDN_FIRST` | `false` | README 与源码文件优先走 jsDelivr（仅公开仓库）；旧名 `GITHUB_README_CDN_FIRST` 仍兼容。 |
 | `GITHUB_CONTENT_BUDGET_MS` | `12000`（CDN-first 时 `6000`） | 单次 `fetchGithubContent` 的总时间预算；单次尝试上限 4.5s。 |
-| `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | 引擎首次熔断冷却（429 / 202 / 验证状态）。连续失败指数退避（30s → 60s → 120s…）。 |
+| `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | 引擎首次熔断冷却（429 / 202 / 验证状态）。连续失败指数退避（30s → 60s → 120s…）。Brave 的首档被覆盖为 **60s**（其 429 人机挑战窗口是分钟级）；显式设置该变量会关闭按引擎覆盖。 |
 | `ENGINE_CIRCUIT_MAX_COOLDOWN_MS` | `300000` | 熔断指数退避上限（默认 5 分钟）。 |
 | `SEARCH_AUTHORITY_DOMAINS` | 空 | 结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单） |
 | `SEARCH_MODE` | `auto` | 检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`playwright`（全强走浏览器；旧值名，底层为 CDP）<br/>• **一种方式多选引擎**：`playwright:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`playwright:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP） |

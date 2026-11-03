@@ -86,7 +86,7 @@ async function warmupStartpageSession(signal?: AbortSignal): Promise<void> {
             code: 'invalid_config',
             retryable: false,
             engine: 'startpage',
-            message: 'Startpage requires a Playwright browser session (Anubis anti-bot), but SEARCH_MODE disables Playwright for startpage. Enable startpage in SEARCH_MODE (e.g. SEARCH_MODE=auto or SEARCH_MODE=startpage), or use another engine (e.g. bing/baidu/sogou).'
+            message: 'Startpage needs a real browser session (CDP, Anubis anti-bot), but SEARCH_MODE disables the browser for startpage. Enable startpage in SEARCH_MODE (e.g. SEARCH_MODE=auto or SEARCH_MODE=startpage), or use another engine (e.g. bing/baidu/sogou).'
         });
     }
     let session: import('../../utils/playwright/types.js').PlaywrightBrowserSession | undefined;

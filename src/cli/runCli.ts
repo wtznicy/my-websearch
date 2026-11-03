@@ -2,27 +2,12 @@ import { MyWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { createErrorEnvelope } from './protocol.js';
 import { ErrorCode } from '../core/errors.js';
 import { CliIo, CommandContext, RunCliOptions } from './shared.js';
-import { handleSearchCommand } from './commands/search.js';
-import { handleFetchWebCommand } from './commands/fetchWeb.js';
-import { handleFetchGithubCommand } from './commands/fetchGithub.js';
-import { handleFetchCsdnCommand, handleFetchJuejinCommand } from './commands/fetchArticle.js';
-import { handleResolveLibraryCommand, handleQueryDocsCommand } from './commands/docs.js';
-import { handleDoctorCommand } from './commands/doctor.js';
-import { handleCacheClearCommand } from './commands/cache.js';
-import { handleServeCommand } from './commands/serve.js';
-import { handleStatusCommand } from './commands/status.js';
-import { handleInitCommand } from './commands/init.js';
 
-// Re-export shared types and parsers for backward compatibility
+// Re-export shared types for backward compatibility.
+// 注意：命令处理器改为**按需动态导入**（见 runCommand），这样 `--help` / `status`
+// 不会因为静态 import 把 16 个引擎和浏览器栈全部加载进来（实测冷启动 1.38s → 目标 <0.4s）。
 export type { CliIo, RunCliOptions };
 export { requireFlagValue } from './shared.js';
-export { parseSearchArgs, type ParsedSearchArgs } from './commands/search.js';
-export { parseFetchWebArgs, type ParsedFetchWebArgs } from './commands/fetchWeb.js';
-export { parseFetchGithubArgs, type ParsedFetchGithubArgs } from './commands/fetchGithub.js';
-export { parseResolveLibraryArgs, type ParsedResolveLibraryArgs, parseQueryDocsArgs, type ParsedQueryDocsArgs } from './commands/docs.js';
-export { parseStatusArgs, type ParsedStatusArgs } from './commands/status.js';
-export { parseServeArgs, type ParsedServeArgs } from './commands/serve.js';
-export { parseInitArgs, type ParsedInitArgs } from './commands/init.js';
 
 const COMMANDS_REQUIRING_RUNTIME = new Set([
     'search',
@@ -150,30 +135,30 @@ export async function runCli(
 
     switch (command) {
         case 'init':
-            return handleInitCommand(ctx);
+            return (await import('./commands/init.js')).handleInitCommand(ctx);
         case 'search':
-            return handleSearchCommand(ctx);
+            return (await import('./commands/search.js')).handleSearchCommand(ctx);
         case 'doctor':
-            return handleDoctorCommand(ctx);
+            return (await import('./commands/doctor.js')).handleDoctorCommand(ctx);
         case 'cache-clear':
-            return handleCacheClearCommand(ctx);
+            return (await import('./commands/cache.js')).handleCacheClearCommand(ctx);
         case 'fetch-web':
-            return handleFetchWebCommand(ctx);
+            return (await import('./commands/fetchWeb.js')).handleFetchWebCommand(ctx);
         case 'fetch-github-readme':
         case 'fetch-github-content':
-            return handleFetchGithubCommand(ctx, command);
+            return (await import('./commands/fetchGithub.js')).handleFetchGithubCommand(ctx, command);
         case 'fetch-csdn':
-            return handleFetchCsdnCommand(ctx);
+            return (await import('./commands/fetchArticle.js')).handleFetchCsdnCommand(ctx);
         case 'fetch-juejin':
-            return handleFetchJuejinCommand(ctx);
+            return (await import('./commands/fetchArticle.js')).handleFetchJuejinCommand(ctx);
         case 'resolve-library-id':
-            return handleResolveLibraryCommand(ctx);
+            return (await import('./commands/docs.js')).handleResolveLibraryCommand(ctx);
         case 'query-docs':
-            return handleQueryDocsCommand(ctx);
+            return (await import('./commands/docs.js')).handleQueryDocsCommand(ctx);
         case 'status':
-            return handleStatusCommand(ctx);
+            return (await import('./commands/status.js')).handleStatusCommand(ctx);
         case 'serve':
-            return handleServeCommand(ctx);
+            return (await import('./commands/serve.js')).handleServeCommand(ctx);
         default: {
             const unknownCommandMessage = getUnknownCommandMessage(command);
             const unknownCommandHint = [

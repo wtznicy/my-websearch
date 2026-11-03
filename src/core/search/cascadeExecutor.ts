@@ -6,7 +6,8 @@ import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { metrics } from '../metrics.js';
 import { AppError, extractErrorCode, extractErrorDetails, extractErrorStatus, isAppError } from '../errors.js';
 import { SUPPORTED_SEARCH_ENGINES, ENGINE_REGISTRY } from './searchEngines.js';
-import type { SearchEngineExecutorMap, SearchExecutionFailure } from './searchTypes.js';
+import type { SearchEngineExecutorMap, SearchExecutionFailure, PerEngineTimeoutMs } from './searchTypes.js';
+import { resolvePerEngineTimeoutMs } from './searchTypes.js';
 import { mergeSearchResults, isPlaceholderResult } from './mergeResults.js';
 import { matchesSiteDomains } from '../../engines/bing/bing.js';
 import {
@@ -29,7 +30,8 @@ export interface ExecuteCascadeOptions {
     engineMap: SearchEngineExecutorMap;
     effectiveSearchMode?: AppConfig['searchMode'];
     deadlineAt: number;
-    perEngineTimeoutMs: number;
+    /** 单引擎基础超时：固定值，或按引擎取值（优先 registry 的 defaultTimeoutMs） */
+    perEngineTimeoutMs: PerEngineTimeoutMs;
     allowedEngines?: string[];
     siteDomains?: string[];
     signal?: AbortSignal;
@@ -267,11 +269,13 @@ export async function executeCascade(
         const runCandidate = (candidate: string): Promise<{ results: SearchResult[]; timedOut: boolean; cancelledBySatisfaction?: boolean }> => new Promise((resolve, reject) => {
             let done = false;
             const cascadeStartedAt = Date.now();
+            // 基础预算优先取 registry 的 per-engine defaultTimeoutMs（yahoo 12s、其它 8–10s）。
             // brave 的 429 回退要拉起无头浏览器并等待 PoW 渲染（冷启动约 10–14s），给 2x 预算；
             // bing/startpage 的浏览器兜底更快，维持 1.5x。
+            const baseTimeoutMs = resolvePerEngineTimeoutMs(perEngineTimeoutMs, candidate);
             const candidateBudget = ['startpage', 'bing', 'brave'].includes(candidate)
-                ? Math.max(perEngineTimeoutMs, Math.min(remaining - 500, Math.round(perEngineTimeoutMs * (candidate === 'brave' ? 2 : 1.5))))
-                : perEngineTimeoutMs;
+                ? Math.max(baseTimeoutMs, Math.min(remaining - 500, Math.round(baseTimeoutMs * (candidate === 'brave' ? 2 : 1.5))))
+                : baseTimeoutMs;
             const wait = Math.max(0, Math.min(remaining, candidateBudget));
             const controller = new AbortController();
             if (options.signal) {

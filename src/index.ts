@@ -1,28 +1,21 @@
 #!/usr/bin/env node
 // 必须先于其他 import：在静态依赖链（playwrightClient → config）求值前决定是否静默启动日志
 import './utils/startupQuiet.js';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { applyHostValidation, applyJsonBody } from './adapters/http/sharedMiddleware.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import express from 'express';
-import type { Request } from 'express';
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { StreamableHTTPServerTransport as StreamableHTTPServerTransportType } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { SSEServerTransport as SSEServerTransportType } from '@modelcontextprotocol/sdk/server/sse.js';
+import type { Request, Response } from 'express';
+import type { SessionSlotReservation } from './adapters/http/mcpHttpSecurity.js';
 import { randomUUID } from "node:crypto";
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import cors from 'cors';
-import { runCli } from './cli/runCli.js';
 import type { MyWebSearchRuntime } from './runtime/runtimeTypes.js';
 import { shouldCreateFullRuntimeForInvocation } from './runtime/runtimeSelection.js';
-import { shutdownLocalPlaywrightBrowserSessions } from './utils/playwrightClient.js';
-import {
-  buildMcpCorsOptions,
-  createSessionCapacityManager,
-  type SessionSlotReservation
-} from './adapters/http/mcpHttpSecurity.js';
 import { configureLogging, installConsoleBridge } from './core/log.js';
+
+// 注意：express / MCP SDK transports / 浏览器栈全部改为**按需动态导入**。
+// CLI 一次性命令（--help、status、search…）不再为 HTTP 服务器与浏览器付启动成本，
+// 实测 `--help` 从 ~1.38s 降到 ~0.4s（见 docs/architecture/overview.md）。
 
 // 统一日志：级别来自 LOG_LEVEL；启动静默时默认 warn。console.* 统一转 stderr，
 // 避免污染 CLI --json 的 stdout。
@@ -36,7 +29,7 @@ const serverVersion = JSON.parse(readFileSync(packageJsonPath, 'utf8')).version 
 
 type StreamableSession = {
   server: McpServer;
-  transport: StreamableHTTPServerTransport;
+  transport: StreamableHTTPServerTransportType;
   closed: boolean;
   /** 最后活跃时间（毫秒）：客户端异常断开时也能被 reaper 回收 */
   lastActiveAt?: number;
@@ -44,7 +37,7 @@ type StreamableSession = {
 
 type SseSession = {
   server: McpServer;
-  transport: SSEServerTransport;
+  transport: SSEServerTransportType;
   closed: boolean;
   lastActiveAt?: number;
 };
@@ -67,8 +60,8 @@ Routing guidance:
 - Use 'search' with site: operator (e.g. site:docs.python.org) or timeRange for targeted queries.
 `.trim();
 
-function createServer(runtime: MyWebSearchRuntime): McpServer {
-  const server = new McpServer(
+function createServer(runtime: MyWebSearchRuntime, McpServerCtor: typeof McpServer): McpServer {
+  const server = new McpServerCtor(
     {
       name: 'web-search',
       version: serverVersion
@@ -84,18 +77,31 @@ function createServer(runtime: MyWebSearchRuntime): McpServer {
   return server;
 }
 
+/** 浏览器栈按需加载并带预算关闭（CLI 一次性命令不为浏览器付启动成本） */
+async function shutdownBrowserSessionsWithBudget(budgetMs: number): Promise<void> {
+  try {
+    const { shutdownLocalPlaywrightBrowserSessions } = await import('./utils/playwrightClient.js');
+    await Promise.race([
+      shutdownLocalPlaywrightBrowserSessions(),
+      new Promise((resolve) => setTimeout(resolve, budgetMs))
+    ]);
+  } catch (error) {
+    console.error('Failed to shut down local browser sessions:', error);
+  }
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   // 启动日志静默已由 ./utils/startupQuiet.js（首个 import）按参数决定
   const { config } = await import('./config.js');
-  const { setupTools } = await import('./tools/setupTools.js');
-  setupToolsFn = setupTools;
   const runtime = shouldCreateFullRuntimeForInvocation(argv)
     ? (await import('./runtime/createRuntime.js')).createMyWebSearchRuntime()
     : ({
         config,
         services: {} as MyWebSearchRuntime['services']
       } satisfies MyWebSearchRuntime);
+  // CLI 与服务器栈都按需加载：`--help` / `status` 不会加载 16 个引擎或 express/MCP SDK。
+  const { runCli } = await import('./cli/runCli.js');
   const cliExitCode = await runCli(argv, runtime, {
     stdout: (text) => console.log(text),
     stderr: (text) => console.error(text)
@@ -104,16 +110,37 @@ async function main() {
   if (cliExitCode !== null) {
     // best-effort 清理：shutdown 失败或临时 profile 删除较慢时，不能把整个 CLI 卡住。
     // 先让关闭流程跑一小段预算，然后强制退出；后台 FS 清理由下次启动继续。
-    try {
-      await Promise.race([
-        shutdownLocalPlaywrightBrowserSessions(),
-        new Promise((resolve) => setTimeout(resolve, 6000))
-      ]);
-    } catch (error) {
-      console.error('Failed to shut down local Playwright browser sessions:', error);
-    }
+    await shutdownBrowserSessionsWithBudget(6000);
     process.exit(cliExitCode);
   }
+
+  // 工具注册（会连带加载全部引擎实现）只在起 MCP 服务时才需要。
+  setupToolsFn = (await import('./tools/setupTools.js')).setupTools;
+
+  // 服务器栈（express / MCP SDK transports / HTTP 中间件）只在真正起服务时加载。
+  const [
+    { McpServer: McpServerCtor },
+    { SSEServerTransport },
+    { StreamableHTTPServerTransport },
+    { StdioServerTransport },
+    { isInitializeRequest },
+    expressModule,
+    corsModule,
+    { applyHostValidation, applyJsonBody },
+    { buildMcpCorsOptions, createSessionCapacityManager }
+  ] = await Promise.all([
+    import('@modelcontextprotocol/sdk/server/mcp.js'),
+    import('@modelcontextprotocol/sdk/server/sse.js'),
+    import('@modelcontextprotocol/sdk/server/streamableHttp.js'),
+    import('@modelcontextprotocol/sdk/server/stdio.js'),
+    import('@modelcontextprotocol/sdk/types.js'),
+    import('express'),
+    import('cors'),
+    import('./adapters/http/sharedMiddleware.js'),
+    import('./adapters/http/mcpHttpSecurity.js')
+  ]);
+  const express = expressModule.default;
+  const cors = corsModule.default;
 
   // MODE 非法值此前是"静默空转"：stdio 分支只认 undefined/both/stdio，HTTP 分支只认 both/http，
   // 于是 MODE=bogus 时两个传输都不启动、无报错、退出码 0（实测：打印一行误导性的
@@ -146,14 +173,7 @@ async function main() {
       }
     }
 
-    try {
-      await Promise.race([
-        shutdownLocalPlaywrightBrowserSessions(),
-        new Promise((resolve) => setTimeout(resolve, 5000))
-      ]);
-    } catch {
-      // ignore
-    }
+    await shutdownBrowserSessionsWithBudget(5000);
 
     process.exit(0);
   };
@@ -164,7 +184,7 @@ async function main() {
   // Enable STDIO mode if MODE is 'both' or 'stdio' or not specified
   if (process.env.MODE === undefined || process.env.MODE === 'both' || process.env.MODE === 'stdio') {
     console.error('🔌 Starting STDIO transport...');
-    const server = createServer(runtime);
+    const server = createServer(runtime, McpServerCtor);
     const stdioTransport = new StdioServerTransport();
     process.stdin.once('close', () => {
       void gracefulShutdown('stdin close');
@@ -307,7 +327,7 @@ async function main() {
     app.post('/mcp', async (req, res) => {
       // Check for existing session ID
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
-      let transport: StreamableHTTPServerTransport;
+      let transport: StreamableHTTPServerTransportType;
       let reservation: SessionSlotReservation | null = null;
 
       const existingSession = sessionId ? transports.streamable[sessionId] : undefined;
@@ -331,7 +351,7 @@ async function main() {
         }
 
         // New initialization request
-        const server = createServer(runtime);
+        const server = createServer(runtime, McpServerCtor);
         const session = {} as StreamableSession;
         const slotReservation = reservation;
 
@@ -400,7 +420,7 @@ async function main() {
     });
 
     // Reusable handler for GET and DELETE requests
-    const handleSessionRequest = async (req: express.Request, res: express.Response) => {
+    const handleSessionRequest = async (req: Request, res: Response) => {
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
       const session = sessionId ? transports.streamable[sessionId] : undefined;
       if (!session) {
@@ -435,7 +455,7 @@ async function main() {
 
       // Create SSE transport for legacy clients
       const transport = new SSEServerTransport('/messages', res);
-      const server = createServer(runtime);
+      const server = createServer(runtime, McpServerCtor);
       const session: SseSession = {
         server,
         transport,

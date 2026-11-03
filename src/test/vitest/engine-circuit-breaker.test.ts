@@ -54,6 +54,14 @@ describe('engineCircuitBreaker', () => {
         expect(tripEngineCircuit('duckduckgo')).toBe(300_000);
     });
 
+    it('uses a longer first cooldown for brave (minute-level 429 challenge window)', () => {
+        vi.useFakeTimers();
+        expect(tripEngineCircuit('brave')).toBe(60_000);
+        expect(tripEngineCircuit('brave')).toBe(120_000);
+        expect(tripEngineCircuit('brave')).toBe(240_000);
+        expect(tripEngineCircuit('brave')).toBe(300_000);
+    });
+
     it('resets consecutive trips and opens no longer after a successful call', () => {
         tripEngineCircuit('duckduckgo');
         expect(getEngineCircuitTripCount('duckduckgo')).toBe(1);

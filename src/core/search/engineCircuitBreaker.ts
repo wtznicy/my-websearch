@@ -16,6 +16,16 @@
 const DEFAULT_BASE_COOLDOWN_MS = 30 * 1000;
 const DEFAULT_MAX_COOLDOWN_MS = 5 * 60 * 1000;
 
+/**
+ * 按引擎覆盖的首档冷却时间。
+ * Brave 的 429 是分钟级窗口（实测多次 1–4 分钟才恢复），30s 后重试必然再撞 429；
+ * 先给 60s，若仍失败由指数退避自动拉长到 120s → 240s → 300s。
+ * 显式设置 ENGINE_CIRCUIT_BASE_COOLDOWN_MS 时以用户配置为准。
+ */
+const ENGINE_INITIAL_COOLDOWN_MS: Record<string, number> = {
+    brave: 60 * 1000
+};
+
 const blockedUntil = new Map<string, number>();
 const consecutiveTrips = new Map<string, number>();
 
@@ -52,16 +62,24 @@ export function isEngineCircuitOpen(engine: string): boolean {
     return true;
 }
 
+/** 某引擎的首档冷却：显式环境变量 > 按引擎覆盖 > 全局默认 */
+function getInitialCooldownForEngine(engine: string): number {
+    if (process.env.ENGINE_CIRCUIT_BASE_COOLDOWN_MS?.trim()) {
+        return getEngineCircuitBaseCooldownMs();
+    }
+    return ENGINE_INITIAL_COOLDOWN_MS[engine] ?? getEngineCircuitBaseCooldownMs();
+}
+
 /**
  * 触发熔断，返回本次实际冷却时长（毫秒）。
- * - 不传 cooldownMs：按连续触发次数指数退避（60s → 120s → 240s → 300s 上限）；
+ * - 不传 cooldownMs：首档按引擎覆盖（brave 60s，其它 30s），连续触发时指数退避；
  * - 传 cooldownMs：使用显式值（测试/特殊场景），不参与指数退避。
  */
 export function tripEngineCircuit(engine: string, cooldownMs?: number): number {
     const trips = (consecutiveTrips.get(engine) ?? 0) + 1;
     consecutiveTrips.set(engine, trips);
 
-    const base = cooldownMs ?? getEngineCircuitBaseCooldownMs();
+    const base = cooldownMs ?? getInitialCooldownForEngine(engine);
     const effective = cooldownMs !== undefined
         ? Math.max(1000, Math.floor(cooldownMs))
         : Math.min(base * (2 ** (trips - 1)), getEngineCircuitMaxCooldownMs());

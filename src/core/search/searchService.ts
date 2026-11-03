@@ -7,6 +7,7 @@ import { isEngineCircuitOpen, getEngineCircuitRemainingMs } from './engineCircui
 import { preprocessSearchQuery } from '../../utils/queryPreprocess.js';
 import { buildEngineQuery, matchesSearchOperators, parseSearchOperators } from '../../utils/searchOperators.js';
 import { ENGINE_REGISTRY } from '../../engines/registry.js';
+import { getEngineDescriptor } from '../../engines/registry.js';
 import { extractSiteDomains, matchesSiteDomains } from '../../engines/bing/bing.js';
 import { metrics } from '../metrics.js';
 import { classifyFailureRetryable, AppError } from '../errors.js';
@@ -444,7 +445,11 @@ export function createSearchService(
                     ])].filter(Boolean);
                     effectiveOperators = { ...operators, siteDomains };
 
+                    // 单引擎基础超时：优先用 registry 的 defaultTimeoutMs（yahoo 12s、其它 8–10s），
+                    // 未登记引擎回退到 deadline 的一半（最多 10s）；浏览器兜底引擎由 executor 再叠 1.5x–2x。
                     const perEngineTimeoutMs = Math.min(Math.floor(deadlineMs * 0.5), 10000);
+                    const perEngineTimeoutMsFor = (engine: string): number =>
+                        getEngineDescriptor(engine)?.defaultTimeoutMs ?? perEngineTimeoutMs;
 
                     // 管道第 1 阶段：主引擎并发执行器
                     const primary = await executePrimaryEngines({
@@ -456,7 +461,7 @@ export function createSearchService(
                         effectiveSearchMode,
                         engineMap,
                         deadlineAt,
-                        perEngineTimeoutMs,
+                        perEngineTimeoutMs: perEngineTimeoutMsFor,
                         // 结果足够即提前返回（给慢引擎 800ms 宽限）。
                         // 但显式点名了引擎时禁用早退：把用户点名的引擎 abort 掉，
                         // 外部会表现为「该引擎返回 0 条」，违背显式指定的意图。
@@ -491,7 +496,7 @@ export function createSearchService(
                         engineMap,
                         effectiveSearchMode,
                         deadlineAt,
-                        perEngineTimeoutMs,
+                        perEngineTimeoutMs: perEngineTimeoutMsFor,
                         // 显式点名引擎时，级联只能在点名的集合内补位；否则会悄悄换成用户没选的引擎
                         // （例如只指定 github，却在 DDG 挂死时返回 bing 的结果）
                         allowedEngines: requestedEngines && requestedEngines.length > 0

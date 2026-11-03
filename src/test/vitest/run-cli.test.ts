@@ -1,15 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import {
-    requireFlagValue,
-    commandNeedsRuntime,
-    parseSearchArgs,
-    parseFetchWebArgs,
-    parseFetchGithubArgs,
-    parseResolveLibraryArgs,
-    parseQueryDocsArgs,
-    parseStatusArgs,
-    parseServeArgs
-} from '../../cli/runCli.js';
+import { requireFlagValue, commandNeedsRuntime } from '../../cli/runCli.js';
+import { parseSearchArgs } from '../../cli/commands/search.js';
+import { parseFetchWebArgs } from '../../cli/commands/fetchWeb.js';
+import { parseFetchGithubArgs } from '../../cli/commands/fetchGithub.js';
+import { parseResolveLibraryArgs, parseQueryDocsArgs } from '../../cli/commands/docs.js';
+import { parseStatusArgs } from '../../cli/commands/status.js';
+import { parseServeArgs } from '../../cli/commands/serve.js';
 import type { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 
 describe('runCli argument parsing', () => {
