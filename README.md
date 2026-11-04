@@ -336,7 +336,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `BING_IMPERSONATE` | `true` | Toggle Chrome TLS impersonation for Bing HTTP mode (auto-trips circuit breaker after consecutive empty results) |
 | `ANUBIS_MAX_POW_DIFFICULTY` | `6` | Maximum difficulty threshold for Startpage Anubis PoW solver; skips/falls back when difficulty exceeds this |
 | `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `3500` | Timeout in ms for direct-first connection probes before proxy fallback |
-| `FETCH_WEB_INSECURE_TLS`| `false` | Disable TLS certificate verification for `fetchWebContent` only (for broken legacy site certs) |
+| `FETCH_WEB_INSECURE_TLS` | `false` | Disable TLS certificate verification for `fetchWebContent` only (for broken legacy site certs) |
 | `GITHUB_README_CDN_FIRST` | `false` | When `true`, forces skipping `raw.githubusercontent.com` direct probe and queries jsDelivr CDN first (domestic network acceleration) |
 
 > **Custom proxy engine lists**: if you set `proxy.engines` in `~/.my-websearch/config.json` or use the `;engine1,engine2` suffix of `PROXY_URL`, **`yahoo` and `bing-news` are added automatically** because they cannot be reached directly from CN (Yahoo times out in 15–20s; Bing News returns a 302/HTML page). Removing the list entirely is still recommended: defaults include them and keep the direct API engines (GitHub / Stack Overflow / Hacker News / arXiv) off the proxy.
@@ -358,7 +358,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | :--- | :--- | :--- |
 | `MODE` | `both` | MCP transport mode: `stdio` (stdin/stdout only), `http` (HTTP/SSE only), `both` (concurrent) |
 | `PORT` | `3211` | MCP HTTP/SSE listen port (local persistent daemon uses `3210` by default) |
-| `MAX_CONCURRENT_SEARCHES`| `20` | Max concurrent searches in daemon mode (`0` for unlimited) |
+| `MAX_CONCURRENT_SEARCHES` | `20` | Max concurrent searches in daemon mode (`0` for unlimited) |
 | `MCP_MAX_SESSIONS` | `100` | Max retained MCP HTTP sessions before returning HTTP 429 Too Many Requests |
 | `MCP_SESSION_TTL_MS` | `1800000` | Idle session expiration duration before reaping (default 30 min) |
 | `MCP_SESSION_REAPER_MS` | `300000` | Session reaper scan interval (default 5 min) |
@@ -386,14 +386,14 @@ Every browser path — Bing fallback, Startpage, DuckDuckGo, Brave, `fetchWebCon
 | `PLAYWRIGHT_CDP_ENDPOINT` | empty | Remote Chrome/Edge CDP endpoint URL (e.g. `http://127.0.0.1:9222` or `ws://...`); legacy name, used by the CDP driver |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | auto | Absolute path to a **Chromium-based** browser executable. Auto-detection covers Chrome / Edge / Chromium / Brave / Vivaldi / Opera in standard locations; `CHROME_PATH` and `BROWSER_PATH` are checked first and work as equivalents; legacy name |
 | `PLAYWRIGHT_HEADLESS` | `true` | Run headless (on Windows, an isolated hidden desktop window is used); legacy name |
-| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`| `20000` | Hard page navigation timeout (milliseconds); legacy name, applied to CDP navigation |
+| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | Hard page navigation timeout (milliseconds); legacy name, applied to CDP navigation |
 
 #### 6. 🛠️ Application Directory & Tool Customization
 
 | Variable | Default | Allowed Values / Description |
 | :--- | :--- | :--- |
 | `MYWEBSEARCH_DATA_DIR` | `~/.my-websearch` | Root directory for configuration and persistent cookie files |
-| `OPEN_WEBSEARCH_RESPONSE_CAP_BYTES`| `60000` | Maximum character limit returned to LLMs to prevent prompt context explosion |
+| `OPEN_WEBSEARCH_RESPONSE_CAP_BYTES` | `60000` | Maximum character limit returned to LLMs to prevent prompt context explosion |
 | `MCP_TOOL_SEARCH_NAME` | `search` | Custom registration name for the search tool in MCP |
 | `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | Custom registration name for the content extraction tool |
 | `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubContent` | Custom registration name for the GitHub/Gitee content tool (set to `fetchGithubReadme` for backward compatibility) |
@@ -416,7 +416,8 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run the Vitest suite (99 files, 762 tests at the current baseline)
+npm test              # Run the Vitest suite (100 files, 769 tests at the current baseline)
+npm run check:docs    # Verify README env tables match docs/env-schema.json (edit the schema, then `npm run docs:env`)
 npm run test:live     # Run bounded-concurrency live integration tests
 npm run eval:live     # Run 23-case live STDIO JSON-RPC evaluation suite
 ```

@@ -33,7 +33,7 @@
     "!build/test"
   ],
   "scripts": {
-    "check:ci": "npm run typecheck:strict && npm run check:manifests && npm run lint && npm test && npm run build && npm run test:deterministic",
+    "check:ci": "npm run typecheck:strict && npm run check:manifests && npm run check:docs && npm run lint && npm test && npm run build && npm run test:deterministic",
     "check:release": "npm run check:ci && npm run test:timing",
     "test:timing": "node tools/repeat-vitest.mjs 10 src/test/vitest/search-outcome-and-doctor.test.ts",
     "typecheck:strict": "tsc --project tsconfig.strict.json",
@@ -72,7 +72,9 @@
     "test:article-fetch:live": "tsc && node build/test/live/test-article-fetch-live.js",
     "prepare": "git config core.hooksPath .githooks || true",
     "prepublishOnly": "npm run build",
-    "canary": "node tools/canary.mjs"
+    "canary": "node tools/canary.mjs",
+    "docs:env": "node tools/env-docs.mjs write",
+    "check:docs": "node tools/env-docs.mjs check"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

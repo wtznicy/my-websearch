@@ -300,7 +300,7 @@ my-websearch doctor --reset-health
 | `BING_IMPERSONATE` | `true` | 是否启用 Bing 的 Chrome TLS 指纹模拟（连续多次返回 0 条时会自动熔断降级为标准 HTTP） |
 | `ANUBIS_MAX_POW_DIFFICULTY` | `6` | Startpage Anubis 工作量证明（PoW）难度上限，超限时自动跳过或走降级策略 |
 | `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `3500` | 直连优先策略探测超时时间（毫秒） |
-| `FETCH_WEB_INSECURE_TLS`| `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点旧证书链损坏时使用） |
+| `FETCH_WEB_INSECURE_TLS` | `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点旧证书链损坏时使用） |
 | `GITHUB_README_CDN_FIRST` | `false` | 为 `true` 时强制跳过 `raw.githubusercontent.com` 直连探测，优先走 jsDelivr CDN 镜像（国内无代理网络加速，免除 3 秒直连探测等待） |
 
 > **自定义代理引擎名单**：如果你在 `~/.my-websearch/config.json` 写了 `proxy.engines`，或用 `PROXY_URL` 的 `;engine1,engine2` 后缀，**`yahoo` 与 `bing-news` 会被自动补齐**——它们在墙内直连不可用（Yahoo 15–20s 超时；Bing News 返回 302/HTML）。仍然推荐直接删掉这份名单：默认名单已包含它们，并把 GitHub / Stack Overflow / Hacker News / arXiv 这些直连 API 引擎排除在代理之外。
@@ -322,7 +322,7 @@ my-websearch doctor --reset-health
 | :--- | :--- | :--- |
 | `MODE` | `both` | MCP 传输通道：`stdio`（仅标准输入输出）、`http`（仅网络接口）、`both`（同时开启） |
 | `PORT` | `3211` | MCP HTTP/SSE 监听端口（CLI 本地常驻 Daemon 默认使用 `3210`） |
-| `MAX_CONCURRENT_SEARCHES`| `20` | Daemon 模式下的全局最大并发搜索数（`0` 表示不限制） |
+| `MAX_CONCURRENT_SEARCHES` | `20` | Daemon 模式下的全局最大并发搜索数（`0` 表示不限制） |
 | `MCP_MAX_SESSIONS` | `100` | 保留的最大并发会话上限，超限时返回 HTTP 429 保护服务器内存 |
 | `MCP_SESSION_TTL_MS` | `1800000` | 会话空闲回收时长（默认 30 分钟） |
 | `MCP_SESSION_REAPER_MS` | `300000` | 会话清理器扫描巡检间隔（默认 5 分钟） |
@@ -350,14 +350,14 @@ my-websearch doctor --reset-health
 | `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 远程 Chrome/Edge CDP 调试端点（如 `http://127.0.0.1:9222` 或 `ws://...`）；旧变量名，由 CDP 驱动使用 |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | 自动探测 | **Chromium 系**浏览器可执行文件的绝对路径；自动探测覆盖 Chrome / Edge / Chromium / Brave / Vivaldi / Opera 的标准安装位置，`CHROME_PATH` 与 `BROWSER_PATH` 优先且等价；旧变量名 |
 | `PLAYWRIGHT_HEADLESS` | `true` | 是否无头运行（Windows 下自动使用隐身独立桌面）；旧变量名 |
-| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`| `20000` | 页面导航硬超时（毫秒）；旧变量名，作用于 CDP 导航 |
+| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | 页面导航硬超时（毫秒）；旧变量名，作用于 CDP 导航 |
 
 #### 6. 🛠️ 应用目录与工具微调
 
 | 变量名 | 默认值 | 可选值 / 说明 |
 | :--- | :--- | :--- |
 | `MYWEBSEARCH_DATA_DIR` | `~/.my-websearch` | 配置文件与持久化 Cookie 的根存储目录 |
-| `OPEN_WEBSEARCH_RESPONSE_CAP_BYTES`| `60000` | MCP 工具返回给大模型的最大字符上限，防止超长上下文撑爆模型窗口 |
+| `OPEN_WEBSEARCH_RESPONSE_CAP_BYTES` | `60000` | MCP 工具返回给大模型的最大字符上限，防止超长上下文撑爆模型窗口 |
 | `MCP_TOOL_SEARCH_NAME` | `search` | 自定义搜索工具在 MCP 中的注册名称 |
 | `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | 自定义正文抓取工具在 MCP 中的注册名称 |
 | `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubContent` | 自定义 GitHub/Gitee 内容工具在 MCP 中的注册名称（设为 `fetchGithubReadme` 可保持旧名） |
@@ -380,7 +380,8 @@ my-websearch doctor --reset-health
 ```bash
 npm install
 npm run build
-npm test              # 执行 Vitest 测试套件（当前基线：99 个文件、762 个测试）
+npm test              # 执行 Vitest 测试套件（当前基线：100 个文件、769 个测试）
+npm run check:docs    # 校验 README 环境变量表与 docs/env-schema.json 一致（改 schema 后跑 npm run docs:env）
 npm run test:live     # 执行实时网络集成测试
 npm run eval:live     # 执行 23 用例真实 STDIO JSON-RPC 评测套件
 ```

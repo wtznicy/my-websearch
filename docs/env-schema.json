@@ -1,0 +1,670 @@
+{
+  "$comment": "环境变量文档单一事实源：改这里后执行 npm run docs:env 再提交；CI 用 npm run check:docs 校验。",
+  "en": [
+    {
+      "id": 0,
+      "title": "🖥️ Server & Runtime",
+      "rows": [
+        {
+          "name": "`MODE`",
+          "default": "`both`",
+          "desc": "`both` / `http` / `stdio`. `http` enables Streamable HTTP + SSE."
+        },
+        {
+          "name": "`HOST` / `OPEN_WEBSEARCH_HOST`",
+          "default": "`127.0.0.1`",
+          "desc": "MCP HTTP bind address. Binding to a non-loopback address also registers that host in the Host allowlist and prints a no-auth warning."
+        },
+        {
+          "name": "`PORT`",
+          "default": "`3211`",
+          "desc": "MCP HTTP port"
+        },
+        {
+          "name": "`OPEN_WEBSEARCH_ALLOWED_HOSTS`",
+          "default": "empty",
+          "desc": "Extra Host-header allowlist entries (comma-separated), needed when serving through a public domain/reverse proxy"
+        },
+        {
+          "name": "`OPEN_WEBSEARCH_DAEMON_HOST` / `OPEN_WEBSEARCH_DAEMON_PORT`",
+          "default": "`127.0.0.1` / `3210`",
+          "desc": "Local REST daemon bind address (no auth: keep it on loopback)"
+        },
+        {
+          "name": "`METRICS_ENABLED`",
+          "default": "`false`",
+          "desc": "Enables in-process counters and the daemon `/metrics` endpoint"
+        },
+        {
+          "name": "`FETCH_WEB_DEADLINE_MS`",
+          "default": "`45000`",
+          "desc": "Hard deadline for one `fetchWebContent` call (cookie + browser + retries combined)"
+        },
+        {
+          "name": "`GITHUB_CONTENT_CDN_FIRST`",
+          "default": "`false`",
+          "desc": "Prefer jsDelivr over `raw.githubusercontent.com` for **README and source files** (public repos only). Legacy alias `GITHUB_README_CDN_FIRST` still works."
+        },
+        {
+          "name": "`GITHUB_CONTENT_BUDGET_MS`",
+          "default": "`12000` (`6000` in CDN-first)",
+          "desc": "Total time budget for one `fetchGithubContent` call; per-attempt timeout is capped at 4.5s."
+        },
+        {
+          "name": "`BING_PLAYWRIGHT_BUDGET_MS`",
+          "default": "`6000`",
+          "desc": "Legacy name retained for compatibility: budget for the Bing browser fallback (now backed by raw CDP) before HTTP results are kept"
+        },
+        {
+          "name": "`MYWEBSEARCH_NO_AUTO_BOOTSTRAP`",
+          "default": "unset",
+          "desc": "Set to `1` to stop copying API keys out of other apps' MCP configs on first run"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "title": "🔍 Search & Routing Orchestration",
+      "rows": [
+        {
+          "name": "`DEFAULT_SEARCH_ENGINE`",
+          "default": "`auto`",
+          "desc": "Default engine: `auto` (smart query routing: Chinese `baidu,sogou`, English/foreign `bing,duckduckgo`). Supports all 16 engines: `auto`, `bing`, `bing-news`, `baidu`, `sogou`, `duckduckgo`, `brave`, `csdn`, `juejin`, `startpage`, `yahoo`, `exa`, `github`, `stackoverflow`, `hackernews`, `arxiv`, `code` (vertical developer engines can be configured as default, though `auto` or general web engines are recommended for global default)"
+        },
+        {
+          "name": "`ALLOWED_SEARCH_ENGINES`",
+          "default": "all",
+          "desc": "Comma-separated whitelist of allowed search engines (e.g. `bing,baidu,duckduckgo`)"
+        },
+        {
+          "name": "`BING_BASE_URL`",
+          "default": "`https://cn.bing.com/search`",
+          "desc": "Base URL for Bing queries. Overseas users or reverse proxy nodes can set to `https://www.bing.com/search` (legacy alias `OPEN_WEBSEARCH_BING_HOST` supported)"
+        },
+        {
+          "name": "`DEFAULT_MIN_RESULTS`",
+          "default": "`5`",
+          "desc": "Cascade threshold: triggers fallback engines when usable results are fewer than this value"
+        },
+        {
+          "name": "`DEFAULT_SEARCH_LIMIT`",
+          "default": "`10`",
+          "desc": "Default result limit when not explicitly specified in tool calls (max 50)"
+        },
+        {
+          "name": "`SEARCH_DEADLINE_MS`",
+          "default": "`30000`",
+          "desc": "Global hard deadline for multi-engine search execution (milliseconds)"
+        },
+        {
+          "name": "`SEARCH_FUSION`",
+          "default": "`legacy`",
+          "desc": "Result fusion mode: `legacy` (engine-hit count + arrival order) or `rrf` (Reciprocal Rank Fusion over per-engine ranks, which also replaces the position/consensus terms in re-ranking). RRF stays opt-in until a larger evaluation exists."
+        },
+        {
+          "name": "`SEARCH_FUSION_RRF_K`",
+          "default": "`20`",
+          "desc": "RRF constant k; lower values amplify rank differences. Only used when `SEARCH_FUSION=rrf`."
+        },
+        {
+          "name": "`ENGINE_CIRCUIT_BASE_COOLDOWN_MS`",
+          "default": "`30000`",
+          "desc": "First circuit-breaker cooldown for an engine (429 / 202 / bot_challenge). Repeated failures back off exponentially (30s → 60s → 120s…). Brave overrides the first step to **60s** because its 429 is a rolling 60-second window of 6 requests (the 7th is challenged) and recovery only starts once the oldest request ages out; setting this variable explicitly disables the per-engine override."
+        },
+        {
+          "name": "`ENGINE_CIRCUIT_MAX_COOLDOWN_MS`",
+          "default": "`300000`",
+          "desc": "Upper bound for the exponential circuit-breaker backoff (default 5 minutes)."
+        },
+        {
+          "name": "`SEARCH_AUTHORITY_DOMAINS`",
+          "default": "empty",
+          "desc": "Additional authority domain whitelist for result re-ranking (comma-separated, appended to built-in list)"
+        },
+        {
+          "name": "`SEARCH_MODE`",
+          "default": "`auto`",
+          "desc": "Search mode and browser policy. Supports single mode, multi-engine per mode, and compound multi-mode combinations:<br/>• **Global mode**: `auto` (default fallback), `request`/`none` (pure HTTP), `playwright` (force browser; legacy value name, now backed by CDP)<br/>• **Single mode, multiple engines**: `playwright:bing,startpage`, `auto:bing,startpage`, `bing,startpage`<br/>• **Compound multiple modes**: `playwright:bing;auto:startpage` (bing forces browser, startpage uses auto fallback), `auto;request:startpage` (global auto but startpage uses pure HTTP)"
+        },
+        {
+          "name": "`BRAVE_BROWSER_FALLBACK`",
+          "default": "`1`",
+          "desc": "When the keyless Brave web path returns HTTP 429 / an anti-bot challenge, retry once through a disguised desktop headless CDP browser that auto-triggers the Argon2 PoW `验证` button (`1` enabled, `0` disables and fails fast). A 429 then opens a **180 s browser-only window**: HTTP is skipped and every Brave call in the window goes straight to the browser; if that also fails the engine trips its circuit (60 → 120 → 240 → 300 s) and routing/cascade substitute other engines. Measured 8/8 success at ~4–6s per query while plain HTTP stayed 429. Still best-effort: it cannot pass the interactive slider CAPTCHA"
+        },
+        {
+          "name": "`AUTO_ROUTE_EN_ENGINES`",
+          "default": "`bing,duckduckgo`",
+          "desc": "Comma-separated engines for default English auto-routing"
+        },
+        {
+          "name": "`AUTO_ROUTE_ZH_ENGINES`",
+          "default": "`baidu,sogou`",
+          "desc": "Comma-separated engines for default Chinese auto-routing"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "🌐 Proxy & Network Security",
+      "rows": [
+        {
+          "name": "`PROXY_URL`",
+          "default": "empty (off)",
+          "desc": "Consolidated upstream proxy configuration (merges previous `USE_PROXY` and `PROXY_ENGINES`). Not needed in TUN mode.<br/>• **Default proxy**: passing empty `PROXY_URL=\"\"` or `PROXY_URL=true` activates default `http://127.0.0.1:7897` (common local proxy ports include 7897, 7890, 10809; overseas engines use proxy, domestic engines stay direct)<br/>• **Custom address**: `PROXY_URL=http://127.0.0.1:10809`<br/>• **Custom engines**: `PROXY_URL=\"http://127.0.0.1:7897;duckduckgo,brave\"` or all engines `PROXY_URL=\";all\"`"
+        },
+        {
+          "name": "`FAKE_IP_CIDRS`",
+          "default": "`198.18.0.0/15`",
+          "desc": "Whitelisted CIDRs for Fake-IP / TUN mode to avoid SSRF false-positive blocking"
+        },
+        {
+          "name": "`CUSTOM_DNS_SERVERS`",
+          "default": "`223.5.5.5,119.29.29.29,1.1.1.1,8.8.8.8`",
+          "desc": "Comma-separated DNS servers used by the internal c-ares resolver (helps when the system DNS is polluted). Overrides the built-in list entirely"
+        },
+        {
+          "name": "`IMPERSONATE_BROWSER`",
+          "default": "`chrome_149`",
+          "desc": "`wreq-js` browser TLS/H2 fingerprint profile (e.g. `chrome_149`, `safari_18`)"
+        },
+        {
+          "name": "`IMPERSONATE_OS`",
+          "default": "`windows`",
+          "desc": "Operating system platform for fingerprint impersonation (`windows`, `macos`, `linux`)"
+        },
+        {
+          "name": "`BING_IMPERSONATE`",
+          "default": "`true`",
+          "desc": "Toggle Chrome TLS impersonation for Bing HTTP mode (auto-trips circuit breaker after consecutive empty results)"
+        },
+        {
+          "name": "`ANUBIS_MAX_POW_DIFFICULTY`",
+          "default": "`6`",
+          "desc": "Maximum difficulty threshold for Startpage Anubis PoW solver; skips/falls back when difficulty exceeds this"
+        },
+        {
+          "name": "`DIRECT_FIRST_PROBE_TIMEOUT_MS`",
+          "default": "`3500`",
+          "desc": "Timeout in ms for direct-first connection probes before proxy fallback"
+        },
+        {
+          "name": "`FETCH_WEB_INSECURE_TLS`",
+          "default": "`false`",
+          "desc": "Disable TLS certificate verification for `fetchWebContent` only (for broken legacy site certs)"
+        },
+        {
+          "name": "`GITHUB_README_CDN_FIRST`",
+          "default": "`false`",
+          "desc": "When `true`, forces skipping `raw.githubusercontent.com` direct probe and queries jsDelivr CDN first (domestic network acceleration)"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "🔐 Credentials & API Keys",
+      "rows": [
+        {
+          "name": "`CONTEXT7_API_KEY`",
+          "default": "empty",
+          "desc": "[Context7 API Key](https://context7.com/dashboard) (strongly recommended for proxy/TUN users to avoid shared IP quotas)"
+        },
+        {
+          "name": "`EXA_API_KEY`",
+          "default": "empty",
+          "desc": "[Exa Free API Key](https://dashboard.exa.ai/api-keys) (only required if using the `exa` semantic search engine)"
+        },
+        {
+          "name": "`BRAVE_API_KEY`",
+          "default": "empty",
+          "desc": "[Brave Search API Key](https://api.search.brave.com/app/keys) (optional; uses official high-reliability API when set)"
+        },
+        {
+          "name": "`GITHUB_TOKEN`",
+          "default": "empty",
+          "desc": "[GitHub Personal Access Token](https://github.com/settings/tokens) (optional; raises rate limit to 5,000 req/hr)"
+        },
+        {
+          "name": "`GITEE_TOKEN`",
+          "default": "empty",
+          "desc": "[Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens) (optional; raises Gitee API rate limits and enables private repos)"
+        },
+        {
+          "name": "`STACKOVERFLOW_API_KEY`",
+          "default": "empty",
+          "desc": "[Stack Apps Key](https://stackapps.com/apps/oauth/register) (optional; raises quota to 10,000 req/day)"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "🖥️ Server Modes, Concurrency & Session Reaper",
+      "rows": [
+        {
+          "name": "`MODE`",
+          "default": "`both`",
+          "desc": "MCP transport mode: `stdio` (stdin/stdout only), `http` (HTTP/SSE only), `both` (concurrent)"
+        },
+        {
+          "name": "`PORT`",
+          "default": "`3211`",
+          "desc": "MCP HTTP/SSE listen port (local persistent daemon uses `3210` by default)"
+        },
+        {
+          "name": "`MAX_CONCURRENT_SEARCHES`",
+          "default": "`20`",
+          "desc": "Max concurrent searches in daemon mode (`0` for unlimited)"
+        },
+        {
+          "name": "`MCP_MAX_SESSIONS`",
+          "default": "`100`",
+          "desc": "Max retained MCP HTTP sessions before returning HTTP 429 Too Many Requests"
+        },
+        {
+          "name": "`MCP_SESSION_TTL_MS`",
+          "default": "`1800000`",
+          "desc": "Idle session expiration duration before reaping (default 30 min)"
+        },
+        {
+          "name": "`MCP_SESSION_REAPER_MS`",
+          "default": "`300000`",
+          "desc": "Session reaper scan interval (default 5 min)"
+        },
+        {
+          "name": "`LOG_LEVEL`",
+          "default": "`info`",
+          "desc": "Log level: `quiet` (completely silent), `debug`, `info`, `warn`, `error`"
+        },
+        {
+          "name": "`SECURITY_AUDIT`",
+          "default": "`false`",
+          "desc": "Enable SSRF blocking and host header security audit logging"
+        },
+        {
+          "name": "`OPEN_WEBSEARCH_ALLOWED_HOSTS`",
+          "default": "loopback",
+          "desc": "Host header whitelist for HTTP server (DNS Rebinding protection, comma-separated)"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "🧭 CDP Browser & Stealth Controls (legacy Playwright env names kept)",
+      "rows": [
+        {
+          "name": "`BROWSER_DRIVER`",
+          "default": "`cdp`",
+          "desc": "Browser backend. `cdp` (default, raw CDP). `playwright` is a legacy escape hatch and requires you to install `playwright-core` manually; it is no longer bundled."
+        },
+        {
+          "name": "`BROWSER_PROFILE`",
+          "default": "`off`",
+          "desc": "CDP device profile: `off`, `windows-chrome-8`, `windows-chrome-16`, `macos-chrome-8`, or `random`. Applies UA, screen/DPR, timezone and locale to browser sessions. It does not affect HTTP-only engines such as DuckDuckGo/Brave."
+        },
+        {
+          "name": "`DDG_BROWSER_FALLBACK`",
+          "default": "`1`",
+          "desc": "When DuckDuckGo's HTTP paths return 202/CAPTCHA, retry the HTML endpoint through the CDP browser. Uses `BROWSER_PROFILE` when set, otherwise the coherent `windows-chrome-8` default; set `0` to disable."
+        },
+        {
+          "name": "`PLAYWRIGHT_CDP_ENDPOINT`",
+          "default": "empty",
+          "desc": "Remote Chrome/Edge CDP endpoint URL (e.g. `http://127.0.0.1:9222` or `ws://...`); legacy name, used by the CDP driver"
+        },
+        {
+          "name": "`PLAYWRIGHT_EXECUTABLE_PATH`",
+          "default": "auto",
+          "desc": "Absolute path to a **Chromium-based** browser executable. Auto-detection covers Chrome / Edge / Chromium / Brave / Vivaldi / Opera in standard locations; `CHROME_PATH` and `BROWSER_PATH` are checked first and work as equivalents; legacy name"
+        },
+        {
+          "name": "`PLAYWRIGHT_HEADLESS`",
+          "default": "`true`",
+          "desc": "Run headless (on Windows, an isolated hidden desktop window is used); legacy name"
+        },
+        {
+          "name": "`PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`",
+          "default": "`20000`",
+          "desc": "Hard page navigation timeout (milliseconds); legacy name, applied to CDP navigation"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "🛠️ Application Directory & Tool Customization",
+      "rows": [
+        {
+          "name": "`MYWEBSEARCH_DATA_DIR`",
+          "default": "`~/.my-websearch`",
+          "desc": "Root directory for configuration and persistent cookie files"
+        },
+        {
+          "name": "`OPEN_WEBSEARCH_RESPONSE_CAP_BYTES`",
+          "default": "`60000`",
+          "desc": "Maximum character limit returned to LLMs to prevent prompt context explosion"
+        },
+        {
+          "name": "`MCP_TOOL_SEARCH_NAME`",
+          "default": "`search`",
+          "desc": "Custom registration name for the search tool in MCP"
+        },
+        {
+          "name": "`MCP_TOOL_FETCH_WEB_NAME`",
+          "default": "`fetchWebContent`",
+          "desc": "Custom registration name for the content extraction tool"
+        },
+        {
+          "name": "`MCP_TOOL_FETCH_GITHUB_NAME`",
+          "default": "`fetchGithubContent`",
+          "desc": "Custom registration name for the GitHub/Gitee content tool (set to `fetchGithubReadme` for backward compatibility)"
+        }
+      ]
+    }
+  ],
+  "zh": [
+    {
+      "id": 1,
+      "title": "🔍 检索与路由编排",
+      "rows": [
+        {
+          "name": "`DEFAULT_SEARCH_ENGINE`",
+          "default": "`auto`",
+          "desc": "默认搜索引擎。`auto`（智能感知路由：中文走 `baidu,sogou`，英文走 `bing,duckduckgo`）。支持全部 16 个引擎：`auto`、`bing`、`bing-news`、`baidu`、`sogou`、`duckduckgo`、`brave`、`csdn`、`juejin`、`startpage`、`yahoo`、`exa`、`github`、`stackoverflow`、`hackernews`、`arxiv`、`code`（垂直开发者引擎可配置为默认，全局默认推荐保持 `auto` 或通用网页引擎）"
+        },
+        {
+          "name": "`ALLOWED_SEARCH_ENGINES`",
+          "default": "全部",
+          "desc": "限制启用的引擎白名单（逗号分隔，如 `bing,baidu,duckduckgo`）"
+        },
+        {
+          "name": "`BING_BASE_URL`",
+          "default": "`https://cn.bing.com/search`",
+          "desc": "Bing 搜索请求基址。国际用户可改为 `https://www.bing.com/search` 或自定义中转域名（兼容旧变量 `OPEN_WEBSEARCH_BING_HOST`）"
+        },
+        {
+          "name": "`DEFAULT_MIN_RESULTS`",
+          "default": "`5`",
+          "desc": "级联补位阈值：可用结果数不足该值时，自动调度备用引擎补齐"
+        },
+        {
+          "name": "`DEFAULT_SEARCH_LIMIT`",
+          "default": "`10`",
+          "desc": "工具调用未显式传 `limit` 时的单次返回上限（最大 50）"
+        },
+        {
+          "name": "`SEARCH_DEADLINE_MS`",
+          "default": "`30000`",
+          "desc": "搜索任务全局超时硬预算（毫秒）"
+        },
+        {
+          "name": "`SEARCH_FUSION`",
+          "default": "`legacy`",
+          "desc": "结果融合模式：`legacy`（命中引擎数 + 到达顺序）或 `rrf`（按各引擎内排名做 Reciprocal Rank Fusion，并在重排阶段替换 position/consensus 两项）。RRF 默认关闭，等待更大评测集。"
+        },
+        {
+          "name": "`SEARCH_FUSION_RRF_K`",
+          "default": "`20`",
+          "desc": "RRF 常数 k，越小越放大排名差异；仅 `SEARCH_FUSION=rrf` 时生效。"
+        },
+        {
+          "name": "`GITHUB_CONTENT_CDN_FIRST`",
+          "default": "`false`",
+          "desc": "README 与源码文件优先走 jsDelivr（仅公开仓库）；旧名 `GITHUB_README_CDN_FIRST` 仍兼容。"
+        },
+        {
+          "name": "`GITHUB_CONTENT_BUDGET_MS`",
+          "default": "`12000`（CDN-first 时 `6000`）",
+          "desc": "单次 `fetchGithubContent` 的总时间预算；单次尝试上限 4.5s。"
+        },
+        {
+          "name": "`ENGINE_CIRCUIT_BASE_COOLDOWN_MS`",
+          "default": "`30000`",
+          "desc": "引擎首次熔断冷却（429 / 202 / 验证状态）。连续失败指数退避（30s → 60s → 120s…）。Brave 的首档被覆盖为 **60s**（其 429 是「滚动 60 秒内 6 个请求」的窗口，第 7 个触发，且要等最早请求滑出窗口才恢复）；显式设置该变量会关闭按引擎覆盖。"
+        },
+        {
+          "name": "`ENGINE_CIRCUIT_MAX_COOLDOWN_MS`",
+          "default": "`300000`",
+          "desc": "熔断指数退避上限（默认 5 分钟）。"
+        },
+        {
+          "name": "`SEARCH_AUTHORITY_DOMAINS`",
+          "default": "空",
+          "desc": "结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单）"
+        },
+        {
+          "name": "`SEARCH_MODE`",
+          "default": "`auto`",
+          "desc": "检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`playwright`（全强走浏览器；旧值名，底层为 CDP）<br/>• **一种方式多选引擎**：`playwright:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`playwright:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP）"
+        },
+        {
+          "name": "`BRAVE_BROWSER_FALLBACK`",
+          "default": "`1`",
+          "desc": "Brave 无 Key 网页路径返回 HTTP 429 / 人机挑战时，是否用桌面指纹伪装的无头 CDP 浏览器重试一次，并自动点击 Argon2 PoW「验证」按钮（`1` 启用，`0` 关闭并快速失败）。命中 429 后会打开 **180 秒的「浏览器优先」窗口**：窗口内跳过 HTTP、所有 Brave 调用直接走浏览器；若浏览器也失败则升级为熔断（60 → 120 → 240 → 300 秒），由路由/级联换引擎。实测在 HTTP 持续 429 期间 8/8 成功、每次约 4–6s。仍是 best-effort：无法通过交互式滑块验证"
+        },
+        {
+          "name": "`AUTO_ROUTE_EN_ENGINES`",
+          "default": "`bing,duckduckgo`",
+          "desc": "英文查询默认自动路由引擎列表（逗号分隔）"
+        },
+        {
+          "name": "`AUTO_ROUTE_ZH_ENGINES`",
+          "default": "`baidu,sogou`",
+          "desc": "中文查询默认自动路由引擎列表（逗号分隔）"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "🌐 代理与网络安全",
+      "rows": [
+        {
+          "name": "`PROXY_URL`",
+          "default": "空（关闭）",
+          "desc": "统一上游代理配置（已合并原 `USE_PROXY` 与 `PROXY_ENGINES`，TUN 模式无需配置保持直连）。<br/>• **开启默认代理**：传空值 `PROXY_URL=\"\"` 或 `PROXY_URL=true` 即可启用默认 `http://127.0.0.1:7897`（常见本地代理端口如 7897、7890、10809；默认仅国际引擎走代理，国内引擎直连）<br/>• **自定义地址**：`PROXY_URL=http://127.0.0.1:10809`<br/>• **自选引擎**：`PROXY_URL=\"http://127.0.0.1:7897;duckduckgo,brave\"` 或全部引擎走代理 `PROXY_URL=\";all\"`"
+        },
+        {
+          "name": "`FAKE_IP_CIDRS`",
+          "default": "`198.18.0.0/15`",
+          "desc": "Fake-IP 虚拟网段白名单，避免误触发 SSRF 本地私网地址拦截"
+        },
+        {
+          "name": "`CUSTOM_DNS_SERVERS`",
+          "default": "`223.5.5.5,119.29.29.29,1.1.1.1,8.8.8.8`",
+          "desc": "内部 c-ares 解析器使用的 DNS 服务器（逗号分隔），系统 DNS 被污染时可用；会整体替换内置列表"
+        },
+        {
+          "name": "`IMPERSONATE_BROWSER`",
+          "default": "`chrome_149`",
+          "desc": "`wreq-js` 模拟的现代浏览器 TLS/H2 指纹（如 `chrome_149`, `safari_18`）"
+        },
+        {
+          "name": "`IMPERSONATE_OS`",
+          "default": "`windows`",
+          "desc": "指纹模拟使用的操作系统平台（`windows`, `macos`, `linux`）"
+        },
+        {
+          "name": "`BING_IMPERSONATE`",
+          "default": "`true`",
+          "desc": "是否启用 Bing 的 Chrome TLS 指纹模拟（连续多次返回 0 条时会自动熔断降级为标准 HTTP）"
+        },
+        {
+          "name": "`ANUBIS_MAX_POW_DIFFICULTY`",
+          "default": "`6`",
+          "desc": "Startpage Anubis 工作量证明（PoW）难度上限，超限时自动跳过或走降级策略"
+        },
+        {
+          "name": "`DIRECT_FIRST_PROBE_TIMEOUT_MS`",
+          "default": "`3500`",
+          "desc": "直连优先策略探测超时时间（毫秒）"
+        },
+        {
+          "name": "`FETCH_WEB_INSECURE_TLS`",
+          "default": "`false`",
+          "desc": "仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点旧证书链损坏时使用）"
+        },
+        {
+          "name": "`GITHUB_README_CDN_FIRST`",
+          "default": "`false`",
+          "desc": "为 `true` 时强制跳过 `raw.githubusercontent.com` 直连探测，优先走 jsDelivr CDN 镜像（国内无代理网络加速，免除 3 秒直连探测等待）"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "🔐 外部服务凭据与 API Key",
+      "rows": [
+        {
+          "name": "`CONTEXT7_API_KEY`",
+          "default": "空",
+          "desc": "[Context7 API Key](https://context7.com/dashboard)（强烈推荐 TUN/代理用户配置，免受共享 IP 200次/月限额影响）"
+        },
+        {
+          "name": "`EXA_API_KEY`",
+          "default": "空",
+          "desc": "[Exa 官方免费 Key](https://dashboard.exa.ai/api-keys)（仅使用 `exa` 语义搜索时需要）"
+        },
+        {
+          "name": "`BRAVE_API_KEY`",
+          "default": "空",
+          "desc": "[Brave Search API Key](https://api.search.brave.com/app/keys)（选配，配置后优先走官方 API 高可靠检索）"
+        },
+        {
+          "name": "`GITHUB_TOKEN`",
+          "default": "空",
+          "desc": "[GitHub Personal Access Token](https://github.com/settings/tokens)（选配，提高 GitHub 搜索与内容抓取的速率配额至 5,000次/小时）"
+        },
+        {
+          "name": "`GITEE_TOKEN`",
+          "default": "空",
+          "desc": "[Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens)（选配，提高 Gitee API 配额并支持私有仓库）"
+        },
+        {
+          "name": "`STACKOVERFLOW_API_KEY`",
+          "default": "空",
+          "desc": "[Stack Apps Key](https://stackapps.com/apps/oauth/register)（选配，提高 StackOverflow 检索配额至 10,000次/天）"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "🖥️ 服务模式、并发与会话治理",
+      "rows": [
+        {
+          "name": "`MODE`",
+          "default": "`both`",
+          "desc": "MCP 传输通道：`stdio`（仅标准输入输出）、`http`（仅网络接口）、`both`（同时开启）"
+        },
+        {
+          "name": "`PORT`",
+          "default": "`3211`",
+          "desc": "MCP HTTP/SSE 监听端口（CLI 本地常驻 Daemon 默认使用 `3210`）"
+        },
+        {
+          "name": "`MAX_CONCURRENT_SEARCHES`",
+          "default": "`20`",
+          "desc": "Daemon 模式下的全局最大并发搜索数（`0` 表示不限制）"
+        },
+        {
+          "name": "`MCP_MAX_SESSIONS`",
+          "default": "`100`",
+          "desc": "保留的最大并发会话上限，超限时返回 HTTP 429 保护服务器内存"
+        },
+        {
+          "name": "`MCP_SESSION_TTL_MS`",
+          "default": "`1800000`",
+          "desc": "会话空闲回收时长（默认 30 分钟）"
+        },
+        {
+          "name": "`MCP_SESSION_REAPER_MS`",
+          "default": "`300000`",
+          "desc": "会话清理器扫描巡检间隔（默认 5 分钟）"
+        },
+        {
+          "name": "`LOG_LEVEL`",
+          "default": "`info`",
+          "desc": "日志输出级别：`quiet`（完全静默）、`debug`、`info`、`warn`、`error`"
+        },
+        {
+          "name": "`SECURITY_AUDIT`",
+          "default": "`false`",
+          "desc": "是否开启安全审计日志（输出 SSRF 拦截详情与主机头放行记录）"
+        },
+        {
+          "name": "`OPEN_WEBSEARCH_ALLOWED_HOSTS`",
+          "default": "本地回环",
+          "desc": "HTTP 服务允许的 Host 域名白名单（DNS Rebinding 安全防护，逗号分隔）"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "🧭 CDP 浏览器高级控制（保留 Playwright 旧变量名）",
+      "rows": [
+        {
+          "name": "`BROWSER_DRIVER`",
+          "default": "`cdp`",
+          "desc": "浏览器后端：`cdp`（默认，raw CDP）；`playwright` 为旧版逃生口，需要你自行安装 `playwright-core`，不再随包提供"
+        },
+        {
+          "name": "`BROWSER_PROFILE`",
+          "default": "`off`",
+          "desc": "CDP 设备 profile：`off`、`windows-chrome-8`、`windows-chrome-16`、`macos-chrome-8` 或 `random`。对浏览器会话应用 UA、屏幕/DPR、时区、语言；不会影响 DuckDuckGo/Brave 等纯 HTTP 引擎。"
+        },
+        {
+          "name": "`DDG_BROWSER_FALLBACK`",
+          "default": "`1`",
+          "desc": "DuckDuckGo 的 HTTP 路径返回 202/CAPTCHA 时，改用 CDP 浏览器请求 HTML 端点；显式设置 `BROWSER_PROFILE` 时使用它，否则使用一致的 `windows-chrome-8` 默认 profile；设为 `0` 关闭。"
+        },
+        {
+          "name": "`PLAYWRIGHT_CDP_ENDPOINT`",
+          "default": "空",
+          "desc": "远程 Chrome/Edge CDP 调试端点（如 `http://127.0.0.1:9222` 或 `ws://...`）；旧变量名，由 CDP 驱动使用"
+        },
+        {
+          "name": "`PLAYWRIGHT_EXECUTABLE_PATH`",
+          "default": "自动探测",
+          "desc": "**Chromium 系**浏览器可执行文件的绝对路径；自动探测覆盖 Chrome / Edge / Chromium / Brave / Vivaldi / Opera 的标准安装位置，`CHROME_PATH` 与 `BROWSER_PATH` 优先且等价；旧变量名"
+        },
+        {
+          "name": "`PLAYWRIGHT_HEADLESS`",
+          "default": "`true`",
+          "desc": "是否无头运行（Windows 下自动使用隐身独立桌面）；旧变量名"
+        },
+        {
+          "name": "`PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`",
+          "default": "`20000`",
+          "desc": "页面导航硬超时（毫秒）；旧变量名，作用于 CDP 导航"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "🛠️ 应用目录与工具微调",
+      "rows": [
+        {
+          "name": "`MYWEBSEARCH_DATA_DIR`",
+          "default": "`~/.my-websearch`",
+          "desc": "配置文件与持久化 Cookie 的根存储目录"
+        },
+        {
+          "name": "`OPEN_WEBSEARCH_RESPONSE_CAP_BYTES`",
+          "default": "`60000`",
+          "desc": "MCP 工具返回给大模型的最大字符上限，防止超长上下文撑爆模型窗口"
+        },
+        {
+          "name": "`MCP_TOOL_SEARCH_NAME`",
+          "default": "`search`",
+          "desc": "自定义搜索工具在 MCP 中的注册名称"
+        },
+        {
+          "name": "`MCP_TOOL_FETCH_WEB_NAME`",
+          "default": "`fetchWebContent`",
+          "desc": "自定义正文抓取工具在 MCP 中的注册名称"
+        },
+        {
+          "name": "`MCP_TOOL_FETCH_GITHUB_NAME`",
+          "default": "`fetchGithubContent`",
+          "desc": "自定义 GitHub/Gitee 内容工具在 MCP 中的注册名称（设为 `fetchGithubReadme` 可保持旧名）"
+        }
+      ]
+    }
+  ]
+}
