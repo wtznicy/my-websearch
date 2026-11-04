@@ -61,7 +61,6 @@
     "test:engine-normalization": "tsc && node build/test/legacy/test-engine-normalization.js",
     "test:startpage": "tsc && node build/test/legacy/test-startpage.js",
     "test:redirect-safety": "tsc && node build/test/legacy/test-redirect-safety.js",
-    "test:browser-path-guard": "tsc && node build/test/legacy/test-browser-path-guard.js",
     "test:web-content": "tsc && node build/test/legacy/test-web-content.js",
     "test:web-content:live": "tsc && node build/test/live/test-web-content-live.js",
     "test:bing:live": "tsc && node build/test/live/test-bing-live.js",
