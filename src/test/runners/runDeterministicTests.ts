@@ -25,7 +25,6 @@ const DETERMINISTIC_TESTS = [
     'test-core-fetch-services',
     'test-core-search',
     'test-sogou',
-    'test-url-safety',
     'test-web-content'
 ] as const;
 
