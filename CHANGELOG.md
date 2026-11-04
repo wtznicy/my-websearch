@@ -10,7 +10,7 @@ All notable changes to `my-websearch` are documented in this file.
 - **浏览器自动探测扩展**：Windows/macOS/Linux 自动探测 Brave / Vivaldi / Opera，错误提示明确仅支持 Chromium 系（Firefox/WebKit 不支持）并列出 `CHROME_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH` / `PLAYWRIGHT_CDP_ENDPOINT` / `doctor --browser`。
 - **环境变量访问层** `src/config/env.ts`：`getEnv / getString / getOptionalString / getNumber / getBoolean / getList`，支持注入 env；ESLint 禁止 `src/config/` 与测试之外直接读 `process.env`。
 - **环境变量文档单一事实源**：`docs/env-schema.json` + `tools/env-docs.mjs`（extract/write/check），`npm run docs:env` 重生成、`npm run check:docs` 进 CI；中英两份 README 表格与 schema 强一致（跨语言漂移也判失败）。
-- **Windows CI + Node 20/22 矩阵**：CI 增加 windows-latest 与 ubuntu Node 20/22；`docsCache` / `pageCache` 对 `node:sqlite` 增加 `nodeMajor >= 22` 守卫并回退 JSON 分片缓存。
+- **Windows CI + Node 22 矩阵（engines 提升到 `>=22`）**：CI 增加 windows-latest，ubuntu/windows 均跑 Node 22。Vitest 5 与可选依赖 `unpdf` 都要求 Node ≥22，因此 `engines.node` 由 `>=20` 提升为 `>=22`（**破坏性变更**：Node 20 不再受支持）。`docsCache` / `pageCache` 保留 `node:sqlite` 版本守卫与 JSON 分片缓存回退。
 
 ### Changed
 - **CLI 冷启动**：`runCli` 命令处理器与 `index.ts` 服务器栈（express/MCP SDK/浏览器栈）改为按需动态导入，`--help` 从 ~1.38s 降到 ~0.32s。
