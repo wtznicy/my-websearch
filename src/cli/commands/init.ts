@@ -13,6 +13,7 @@ import {
     parseClientIds
 } from '../init/clientTargets.js';
 import { applyPatch, formatEntryDiff, planPatch, type PatchAction } from '../init/patcher.js';
+import { getProcessEnv } from '../../config/env.js';
 
 export type ParsedInitArgs = {
     /** 空数组表示自动探测 */
@@ -145,7 +146,7 @@ const resolveHost = (args: ParsedInitArgs): InitHost => ({
     home: args.home ?? os.homedir(),
     cwd: process.cwd(),
     platform: process.platform,
-    env: process.env
+    env: getProcessEnv()
 });
 
 const fsExists = (targetPath: string): boolean => fs.existsSync(targetPath);

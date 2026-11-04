@@ -6,6 +6,7 @@ import { AppConfig, config, engineShouldUseProxy, getProxyUrl } from '../../conf
 import { LoadPlaywrightClientOptions, PlaywrightBrowserLike, PlaywrightModule } from './types.js';
 import { cdpDriver } from '../browser/cdpDriver.js';
 import { findChromeExecutable } from '../browser/chromeLauncher.js';
+import { getString } from '../../config/env.js';
 
 const require = createRequire(import.meta.url);
 
@@ -294,7 +295,7 @@ function createCdpPlaywrightModule(): PlaywrightModule {
 export async function loadPlaywrightClient(options?: LoadPlaywrightClientOptions): Promise<PlaywrightModule | null> {
     if (!playwrightModulePromise) {
         playwrightModulePromise = (async () => {
-            const driverName = (process.env.BROWSER_DRIVER || 'cdp').trim().toLowerCase();
+            const driverName = getString('BROWSER_DRIVER', 'cdp').toLowerCase();
             if (driverName !== 'playwright') {
                 playwrightModuleSource = 'cdp (chrome-remote-interface)';
                 playwrightUnavailableMessage = null;

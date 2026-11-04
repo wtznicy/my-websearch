@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { looksLikeBotChallengePage } from '../antiBot/antiBotDetection.js';
+import { getOptionalString } from '../../config/env.js';
 
 // 读路径写放大治理：60s 内同一 key 只更新一次 last_accessed_at（LRU 精度足够，避免每次命中都写盘）
 const lastTouchByKey = new Map<string, number>();
@@ -142,10 +143,11 @@ export function passesQualityGate(markdown: string, title?: string): boolean {
 }
 
 export function getDefaultPageCacheDir(): string {
-    if (process.env.MY_WEBSEARCH_CACHE_DIR) {
-        return path.resolve(process.env.MY_WEBSEARCH_CACHE_DIR);
+    const customCacheDir = getOptionalString('MY_WEBSEARCH_CACHE_DIR');
+    if (customCacheDir) {
+        return path.resolve(customCacheDir);
     }
-    const base = process.env.LOCALAPPDATA
+    const base = getOptionalString('LOCALAPPDATA')
         || (process.platform === 'darwin'
             ? path.join(os.homedir(), 'Library', 'Caches')
             : path.join(os.homedir(), '.cache'));

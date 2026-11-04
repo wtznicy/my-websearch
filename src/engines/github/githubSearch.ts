@@ -4,6 +4,7 @@ import type { SearchExecutionContext } from '../../core/search/searchTypes.js';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 import { AppError, isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
+import { getOptionalString } from '../../config/env.js';
 
 export interface GitHubIssueItem {
     number?: number;
@@ -357,7 +358,7 @@ export async function searchGithub(
     }
 
     const targetLimit = Math.max(1, Math.min(limit, 30));
-    const userToken = process.env.GITHUB_TOKEN?.trim();
+    const userToken = getOptionalString('GITHUB_TOKEN');
 
     // P0：精确 owner/repo（或 GitHub URL）直接查 /repos，避免被 Search API 的相关性排序带偏。
     // timeRange 需要过滤，仍走普通搜索路径。

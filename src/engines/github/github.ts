@@ -5,6 +5,7 @@ import { config } from '../../config.js';
 import { buildAxiosRequestOptions, isNetworkLayerError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { detectSystemProxy } from '../../utils/systemProxy.js';
 import { AppError } from '../../core/errors.js';
+import { getOptionalString } from '../../config/env.js';
 import { detectLanguageFromPath, formatSourceFile, renderAsciiTree } from './format.js';
 import { LineRange, parseLineRangeFromUrl } from './lineRange.js';
 import { fetchGiteeBlob, fetchGiteeCommit, fetchGiteeCompare, fetchGiteeIssue, fetchGiteePullRequest, fetchGiteeReleases, fetchGiteeTree } from './gitee.js';
@@ -117,7 +118,7 @@ function buildReadmeOptions(label: string, forceDirect: boolean, timeout: number
             headers: {
                 'User-Agent': 'GitHub-README-Fetcher/1.0',
                 // 可选 GITHUB_TOKEN：提高 raw 的速率上限（匿名额度用尽时会 403，README 抓取整体失败）
-                ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
+                ...(getOptionalString('GITHUB_TOKEN') ? { Authorization: `Bearer ${getOptionalString('GITHUB_TOKEN')}` } : {})
             },
             // raw 与 jsDelivr 的域名都由代码硬编码，属于「固定可信 host」。
             // 走 trustedStaticHost 还能避开 request-filtering-agent 的 fake-IP 白名单在
@@ -596,7 +597,7 @@ async function fetchSiblingFileNames(
         const headers: Record<string, string> = {
             'User-Agent': 'GitHub-Content-Fetcher/1.0',
             'Accept': 'application/vnd.github.v3+json',
-            ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
+            ...(getOptionalString('GITHUB_TOKEN') ? { Authorization: `Bearer ${getOptionalString('GITHUB_TOKEN')}` } : {})
         };
         const res = await requestDirectFirst('GET', apiUrl, (forceDirect) => ({
             ...buildAxiosRequestOptions({ headers, timeout: 8000, forceDirect })
@@ -690,7 +691,7 @@ async function fetchGithubTree(
         const headers: Record<string, string> = {
             'User-Agent': 'GitHub-Tree-Fetcher/1.0',
             'Accept': 'application/vnd.github.v3+json',
-            ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
+            ...(getOptionalString('GITHUB_TOKEN') ? { Authorization: `Bearer ${getOptionalString('GITHUB_TOKEN')}` } : {})
         };
 
         const treeUrl = `https://api.github.com/repos/${ownerEnc}/${repoEnc}/git/trees/${refEnc}?recursive=1`;

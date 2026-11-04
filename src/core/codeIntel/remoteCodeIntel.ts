@@ -5,6 +5,7 @@ import path from 'node:path';
 import { analyzeWithTreeSitter, type CodeSymbolCallSite } from './treeSitter.js';
 import { inferTypeInfo, type CodeTypeInfo } from './typeInference.js';
 import { fileAnalysisCache, fileContentCache, hashContent, symbolResultCache } from './codeIntelCache.js';
+import { getBoolean, getNumber, getOptionalString } from '../../config/env.js';
 
 export type CodeSymbolKind = 'class' | 'function' | 'interface' | 'type' | 'method' | 'const' | 'enum' | 'struct' | 'trait' | 'namespace';
 
@@ -635,7 +636,7 @@ interface GitHubCodeSearchResponse {
 }
 
 function githubHeaders(): Record<string, string> {
-    const token = process.env.GITHUB_TOKEN?.trim();
+    const token = getOptionalString('GITHUB_TOKEN');
     return {
         'User-Agent': DEFAULT_DESKTOP_UA,
         'Accept': 'application/vnd.github.text-match+json',
@@ -650,7 +651,7 @@ async function searchGitHubCode(
     maxResults: number,
     signal?: AbortSignal
 ): Promise<string[]> {
-    const token = process.env.GITHUB_TOKEN?.trim();
+    const token = getOptionalString('GITHUB_TOKEN');
     if (!token) {
         throw new AppError({
             code: 'missing_api_key',
@@ -735,7 +736,7 @@ async function fetchRawFile(
 
     // Private repositories are not served by raw.githubusercontent.com/jsDelivr;
     // use the authenticated Contents API as the last resort.
-    const token = process.env.GITHUB_TOKEN?.trim();
+    const token = getOptionalString('GITHUB_TOKEN');
     if (!token) return null;
     try {
         const encodedPath = path.split('/').map(encodeURIComponent).join('/');
@@ -981,10 +982,10 @@ export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbol
         return { ...cachedResult, cached: true };
     }
 
-    const budgetMs = Math.min(Math.max(Number(process.env.CODE_SYMBOL_BUDGET_MS) || 8000, 3000), 30000);
+    const budgetMs = getNumber('CODE_SYMBOL_BUDGET_MS', 8000, { min: 3000, max: 30000, integer: true });
     const deadline = Date.now() + budgetMs;
     let partial = false;
-    const debug = process.env.CODE_SYMBOL_DEBUG === '1';
+    const debug = getBoolean('CODE_SYMBOL_DEBUG', false);
     const debugStarted = Date.now();
     const debugLog = (stage: string): void => {
         if (debug) console.error(`[codeSymbol] ${stage} +${Date.now() - debugStarted}ms`);

@@ -1,3 +1,5 @@
+import { getOptionalString, type EnvLike } from '../config/env.js';
+
 /**
  * 请求头 `Accept-Language` 的默认值：跟随系统区域，而不是硬编码 zh-CN。
  *
@@ -7,16 +9,16 @@
  *
  * 覆盖方式：环境变量 `ACCEPT_LANGUAGE`（优先级最高）。
  */
-export function isChineseLocale(env: NodeJS.ProcessEnv = process.env): boolean {
+export function isChineseLocale(env?: EnvLike): boolean {
     try {
         return /^zh\b/i.test(Intl.DateTimeFormat().resolvedOptions().locale || '');
     } catch {
-        return Boolean(env.LANG?.toLowerCase().startsWith('zh'));
+        return Boolean(getOptionalString('LANG', env)?.toLowerCase().startsWith('zh'));
     }
 }
 
-export function resolveAcceptLanguage(env: NodeJS.ProcessEnv = process.env): string {
-    const explicit = env.ACCEPT_LANGUAGE?.trim();
+export function resolveAcceptLanguage(env?: EnvLike): string {
+    const explicit = getOptionalString('ACCEPT_LANGUAGE', env);
     if (explicit) {
         return explicit;
     }

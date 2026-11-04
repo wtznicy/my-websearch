@@ -1,6 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import {
+    getBoolean,
+    getOptionalString,
+    getProcessEnv,
+    getString,
+    type EnvLike
+} from './config/env.js';
 
 export interface MyWebSearchConfigFile {
     apiKeys?: {
@@ -50,14 +57,14 @@ export function parseDotEnv(content: string): Record<string, string> {
 /**
  * 获取应用级数据目录（默认 ~/.my-websearch，支持 MYWEBSEARCH_DATA_DIR 环境变量覆盖）
  */
-export function getAppConfigDir(env: NodeJS.ProcessEnv = process.env): string {
-    return env.MYWEBSEARCH_DATA_DIR || path.join(os.homedir(), '.my-websearch');
+export function getAppConfigDir(env: EnvLike = getProcessEnv()): string {
+    return getString('MYWEBSEARCH_DATA_DIR', '', env) || path.join(os.homedir(), '.my-websearch');
 }
 
 /**
  * 获取应用级配置文件路径（~/.my-websearch/config.json）
  */
-export function getAppConfigFilePath(env: NodeJS.ProcessEnv = process.env): string {
+export function getAppConfigFilePath(env: EnvLike = getProcessEnv()): string {
     return path.join(getAppConfigDir(env), 'config.json');
 }
 
@@ -71,7 +78,7 @@ export interface ConfigLoadSnapshot {
 
 const envLoadSnapshots = new WeakMap<NodeJS.ProcessEnv, ConfigLoadSnapshot>();
 
-export function getConfigLoadSnapshot(targetEnv: NodeJS.ProcessEnv = process.env): ConfigLoadSnapshot | undefined {
+export function getConfigLoadSnapshot(targetEnv: NodeJS.ProcessEnv = getProcessEnv()): ConfigLoadSnapshot | undefined {
     return envLoadSnapshots.get(targetEnv);
 }
 
@@ -173,23 +180,23 @@ export function shouldEmitConfigStartupLog(targetEnv: NodeJS.ProcessEnv, quiet?:
     if (quiet === true) {
         return false;
     }
-    const debugTestLogs = targetEnv.DEBUG_TEST_LOGS === 'true' || process.env.DEBUG_TEST_LOGS === 'true';
+    const debugTestLogs = getBoolean('DEBUG_TEST_LOGS', false, targetEnv) || getBoolean('DEBUG_TEST_LOGS', false);
     if (debugTestLogs || quiet === false) {
         return true;
     }
     if (
-        targetEnv.OPEN_WEBSEARCH_QUIET_STARTUP === 'true'
-        || process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true'
-        || (targetEnv.LOG_LEVEL ?? process.env.LOG_LEVEL ?? '').toLowerCase() === 'quiet'
+        getBoolean('OPEN_WEBSEARCH_QUIET_STARTUP', false, targetEnv)
+        || getBoolean('OPEN_WEBSEARCH_QUIET_STARTUP', false)
+        || (getString('LOG_LEVEL', '', targetEnv) || getString('LOG_LEVEL', '')).toLowerCase() === 'quiet'
     ) {
         return false;
     }
     const isStandaloneTestRunner = Boolean(process.argv[1] && /[\\/]test[\\/]/i.test(process.argv[1]));
-    const isTestEnv = targetEnv.NODE_ENV === 'test'
-        || process.env.NODE_ENV === 'test'
-        || targetEnv.VITEST === 'true'
-        || process.env.VITEST === 'true'
-        || targetEnv.MODE === 'test'
+    const isTestEnv = getString('NODE_ENV', '', targetEnv) === 'test'
+        || getString('NODE_ENV', '') === 'test'
+        || getBoolean('VITEST', false, targetEnv)
+        || getBoolean('VITEST', false)
+        || getString('MODE', '', targetEnv) === 'test'
         || isStandaloneTestRunner;
     return !isTestEnv;
 }
@@ -203,7 +210,7 @@ function tryAutoBootstrapConfig(
 ): MyWebSearchConfigFile | null {
     // P2-20：默认仍然自动引导（保持零配置体验），但必须可关闭——
     // 「把别的应用里的密钥复制到本应用目录」对安全敏感用户是意外行为。
-    if (process.env.MYWEBSEARCH_NO_AUTO_BOOTSTRAP === '1') {
+    if (getString('MYWEBSEARCH_NO_AUTO_BOOTSTRAP', '') === '1') {
         return null;
     }
     const home = os.homedir();
@@ -246,7 +253,7 @@ function tryAutoBootstrapConfig(
                         // ignore directory creation error
                     }
                     fs.writeFileSync(targetPath, JSON.stringify(bootstrapped, null, 2), { encoding: 'utf8', mode: 0o600 });
-                    if (shouldEmitConfigStartupLog(options.targetEnv ?? process.env, options.quiet)) {
+                    if (shouldEmitConfigStartupLog(options.targetEnv ?? getProcessEnv(), options.quiet)) {
                         console.error(`ℹ️ [config] Auto-bootstrapped configuration from ${sanitizePathForLog(cand)} to ${sanitizePathForLog(targetPath)}`);
                     }
                     return bootstrapped;
@@ -287,7 +294,7 @@ function mergeLowerPriorityEnv(
 }
 
 /**
- * 统一加载应用级配置，并将缺失的配置填补（fill-missing）写入 targetEnv（默认 process.env）
+ * 统一加载应用级配置，并将缺失的配置填补（fill-missing）写入 targetEnv（默认当前进程环境变量）
  * 优先级：
  *   1. targetEnv 现有变量（最高优先级，绝不覆盖）
  *   2. 项目根目录 .env
@@ -297,7 +304,7 @@ function mergeLowerPriorityEnv(
  * @returns 本次被填充注入的新环境变量键值对
  */
 export function loadApplicationConfigEnv(
-    targetEnv: NodeJS.ProcessEnv = process.env,
+    targetEnv: NodeJS.ProcessEnv = getProcessEnv(),
     options: { cwd?: string; quiet?: boolean } = {}
 ): Record<string, string> {
     const cwd = options.cwd || process.cwd();

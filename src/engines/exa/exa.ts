@@ -2,6 +2,7 @@ import axios from 'axios';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from "../../utils/httpRequest.js";
 import { AppError } from '../../core/errors.js';
+import { getOptionalString } from '../../config/env.js';
 
 interface ExaResult {
     id: string;
@@ -103,7 +104,7 @@ export function parseExaResults(apiResults: ExaResult[], limit: number): SearchR
 }
 
 export async function searchExa(query: string, limit: number, options?: { signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }): Promise<SearchResult[]> {
-    const apiKey = process.env.EXA_API_KEY?.trim();
+    const apiKey = getOptionalString('EXA_API_KEY');
     if (!apiKey) {
         // 旧版免 key 的网页端内部端点（exa.ai/search/api/search-fast）自 2026-08 起已失效（返回 500）。
         // 无 key 直接抛出结构化 AppError；标记不可重试——配置缺失是确定性错误，

@@ -8,6 +8,7 @@ import {
     isSuccessEnvelope,
     requireFlagValue
 } from '../shared.js';
+import { getNumber, getString } from '../../config/env.js';
 
 export type ParsedStatusArgs = {
     baseUrl: string;
@@ -15,7 +16,7 @@ export type ParsedStatusArgs = {
 };
 
 export function parseStatusArgs(argv: string[]): ParsedStatusArgs {
-    let baseUrl = process.env.OPEN_WEBSEARCH_DAEMON_URL || `http://127.0.0.1:${process.env.OPEN_WEBSEARCH_DAEMON_PORT || '3210'}`;
+    let baseUrl = getString('OPEN_WEBSEARCH_DAEMON_URL', '') || `http://127.0.0.1:${getString('OPEN_WEBSEARCH_DAEMON_PORT', '3210')}`;
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -122,7 +123,7 @@ export async function handleStatusCommand(ctx: CommandContext): Promise<number> 
     try {
         const payload = await fetchJsonWithTimeout<StatusPayload>(
             `${parsed.baseUrl}/status`,
-            Number(process.env.OPEN_WEBSEARCH_DAEMON_TIMEOUT_MS || '2000')
+            getNumber('OPEN_WEBSEARCH_DAEMON_TIMEOUT_MS', 2000, { min: 1, integer: true })
         );
         if (parsed.json) {
             io.stdout(JSON.stringify(payload, null, 2));

@@ -1,5 +1,6 @@
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 import { formatChangedFilesSection } from './contentBudget.js';
+import { getOptionalString } from '../../config/env.js';
 /**
  * 通过 GitHub REST API 获取 Issue 详情与评论讨论（免 key 10次/分，支持 GITHUB_TOKEN）。
  */
@@ -16,7 +17,7 @@ export async function fetchGithubIssue(
         const headers: Record<string, string> = {
             'User-Agent': 'GitHub-Issue-Fetcher/1.0',
             'Accept': 'application/vnd.github.v3+json',
-            ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
+            ...(getOptionalString('GITHUB_TOKEN') ? { Authorization: `Bearer ${getOptionalString('GITHUB_TOKEN')}` } : {})
         };
 
         const issueUrl = `https://api.github.com/repos/${ownerEnc}/${repoEnc}/issues/${numEnc}`;
@@ -117,7 +118,7 @@ export async function fetchGithubPullRequest(
         const headers: Record<string, string> = {
             'User-Agent': 'GitHub-PR-Fetcher/1.0',
             'Accept': 'application/vnd.github.v3+json',
-            ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
+            ...(getOptionalString('GITHUB_TOKEN') ? { Authorization: `Bearer ${getOptionalString('GITHUB_TOKEN')}` } : {})
         };
 
         const prUrl = `https://api.github.com/repos/${ownerEnc}/${repoEnc}/pulls/${numEnc}`;

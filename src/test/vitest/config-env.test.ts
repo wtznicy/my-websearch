@@ -5,7 +5,10 @@ import {
     getOptionalString,
     getNumber,
     getBoolean,
-    getList
+    getList,
+    getProcessEnv,
+    setEnv,
+    unsetEnv
 } from '../../config/env.js';
 
 describe('config/env 访问层', () => {
@@ -51,5 +54,14 @@ describe('config/env 访问层', () => {
         expect(getList('L', ['fb'], env)).toEqual(['a', 'b', 'c']);
         expect(getList('EMPTY', ['fb'], env)).toEqual(['fb']);
         expect(getList('MISSING', ['fb'], env)).toEqual(['fb']);
+    });
+
+    it('setEnv, unsetEnv and getProcessEnv manipulate env', () => {
+        const fakeEnv: Record<string, string | undefined> = {};
+        setEnv('FOO', 'bar', fakeEnv);
+        expect(fakeEnv.FOO).toBe('bar');
+        unsetEnv('FOO', fakeEnv);
+        expect(fakeEnv.FOO).toBeUndefined();
+        expect(getProcessEnv()).toBe(process.env);
     });
 });

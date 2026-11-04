@@ -7,6 +7,7 @@ import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
 import { formatSourceFile, renderAsciiTree } from './format.js';
 import type { LineRange } from './lineRange.js';
 import { renderCommit, renderCompare, renderReleases, type ChangedFile } from './changes.js';
+import { getOptionalString } from '../../config/env.js';
 
 const GITEE_API = 'https://gitee.com/api/v5';
 const GITEE_TIMEOUT_MS = 12000;
@@ -30,7 +31,7 @@ function giteeHeaders(): Record<string, string> {
         'User-Agent': DEFAULT_DESKTOP_UA,
         'Accept': 'application/json',
         // Gitee API 支持 Authorization: token；匿名也可读公开仓库，token 仅提升限额/私有仓库。
-        ...(process.env.GITEE_TOKEN ? { Authorization: `token ${process.env.GITEE_TOKEN}` } : {})
+        ...(getOptionalString('GITEE_TOKEN') ? { Authorization: `token ${getOptionalString('GITEE_TOKEN')}` } : {})
     };
 }
 

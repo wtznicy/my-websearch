@@ -18,6 +18,7 @@ import { isEngineCircuitOpen } from '../../core/search/engineCircuitBreaker.js';
 import { AppError, isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
 import { hasFirstTokenDrift } from '../../core/search/resultRanking.js';
+import { getNumber } from '../../config/env.js';
 
 // 默认面向大陆部署用 cn.bing.com；可通过 BING_BASE_URL（兼容 OPEN_WEBSEARCH_BING_HOST）覆盖为 www.bing.com 等获取国际区结果
 export function getBingHomeUrl(): string {
@@ -801,7 +802,7 @@ async function searchBingWithPlaywright(query: string, limit: number, signal?: A
 
 /** Playwright 兜底的独立预算：不能让它把整个搜索 deadline 吃光（默认 6s，可用 BING_PLAYWRIGHT_BUDGET_MS 覆盖） */
 const BING_PLAYWRIGHT_FALLBACK_BUDGET_MS = (() => {
-    const parsed = Number(process.env.BING_PLAYWRIGHT_BUDGET_MS);
+    const parsed = getNumber('BING_PLAYWRIGHT_BUDGET_MS', 6000, { min: 1000, integer: true });
     return Number.isFinite(parsed) && parsed >= 1000 ? Math.floor(parsed) : 6000;
 })();
 

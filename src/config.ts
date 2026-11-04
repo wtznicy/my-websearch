@@ -6,6 +6,15 @@ import {
     sanitizePathForLog,
     shouldEmitConfigStartupLog
 } from './configLoader.js';
+import {
+    getBoolean,
+    getEnv,
+    getList,
+    getOptionalString,
+    getProcessEnv,
+    getString,
+    type EnvLike
+} from './config/env.js';
 
 export const KNOWN_PLAYWRIGHT_ENGINES = ['bing', 'startpage'] as const;
 export type KnownPlaywrightEngine = typeof KNOWN_PLAYWRIGHT_ENGINES[number];
@@ -371,73 +380,62 @@ export function parsePositiveIntEnv(rawValue: string | undefined, fallback: numb
 }
 
 /**
- * 工厂函数：基于给定的环境变量字典创建独立的 AppConfig 实例（默认 process.env）。
+ * 工厂函数：基于给定的环境变量字典创建独立的 AppConfig 实例（默认当前进程环境变量）。
  * 解锁测试隔离与多实例支持。
  */
 export function createConfig(
-    env: NodeJS.ProcessEnv = process.env,
+    env: NodeJS.ProcessEnv = getProcessEnv(),
     options: CreateConfigOptions = {}
 ): AppConfig {
     // 启动时一次性加载应用级与本地配置（~/.my-websearch/config.json / .env），仅补充缺失的环境变量
     loadApplicationConfigEnv(env, { quiet: options.quiet });
 
-    const readOptionalEnv = (name: string): string | undefined => {
-        const value = env[name]?.trim();
-        return value ? value : undefined;
-    };
-
     const parsedSearchMode = parseSearchModeConfig(
-        env.SEARCH_MODE,
-        env.BING_PLAYWRIGHT_FALLBACK,
-        env.STARTPAGE_PLAYWRIGHT_FALLBACK
+        getEnv('SEARCH_MODE', env),
+        getEnv('BING_PLAYWRIGHT_FALLBACK', env),
+        getEnv('STARTPAGE_PLAYWRIGHT_FALLBACK', env)
     );
 
     const parsedProxy = parseProxyConfig(
-        env.PROXY_URL,
-        env.USE_PROXY,
-        env.PROXY_ENGINES
+        getEnv('PROXY_URL', env),
+        getEnv('USE_PROXY', env),
+        getEnv('PROXY_ENGINES', env)
     );
 
     const cfg: AppConfig = {
-        defaultSearchEngine: (env.DEFAULT_SEARCH_ENGINE as AppConfig['defaultSearchEngine']) || 'auto',
-        allowedSearchEngines: env.ALLOWED_SEARCH_ENGINES ?
-            env.ALLOWED_SEARCH_ENGINES.split(',').map(e => e.trim()) :
-            [],
+        defaultSearchEngine: (getString('DEFAULT_SEARCH_ENGINE', 'auto', env) as AppConfig['defaultSearchEngine']),
+        allowedSearchEngines: getList('ALLOWED_SEARCH_ENGINES', [], env),
         searchMode: parsedSearchMode.searchMode,
         engineSearchModes: parsedSearchMode.engineSearchModes,
         playwrightEngines: parsedSearchMode.playwrightEngines,
         bingPlaywrightFallback: parsedSearchMode.playwrightEngines.includes('bing') && (parsedSearchMode.engineSearchModes['bing'] ?? parsedSearchMode.searchMode) !== 'request',
-        bingBaseUrl: (env.BING_BASE_URL || env.OPEN_WEBSEARCH_BING_HOST || 'https://cn.bing.com/search').trim().replace(/\/$/, ''),
+        bingBaseUrl: (getString('BING_BASE_URL', '', env) || getString('OPEN_WEBSEARCH_BING_HOST', '', env) || 'https://cn.bing.com/search').trim().replace(/\/$/, ''),
         startpagePlaywrightFallback: parsedSearchMode.playwrightEngines.includes('startpage') && (parsedSearchMode.engineSearchModes['startpage'] ?? parsedSearchMode.searchMode) !== 'request',
-        maxConcurrentSearches: parsePositiveIntEnv(env.MAX_CONCURRENT_SEARCHES, 20, 0),
-        impersonateBrowser: readOptionalEnv('IMPERSONATE_BROWSER') || 'chrome_149',
-        impersonateOs: readOptionalEnv('IMPERSONATE_OS') || 'windows',
+        maxConcurrentSearches: parsePositiveIntEnv(getOptionalString('MAX_CONCURRENT_SEARCHES', env), 20, 0),
+        impersonateBrowser: getOptionalString('IMPERSONATE_BROWSER', env) || 'chrome_149',
+        impersonateOs: getOptionalString('IMPERSONATE_OS', env) || 'windows',
         proxyUrl: parsedProxy.proxyUrl,
         useProxy: parsedProxy.useProxy,
         proxyEngines: parsedProxy.proxyEngines,
-        fakeIpCidrs: env.FAKE_IP_CIDRS ?
-            env.FAKE_IP_CIDRS.split(',').map(cidr => cidr.trim()).filter(Boolean) :
-            ['198.18.0.0/15'],
-        authorityDomains: env.SEARCH_AUTHORITY_DOMAINS ?
-            env.SEARCH_AUTHORITY_DOMAINS.split(',').map(domain => domain.trim().toLowerCase()).filter(Boolean) :
-            [],
-        autoRouteEnEngines: env.AUTO_ROUTE_EN_ENGINES ?
-            env.AUTO_ROUTE_EN_ENGINES.split(',').map(e => e.trim().toLowerCase()).filter(Boolean) :
+        fakeIpCidrs: getList('FAKE_IP_CIDRS', ['198.18.0.0/15'], env),
+        authorityDomains: getList('SEARCH_AUTHORITY_DOMAINS', [], env).map(domain => domain.toLowerCase()),
+        autoRouteEnEngines: getOptionalString('AUTO_ROUTE_EN_ENGINES', env) ?
+            getList('AUTO_ROUTE_EN_ENGINES', [], env).map(e => e.toLowerCase()) :
             undefined,
-        autoRouteZhEngines: env.AUTO_ROUTE_ZH_ENGINES ?
-            env.AUTO_ROUTE_ZH_ENGINES.split(',').map(e => e.trim().toLowerCase()).filter(Boolean) :
+        autoRouteZhEngines: getOptionalString('AUTO_ROUTE_ZH_ENGINES', env) ?
+            getList('AUTO_ROUTE_ZH_ENGINES', [], env).map(e => e.toLowerCase()) :
             undefined,
-        defaultSearchLimit: parsePositiveIntEnv(env.DEFAULT_SEARCH_LIMIT, 10, 1, 50),
-        defaultMinResults: parsePositiveIntEnv(env.DEFAULT_MIN_RESULTS, 5, 0, 50),
-        searchDeadlineMs: parsePositiveIntEnv(env.SEARCH_DEADLINE_MS, 30000, 1000, 300000),
-        fetchWebAllowInsecureTls: env.FETCH_WEB_INSECURE_TLS === 'true',
-        playwrightExecutablePath: readOptionalEnv('PLAYWRIGHT_EXECUTABLE_PATH'),
-        playwrightCdpEndpoint: readOptionalEnv('PLAYWRIGHT_CDP_ENDPOINT'),
-        playwrightHeadless: env.PLAYWRIGHT_HEADLESS !== 'false',
-        playwrightNavigationTimeoutMs: parsePositiveIntEnv(env.PLAYWRIGHT_NAVIGATION_TIMEOUT_MS, 20000, 1000, 300000),
-        enableHttpServer: env.MODE ? ['both', 'http'].includes(env.MODE) : true,
-        enableCors: env.ENABLE_CORS === 'true',
-        corsOrigin: readOptionalEnv('CORS_ORIGIN') || '*'
+        defaultSearchLimit: parsePositiveIntEnv(getOptionalString('DEFAULT_SEARCH_LIMIT', env), 10, 1, 50),
+        defaultMinResults: parsePositiveIntEnv(getOptionalString('DEFAULT_MIN_RESULTS', env), 5, 0, 50),
+        searchDeadlineMs: parsePositiveIntEnv(getOptionalString('SEARCH_DEADLINE_MS', env), 30000, 1000, 300000),
+        fetchWebAllowInsecureTls: getBoolean('FETCH_WEB_INSECURE_TLS', false, env),
+        playwrightExecutablePath: getOptionalString('PLAYWRIGHT_EXECUTABLE_PATH', env),
+        playwrightCdpEndpoint: getOptionalString('PLAYWRIGHT_CDP_ENDPOINT', env),
+        playwrightHeadless: getString('PLAYWRIGHT_HEADLESS', 'true', env).toLowerCase() !== 'false',
+        playwrightNavigationTimeoutMs: parsePositiveIntEnv(getOptionalString('PLAYWRIGHT_NAVIGATION_TIMEOUT_MS', env), 20000, 1000, 300000),
+        enableHttpServer: getOptionalString('MODE', env) ? ['both', 'http'].includes(getOptionalString('MODE', env)!) : true,
+        enableCors: getBoolean('ENABLE_CORS', false, env),
+        corsOrigin: getOptionalString('CORS_ORIGIN', env) || '*'
     };
 
     if (!validSearchEngines.includes(cfg.defaultSearchEngine)) {
@@ -536,7 +534,7 @@ export function sanitizeUrlForLog(rawUrl: string | undefined): string {
  */
 export function formatSanitizedConfigSummary(
     cfg: AppConfig,
-    env: NodeJS.ProcessEnv = process.env
+    env: NodeJS.ProcessEnv = getProcessEnv()
 ): string[] {
     const lines: string[] = [];
     lines.push(`🔍 Default search engine: ${cfg.defaultSearchEngine}`);
@@ -578,7 +576,7 @@ export function formatSanitizedConfigSummary(
         lines.push('🔐 fetchWebContent TLS verification is enabled');
     }
 
-    const browserDriver = (env.BROWSER_DRIVER || 'cdp').trim().toLowerCase() === 'playwright' ? 'playwright' : 'cdp';
+    const browserDriver = getString('BROWSER_DRIVER', 'cdp', env).toLowerCase() === 'playwright' ? 'playwright' : 'cdp';
     lines.push(`🧭 Browser driver: ${browserDriver}${browserDriver === 'cdp' ? ' (chrome-remote-interface)' : ' (playwright-core)'}`);
     if (cfg.playwrightCdpEndpoint) {
         lines.push(`🧭 Browser: remote CDP endpoint ${sanitizeUrlForLog(cfg.playwrightCdpEndpoint)}`);
@@ -590,7 +588,7 @@ export function formatSanitizedConfigSummary(
     lines.push(`🧭 Browser headless: ${cfg.playwrightHeadless}`);
     lines.push(`🧭 Browser navigation timeout: ${cfg.playwrightNavigationTimeoutMs}ms`);
 
-    const mode = env.MODE || (cfg.enableHttpServer ? 'both' : 'stdio');
+    const mode = getString('MODE', '', env) || (cfg.enableHttpServer ? 'both' : 'stdio');
     lines.push(`🖥️ Server mode: ${mode.toUpperCase()}`);
 
     if (cfg.enableHttpServer) {
@@ -605,7 +603,7 @@ export function formatSanitizedConfigSummary(
 }
 
 // 保持向后兼容的全局单例配置
-export const config: AppConfig = createConfig(process.env);
+export const config: AppConfig = createConfig(getProcessEnv());
 
 /**
  * Helper function to get the proxy URL if proxy is enabled

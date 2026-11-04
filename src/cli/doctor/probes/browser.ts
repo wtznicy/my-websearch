@@ -11,6 +11,7 @@ import {
 import { maskProxyUrl } from './proxy.js';
 import { probeTcpEndpoint } from './network.js';
 import { BrowserLaunchProbeResult } from '../types.js';
+import { getBoolean, getString, type EnvLike } from '../../../config/env.js';
 
 export function sanitizeBrowserTargetForDoctor(rawTarget: string | undefined | null): string {
     if (!rawTarget || !rawTarget.trim()) {
@@ -35,19 +36,19 @@ export async function probeBrowserLaunch(
     appConfig: AppConfig,
     timeoutMs = 8000,
     options: {
-        env?: NodeJS.ProcessEnv;
+        env?: EnvLike;
         playwrightClient?: {
             chromium?: unknown;
         } | null;
     } = {}
 ): Promise<BrowserLaunchProbeResult> {
     const startedAt = Date.now();
-    const env = options.env ?? process.env;
+    const env = options.env;
     const playwright = options.playwrightClient !== undefined
         ? options.playwrightClient
         : await loadPlaywrightClient({ silent: true });
     if (!playwright || !playwright.chromium) {
-        const driver = (env.BROWSER_DRIVER || 'cdp').trim().toLowerCase();
+        const driver = getString('BROWSER_DRIVER', 'cdp', env).toLowerCase();
         return {
             available: false,
             status: 'unavailable',
@@ -70,7 +71,7 @@ export async function probeBrowserLaunch(
 
     if (appConfig.playwrightCdpEndpoint) {
         const cdpTarget = maskProxyUrl(appConfig.playwrightCdpEndpoint);
-        const shouldCloseCdpBrowser = (env.DOCTOR_CLOSE_CDP_BROWSER ?? '').trim().toLowerCase() === 'true';
+        const shouldCloseCdpBrowser = getBoolean('DOCTOR_CLOSE_CDP_BROWSER', false, env);
         type ProbePageLike = {
             goto(url: string, opts?: { timeout?: number }): Promise<unknown>;
             title(): Promise<string>;

@@ -6,6 +6,7 @@ import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 import { getProxyUrl } from '../../config.js';
 import { detectSystemProxy } from '../../utils/systemProxy.js';
+import { getString } from '../../config/env.js';
 import { createWreqSession, loadWreqModule } from '../bing/impersonate.js';
 import {
   AppError,
@@ -432,7 +433,7 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
   try {
     return await searchDuckDuckGoHtml(query, limit, signal, timeRange);
   } catch (htmlError) {
-    if (process.env.DDG_BROWSER_FALLBACK !== '0' && shouldUseDuckDuckGoBrowserFallback(htmlError)) {
+    if (getString('DDG_BROWSER_FALLBACK', '') !== '0' && shouldUseDuckDuckGoBrowserFallback(htmlError)) {
       try {
         const browserResults = await searchDuckDuckGoWithBrowser(query, limit, signal);
         if (browserResults.length > 0) {
@@ -473,7 +474,7 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
     // DDG's HTML anomaly check is sensitive to a generic browser fingerprint;
     // use the coordinate default even when BROWSER_PROFILE is unset.
-    const profile = process.env.BROWSER_PROFILE || 'windows-chrome-8';
+    const profile = getString('BROWSER_PROFILE', 'windows-chrome-8');
     const page = await fetchPageHtmlWithBrowser(url, signal, profile);
     const parsed = parseDuckDuckGoHtmlResults(page.html, limit, new Set());
     if (parsed.results.length === 0) {

@@ -8,6 +8,21 @@ export type EnvLike = Record<string, string | undefined>;
 
 const DEFAULT_ENV: EnvLike = process.env;
 
+/** 原始 process.env 引用（供 configLoader、WeakMap 键或必须传递对象引用的场景使用） */
+export function getProcessEnv(): NodeJS.ProcessEnv {
+    return process.env;
+}
+
+/** 设置环境变量（集中收敛写操作） */
+export function setEnv(name: string, value: string, env: EnvLike = DEFAULT_ENV): void {
+    env[name] = value;
+}
+
+/** 删除/清除环境变量 */
+export function unsetEnv(name: string, env: EnvLike = DEFAULT_ENV): void {
+    delete env[name];
+}
+
 /** 原始值（不 trim、不做空值归一） */
 export function getEnv(name: string, env: EnvLike = DEFAULT_ENV): string | undefined {
     return env[name];

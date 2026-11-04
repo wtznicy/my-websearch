@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { LaunchOptions } from './driver.js';
 import { DEFAULT_DESKTOP_UA } from '../userAgents.js';
+import { getBoolean, getOptionalString } from '../../config/env.js';
 
 let cachedExecutablePath: string | null = null;
 
@@ -23,7 +24,7 @@ export function findChromeExecutable(customPath?: string): string {
         return customPath;
     }
 
-    const envPath = process.env.CHROME_PATH || process.env.BROWSER_PATH;
+    const envPath = getOptionalString('CHROME_PATH') || getOptionalString('BROWSER_PATH');
     if (envPath && fs.existsSync(envPath)) {
         return envPath;
     }
@@ -40,9 +41,9 @@ export function findChromeExecutable(customPath?: string): string {
     candidates.push('C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe');
     candidates.push('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe');
 
-    const pf = process.env['PROGRAMFILES'];
-    const pf86 = process.env['PROGRAMFILES(X86)'];
-    const localAppData = process.env['LOCALAPPDATA'];
+    const pf = getOptionalString('PROGRAMFILES');
+    const pf86 = getOptionalString('PROGRAMFILES(X86)');
+    const localAppData = getOptionalString('LOCALAPPDATA');
     if (pf) {
         candidates.push(`${pf}\\Google\\Chrome\\Application\\chrome.exe`);
         candidates.push(`${pf}\\Microsoft\\Edge\\Application\\msedge.exe`);
@@ -173,7 +174,7 @@ export function buildChromeArgs(options: LaunchOptions, tempDir: string): string
     }
 
     // 不要默认加 --no-sandbox，仅在明确配置或 root 环境使用
-    if (process.env.CHROME_NO_SANDBOX === 'true' || (typeof process.getuid === 'function' && process.getuid() === 0)) {
+    if (getBoolean('CHROME_NO_SANDBOX', false) || (typeof process.getuid === 'function' && process.getuid() === 0)) {
         flags.push('--no-sandbox');
     }
 

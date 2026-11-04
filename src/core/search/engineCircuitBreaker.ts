@@ -13,6 +13,8 @@
  * - 期间 searchService 跳过该引擎并把配额平移给其他引擎，级联候选同样排除。
  */
 
+import { getNumber, getOptionalString } from '../../config/env.js';
+
 const DEFAULT_BASE_COOLDOWN_MS = 30 * 1000;
 const DEFAULT_MAX_COOLDOWN_MS = 5 * 60 * 1000;
 
@@ -30,12 +32,7 @@ const blockedUntil = new Map<string, number>();
 const consecutiveTrips = new Map<string, number>();
 
 function readPositiveIntEnv(name: string, fallback: number): number {
-    const raw = process.env[name]?.trim();
-    if (!raw) {
-        return fallback;
-    }
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed >= 1000 ? Math.floor(parsed) : fallback;
+    return getNumber(name, fallback, { min: 1000, integer: true });
 }
 
 /** 首次熔断的基础冷却时间（毫秒） */
@@ -64,7 +61,7 @@ export function isEngineCircuitOpen(engine: string): boolean {
 
 /** 某引擎的首档冷却：显式环境变量 > 按引擎覆盖 > 全局默认 */
 function getInitialCooldownForEngine(engine: string): number {
-    if (process.env.ENGINE_CIRCUIT_BASE_COOLDOWN_MS?.trim()) {
+    if (getOptionalString('ENGINE_CIRCUIT_BASE_COOLDOWN_MS')) {
         return getEngineCircuitBaseCooldownMs();
     }
     return ENGINE_INITIAL_COOLDOWN_MS[engine] ?? getEngineCircuitBaseCooldownMs();

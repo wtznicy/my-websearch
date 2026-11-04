@@ -12,6 +12,7 @@ import { ErrorCode, extractErrorCode, extractErrorStatus, isAppError } from '../
 import { metrics } from '../../core/metrics.js';
 import { validateExtractSchema } from '../../engines/web/extract.js';
 import { isContext7QuotaExhaustedError } from '../../engines/context7/context7.js';
+import { getBoolean, getNumber } from '../../config/env.js';
 
 export type LocalDaemonOptions = {
     host?: string;
@@ -310,7 +311,7 @@ export async function startLocalDaemon(
             + 'Put it behind a reverse proxy with auth, or use an SSH tunnel. See docs/ops/security.md.'
         );
     }
-    const requestedPort = options.port ?? Number(process.env.OPEN_WEBSEARCH_DAEMON_PORT || DEFAULT_PORT);
+    const requestedPort = options.port ?? getNumber('OPEN_WEBSEARCH_DAEMON_PORT', DEFAULT_PORT, { integer: true });
     const version = options.version ?? 'unknown';
 
     const app = express();
@@ -353,7 +354,7 @@ export async function startLocalDaemon(
     app.get('/metrics', (_req, res) => {
         // 指标收集是 opt-in（METRICS_ENABLED=true）：未启用时计数器恒为 0，直接说明原因，
         // 免得使用者以为是坏掉的仪表盘（测评报告 P2-15 的"指标恒为 0"一半来自这里）
-        const notice = process.env.METRICS_ENABLED === 'true'
+        const notice = getBoolean('METRICS_ENABLED', false)
             ? ''
             : '# note: METRICS_ENABLED is not set to "true" — engine/cache counters stay at 0 by design\n';
         res.type('text/plain; version=0.0.4; charset=utf-8').send(notice + metrics.renderPrometheus());

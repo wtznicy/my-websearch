@@ -1,4 +1,5 @@
 import { inspect } from 'node:util';
+import { getOptionalString } from '../config/env.js';
 
 /**
  * 统一日志入口。
@@ -44,7 +45,7 @@ export function resolveLogLevel(explicit?: string, quietStartup = false): LogLev
 }
 
 export function configureLogging(options: { level?: string; prefix?: string; quietStartup?: boolean } = {}): void {
-    currentLevel = resolveLogLevel(options.level ?? process.env.LOG_LEVEL, options.quietStartup);
+    currentLevel = resolveLogLevel(options.level ?? getOptionalString('LOG_LEVEL'), options.quietStartup);
     if (options.prefix) {
         currentPrefix = options.prefix;
     }

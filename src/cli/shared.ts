@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { MyWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { CliEnvelope } from './protocol.js';
 import { ErrorCode } from '../core/errors.js';
+import { getNumber, getOptionalString, getString } from '../config/env.js';
 
 export type CliIo = {
     stdout: (text: string) => void;
@@ -65,7 +66,7 @@ export class DaemonRequestTimeoutError extends Error {}
 export class DaemonRequestFailedError extends Error {}
 
 export function getDefaultDaemonBaseUrl(): string {
-    return process.env.OPEN_WEBSEARCH_DAEMON_URL || `http://127.0.0.1:${process.env.OPEN_WEBSEARCH_DAEMON_PORT || '3210'}`;
+    return getString('OPEN_WEBSEARCH_DAEMON_URL', '') || `http://127.0.0.1:${getString('OPEN_WEBSEARCH_DAEMON_PORT', '3210')}`;
 }
 
 export function parsePositiveTimeout(value: string | undefined, fallback: number): number {
@@ -75,16 +76,16 @@ export function parsePositiveTimeout(value: string | undefined, fallback: number
 
 export function getDaemonActionTimeoutMs(transport: DaemonTransportArgs): number {
     if (transport.daemonUrlExplicit) {
-        return parsePositiveTimeout(process.env.OPEN_WEBSEARCH_DAEMON_ACTION_TIMEOUT_MS, 15000);
+        return getNumber('OPEN_WEBSEARCH_DAEMON_ACTION_TIMEOUT_MS', 15000, { min: 1 });
     }
 
-    return parsePositiveTimeout(process.env.OPEN_WEBSEARCH_DAEMON_DISCOVERY_TIMEOUT_MS, 300);
+    return getNumber('OPEN_WEBSEARCH_DAEMON_DISCOVERY_TIMEOUT_MS', 300, { min: 1 });
 }
 
 export function extractDaemonTransportArgs(argv: string[]): DaemonTransportArgs {
     const passthrough: string[] = [];
     let daemonUrl = getDefaultDaemonBaseUrl();
-    let daemonUrlExplicit = Boolean(process.env.OPEN_WEBSEARCH_DAEMON_URL);
+    let daemonUrlExplicit = Boolean(getOptionalString('OPEN_WEBSEARCH_DAEMON_URL'));
     let shouldSpawn = false;
 
     for (let index = 0; index < argv.length; index += 1) {

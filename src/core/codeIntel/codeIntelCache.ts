@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { getNumber } from '../../config/env.js';
 import type { CodeSymbolCallSite } from './treeSitter.js';
 import type { CodeSymbolDefinition, CodeSymbolResult } from './remoteCodeIntel.js';
 
@@ -54,8 +55,7 @@ export class CodeIntelTtlCache<T> {
 }
 
 const ttlFromEnv = (name: string, fallback: number): number => {
-    const parsed = Number(process.env[name]);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    return getNumber(name, fallback, { min: 1 });
 };
 
 export const symbolResultCache = new CodeIntelTtlCache<CodeSymbolResult>(

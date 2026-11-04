@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import { assertPublicHttpUrl } from '../../utils/urlSafety.js';
+import { getString } from '../../config/env.js';
 import {
     ExtractedLink,
     HtmlExtractionResult,
@@ -70,7 +71,7 @@ export function isMarkdownContentType(contentType: string): boolean {
 }
 
 function shouldDebugReadabilityFallback(): boolean {
-    return (process.env.LOG_LEVEL ?? '').toLowerCase() === 'debug';
+    return getString('LOG_LEVEL', '').toLowerCase() === 'debug';
 }
 
 export function logReadabilityFallback(message: string, error?: unknown): void {

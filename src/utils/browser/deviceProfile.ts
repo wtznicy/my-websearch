@@ -1,3 +1,5 @@
+import { getString } from '../../config/env.js';
+
 export interface DeviceProfile {
     id: string;
     userAgent: string;
@@ -43,7 +45,7 @@ export function listDeviceProfiles(): DeviceProfile[] {
 }
 
 export function selectDeviceProfile(selector?: string): DeviceProfile {
-    const wanted = (selector ?? process.env.BROWSER_PROFILE ?? 'windows-chrome-8').trim();
+    const wanted = (selector ?? getString('BROWSER_PROFILE', 'windows-chrome-8')).trim();
     if (wanted === 'random') {
         return listDeviceProfiles()[Math.floor(Math.random() * PROFILES.length)]!;
     }

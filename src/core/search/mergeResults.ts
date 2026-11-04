@@ -1,4 +1,5 @@
 import { SearchResult } from '../../types.js';
+import { getNumber, getString } from '../../config/env.js';
 
 /** 计算结果的规范化 URL 键，用于跨引擎去重。 */
 export function normalizeResultUrl(url: string): string {
@@ -50,13 +51,12 @@ export function isPlaceholderResult(result: SearchResult): boolean {
 
 /** RRF 融合开关：默认 legacy，设置 SEARCH_FUSION=rrf 启用（便于 bench A/B 对比） */
 export function isRrfFusionEnabled(): boolean {
-    return process.env.SEARCH_FUSION === 'rrf';
+    return getString('SEARCH_FUSION', '') === 'rrf';
 }
 
 /** RRF 常数 k：2-3 个引擎时 60 会抹平差异，默认 20（可用 SEARCH_FUSION_RRF_K 覆盖） */
 function getRrfK(): number {
-    const parsed = Number(process.env.SEARCH_FUSION_RRF_K);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 20;
+    return getNumber('SEARCH_FUSION_RRF_K', 20, { min: 1 });
 }
 
 /** 跨引擎融合：按规范化 URL 去重；默认按「命中引擎数 + 遍历序」，开启 RRF 后按排名倒数之和。 */

@@ -16,6 +16,7 @@ import {
     resetErrorClassificationMetrics,
     type ErrorClassificationMetrics
 } from './errors.js';
+import { getBoolean, getOptionalString } from '../config/env.js';
 
 export type LogLevel = 'quiet' | 'debug' | 'info' | 'warn' | 'error';
 
@@ -82,7 +83,7 @@ class MetricsCollector {
     private queryDocsMetrics = { total: 0, fallback: 0, sources: new Map<string, number>() };
 
     private get logLevel(): LogLevel {
-        const raw = process.env.LOG_LEVEL;
+        const raw = getOptionalString('LOG_LEVEL');
         if (!raw) {
             return 'info';
         }
@@ -96,11 +97,11 @@ class MetricsCollector {
     }
 
     private get metricsEnabled(): boolean {
-        return process.env.METRICS_ENABLED === 'true';
+        return getBoolean('METRICS_ENABLED', false);
     }
 
     private get securityAuditEnabled(): boolean {
-        return process.env.SECURITY_AUDIT === 'true';
+        return getBoolean('SECURITY_AUDIT', false);
     }
 
     reset(): void {
@@ -189,7 +190,8 @@ class MetricsCollector {
         const timestamp = new Date().toISOString();
         const entry = { timestamp, level, message, ...context };
         // stdio 模式下保持人类可读格式，daemon 模式下输出 JSON
-        if (process.env.MODE === 'stdio' || process.env.MODE === undefined) {
+        const mode = getOptionalString('MODE');
+        if (mode === 'stdio' || mode === undefined) {
             console.error(`[${timestamp}] ${level}: ${message}`);
         } else {
             console.error(JSON.stringify(entry));

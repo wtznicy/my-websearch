@@ -8,12 +8,13 @@ import {
     readServerVersion,
     requireFlagValue
 } from '../shared.js';
+import { getNumber, getString } from '../../config/env.js';
 
 export type { ParsedServeArgs };
 
 export function parseServeArgs(argv: string[]): ParsedServeArgs {
-    let host = process.env.OPEN_WEBSEARCH_DAEMON_HOST || '127.0.0.1';
-    let port = Number(process.env.OPEN_WEBSEARCH_DAEMON_PORT || '3210');
+    let host = getString('OPEN_WEBSEARCH_DAEMON_HOST', '127.0.0.1');
+    let port = getNumber('OPEN_WEBSEARCH_DAEMON_PORT', 3210, { integer: true });
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {

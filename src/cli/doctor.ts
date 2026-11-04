@@ -11,6 +11,7 @@ import { detectSystemProxy, resetSystemProxyCache } from '../utils/systemProxy.j
 import { readEngineLatencyStats } from '../core/engineLatency.js';
 import { __resetGithubReadmeCacheForTests } from '../engines/github/github.js';
 import { resetContext7Cache } from '../core/context7/context7Service.js';
+import { getProcessEnv } from '../config/env.js';
 
 // Types & Constants
 import {
@@ -129,7 +130,7 @@ export async function buildDoctorReport(
     if (options.resetHealth) {
         resetAllHealthState(runtime);
     }
-    const env = options.env ?? process.env;
+    const env = options.env ?? getProcessEnv();
     const cwd = options.cwd ?? process.cwd();
     const version = options.version ?? 'unknown';
     const checkedAt = new Date().toISOString();

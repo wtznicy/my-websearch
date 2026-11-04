@@ -13,6 +13,7 @@ import { AppError, extractErrorCode, extractErrorStatus, isAppError } from '../.
 import { getProxyUrl } from '../../config.js';
 import { getSystemProxyFallbackUrl } from '../../utils/systemProxy.js';
 import { braveHttpGetWithCurl } from '../../utils/braveCurl.js';
+import { getOptionalString, getString } from '../../config/env.js';
 export { isBraveBlockedPage };
 
 /**
@@ -74,7 +75,7 @@ function buildBraveErrorMessage(error: unknown): Error {
         // 调用方（searchBraveWeb）负责在「浏览器兜底也失败」时 tripEngineCircuit；
         // 这里只负责把 429 归类成 bot_challenge / rate_limited 并给出可操作提示。
         const isCaptchaChallenge = isBraveCaptchaChallengePage(extractBraveResponseBody(error));
-        const fallbackState = process.env.BRAVE_BROWSER_FALLBACK === '0'
+        const fallbackState = getString('BRAVE_BROWSER_FALLBACK', '') === '0'
             ? 'The disguised headless browser fallback is disabled (BRAVE_BROWSER_FALLBACK=0). '
             : 'The disguised headless browser fallback also failed to pass this challenge. ';
         const err = new AppError({
@@ -385,7 +386,7 @@ export async function searchBraveOfficial(
 
 /** 检查 Brave 报错是否应当触发无头浏览器伪装回退 */
 export function shouldUseBraveBrowserFallback(error: unknown): boolean {
-    if (process.env.BRAVE_BROWSER_FALLBACK === '0') {
+    if (getString('BRAVE_BROWSER_FALLBACK', '') === '0') {
         return false;
     }
     const code = isAppError(error) ? error.code : extractErrorCode(error);
@@ -473,7 +474,7 @@ export async function searchBraveWithBrowser(
             }
 
             await prepareStealthPage(p as never);
-            const selector = process.env.BROWSER_PROFILE || 'windows-chrome-8';
+            const selector = getString('BROWSER_PROFILE', 'windows-chrome-8');
             if (p.applyDeviceProfile) {
                 await p.applyDeviceProfile(selectDeviceProfile(selector));
             }
@@ -617,7 +618,7 @@ const BRAVE_BROWSER_ONLY_MS = 180_000;
 
 /** 当前是否应跳过 curl、直接走浏览器兜底（软窗口 + 未被环境变量禁用） */
 export function shouldPreferBraveBrowser(): boolean {
-    return process.env.BRAVE_BROWSER_FALLBACK !== '0' && isEngineBrowserOnly('brave');
+    return getString('BRAVE_BROWSER_FALLBACK', '') !== '0' && isEngineBrowserOnly('brave');
 }
 
 export async function searchBraveWeb(
@@ -625,7 +626,7 @@ export async function searchBraveWeb(
     limit: number,
     options?: { signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }
 ): Promise<SearchResult[]> {
-    const fallbackEnabled = process.env.BRAVE_BROWSER_FALLBACK !== '0';
+    const fallbackEnabled = getString('BRAVE_BROWSER_FALLBACK', '') !== '0';
 
     // 软窗口内：curl 必然继续吃 429，直接走浏览器兜底。
     if (shouldPreferBraveBrowser()) {
@@ -677,7 +678,7 @@ export async function searchBrave(query: string, limit: number, options?: { sign
     // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂超时拖累整次搜索
     await assertOverseasEngineUsable('brave');
 
-    const apiKey = (process.env.BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY)?.trim();
+    const apiKey = (getOptionalString('BRAVE_API_KEY') || getOptionalString('BRAVE_SEARCH_API_KEY'));
     if (apiKey) {
         if (!isBraveOfficialApiDisabled()) {
             try {

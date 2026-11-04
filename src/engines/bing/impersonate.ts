@@ -3,6 +3,7 @@ import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { AppError } from '../../core/errors.js';
 import { PER_ENGINE_TIMEOUT_MS } from '../../utils/timeouts.js';
+import { getString } from '../../config/env.js';
 
 /**
  * Bing HTTP 模式的浏览器指纹请求层（wreq-js，Rust 实现）。
@@ -181,7 +182,7 @@ let consecutiveBingImpersonateFailures = 0;
 let bingImpersonateDisabledUntil = 0;
 
 export function isBingImpersonateCircuitOpen(now = Date.now()): boolean {
-    if (process.env.BING_IMPERSONATE === 'false') {
+    if (getString('BING_IMPERSONATE', '') === 'false') {
         return true;
     }
     if (bingImpersonateDisabledUntil > now) {

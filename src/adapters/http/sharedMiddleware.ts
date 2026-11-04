@@ -1,5 +1,6 @@
 import express from 'express';
 import { hostHeaderValidation } from '@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js';
+import { getList, type EnvLike } from '../../config/env.js';
 
 /**
  * 两个 HTTP 入口（MCP 传输 `src/index.ts` / 本地 REST daemon `localDaemon.ts`）共享的中间件配置。
@@ -20,12 +21,9 @@ export const LOOPBACK_HOSTNAMES = ['127.0.0.1', 'localhost', '[::1]'] as const;
  */
 export function resolveAllowedHostnames(
     extraHosts: Array<string | undefined> = [],
-    env: NodeJS.ProcessEnv = process.env
+    env?: EnvLike
 ): string[] {
-    const configured = (env.OPEN_WEBSEARCH_ALLOWED_HOSTS ?? '')
-        .split(',')
-        .map((entry) => entry.trim())
-        .filter(Boolean);
+    const configured = getList('OPEN_WEBSEARCH_ALLOWED_HOSTS', [], env);
 
     const hostnames = configured.length > 0 ? [...configured] : [...LOOPBACK_HOSTNAMES];
     for (const host of extraHosts) {

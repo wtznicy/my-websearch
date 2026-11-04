@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getAppConfigDir } from '../configLoader.js';
+import { getString, type EnvLike } from '../config/env.js';
 
 /**
  * 引擎延迟采样（跨进程持久化）。
@@ -33,12 +34,12 @@ const MAX_FILE_BYTES = 4 * 1024 * 1024;
 /** 低于该值的"耗时"不可能来自一次真实网络调用（测试假引擎 / 缓存命中），不入库也不参与统计 */
 const MIN_MEANINGFUL_LATENCY_MS = 10;
 
-export function engineLatencyPath(env: NodeJS.ProcessEnv = process.env): string {
-    return env.MYWEBSEARCH_LATENCY_PATH || path.join(getAppConfigDir(env), 'engine-latency.jsonl');
+export function engineLatencyPath(env?: EnvLike): string {
+    return getString('MYWEBSEARCH_LATENCY_PATH', '', env) || path.join(getAppConfigDir(env), 'engine-latency.jsonl');
 }
 
 /** 追加采样；任何 I/O 失败都静默忽略——采样不能影响搜索本身 */
-export function recordEngineLatency(samples: EngineLatencySample[], env: NodeJS.ProcessEnv = process.env): void {
+export function recordEngineLatency(samples: EngineLatencySample[], env?: EnvLike): void {
     const meaningful = samples.filter((sample) => sample.ms >= MIN_MEANINGFUL_LATENCY_MS);
     if (meaningful.length === 0) {
         return;
@@ -74,9 +75,9 @@ export function percentile(sorted: number[], p: number): number {
 
 /** 读取并聚合最近的采样；文件不存在时返回空数组 */
 export function readEngineLatencyStats(
-    options: { env?: NodeJS.ProcessEnv; now?: number; retentionMs?: number; maxSamplesPerEngine?: number } = {}
+    options: { env?: EnvLike; now?: number; retentionMs?: number; maxSamplesPerEngine?: number } = {}
 ): EngineLatencyStat[] {
-    const env = options.env ?? process.env;
+    const env = options.env;
     const now = options.now ?? Date.now();
     const retentionMs = options.retentionMs ?? DEFAULT_RETENTION_MS;
     const maxSamples = options.maxSamplesPerEngine ?? 500;
@@ -135,7 +136,7 @@ export function readEngineLatencyStats(
 }
 
 /** 文件过大时裁剪到保留窗口内（默认 7 天），避免无界增长 */
-export function compactEngineLatencyFile(env: NodeJS.ProcessEnv = process.env, now = Date.now()): void {
+export function compactEngineLatencyFile(env?: EnvLike, now = Date.now()): void {
     try {
         const filePath = engineLatencyPath(env);
         const stat = fs.statSync(filePath);

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { getString } from '../config/env.js';
 
 /**
  * 会话 Cookie 的磁盘持久化（best-effort）。
@@ -40,7 +41,7 @@ type CookieStoreFile = {
 };
 
 function getDataDir(): string {
-    return process.env.MYWEBSEARCH_DATA_DIR || path.join(os.homedir(), '.my-websearch');
+    return getString('MYWEBSEARCH_DATA_DIR', '') || path.join(os.homedir(), '.my-websearch');
 }
 
 function getStorePath(): string {

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { FetchWebContentResult } from '../engines/web/fetchWebContent.js';
 import { extractErrorStatus, isAppError } from '../core/errors.js';
+import { getBoolean, getNumber, getOptionalString, getString } from '../config/env.js';
 
 export { extractErrorStatus };
 
@@ -9,8 +10,7 @@ export { extractErrorStatus };
  * 把数 MB JSON 塞进 MCP response 浪费客户端 token。默认 60KB，可配置。
  */
 export function getResponseCapBytes(): number {
-    const raw = Number(process.env.OPEN_WEBSEARCH_RESPONSE_CAP_BYTES ?? 60000);
-    return Number.isFinite(raw) && raw > 0 ? raw : 60000;
+    return getNumber('OPEN_WEBSEARCH_RESPONSE_CAP_BYTES', 60000, { min: 1 });
 }
 export const RESPONSE_CAP_BYTES = 60000;
 
@@ -104,8 +104,8 @@ export function buildFetchWebErrorHint(error: unknown): string {
  * 静默所有工具执行日志（搜索词、URL、库名等），避免噪音与隐私信息写入宿主日志。
  */
 export function isQuietToolLogs(): boolean {
-    return (process.env.LOG_LEVEL ?? '').toLowerCase() === 'quiet'
-        || process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true';
+    return getString('LOG_LEVEL', '').toLowerCase() === 'quiet'
+        || getBoolean('OPEN_WEBSEARCH_QUIET_STARTUP', false);
 }
 
 export function logTool(message: string): void {
@@ -218,7 +218,7 @@ export function serializeFetchWebResult(result: FetchWebContentResult): string {
 
 // 获取工具名称，优先使用环境变量，否则使用默认值
 export function getToolName(envVarName: string, defaultName: string): string {
-    const configuredName = process.env[envVarName];
+    const configuredName = getOptionalString(envVarName);
     if (configuredName) {
         // Validate tool name to ensure it follows MCP naming conventions
         if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(configuredName)) {

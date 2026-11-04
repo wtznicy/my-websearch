@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { getEnv, getString, setEnv } from '../config/env.js';
 
 /**
  * 启动日志静默前置模块与 libuv 线程池初始化。
@@ -8,7 +9,9 @@ import { execFileSync } from 'node:child_process';
  * 2. 在任何 C++ 异步 binding 初始化 libuv 线程池前扩容 UV_THREADPOOL_SIZE（默认仅 4），
  *    防止并发 DNS 查询与文件 I/O 耗尽线程池。
  */
-process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '16';
+if (!getEnv('UV_THREADPOOL_SIZE')) {
+    setEnv('UV_THREADPOOL_SIZE', '16');
+}
 const argv = process.argv.slice(2);
 const [command] = argv;
 const isQuietInvocation =
@@ -19,10 +22,10 @@ const isQuietInvocation =
     // init 的全部价值就是一段干净的、可复制的配置报告；前面叠十几行 [proxy]/[playwright] 只会让人怀疑它改了什么
     || command === 'init'
     || argv.includes('--json')
-    || (process.env.LOG_LEVEL ?? '').toLowerCase() === 'quiet';
+    || getString('LOG_LEVEL', '').toLowerCase() === 'quiet';
 
 if (isQuietInvocation) {
-    process.env.OPEN_WEBSEARCH_QUIET_STARTUP = 'true';
+    setEnv('OPEN_WEBSEARCH_QUIET_STARTUP', 'true');
 }
 
 /**

@@ -1,6 +1,7 @@
 import dns from 'node:dns';
 import { Resolver as PromisesResolver } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { getOptionalString } from '../config/env.js';
 
 /**
  * 进程内 DNS 解析缓存（短 TTL）与非阻塞解析器。
@@ -52,7 +53,7 @@ export type DnsLookupFn = (
 ) => void;
 
 // 独立 c-ares Resolver 实例（纯网络异步事件循环，不占用 libuv 线程池）
-const customDns = process.env.CUSTOM_DNS_SERVERS?.trim();
+const customDns = getOptionalString('CUSTOM_DNS_SERVERS');
 const caresResolver = new PromisesResolver();
 if (customDns) {
     try {

@@ -14,6 +14,7 @@ import { AppError } from '../core/errors.js';
 export { isBlockedBrowserSubresource } from './browserResourceBlocker.js';
 
 import { DEFAULT_DESKTOP_UA } from './userAgents.js';
+import { getOptionalString } from '../config/env.js';
 
 const COOKIE_CACHE_TTL_MS = 10 * 60 * 1000;
 const COOKIE_WARMUP_DELAY_MS = 1200;
@@ -371,7 +372,7 @@ export async function fetchPageHtmlWithBrowser(
             await installNavigationGuard(page);
             // 注入 stealth 指纹伪装，降低被 JS 反爬站点识别的概率
             await prepareStealthPage(page);
-            const selector = profileSelector ?? process.env.BROWSER_PROFILE;
+            const selector = profileSelector ?? getOptionalString('BROWSER_PROFILE');
             if (selector && selector !== 'off' && page.applyDeviceProfile) {
                 await page.applyDeviceProfile(selectDeviceProfile(selector));
             }

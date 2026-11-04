@@ -2,9 +2,10 @@ import * as cheerio from 'cheerio';
 import { buildAxiosRequestOptions, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { htmlToMarkdown } from '../../utils/markdown.js';
 import { AppError, extractErrorCode, extractErrorStatus, isAppError, isRetryableError, normalizePublicErrorCode } from '../../core/errors.js';
+import { getString } from '../../config/env.js';
 
 function shouldDebug(): boolean {
-    return (process.env.LOG_LEVEL ?? '').toLowerCase() === 'debug';
+    return getString('LOG_LEVEL', '').toLowerCase() === 'debug';
 }
 
 /**

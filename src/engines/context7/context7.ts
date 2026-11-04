@@ -17,6 +17,7 @@ import axios from 'axios';
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 import { AppError } from '../../core/errors.js';
+import { getOptionalString } from '../../config/env.js';
 
 export const CONTEXT7_BASE_URL = 'https://context7.com';
 export const CONTEXT7_API_VERSION = 'v2';
@@ -116,7 +117,7 @@ export type Context7DocsResult = {
 };
 
 function getApiKey(): string | undefined {
-    const key = process.env.CONTEXT7_API_KEY || '';
+    const key = getOptionalString('CONTEXT7_API_KEY') || '';
     return key.trim() || undefined;
 }
 

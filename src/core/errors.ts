@@ -33,6 +33,7 @@ export const ErrorCode = {
 export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode];
 
 import axios from 'axios';
+import { getBoolean, getString } from '../config/env.js';
 
 export type PublicErrorCode =
     | 'missing_api_key'
@@ -410,8 +411,8 @@ function recordLegacyFallbackClassification(message: string, matched: boolean): 
             }
             recentFallbackSamples.push(sample);
         }
-        const isDebug = (process.env.LOG_LEVEL ?? '').toLowerCase() === 'debug'
-            || process.env.DEBUG_TEST_LOGS === 'true';
+        const isDebug = getString('LOG_LEVEL', '').toLowerCase() === 'debug'
+            || getBoolean('DEBUG_TEST_LOGS', false);
         if (isDebug) {
             console.error(`[errors/fallback] Legacy string fallback matched unstructured error: ${sample}`);
         }

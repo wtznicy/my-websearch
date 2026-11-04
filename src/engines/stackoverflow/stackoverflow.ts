@@ -5,6 +5,7 @@ import type { SearchExecutionContext } from '../../core/search/searchTypes.js';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 import { AppError, isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
+import { getOptionalString } from '../../config/env.js';
 
 interface StackExchangeItem {
     title: string;
@@ -131,7 +132,7 @@ export async function searchStackOverflow(
     }
 
     const targetLimit = Math.max(1, Math.min(limit, 30));
-    const apiKey = (process.env.STACKOVERFLOW_API_KEY || process.env.STACKEXCHANGE_API_KEY)?.trim();
+    const apiKey = getOptionalString('STACKOVERFLOW_API_KEY') || getOptionalString('STACKEXCHANGE_API_KEY');
 
     try {
         const candidates = relaxStackOverflowQueries(cleanQuery);

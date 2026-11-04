@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { config } from '../config.js';
+import { getOptionalString } from '../config/env.js';
 
 /**
  * 系统代理检测与兜底（仅当未显式配置 USE_PROXY 时生效）。
@@ -117,10 +118,10 @@ async function readMacSystemProxy(): Promise<string | null> {
 }
 
 function readEnvSystemProxy(): string | null {
-    return process.env.https_proxy
-        || process.env.http_proxy
-        || process.env.HTTPS_PROXY
-        || process.env.HTTP_PROXY
+    return getOptionalString('https_proxy')
+        || getOptionalString('http_proxy')
+        || getOptionalString('HTTPS_PROXY')
+        || getOptionalString('HTTP_PROXY')
         || null;
 }
 

@@ -13,6 +13,7 @@
 
 import { isEngineCircuitOpen } from './engineCircuitBreaker.js';
 import { isEngineBrowserOnly } from './engineBrowserOnly.js';
+import { getOptionalString } from '../../config/env.js';
 import { metrics } from '../metrics.js';
 
 /** 判定为中文查询的最小 CJK 字符数（单个汉字可能是噪声/标点） */
@@ -58,7 +59,7 @@ function applyPrimaryHealthFilter(baseGroup: string[], isChinese: boolean, hasCu
     }
 
     const result = [...healthyBase];
-    const hasExaKey = Boolean(process.env.EXA_API_KEY?.trim());
+    const hasExaKey = Boolean(getOptionalString('EXA_API_KEY'));
     // 替补必须是**同类通用搜索引擎**：CSDN/掘金是站内技术库，拿它顶替百度会让
     // 「杭州落户政策」「今天天气」这类查询直接 0 结果（可用性换延迟是亏本买卖）。
     // 垂直引擎只在查询被判定为代码/学术特征时才由路由显式拉入。
@@ -96,9 +97,9 @@ export function pickDefaultEnginesForQuery(
         return [configuredDefault];
     }
 
-    const envEn = parseEnvEngineList(process.env.AUTO_ROUTE_EN_ENGINES);
-    const envZh = parseEnvEngineList(process.env.AUTO_ROUTE_ZH_ENGINES);
-    const envMixed = parseEnvEngineList(process.env.AUTO_ROUTE_MIXED_ENGINES);
+    const envEn = parseEnvEngineList(getOptionalString('AUTO_ROUTE_EN_ENGINES'));
+    const envZh = parseEnvEngineList(getOptionalString('AUTO_ROUTE_ZH_ENGINES'));
+    const envMixed = parseEnvEngineList(getOptionalString('AUTO_ROUTE_MIXED_ENGINES'));
 
     const customEn = routing?.en && routing.en.length > 0 ? routing.en : envEn;
     const customZh = routing?.zh && routing.zh.length > 0 ? routing.zh : envZh;

@@ -11,6 +11,7 @@ import type { SearchEngineExecutorMap, SearchExecutionFailure, PerEngineTimeoutM
 import { resolvePerEngineTimeoutMs } from './searchTypes.js';
 import { mergeSearchResults, isPlaceholderResult } from './mergeResults.js';
 import { matchesSiteDomains } from '../../engines/bing/bing.js';
+import { getOptionalString } from '../../config/env.js';
 import {
     buildHintedMessage,
     isRetryableEngineError,
@@ -232,7 +233,7 @@ export async function executeCascade(
     }
 
     const usedEngines = new Set(engines);
-    const hasExaKey = Boolean(process.env.EXA_API_KEY?.trim());
+    const hasExaKey = Boolean(getOptionalString('EXA_API_KEY'));
     const initialCandidates = pickCascadeCandidates(
         cleanQuery,
         usedEngines,

@@ -1,5 +1,6 @@
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 import { AppError } from '../../core/errors.js';
+import { getOptionalString } from '../../config/env.js';
 
 const GITHUB_API = 'https://api.github.com';
 const USER_AGENT = 'GitHub-Changes-Fetcher/1.0';
@@ -54,10 +55,11 @@ function truncate(text: string, max: number): string {
 }
 
 function githubHeaders(): Record<string, string> {
+    const token = getOptionalString('GITHUB_TOKEN');
     return {
         'User-Agent': USER_AGENT,
         'Accept': 'application/vnd.github.v3+json',
-        ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
     };
 }
 

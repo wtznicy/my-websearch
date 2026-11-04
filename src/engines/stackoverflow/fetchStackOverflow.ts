@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 import { htmlToMarkdown } from '../../utils/markdown.js';
+import { getOptionalString } from '../../config/env.js';
 
 interface StackExchangeQuestionItem {
     question_id: number;
@@ -64,7 +65,7 @@ export async function fetchStackOverflowQuestion(
         return null;
     }
 
-    const apiKey = (process.env.STACKOVERFLOW_API_KEY || process.env.STACKEXCHANGE_API_KEY)?.trim();
+    const apiKey = getOptionalString('STACKOVERFLOW_API_KEY') || getOptionalString('STACKEXCHANGE_API_KEY');
     const headers = {
         'User-Agent': 'Mozilla/5.0 (compatible; MyWebSearch/1.0)',
         'Accept': 'application/json'

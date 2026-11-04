@@ -28,23 +28,24 @@ export const CDN_FIRST_BUDGET_MS = 6000;
 export const ATTEMPT_TIMEOUT_MS = 4500;
 /** 剩余预算低于此值就不再发起新请求 */
 export const MIN_REMAINING_MS = 500;
+import { getBoolean, getNumber, type EnvLike } from '../../config/env.js';
 
 /**
  * CDN-first 开关。新名字覆盖 README + blob；旧名 GITHUB_README_CDN_FIRST 保留为别名。
  */
-export function isGithubContentCdnFirst(env: NodeJS.ProcessEnv = process.env): boolean {
-    return env.GITHUB_CONTENT_CDN_FIRST === 'true' || env.GITHUB_README_CDN_FIRST === 'true';
+export function isGithubContentCdnFirst(env?: EnvLike): boolean {
+    return getBoolean('GITHUB_CONTENT_CDN_FIRST', false, env) || getBoolean('GITHUB_README_CDN_FIRST', false, env);
 }
 
-export function contentBudgetMs(env: NodeJS.ProcessEnv = process.env): number {
-    const raw = Number(env.GITHUB_CONTENT_BUDGET_MS);
-    if (Number.isFinite(raw) && raw >= 1000) {
-        return Math.floor(raw);
+export function contentBudgetMs(env?: EnvLike): number {
+    const raw = getNumber('GITHUB_CONTENT_BUDGET_MS', -1, { min: 1000, integer: true }, env);
+    if (raw >= 1000) {
+        return raw;
     }
     return isGithubContentCdnFirst(env) ? CDN_FIRST_BUDGET_MS : DEFAULT_CONTENT_BUDGET_MS;
 }
 
-export function createContentBudget(env: NodeJS.ProcessEnv = process.env): ContentBudget {
+export function createContentBudget(env?: EnvLike): ContentBudget {
     return { deadline: Date.now() + contentBudgetMs(env), deadHosts: new Set() };
 }
 

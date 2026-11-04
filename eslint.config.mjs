@@ -19,7 +19,21 @@ export default tseslint.config(
         plugins: { '@typescript-eslint': tseslint.plugin },
         languageOptions: { parser: tseslint.parser },
         rules: {
-            '@typescript-eslint/no-explicit-any': 'error'
+            '@typescript-eslint/no-explicit-any': 'error',
+            'no-restricted-syntax': [
+                'error',
+                {
+                    selector: "MemberExpression[object.name='process'][property.name='env']",
+                    message: 'Do not access process.env directly. Use accessor functions from src/config/env.ts instead.'
+                }
+            ]
+        }
+    },
+    {
+        // 环境变量唯一访问层：允许直接读写 process.env
+        files: ['src/config/env.ts'],
+        rules: {
+            'no-restricted-syntax': 'off'
         }
     },
     {

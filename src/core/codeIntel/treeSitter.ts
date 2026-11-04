@@ -6,6 +6,7 @@ import { Language, Parser, type Node as SyntaxNode } from 'web-tree-sitter';
 import { isKindCompatible, type CodeSymbolDefinition, type CodeSymbolKind } from './remoteCodeIntel.js';
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
+import { getBoolean, getString } from '../../config/env.js';
 
 const GRAMMAR_VERSION = '0.3.1';
 const GRAMMAR_BASE = `https://cdn.jsdelivr.net/npm/@vscode/tree-sitter-wasm@${GRAMMAR_VERSION}/wasm`;
@@ -51,7 +52,7 @@ function runtimeWasmPath(): string {
 }
 
 function grammarCacheDir(): string {
-    const dataDir = process.env.MY_WEBSEARCH_DATA_DIR?.trim() || path.join(os.homedir(), '.my-websearch');
+    const dataDir = getString('MY_WEBSEARCH_DATA_DIR', '') || path.join(os.homedir(), '.my-websearch');
     return path.join(dataDir, 'grammars');
 }
 
@@ -123,7 +124,7 @@ async function getLanguage(language: string, filePath: string): Promise<Language
 
     if (!available) {
         const download = ensureGrammar(fileName);
-        if (process.env.CODE_SYMBOL_TREE_SITTER_WAIT === '1') {
+        if (getBoolean('CODE_SYMBOL_TREE_SITTER_WAIT', false)) {
             await download;
             try {
                 available = fs.existsSync(grammarPath) && fs.statSync(grammarPath).size > 1000;
@@ -149,7 +150,7 @@ async function getLanguage(language: string, filePath: string): Promise<Language
 }
 
 async function getParser(language: string, filePath: string): Promise<Parser | null> {
-    if (process.env.CODE_SYMBOL_TREE_SITTER === '0') return null;
+    if (getString('CODE_SYMBOL_TREE_SITTER', '') === '0') return null;
     try {
         if (!parserInit) {
             parserInit = Parser.init({ locateFile: () => runtimeWasmPath() });

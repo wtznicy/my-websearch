@@ -16,6 +16,7 @@ import { metrics } from '../metrics.js';
 import { RequestContext } from '../requestContext.js';
 import { requestDirectFirst, buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
+import { getNumber } from '../../config/env.js';
 
 export type ArticleFetchOptions = { format?: 'text' | 'markdown' };
 export type ArticleFetcher = (url: string, options?: ArticleFetchOptions) => Promise<{ content: string; title?: string }>;
@@ -89,7 +90,7 @@ function validateFetchOptionCombinations(params: FetchPipelineOptions): void {
 
 /** 整体抓取预算：cookie 15s + 浏览器 30s + 主请求 10s + 回退 10s 各自为政时最坏 ~65s，会打穿 MCP 客户端默认超时 */
 const FETCH_PIPELINE_DEADLINE_MS = (() => {
-    const parsed = Number(process.env.FETCH_WEB_DEADLINE_MS);
+    const parsed = getNumber('FETCH_WEB_DEADLINE_MS', 45_000, { min: 5000, integer: true });
     return Number.isFinite(parsed) && parsed >= 5000 ? Math.floor(parsed) : 45_000;
 })();
 
