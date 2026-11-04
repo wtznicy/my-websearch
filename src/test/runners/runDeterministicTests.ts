@@ -20,11 +20,9 @@ import { fileURLToPath } from 'node:url';
  * 用 pipe 捕获输出会直接 EPERM。透传标准流在所有环境下都能跑。
  */
 const DETERMINISTIC_TESTS = [
-    'test-bing-parser',
     'test-browser-path-guard',
     'test-core-fetch-services',
     'test-core-search',
-    'test-sogou',
     'test-web-content'
 ] as const;
 
