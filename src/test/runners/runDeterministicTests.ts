@@ -24,14 +24,9 @@ const DETERMINISTIC_TESTS = [
     'test-browser-path-guard',
     'test-core-fetch-services',
     'test-core-search',
-    'test-duckduckgo-preload-url',
     'test-engine-normalization',
-    'test-network-error',
-    'test-pagination',
-    'test-query-preprocess',
     'test-redirect-safety',
     'test-sogou',
-    'test-text',
     'test-url-safety',
     'test-web-content'
 ] as const;

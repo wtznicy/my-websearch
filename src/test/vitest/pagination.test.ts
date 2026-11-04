@@ -81,6 +81,20 @@ describe('paginateSearch', () => {
         expect(fetchPage).toHaveBeenCalledTimes(3);
     });
 
+    it('increments page numbers by pageStep', async () => {
+        const pagesSeen: number[] = [];
+        await paginateSearch<number>({
+            limit: 100,
+            maxPages: 3,
+            pageStep: 10,
+            fetchPage: async (pageIndex) => {
+                pagesSeen.push(pageIndex);
+                return [pageIndex];
+            }
+        });
+        expect(pagesSeen).toEqual([0, 10, 20]);
+    });
+
     it('preserves directAnswer property if attached to page results', async () => {
         const page1 = [{ id: 1 }];
         (page1 as any).directAnswer = '42';
