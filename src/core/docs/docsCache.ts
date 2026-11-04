@@ -56,6 +56,11 @@ function openSqlite(): SqliteDatabase | null {
     if (sqliteDb !== undefined) {
         return sqliteDb;
     }
+    const nodeMajor = parseInt(process.versions.node.split('.')[0] || '0', 10);
+    if (nodeMajor < 22) {
+        sqliteDb = null;
+        return null;
+    }
     try {
         ensureDir();
         const require = createRequire(import.meta.url);

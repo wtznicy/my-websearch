@@ -560,15 +560,18 @@ export class PageCacheService {
         this.cacheDir = customCacheDir || getDefaultPageCacheDir();
 
         let initializedBackend: StorageBackend | null = null;
-        try {
-            // Try loading node:sqlite (native in Node 22+)
-            const { DatabaseSync } = require('node:sqlite');
-            if (typeof DatabaseSync === 'function') {
-                const dbPath = path.join(this.cacheDir, 'pages.db');
-                initializedBackend = new SqliteStorageBackend(DatabaseSync, dbPath);
+        const nodeMajor = parseInt(process.versions.node.split('.')[0] || '0', 10);
+        if (nodeMajor >= 22) {
+            try {
+                // Try loading node:sqlite (native in Node 22+)
+                const { DatabaseSync } = require('node:sqlite');
+                if (typeof DatabaseSync === 'function') {
+                    const dbPath = path.join(this.cacheDir, 'pages.db');
+                    initializedBackend = new SqliteStorageBackend(DatabaseSync, dbPath);
+                }
+            } catch {
+                initializedBackend = null;
             }
-        } catch {
-            initializedBackend = null;
         }
 
         if (!initializedBackend) {
