@@ -7,6 +7,7 @@ import { LoadPlaywrightClientOptions, PlaywrightBrowserLike, PlaywrightModule } 
 import { cdpDriver } from '../browser/cdpDriver.js';
 import { findChromeExecutable } from '../browser/chromeLauncher.js';
 import { getString } from '../../config/env.js';
+import { DEFAULT_DESKTOP_UA } from '../userAgents.js';
 
 const require = createRequire(import.meta.url);
 
@@ -340,4 +341,47 @@ export async function loadPlaywrightClient(options?: LoadPlaywrightClientOptions
         emitPlaywrightUnavailableWarning(options);
     }
     return playwright;
+}
+
+export function buildLocalBrowserProcessArgs(
+    port: number,
+    tempDir: string,
+    launchArgs: string[],
+    headless = false,
+    cfg: AppConfig = config
+): string[] {
+    const args = [
+        `--remote-debugging-port=${port}`,
+        `--user-data-dir=${tempDir}`,
+        ...launchArgs
+    ];
+
+    if (headless) {
+        args.push('--headless=new');
+        if (!launchArgs.some((arg) => arg.startsWith('--disable-blink-features='))) {
+            args.push('--disable-blink-features=AutomationControlled');
+        }
+        if (!launchArgs.some((arg) => arg.startsWith('--user-agent='))) {
+            args.push(`--user-agent=${DEFAULT_DESKTOP_UA}`);
+        }
+        if (!launchArgs.some((arg) => arg.startsWith('--window-size='))) {
+            args.push('--window-size=1920,1080');
+        }
+    }
+
+    args.push('--edge-skip-compat-layer-relaunch');
+
+    const proxy = buildPlaywrightProxy(cfg);
+
+    if (proxy?.server) {
+        args.push(`--proxy-server=${proxy.server}`);
+        if (proxy.bypass) {
+            args.push(`--proxy-bypass-list=${formatChromiumProxyBypassList(proxy.bypass)}`);
+        }
+        if (proxy.username || proxy.password) {
+            console.warn('Playwright local browser process proxy authentication is not applied via command-line flags. Use WS/CDP mode if authenticated proxy support is required.');
+        }
+    }
+
+    return args;
 }
