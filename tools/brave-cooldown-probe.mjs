@@ -192,6 +192,29 @@ async function blind(waitStepSeconds, maxSeconds, burnFirst) {
     log({ event: 'summary', phase: 'blind', recoveredAfterMs: null, maxSeconds });
 }
 
+/**
+ * 定速模式：按固定间隔发请求，用来区分「每分钟 N 次」还是「短窗口突发」。
+ * 间隔按「请求开始时间」对齐（t_i = start + i * interval），不受单次探测耗时影响。
+ */
+async function rateTest(intervalSeconds, count) {
+    log({ event: 'phase', name: 'rate', intervalSeconds, count });
+    const startedAt = Date.now();
+    for (let i = 1; i <= count; i += 1) {
+        const target = startedAt + (i - 1) * intervalSeconds * 1000;
+        const wait = target - Date.now();
+        if (wait > 0) {
+            await sleep(wait);
+        }
+        const probe = await probeWithRetry(1);
+        log({ event: 'rate_probe', index: i, intervalSeconds, elapsedMs: Date.now() - startedAt, ...probe });
+        if (probe.status === 'blocked') {
+            log({ event: 'summary', phase: 'rate', blockedAtRequest: i, intervalSeconds, elapsedMs: Date.now() - startedAt });
+            return;
+        }
+    }
+    log({ event: 'summary', phase: 'rate', blockedAtRequest: null, intervalSeconds, requests: count });
+}
+
 async function findSafe(stepSeconds, maxSeconds) {
     log({ event: 'phase', name: 'find-safe', stepSeconds, maxSeconds });
     const settled = await settle(30, Math.max(stepSeconds * 3, 300));
@@ -301,6 +324,9 @@ async function main() {
                 maxSeconds,
                 Boolean(options['burn-first'])
             );
+            return;
+        case 'rate':
+            await rateTest(Number(options.interval ?? 10), Number(options.count ?? 8));
             return;
         case 'find-min':
             await findMin(
