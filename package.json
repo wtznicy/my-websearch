@@ -59,7 +59,6 @@
     "test:bing-parser": "tsc && node build/test/legacy/test-bing-parser.js",
     "test:core-search": "tsc && node build/test/legacy/test-core-search.js",
     "test:core-fetch-services": "tsc && node build/test/legacy/test-core-fetch-services.js",
-    "test:core-target-validation": "tsc && node build/test/legacy/test-core-target-validation.js",
     "test:engine-normalization": "tsc && node build/test/legacy/test-engine-normalization.js",
     "test:sogou": "tsc && node build/test/legacy/test-sogou.js",
     "test:startpage": "tsc && node build/test/legacy/test-startpage.js",

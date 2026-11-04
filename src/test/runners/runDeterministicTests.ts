@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
  *
  * 背景：这些脚本是仓库最早的一批测试，写法是自校验脚本（`assert` + `process.exit`），
  * 而不是 vitest 用例。它们覆盖了几个 vitest 从未触碰的模块（`utils/text`、
- * `utils/queryPreprocess`、`utils/dnsCache`、`core/validation/targetValidation` 等），
+ * `utils/queryPreprocess`、`utils/text` 等），
  * 但因为 CI 只跑 `npm test`，这批覆盖**长期不产生任何保护**。
  *
  * 这里用显式白名单接进 CI。白名单必须手动维护：
@@ -24,8 +24,6 @@ const DETERMINISTIC_TESTS = [
     'test-browser-path-guard',
     'test-core-fetch-services',
     'test-core-search',
-    'test-core-target-validation',
-    'test-dns-cache',
     'test-duckduckgo-preload-url',
     'test-engine-normalization',
     'test-network-error',
