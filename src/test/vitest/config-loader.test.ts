@@ -51,6 +51,7 @@ INVALID LINE WITHOUT EQUALS
                     context7: 'ctx7sk-12345',
                     exa: 'exa-67890',
                     github: 'ghp_abc',
+                    gitee: 'gitee_abc',
                     brave: 'bsk_xyz'
                 },
                 proxy: {
@@ -65,6 +66,7 @@ INVALID LINE WITHOUT EQUALS
             expect(flat.CONTEXT7_API_KEY).toBe('ctx7sk-12345');
             expect(flat.EXA_API_KEY).toBe('exa-67890');
             expect(flat.GITHUB_TOKEN).toBe('ghp_abc');
+            expect(flat.GITEE_TOKEN).toBe('gitee_abc');
             expect(flat.BRAVE_API_KEY).toBe('bsk_xyz');
             expect(flat.PROXY_URL).toBe('http://127.0.0.1:7897');
             expect(flat.USE_PROXY).toBe('true');
@@ -102,6 +104,17 @@ INVALID LINE WITHOUT EQUALS
             // EXA_API_KEY should be filled
             expect(fakeTargetEnv.EXA_API_KEY).toBe('injected-exa-key');
             expect(injected.EXA_API_KEY).toBe('injected-exa-key');
+        });
+
+        it('maps apiKeys.gitee to GITEE_TOKEN', () => {
+            const fakeTargetEnv: NodeJS.ProcessEnv = { MYWEBSEARCH_DATA_DIR: tempDir };
+            const appConfigPath = getAppConfigFilePath(fakeTargetEnv);
+            fs.writeFileSync(appConfigPath, JSON.stringify({ apiKeys: { gitee: 'gitee-from-config' } }), 'utf8');
+
+            const injected = loadApplicationConfigEnv(fakeTargetEnv, { cwd: tempDir, quiet: true });
+
+            expect(fakeTargetEnv.GITEE_TOKEN).toBe('gitee-from-config');
+            expect(injected.GITEE_TOKEN).toBe('gitee-from-config');
         });
 
         it('.env takes precedence over ~/.my-websearch/config.json', () => {

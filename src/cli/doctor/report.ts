@@ -98,6 +98,7 @@ export function buildDoctorEffectiveConfig(
             exa: maskSecret(env.EXA_API_KEY),
             brave: maskSecret(env.BRAVE_API_KEY),
             github: maskSecret(env.GITHUB_TOKEN || env.GH_TOKEN),
+            gitee: maskSecret(env.GITEE_TOKEN),
             stackoverflow: maskSecret(env.STACKOVERFLOW_API_KEY)
         }
     };
@@ -194,7 +195,11 @@ export function formatDoctorHumanReadable(report: DoctorReport): string {
         `  Search mode:     ${report.effectiveConfig.searchMode}`,
         `  Search deadline: ${report.effectiveConfig.searchDeadlineMs}ms`,
         `  HTTP CORS:       ${report.effectiveConfig.enableCors ? `enabled (${report.effectiveConfig.corsOrigin})` : 'disabled'}`,
-        `  API keys:        context7=${report.effectiveConfig.apiKeys.context7 ?? 'unset'}, exa=${report.effectiveConfig.apiKeys.exa ?? 'unset'}, brave=${report.effectiveConfig.apiKeys.brave ?? 'unset'}, github=${report.effectiveConfig.apiKeys.github ?? 'unset'}, stackoverflow=${report.effectiveConfig.apiKeys.stackoverflow ?? 'unset'}`,
+        `  API keys:        context7=${report.effectiveConfig.apiKeys.context7 ?? 'unset'}, exa=${report.effectiveConfig.apiKeys.exa ?? 'unset'}, brave=${report.effectiveConfig.apiKeys.brave ?? 'unset'}, github=${report.effectiveConfig.apiKeys.github ?? 'unset'}, gitee=${report.effectiveConfig.apiKeys.gitee ?? 'unset'}, stackoverflow=${report.effectiveConfig.apiKeys.stackoverflow ?? 'unset'}`,
+        ...(report.effectiveConfig.apiKeys.github
+            ? []
+            : ['  ⚠️ codeSymbol needs GITHUB_TOKEN: add "github" under apiKeys in ~/.my-websearch/config.json and restart the MCP server.']
+        ),
         '',
         'Proxy:',
         `  Enabled:         ${report.proxy.enabled ? 'yes' : 'no'}`,

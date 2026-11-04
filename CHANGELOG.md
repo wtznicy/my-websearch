@@ -26,6 +26,9 @@ All notable changes to `my-websearch` are documented in this file.
 - **浏览器栈错误提示**：移除引用不存在的 `PLAYWRIGHT_MODULE_PATH` / `PLAYWRIGHT_PACKAGE` / `PLAYWRIGHT_WS_ENDPOINT`，改为可操作的浏览器与代理提示；`RECOGNIZED_ENV_KEYS` 移除 3 个从未生效的变量。
 - **Brave 冷启动首次必失败**：PoW 验证按钮在 `domcontentloaded` 后才渲染，改为轮询点击（冷启动 3/3 成功）。
 - **Startpage 文案**：不再声称「requires a Playwright browser session」，明确为 CDP + Anubis 反爬。
+- **`apiKeys.gitee` 未生效**：`config.json` 的 `apiKeys.gitee` 此前不会映射到 `GITEE_TOKEN`（只能靠环境变量），现已修复；自动引导同样会复制 `GITEE_TOKEN` / `STACKOVERFLOW_API_KEY`。
+- **配置重建无提示**：自动引导/重建 `~/.my-websearch/config.json` 时现在会打印复制了哪些 key、缺哪些，并提示补 `apiKeys` 后重启；`doctor` 的 API keys 行新增 `gitee`，未配置 github 时明确提示 codeSymbol 需要 `GITHUB_TOKEN`。
+- **codeSymbol 缺 token 提示**：错误 hint 补充 `~/.my-websearch/config.json` 的 `apiKeys.github` 与「重启 MCP server」；新增 `src/test/live/test-code-symbol-live.ts`（无 token 自动 skip），补上此前只有契约测试、没有真实调用的盲区。
 
 ### Performance
 - CLI 冷启动 1.38s → 0.32s（`--help` / `status` 不再加载引擎与服务器栈）。

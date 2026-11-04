@@ -250,7 +250,10 @@ my-websearch doctor --reset-health
 {
   "apiKeys": {
     "context7": "ctx7sk-...",
-    "exa": "..."
+    "exa": "...",
+    "github": "ghp_...",
+    "gitee": "...",
+    "brave": "..."
   },
   "proxy": {
     "url": "http://127.0.0.1:7897",
@@ -261,6 +264,7 @@ my-websearch doctor --reset-health
 ```
 
 > ⚠️ **关于 `useProxy` 的重要说明**：只要配置了 `"url"`，代理默认就会自动启用。如果显式配置了 `"useProxy": false`，会**强制覆盖并废掉 `url`**。因此若要启用代理，请将该字段设为 `true` 或直接省略不写。
+> **Key 与重启**：`apiKeys` 下的条目会在启动时映射为环境变量（`github` → `GITHUB_TOKEN`、`gitee` → `GITEE_TOKEN`、`context7` → `CONTEXT7_API_KEY`…），且只填补**客户端 env 中尚未设置**的变量。改完文件需重启 MCP server；`my-websearch doctor` 会显示当前实际可见的 key。
 
 ### 📋 环境变量完整全量参考
 
@@ -324,7 +328,7 @@ my-websearch doctor --reset-health
 | `EXA_API_KEY` | 空 | [Exa 官方免费 Key](https://dashboard.exa.ai/api-keys)（仅使用 `exa` 语义搜索时需要） |
 | `BRAVE_API_KEY` | 空 | [Brave Search API Key](https://api.search.brave.com/app/keys)（选配，配置后优先走官方 API 高可靠检索） |
 | `GITHUB_TOKEN` | 空 | [GitHub Personal Access Token](https://github.com/settings/tokens)（选配，提高 GitHub 搜索与内容抓取的速率配额至 5,000次/小时） |
-| `GITEE_TOKEN` | 空 | [Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens)（选配，提高 Gitee API 配额并支持私有仓库） |
+| `GITEE_TOKEN` | 空 | [Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens)（选配，提高 Gitee API 配额并支持私有仓库）。也可写在 ~/.my-websearch/config.json 的 piKeys.gitee。 |
 | `STACKOVERFLOW_API_KEY` | 空 | [Stack Apps Key](https://stackapps.com/apps/oauth/register)（选配，提高 StackOverflow 检索配额至 10,000次/天） |
 
 #### 4. 🖥️ 服务模式、并发与会话治理

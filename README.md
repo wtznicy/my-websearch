@@ -270,7 +270,10 @@ To share settings across all MCP clients without duplicate configuration:
 {
   "apiKeys": {
     "context7": "ctx7sk-...",
-    "exa": "..."
+    "exa": "...",
+    "github": "ghp_...",
+    "gitee": "...",
+    "brave": "..."
   },
   "proxy": {
     "url": "http://127.0.0.1:7897",
@@ -281,6 +284,7 @@ To share settings across all MCP clients without duplicate configuration:
 ```
 
 > ⚠️ **Note on `useProxy`**: When `"url"` is configured, proxy is enabled automatically. Setting `"useProxy": false` will **explicitly override and disable `url`**. If you want proxy enabled, set `"useProxy": true` or omit the field entirely.
+> **Keys & restart**: entries under `apiKeys` are mapped to env vars at startup (`github` → `GITHUB_TOKEN`, `gitee` → `GITEE_TOKEN`, `context7` → `CONTEXT7_API_KEY`, …) and only fill variables that are **not already set** in the client env. Restart the MCP server after editing the file; `my-websearch doctor` shows which keys are currently visible.
 
 ### 📋 Exhaustive Environment Variables Reference
 
@@ -349,7 +353,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `EXA_API_KEY` | empty | [Exa Free API Key](https://dashboard.exa.ai/api-keys) (only required if using the `exa` semantic search engine) |
 | `BRAVE_API_KEY` | empty | [Brave Search API Key](https://api.search.brave.com/app/keys) (optional; uses official high-reliability API when set) |
 | `GITHUB_TOKEN` | empty | [GitHub Personal Access Token](https://github.com/settings/tokens) (optional; raises rate limit to 5,000 req/hr) |
-| `GITEE_TOKEN` | empty | [Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens) (optional; raises Gitee API rate limits and enables private repos) |
+| `GITEE_TOKEN` | empty | [Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens) (optional; raises Gitee API rate limits and enables private repos). Also configurable as piKeys.gitee in ~/.my-websearch/config.json. |
 | `STACKOVERFLOW_API_KEY` | empty | [Stack Apps Key](https://stackapps.com/apps/oauth/register) (optional; raises quota to 10,000 req/day) |
 
 #### 4. 🖥️ Server Modes, Concurrency & Session Reaper

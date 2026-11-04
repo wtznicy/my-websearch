@@ -60,7 +60,7 @@ export async function searchGitHubCode(
             retryable: false,
             engine: 'github',
             message: 'codeSymbol requires GITHUB_TOKEN for GitHub code search.',
-            hint: '配置 GITHUB_TOKEN 后重试；未配置时可用 fetchGithubContent 直接读取已知路径。'
+            hint: '配置 GITHUB_TOKEN（~/.my-websearch/config.json 的 apiKeys.github）后重启 MCP server；未配置时可用 fetchGithubContent 直接读取已知路径。'
         });
     }
 

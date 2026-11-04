@@ -165,6 +165,7 @@ export type DoctorReport = {
             exa: string | null;
             brave: string | null;
             github: string | null;
+            gitee: string | null;
             stackoverflow?: string | null;
         };
     };

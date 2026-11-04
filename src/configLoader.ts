@@ -14,7 +14,9 @@ export interface MyWebSearchConfigFile {
         context7?: string;
         exa?: string;
         github?: string;
+        gitee?: string;
         brave?: string;
+        stackoverflow?: string;
         [key: string]: string | undefined;
     };
     proxy?: {
@@ -97,6 +99,7 @@ export function flattenConfigFileToEnv(
         if (typeof keys.context7 === 'string') flat.CONTEXT7_API_KEY = keys.context7.trim();
         if (typeof keys.exa === 'string') flat.EXA_API_KEY = keys.exa.trim();
         if (typeof keys.github === 'string') flat.GITHUB_TOKEN = keys.github.trim();
+        if (typeof keys.gitee === 'string') flat.GITEE_TOKEN = keys.gitee.trim();
         if (typeof keys.brave === 'string') flat.BRAVE_API_KEY = keys.brave.trim();
         if (typeof keys.stackoverflow === 'string') flat.STACKOVERFLOW_API_KEY = keys.stackoverflow.trim();
         if (typeof keys.stackexchange === 'string') flat.STACKOVERFLOW_API_KEY = keys.stackexchange.trim();
@@ -231,7 +234,9 @@ function tryAutoBootstrapConfig(
                 if (env.CONTEXT7_API_KEY) apiKeys.context7 = env.CONTEXT7_API_KEY;
                 if (env.EXA_API_KEY) apiKeys.exa = env.EXA_API_KEY;
                 if (env.GITHUB_TOKEN) apiKeys.github = env.GITHUB_TOKEN;
+                if (env.GITEE_TOKEN) apiKeys.gitee = env.GITEE_TOKEN;
                 if (env.BRAVE_API_KEY) apiKeys.brave = env.BRAVE_API_KEY;
+                if (env.STACKOVERFLOW_API_KEY) apiKeys.stackoverflow = env.STACKOVERFLOW_API_KEY;
 
                 const proxy: Record<string, unknown> = {};
                 if (env.PROXY_URL) proxy.url = env.PROXY_URL;
@@ -254,7 +259,14 @@ function tryAutoBootstrapConfig(
                     }
                     fs.writeFileSync(targetPath, JSON.stringify(bootstrapped, null, 2), { encoding: 'utf8', mode: 0o600 });
                     if (shouldEmitConfigStartupLog(options.targetEnv ?? getProcessEnv(), options.quiet)) {
-                        console.error(`ℹ️ [config] Auto-bootstrapped configuration from ${sanitizePathForLog(cand)} to ${sanitizePathForLog(targetPath)}`);
+                        const copied = Object.keys(apiKeys);
+                        const knownKeyNames = ['context7', 'exa', 'github', 'gitee', 'brave', 'stackoverflow'];
+                        const missing = knownKeyNames.filter((name) => !copied.includes(name));
+                        console.error(
+                            `ℹ️ [config] Auto-bootstrapped configuration from ${sanitizePathForLog(cand)} to ${sanitizePathForLog(targetPath)} `
+                            + `(copied: ${copied.join(', ') || 'none'}; missing: ${missing.join(', ') || 'none'}). `
+                            + 'Set missing keys under "apiKeys" in that file and restart the MCP server.'
+                        );
                     }
                     return bootstrapped;
                 }

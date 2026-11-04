@@ -226,7 +226,7 @@
         {
           "name": "`GITEE_TOKEN`",
           "default": "empty",
-          "desc": "[Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens) (optional; raises Gitee API rate limits and enables private repos)"
+          "desc": "[Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens) (optional; raises Gitee API rate limits and enables private repos). Also configurable as \u0007piKeys.gitee in ~/.my-websearch/config.json."
         },
         {
           "name": "`STACKOVERFLOW_API_KEY`",
@@ -570,7 +570,7 @@
         {
           "name": "`GITEE_TOKEN`",
           "default": "空",
-          "desc": "[Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens)（选配，提高 Gitee API 配额并支持私有仓库）"
+          "desc": "[Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens)（选配，提高 Gitee API 配额并支持私有仓库）。也可写在 ~/.my-websearch/config.json 的 \u0007piKeys.gitee。"
         },
         {
           "name": "`STACKOVERFLOW_API_KEY`",
