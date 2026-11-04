@@ -12,6 +12,7 @@
  */
 
 import { isEngineCircuitOpen } from './engineCircuitBreaker.js';
+import { isEngineBrowserOnly } from './engineBrowserOnly.js';
 import { metrics } from '../metrics.js';
 
 /** 判定为中文查询的最小 CJK 字符数（单个汉字可能是噪声/标点） */
@@ -67,7 +68,13 @@ function applyPrimaryHealthFilter(baseGroup: string[], isChinese: boolean, hasCu
         // Brave 429 是常态，放在其后由健康过滤自动跳过。
         : ['yahoo', ...(hasExaKey ? ['exa'] : []), 'brave', 'duckduckgo', 'bing'];
 
-    for (const candidate of fallbackPool) {
+    // 浏览器优先窗口内的引擎（如 Brave 429 后）仍可用，但每次要走 4–13s 的浏览器兜底；
+    // 这里只做**稳定降权**（排到最后），不剔除——显式请求仍会选中它。
+    const orderedPool = [...fallbackPool].sort(
+        (a, b) => Number(isEngineBrowserOnly(a)) - Number(isEngineBrowserOnly(b))
+    );
+
+    for (const candidate of orderedPool) {
         if (result.length >= baseGroup.length) {
             break;
         }

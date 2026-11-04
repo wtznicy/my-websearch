@@ -7,6 +7,7 @@ import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { paginateSearch } from '../../utils/pagination.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 import { tripEngineCircuit } from '../../core/search/engineCircuitBreaker.js';
+import { isEngineBrowserOnly, setEngineBrowserOnly } from '../../core/search/engineBrowserOnly.js';
 import { isBraveBlockedPage, isBraveCaptchaChallengePage } from '../../core/antiBot/antiBotDetection.js';
 import { AppError, extractErrorCode, extractErrorStatus, isAppError } from '../../core/errors.js';
 import { getProxyUrl } from '../../config.js';
@@ -70,7 +71,8 @@ function extractBraveResponseBody(error: unknown): string {
 function buildBraveErrorMessage(error: unknown): Error {
     const status = extractErrorStatus(error);
     if (status === 429) {
-        // 走到这里说明浏览器兜底也失败了（或已被 BRAVE_BROWSER_FALLBACK=0 关闭），故标记不可重试并熔断，避免重试风暴。
+        // 调用方（searchBraveWeb）负责在「浏览器兜底也失败」时 tripEngineCircuit；
+        // 这里只负责把 429 归类成 bot_challenge / rate_limited 并给出可操作提示。
         const isCaptchaChallenge = isBraveCaptchaChallengePage(extractBraveResponseBody(error));
         const fallbackState = process.env.BRAVE_BROWSER_FALLBACK === '0'
             ? 'The disguised headless browser fallback is disabled (BRAVE_BROWSER_FALLBACK=0). '
@@ -90,7 +92,6 @@ function buildBraveErrorMessage(error: unknown): Error {
                 : 'Brave rate limited this exit IP (HTTP 429 quota window, no captcha page in the response). '
                     + 'Wait for the window to reset, switch exit node, or configure BRAVE_API_KEY (official API, free tier).'
         });
-        tripEngineCircuit('brave');
         return err;
     }
     return error instanceof Error ? error : new Error(String(error));
@@ -595,25 +596,67 @@ async function executeBraveHttpSearch(
 
 /**
  * Brave 网页端（SvelteKit SSR）抓取搜索实现（无 API Key 时的默认路径，或官方 API 故障/密钥错误/配额耗尽时的回退路径）。
- * 当 HTTP 路径遭遇 429 或人机拦截时，尝试自动回退到伪装桌面指纹的无头浏览器检索（best-effort）。
+ *
+ * 429 软窗口策略（实测：滚动窗口约 5–6 个请求、回补约 100s+，探测本身会延长窗口）：
+ * - curl 429 → 开 180s「浏览器优先」窗口，并立刻用伪装无头浏览器兜底这一次；
+ * - 窗口内再调用 Brave → **直接走浏览器**，不再用 curl 白撞；
+ * - 窗口内兜底也失败（或兜底被禁用）→ 升级为硬熔断，由路由/级联换引擎；
+ * - 180s 后自动恢复 curl。
  */
+const BRAVE_BROWSER_ONLY_MS = 180_000;
+
+/** 当前是否应跳过 curl、直接走浏览器兜底（软窗口 + 未被环境变量禁用） */
+export function shouldPreferBraveBrowser(): boolean {
+    return process.env.BRAVE_BROWSER_FALLBACK !== '0' && isEngineBrowserOnly('brave');
+}
+
 export async function searchBraveWeb(
     query: string,
     limit: number,
     options?: { signal?: AbortSignal; timeRange?: 'day' | 'week' | 'month' | 'year' }
 ): Promise<SearchResult[]> {
+    const fallbackEnabled = process.env.BRAVE_BROWSER_FALLBACK !== '0';
+
+    // 软窗口内：curl 必然继续吃 429，直接走浏览器兜底。
+    if (shouldPreferBraveBrowser()) {
+        try {
+            return await searchBraveWithBrowser(query, limit, options);
+        } catch (browserError) {
+            if (options?.signal?.aborted) {
+                throw browserError;
+            }
+            console.warn('Brave browser fallback failed during browser-only window:', browserError instanceof Error ? browserError.message : String(browserError));
+            tripEngineCircuit('brave');
+            throw new AppError({
+                code: 'bot_challenge',
+                retryable: false,
+                status: 429,
+                engine: 'brave',
+                hint: 'Configure BRAVE_API_KEY (free tier), switch exit node, or wait for the rate-limit window to reset.',
+                message: 'Brave is in its browser-only cooldown window and the disguised headless browser fallback failed (interactive slider or timeout). '
+                    + 'The engine is temporarily suspended; other engines will fill in.'
+            });
+        }
+    }
+
     try {
         return await executeBraveHttpSearch(query, limit, options);
     } catch (httpError) {
         if (shouldUseBraveBrowserFallback(httpError)) {
-            try {
-                const browserResults = await searchBraveWithBrowser(query, limit, options);
-                if (browserResults.length > 0) {
-                    return browserResults;
+            if (fallbackEnabled) {
+                // 先开窗口再兜底：即使这次兜底失败，窗口也能避免后续 curl 白撞。
+                setEngineBrowserOnly('brave', BRAVE_BROWSER_ONLY_MS);
+                try {
+                    const browserResults = await searchBraveWithBrowser(query, limit, options);
+                    if (browserResults.length > 0) {
+                        return browserResults;
+                    }
+                } catch (browserError) {
+                    console.warn('Brave browser fallback failed:', browserError instanceof Error ? browserError.message : String(browserError));
                 }
-            } catch (browserError) {
-                console.warn('Brave browser fallback failed:', browserError instanceof Error ? browserError.message : String(browserError));
             }
+            // 兜底被禁用或失败 → 硬熔断（指数退避），后续由路由/级联换引擎。
+            tripEngineCircuit('brave');
         }
         throw buildBraveErrorMessage(httpError);
     }

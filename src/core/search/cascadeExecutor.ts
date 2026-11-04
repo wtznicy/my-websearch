@@ -2,6 +2,7 @@ import { SearchResult } from '../../types.js';
 import { AppConfig } from '../../config.js';
 import { countUsableResults } from './resultRanking.js';
 import { isEngineCircuitOpen } from './engineCircuitBreaker.js';
+import { isEngineBrowserOnly } from './engineBrowserOnly.js';
 import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
 import { metrics } from '../metrics.js';
 import { AppError, extractErrorCode, extractErrorDetails, extractErrorStatus, isAppError } from '../errors.js';
@@ -93,7 +94,7 @@ function getPersistedLatencyMap(now = Date.now()): Map<string, EngineLatencyStat
  * `engine-latency.jsonl`（CLI 每次都是新进程，否则永远冷启动）。
  * 注意：这里只调整**同类候选之间**的先后——类别错配由路由层的 fallbackPool 负责拦截。
  */
-function sortCandidatesByRecentHealth(candidates: string[]): string[] {
+export function sortCandidatesByRecentHealth(candidates: string[]): string[] {
     if (candidates.length <= 1) {
         return candidates;
     }
@@ -108,6 +109,8 @@ function sortCandidatesByRecentHealth(candidates: string[]): string[] {
             engine,
             index,
             isDegraded: sampleCount >= 2 && successRate < 50,
+            // 浏览器优先窗口内的引擎仍可用，但每次要走 4–13s 的浏览器兜底 → 同类里排到最后。
+            isBrowserOnly: isEngineBrowserOnly(engine),
             successRate,
             avgDurationMs
         };
@@ -115,6 +118,9 @@ function sortCandidatesByRecentHealth(candidates: string[]): string[] {
     indexed.sort((a, b) => {
         if (a.isDegraded !== b.isDegraded) {
             return a.isDegraded ? 1 : -1;
+        }
+        if (a.isBrowserOnly !== b.isBrowserOnly) {
+            return a.isBrowserOnly ? 1 : -1;
         }
         if (a.isDegraded && b.isDegraded) {
             if (a.successRate !== b.successRate) {
