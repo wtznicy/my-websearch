@@ -140,6 +140,14 @@ function check(schema) {
             });
         }
     }
+    // 跨语言漂移也视为失败：新增变量必须两种语言同时补齐。
+    const drift = crossLanguageDrift(schema);
+    if (drift.onlyEn.length > 0) {
+        problems.push(`zh 缺少变量（仅 en 有）: ${drift.onlyEn.join(', ')}`);
+    }
+    if (drift.onlyZh.length > 0) {
+        problems.push(`en 缺少变量（仅 zh 有）: ${drift.onlyZh.join(', ')}`);
+    }
     return problems;
 }
 

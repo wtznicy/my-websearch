@@ -266,6 +266,17 @@ my-websearch doctor --reset-health
 
 支持通过全局配置文件（`~/.my-websearch/config.json`）、本地 `.env` 或系统环境变量设置：
 
+#### 0. 🖥️ 服务器与运行时
+
+| 变量名 | 默认值 | 可选值 / 说明 |
+| :--- | :--- | :--- |
+| `HOST` / `OPEN_WEBSEARCH_HOST` | `127.0.0.1` | MCP HTTP 监听地址；绑定到非回环地址时会自动加入 Host 白名单并打印无鉴权警告 |
+| `OPEN_WEBSEARCH_DAEMON_HOST` / `OPEN_WEBSEARCH_DAEMON_PORT` | `127.0.0.1` / `3210` | 本地 REST daemon 监听地址（无鉴权，保持回环） |
+| `METRICS_ENABLED` | `false` | 启用进程内计数器与 daemon `/metrics` 端点 |
+| `FETCH_WEB_DEADLINE_MS` | `45000` | 单次 `fetchWebContent` 的硬截止时间（cookie + 浏览器 + 重试合计） |
+| `BING_PLAYWRIGHT_BUDGET_MS` | `6000` | 旧变量名保留：Bing 浏览器兜底预算（现由 raw CDP 驱动），超时后保留 HTTP 结果 |
+| `MYWEBSEARCH_NO_AUTO_BOOTSTRAP` | 未设置 | 设为 `1` 时，首次运行不再从其他应用的 MCP 配置中复制 API Key |
+
 #### 1. 🔍 检索与路由编排
 
 | 变量名 | 默认值 | 可选值 / 说明 |
