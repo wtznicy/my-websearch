@@ -517,12 +517,17 @@ export async function searchBraveWithBrowser(
             const html = await p.content();
             const results = parseBraveResults(html, new Set());
             if (results.length === 0) {
-                throw new AppError({
-                    code: 'bot_challenge',
-                    retryable: false,
-                    engine: 'brave',
-                    message: 'Brave browser fallback returned no parsable results (likely blocked).'
-                });
+                // 0 条可能是「查询本身没有结果」，也可能是验证页；只有后者才算被拦。
+                // 误把正常空结果当 bot_challenge 会错误熔断 180s。
+                if (isBraveBrowserFallbackChallenge(html, 0)) {
+                    throw new AppError({
+                        code: 'bot_challenge',
+                        retryable: false,
+                        engine: 'brave',
+                        message: 'Brave browser fallback returned the anti-bot challenge page (no parsable results).'
+                    });
+                }
+                return [];
             }
             return results.slice(0, limit);
         } finally {
@@ -592,6 +597,11 @@ async function executeBraveHttpSearch(
             return parseBraveResults(html, seenUrls, $);
         }
     });
+}
+
+/** 浏览器兜底是否真的被反爬拦截（0 条结果且页面命中验证页特征；正常空结果不算） */
+export function isBraveBrowserFallbackChallenge(html: string, resultCount: number): boolean {
+    return resultCount === 0 && isBraveCaptchaChallengePage(html);
 }
 
 /**

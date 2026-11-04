@@ -7,7 +7,8 @@ import {
     disableBraveOfficialApi,
     resetBraveOfficialApiCooldown,
     getBraveOfficialApiCooldownRemainingMs,
-    shouldUseBraveBrowserFallback
+    shouldUseBraveBrowserFallback,
+    isBraveBrowserFallbackChallenge
 } from '../../engines/brave/brave.js';
 import { AppError } from '../../core/errors.js';
 import { isBraveCaptchaChallengePage } from '../../core/antiBot/antiBotDetection.js';
@@ -360,5 +361,14 @@ describe('Brave 429 挑战页与配额限流区分', () => {
         expect(classifyBraveChallenge(plain429)).toBe('quota');
         expect(isBraveCaptchaChallengePage('')).toBe(false);
         expect(classifyBraveChallenge('')).toBe('quota');
+    });
+});
+
+describe('Brave browser fallback 空结果判定', () => {
+    it('only treats zero results as blocked when the page is a challenge page', () => {
+        expect(isBraveBrowserFallbackChallenge('<p>正在验证您不是机器人</p>', 0)).toBe(true);
+        // 正常空结果页：不能被误判成 bot_challenge（否则会错误熔断 180s）
+        expect(isBraveBrowserFallbackChallenge('<html><body><div id="results">No results found</div></body></html>', 0)).toBe(false);
+        expect(isBraveBrowserFallbackChallenge(NORMAL_PAGE, 1)).toBe(false);
     });
 });
