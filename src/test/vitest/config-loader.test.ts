@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -115,6 +115,38 @@ INVALID LINE WITHOUT EQUALS
 
             expect(fakeTargetEnv.GITEE_TOKEN).toBe('gitee-from-config');
             expect(injected.GITEE_TOKEN).toBe('gitee-from-config');
+        });
+
+        it('treats a blank secret env value as unset so config can fill it', () => {
+            const fakeTargetEnv: NodeJS.ProcessEnv = { MYWEBSEARCH_DATA_DIR: tempDir, GITHUB_TOKEN: '   ' };
+            const appConfigPath = getAppConfigFilePath(fakeTargetEnv);
+            fs.writeFileSync(appConfigPath, JSON.stringify({ apiKeys: { github: 'ghp_from_config' } }), 'utf8');
+
+            const injected = loadApplicationConfigEnv(fakeTargetEnv, { cwd: tempDir, quiet: true });
+
+            expect(fakeTargetEnv.GITHUB_TOKEN).toBe('ghp_from_config');
+            expect(injected.GITHUB_TOKEN).toBe('ghp_from_config');
+        });
+
+        it('warns once when env and config values differ, without printing secrets', () => {
+            const fakeTargetEnv: NodeJS.ProcessEnv = { MYWEBSEARCH_DATA_DIR: tempDir, GITHUB_TOKEN: 'env-token' };
+            const appConfigPath = getAppConfigFilePath(fakeTargetEnv);
+            fs.writeFileSync(appConfigPath, JSON.stringify({ apiKeys: { github: 'config-token' } }), 'utf8');
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+            try {
+                loadApplicationConfigEnv(fakeTargetEnv, { cwd: tempDir, quiet: false });
+                const diffWarnings = warn.mock.calls
+                    .map((call) => String(call[0]))
+                    .filter((line) => line.includes('differs from'));
+
+                expect(diffWarnings).toHaveLength(1);
+                expect(diffWarnings[0]).toContain('GITHUB_TOKEN');
+                expect(diffWarnings[0]).not.toContain('env-token');
+                expect(diffWarnings[0]).not.toContain('config-token');
+            } finally {
+                warn.mockRestore();
+            }
         });
 
         it('.env takes precedence over ~/.my-websearch/config.json', () => {

@@ -76,6 +76,8 @@ export interface ConfigLoadSnapshot {
     initialEnvKeys: Set<string>;
     injectedValues: Record<string, string>;
     injectedSources: Record<string, ConfigValueSource>;
+    /** 已提示过「env 与配置文件值不同」的 key（每进程一次） */
+    warnedEnvDiffKeys?: Set<string>;
 }
 
 const envLoadSnapshots = new WeakMap<NodeJS.ProcessEnv, ConfigLoadSnapshot>();
@@ -305,10 +307,30 @@ function mergeLowerPriorityEnv(
     }
 }
 
+/** 密钥类环境变量：空字符串/纯空白视为未配置（允许 config.json 注入） */
+function isSecretEnvKey(key: string): boolean {
+    return /(?:^|_)(?:TOKEN|KEY|SECRET)(?:_|$)/.test(key);
+}
+
+function isBlankEnvValue(value: string | undefined): boolean {
+    return value === undefined || value.trim() === '';
+}
+
+function describeCandidateSource(source: ConfigValueSource | undefined): string {
+    switch (source) {
+        case 'dot_env':
+            return 'the project .env';
+        case 'project_config_json':
+            return 'the project .my-websearch.json';
+        default:
+            return '~/.my-websearch/config.json';
+    }
+}
+
 /**
  * 统一加载应用级配置，并将缺失的配置填补（fill-missing）写入 targetEnv（默认当前进程环境变量）
  * 优先级：
- *   1. targetEnv 现有变量（最高优先级，绝不覆盖）
+ *   1. targetEnv 现有变量（最高优先级，绝不覆盖；密钥类变量的空白值除外）
  *   2. 项目根目录 .env
  *   3. 项目根目录 .my-websearch.json
  *   4. ~/.my-websearch/config.json（支持 MYWEBSEARCH_DATA_DIR）
@@ -394,10 +416,37 @@ export function loadApplicationConfigEnv(
         injectedValues: {},
         injectedSources: {}
     };
+    if (!snapshot.warnedEnvDiffKeys) {
+        snapshot.warnedEnvDiffKeys = new Set<string>();
+    }
+
+    // env 与配置文件同时存在且值不同：只提示 key 名（不打印值），每个 key 每进程一次。
+    // 注意：两边不同时存在时不会触发；空值 env 视为未配置（交给下面的注入）。
+    if (shouldEmitConfigStartupLog(targetEnv, options.quiet)) {
+        for (const [key, candidateValue] of Object.entries(candidateEnv)) {
+            if (!currentDefinedKeys.has(key)) {
+                continue;
+            }
+            if (isSecretEnvKey(key) && isBlankEnvValue(targetEnv[key])) {
+                continue;
+            }
+            const current = (targetEnv[key] ?? '').trim();
+            const incoming = candidateValue.trim();
+            if (!incoming || current === incoming || snapshot.warnedEnvDiffKeys.has(key)) {
+                continue;
+            }
+            snapshot.warnedEnvDiffKeys.add(key);
+            console.warn(
+                `⚠️ [config] ${key} differs from ${describeCandidateSource(candidateSources[key])}; the process env value wins.`
+            );
+        }
+    }
 
     const injected: Record<string, string> = {};
     for (const [key, value] of Object.entries(candidateEnv)) {
-        if (Object.prototype.hasOwnProperty.call(candidateEnv, key) && !currentDefinedKeys.has(key)) {
+        // 密钥类变量：env 里只有空白字符时视为未配置，允许 config 注入（避免 "" 占位堵死）
+        const blankSecret = isSecretEnvKey(key) && isBlankEnvValue(targetEnv[key]);
+        if (Object.prototype.hasOwnProperty.call(candidateEnv, key) && (!currentDefinedKeys.has(key) || blankSecret)) {
             // 若外部环境变量已显式指定了 PROXY_URL，则配置文件中的 USE_PROXY / PROXY_ENGINES 不再补入，避免干扰外部显式合并变量
             if (currentDefinedKeys.has('PROXY_URL') && (key === 'USE_PROXY' || key === 'PROXY_ENGINES')) {
                 continue;

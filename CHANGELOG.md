@@ -6,6 +6,9 @@ All notable changes to `my-websearch` are documented in this file.
 
 ### Changed
 - **codeSymbol 快速失败**：缺少 `GITHUB_TOKEN` 时在入口立即返回 `missing_api_key`，不再进入 8s 预算、也不发起任何网络请求；契约测试补充「耗时 <500ms」断言。
+- **密钥类空 env 不再堵死 config.json**：`*_TOKEN` / `*_KEY` / `*_SECRET` 在进程 env 中为纯空白时视为未配置，允许 config.json 注入（`PROXY_URL=""` 等开关语义保持不变）。
+- **env 与 config 冲突提示**：两者同时存在且值不同时，启动日志提示 key 名与来源（不打印值，每进程一次），并明确 env 优先。
+- **doctor 显示 key 来源**：`API keys` 行现在标注每个 key 来自 `env` / `config` / `project` / `.env`；`RECOGNIZED_ENV_KEYS` 补入 `GITEE_TOKEN`。
 
 ## [1.5.0] - 2026-11-04
 

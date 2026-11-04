@@ -177,6 +177,36 @@ export function formatDoctorHumanReadable(report: DoctorReport): string {
         ? `, probeKind=${browserProbeKind}, launched=${report.browser.launched ? 'yes' : 'no'}, pageOpened=${report.browser.pageOpened ? 'yes' : 'no'}${report.browser.latencyMs !== null ? ` (${report.browser.latencyMs}ms)` : ''}`
         : ` (probeKind=${browserProbeKind}; path check only; use --browser to verify launch)`;
 
+    // 每个 key 的来源：env / config / project / .env（便于排查「env 覆盖了 config」或「空值堵死注入」）
+    const keySourceLabel = (envKey: string): string => {
+        switch (report.configSources.keySources[envKey]) {
+            case 'process_env':
+                return 'env';
+            case 'app_config_json':
+                return 'config';
+            case 'project_config_json':
+                return 'project';
+            case 'dot_env':
+                return '.env';
+            default:
+                return 'unset';
+        }
+    };
+    const apiKeyPairs: Array<[keyof typeof report.effectiveConfig.apiKeys, string]> = [
+        ['context7', 'CONTEXT7_API_KEY'],
+        ['exa', 'EXA_API_KEY'],
+        ['brave', 'BRAVE_API_KEY'],
+        ['github', 'GITHUB_TOKEN'],
+        ['gitee', 'GITEE_TOKEN'],
+        ['stackoverflow', 'STACKOVERFLOW_API_KEY']
+    ];
+    const apiKeyLine = apiKeyPairs
+        .map(([name, envKey]) => {
+            const value = report.effectiveConfig.apiKeys[name];
+            return value ? `${name}=${value} (${keySourceLabel(envKey)})` : `${name}=unset`;
+        })
+        .join(', ');
+
     const lines = [
         `my-websearch doctor (v${report.version})`,
         `Checked at: ${report.checkedAt}`,
@@ -195,7 +225,7 @@ export function formatDoctorHumanReadable(report: DoctorReport): string {
         `  Search mode:     ${report.effectiveConfig.searchMode}`,
         `  Search deadline: ${report.effectiveConfig.searchDeadlineMs}ms`,
         `  HTTP CORS:       ${report.effectiveConfig.enableCors ? `enabled (${report.effectiveConfig.corsOrigin})` : 'disabled'}`,
-        `  API keys:        context7=${report.effectiveConfig.apiKeys.context7 ?? 'unset'}, exa=${report.effectiveConfig.apiKeys.exa ?? 'unset'}, brave=${report.effectiveConfig.apiKeys.brave ?? 'unset'}, github=${report.effectiveConfig.apiKeys.github ?? 'unset'}, gitee=${report.effectiveConfig.apiKeys.gitee ?? 'unset'}, stackoverflow=${report.effectiveConfig.apiKeys.stackoverflow ?? 'unset'}`,
+        `  API keys:        ${apiKeyLine}`,
         ...(report.effectiveConfig.apiKeys.github
             ? []
             : ['  ⚠️ codeSymbol needs GITHUB_TOKEN: add "github" under apiKeys in ~/.my-websearch/config.json and restart the MCP server.']
