@@ -132,26 +132,27 @@ export async function cleanOrphanTempProfilesInBackground(maxAgeMs = 60 * 60 * 1
             activeTempDirs.add(activeSessionDir);
         }
 
-        for (const entry of entries) {
-            if (entry.isDirectory() && (entry.name.startsWith('mcp-search-') || entry.name.startsWith('my-websearch-cdp-'))) {
-                const fullPath = path.join(tempRoot, entry.name);
-                if (activeTempDirs.has(fullPath)) {
-                    continue;
-                }
-                try {
-                    const stats = await statAsync(fullPath).catch(() => null);
-                    const isStale = stats && (
-                        (now - stats.birthtimeMs > maxAgeMs) ||
-                        (now - stats.mtimeMs > maxAgeMs)
-                    );
-                    if (isStale) {
-                        await rmAsync(fullPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => undefined);
-                    }
-                } catch {
-                    // 忽略单个目录检查异常
-                }
+        const candidateEntries = entries.filter((entry) =>
+            entry.isDirectory() && (entry.name.startsWith('mcp-search-') || entry.name.startsWith('my-websearch-cdp-'))
+        );
+        await Promise.all(candidateEntries.map(async (entry) => {
+            const fullPath = path.join(tempRoot, entry.name);
+            if (activeTempDirs.has(fullPath)) {
+                return;
             }
-        }
+            try {
+                const stats = await statAsync(fullPath).catch(() => null);
+                const isStale = stats && (
+                    (now - stats.birthtimeMs > maxAgeMs) ||
+                    (now - stats.mtimeMs > maxAgeMs)
+                );
+                if (isStale) {
+                    await rmAsync(fullPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => undefined);
+                }
+            } catch {
+                // 忽略单个目录检查异常
+            }
+        }));
     } catch {
         // 忽略后台扫描异常
     }

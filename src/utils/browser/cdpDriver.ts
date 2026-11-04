@@ -144,14 +144,15 @@ export class CDPSession implements BrowserSession {
         this.closed = true;
         activeCDPSessions.delete(this);
 
-        for (const page of this.openPages) {
+        const pages = Array.from(this.openPages);
+        this.openPages.clear();
+        await Promise.allSettled(pages.map(async (page) => {
             try {
                 await settleWithin(page.close(), 1500);
             } catch {
                 // ignore
             }
-        }
-        this.openPages.clear();
+        }));
 
         if (this.rootClient) {
             try {
@@ -192,13 +193,13 @@ const activeCDPSessions = new Set<CDPSession>();
 export async function closeAllCDPSessions(): Promise<void> {
     const sessions = Array.from(activeCDPSessions);
     activeCDPSessions.clear();
-    for (const session of sessions) {
+    await Promise.allSettled(sessions.map(async (session) => {
         try {
             await session.close();
         } catch {
             // ignore
         }
-    }
+    }));
 }
 
 export class CDPDriver implements BrowserDriver {
