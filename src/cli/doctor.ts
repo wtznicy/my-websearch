@@ -226,6 +226,20 @@ export async function buildDoctorReport(
         ? 'Live network probes sent to target engines (using minimal result count and short-TTL cache). Avoid high-frequency execution to prevent upstream anti-bot rate limits.'
         : undefined;
 
+    const metricsSnapshot = metrics.getMetrics();
+    const cacheStats = {
+        search: {
+            hits: metricsSnapshot.cache.hits,
+            misses: metricsSnapshot.cache.misses,
+            hitRate: metricsSnapshot.cache.hitRate
+        },
+        fetch: {
+            hits: metricsSnapshot.fetchCache.hits,
+            misses: metricsSnapshot.fetchCache.misses,
+            hitRate: metricsSnapshot.fetchCache.hitRate
+        }
+    };
+
     return {
         version,
         checkedAt,
@@ -248,6 +262,7 @@ export async function buildDoctorReport(
         proxy,
         browser: browserInfo,
         engines,
+        cacheStats,
         recommendations,
         // 跨进程的引擎延迟样本（最近 7 天），供用户判断该不该调整路由权重
         engineLatency: readEngineLatencyStats(),

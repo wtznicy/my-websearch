@@ -57,6 +57,7 @@ export type SlidingWindowEngineStats = {
     failure: number;
     successRate: number; // 0-100 百分比
     avgDurationMs: number;
+    p50DurationMs: number;
     p95DurationMs: number;
 };
 
@@ -283,6 +284,7 @@ class MetricsCollector {
                     failure: 0,
                     successRate: 0,
                     avgDurationMs: 0,
+                    p50DurationMs: 0,
                     p95DurationMs: 0
                 };
                 continue;
@@ -296,6 +298,8 @@ class MetricsCollector {
             const avgDurationMs = Math.round(totalDuration / total);
 
             const sortedDurations = valid.map((s) => s.durationMs).sort((a, b) => a - b);
+            const p50Idx = Math.min(Math.floor(0.5 * total), total - 1);
+            const p50DurationMs = sortedDurations[p50Idx] ?? 0;
             const p95Idx = Math.min(Math.floor(0.95 * total), total - 1);
             const p95DurationMs = sortedDurations[p95Idx] ?? 0;
 
@@ -305,6 +309,7 @@ class MetricsCollector {
                 failure,
                 successRate,
                 avgDurationMs,
+                p50DurationMs,
                 p95DurationMs
             };
         }
@@ -403,6 +408,8 @@ class MetricsCollector {
         const totalDuration = valid.reduce((acc, s) => acc + s.durationMs, 0);
         const avgDurationMs = Math.round(totalDuration / total);
         const sortedDurations = valid.map((s) => s.durationMs).sort((a, b) => a - b);
+        const p50Idx = Math.min(Math.floor(0.5 * total), total - 1);
+        const p50DurationMs = sortedDurations[p50Idx] ?? 0;
         const p95Idx = Math.min(Math.floor(0.95 * total), total - 1);
         const p95DurationMs = sortedDurations[p95Idx] ?? 0;
         return {
@@ -411,6 +418,7 @@ class MetricsCollector {
             failure,
             successRate,
             avgDurationMs,
+            p50DurationMs,
             p95DurationMs
         };
     }

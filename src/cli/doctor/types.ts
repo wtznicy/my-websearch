@@ -114,6 +114,11 @@ export type DoctorEngineStatus = {
     detail?: string;
     /** 挑战类型：captcha=需要人机验证（非配额）；quota=配额/频控窗口 */
     challengeKind?: 'captcha' | 'quota';
+    /** 引擎熔断冷却剩余毫秒数 */
+    circuitRemainingMs?: number;
+    /** 近期滑动窗口延迟指标（来自 core/metrics.ts） */
+    p50Ms?: number;
+    p95Ms?: number;
 };
 
 export type DoctorReport = {
@@ -129,6 +134,11 @@ export type DoctorReport = {
         failureTtlMs: number;
     };
     probedEngines: string[];
+    /** 缓存命中率统计（来自 core/metrics.ts） */
+    cacheStats?: {
+        search: { hits: number; misses: number; hitRate: number };
+        fetch: { hits: number; misses: number; hitRate: number };
+    };
     /** 最近 7 天的引擎耗时聚合（跨进程持久化）；为空表示还没有样本 */
     engineLatency: Array<{ engine: string; samples: number; successRate: number; p50: number; p95: number }>;
     configSources: {

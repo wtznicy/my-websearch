@@ -214,12 +214,25 @@ export function formatDoctorHumanReadable(report: DoctorReport): string {
     for (const eng of report.engines) {
         const extra = eng.detail ? ` (${eng.detail})` : '';
         const challengeInfo = eng.challengeKind ? ` challenge=${eng.challengeKind}` : '';
+        const circuitInfo = eng.circuitRemainingMs && eng.circuitRemainingMs > 0
+            ? ` circuit=${Math.ceil(eng.circuitRemainingMs / 1000)}s`
+            : '';
+        const latencyInfo = eng.p50Ms !== undefined && eng.p95Ms !== undefined
+            ? ` p50=${eng.p50Ms}ms p95=${eng.p95Ms}ms`
+            : '';
         const cacheInfo = eng.probeKind === 'http_search'
             ? ` probe=${eng.probeKind} cached=${eng.cached ? 'yes' : 'no'} ttl=${eng.ttlMs}ms`
             : ` probe=${eng.probeKind}`;
         lines.push(
-            `  - ${eng.engine.padEnd(11)} status=${eng.status.padEnd(21)} stage=${eng.stage.padEnd(14)} proxyTcp=${eng.proxyTcp.padEnd(11)} http=${eng.http.padEnd(11)} app=${eng.application.padEnd(15)} route=${eng.usesProxy ? 'proxy' : 'direct'}${cacheInfo}${challengeInfo}${extra}`
+            `  - ${eng.engine.padEnd(11)} status=${eng.status.padEnd(21)} stage=${eng.stage.padEnd(14)} proxyTcp=${eng.proxyTcp.padEnd(11)} http=${eng.http.padEnd(11)} app=${eng.application.padEnd(15)} route=${eng.usesProxy ? 'proxy' : 'direct'}${cacheInfo}${challengeInfo}${circuitInfo}${latencyInfo}${extra}`
         );
+    }
+
+    if (report.cacheStats) {
+        lines.push('');
+        lines.push('Cache hit rate:');
+        lines.push(`  Search cache:    ${report.cacheStats.search.hitRate}% (${report.cacheStats.search.hits} hits, ${report.cacheStats.search.misses} misses)`);
+        lines.push(`  Fetch pageCache: ${report.cacheStats.fetch.hitRate}% (${report.cacheStats.fetch.hits} hits, ${report.cacheStats.fetch.misses} misses)`);
     }
 
     if (report.engineLatency.length > 0) {

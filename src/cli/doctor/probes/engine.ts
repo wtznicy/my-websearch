@@ -12,7 +12,8 @@ import {
 import { ENGINE_REGISTRY } from '../../../engines/registry.js';
 import { BROWSER_USER_AGENT } from '../../../utils/constants.js';
 import { buildAxiosRequestOptions } from '../../../utils/httpRequest.js';
-import { isEngineCircuitOpen } from '../../../core/search/engineCircuitBreaker.js';
+import { isEngineCircuitOpen, getEngineCircuitRemainingMs } from '../../../core/search/engineCircuitBreaker.js';
+import { metrics } from '../../../core/metrics.js';
 import { normalizeEngineName, SUPPORTED_SEARCH_ENGINES } from '../../../core/search/searchEngines.js';
 import { isKnownUnreachableOverseasEngine } from '../../../utils/overseasProbe.js';
 import {
@@ -503,8 +504,22 @@ export async function evaluateEnginesDoctor(
         })
     );
 
+    const enrichedEngines: DoctorEngineStatus[] = engines.map((item) => {
+        const circuitRemainingMs = getEngineCircuitRemainingMs(item.engine);
+        const recentHealth = metrics.getRecentEngineHealth(item.engine) ?? metrics.getWindowedMetrics()[item.engine];
+        const p50Ms = recentHealth && recentHealth.total > 0 ? recentHealth.p50DurationMs : undefined;
+        const p95Ms = recentHealth && recentHealth.total > 0 ? recentHealth.p95DurationMs : undefined;
+
+        return {
+            ...item,
+            circuitRemainingMs,
+            ...(p50Ms !== undefined ? { p50Ms } : {}),
+            ...(p95Ms !== undefined ? { p95Ms } : {})
+        };
+    });
+
     return {
-        engines,
+        engines: enrichedEngines,
         probedEngines
     };
 }
