@@ -444,9 +444,12 @@ export async function searchBraveWithBrowser(
             };
         } else if (typeof b.contexts === 'function') {
             const contexts = b.contexts();
-            const firstCtx = contexts[0];
+            const firstCtx = contexts[0] as { newPage: () => Promise<unknown>; clearCookies?: () => Promise<void> } | undefined;
             if (!firstCtx) {
                 throw new Error('No browser context available');
+            }
+            if (typeof firstCtx.clearCookies === 'function') {
+                await firstCtx.clearCookies().catch(() => undefined);
             }
             page = await firstCtx.newPage();
         } else {
@@ -484,8 +487,10 @@ export async function searchBraveWithBrowser(
             // 轮询等待结果或 PoW「验证」按钮：
             // 冷启动（首次拉起浏览器/新 profile）时 SvelteKit 页面渲染晚于 domcontentloaded，
             // 只点一次会打空，随后只能看着 8s 超时失败——这正是「首次必失败、暖机后正常」的根因。
-            // 这里每 300ms 检查一次：有结果立刻结束；出现「验证/Verify」按钮就点击触发 Argon2 挑战。
-            const deadline = Date.now() + 9000;
+            // 采用阶梯轮询（前 2 秒 200ms 快速捕获渲染，之后 500ms 减小 CPU 开销）：
+            // 有结果立刻结束；出现「验证/Verify」按钮就点击触发 Argon2 挑战。
+            const startTime = Date.now();
+            const deadline = startTime + 9000;
             while (Date.now() < deadline && !signal?.aborted) {
                 const state = await p.evaluate(() => {
                     const hasResults = document.querySelectorAll('.snippet, .result-content').length > 0;
@@ -506,7 +511,8 @@ export async function searchBraveWithBrowser(
                 if (state.hasResults) {
                     break;
                 }
-                await new Promise((resolve) => setTimeout(resolve, 300));
+                const interval = (Date.now() - startTime < 2000) ? 200 : 500;
+                await new Promise((resolve) => setTimeout(resolve, interval));
             }
 
             if (signal?.aborted) {
