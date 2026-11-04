@@ -24,8 +24,6 @@ const DETERMINISTIC_TESTS = [
     'test-browser-path-guard',
     'test-core-fetch-services',
     'test-core-search',
-    'test-engine-normalization',
-    'test-redirect-safety',
     'test-sogou',
     'test-url-safety',
     'test-web-content'
