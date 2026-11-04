@@ -416,7 +416,7 @@ Pull requests and issues are welcome! To run the test suite locally:
 ```bash
 npm install
 npm run build
-npm test              # Run the Vitest suite (100 files, 769 tests at the current baseline)
+npm test              # Run the Vitest suite (`npm test` prints the current file/test counts)
 npm run check:docs    # Verify README env tables match docs/env-schema.json (edit the schema, then `npm run docs:env`)
 npm run test:live     # Run bounded-concurrency live integration tests
 npm run eval:live     # Run 23-case live STDIO JSON-RPC evaluation suite

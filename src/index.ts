@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { MyWebSearchRuntime } from './runtime/runtimeTypes.js';
 import { shouldCreateFullRuntimeForInvocation } from './runtime/runtimeSelection.js';
+import { getBoolean, getEnv, getNumber, getOptionalString } from './config/env.js';
 import { configureLogging, installConsoleBridge } from './core/log.js';
 
 // 注意：express / MCP SDK transports / 浏览器栈全部改为**按需动态导入**。
@@ -19,7 +20,7 @@ import { configureLogging, installConsoleBridge } from './core/log.js';
 
 // 统一日志：级别来自 LOG_LEVEL；启动静默时默认 warn。console.* 统一转 stderr，
 // 避免污染 CLI --json 的 stdout。
-configureLogging({ quietStartup: process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true' });
+configureLogging({ quietStartup: getBoolean('OPEN_WEBSEARCH_QUIET_STARTUP', false) });
 installConsoleBridge();
 
 // 从 package.json 注入真实版本号，避免 MCP 客户端看到的 server 版本失真。
@@ -146,7 +147,7 @@ async function main() {
   // 于是 MODE=bogus 时两个传输都不启动、无报错、退出码 0（实测：打印一行误导性的
   // "HTTP server disabled, running in STDIO mode only" 后直接退出，任何 JSON-RPC 请求都无响应）。
   // 这里显式校验：非法值直接报错退出，省掉使用者半小时排查。
-  const modeValue = process.env.MODE;
+  const modeValue = getOptionalString('MODE');
   if (modeValue !== undefined && !['both', 'http', 'stdio'].includes(modeValue)) {
     console.error(`❌ Invalid MODE="${modeValue}". Expected one of: both, http, stdio (or leave MODE unset for "both").`);
     process.exit(1);
@@ -182,7 +183,7 @@ async function main() {
   process.once('SIGTERM', () => { void gracefulShutdown('SIGTERM'); });
 
   // Enable STDIO mode if MODE is 'both' or 'stdio' or not specified
-  if (process.env.MODE === undefined || process.env.MODE === 'both' || process.env.MODE === 'stdio') {
+  if (modeValue === undefined || modeValue === 'both' || modeValue === 'stdio') {
     console.error('🔌 Starting STDIO transport...');
     const server = createServer(runtime, McpServerCtor);
     const stdioTransport = new StdioServerTransport();
@@ -215,7 +216,7 @@ async function main() {
 
     // 绑定地址必须先解析：Host 白名单要和它联动，否则 HOST=0.0.0.0（Docker/容器）
     // 的部署会被 Host 校验 403 掉——文档里的生产配方直接失效。
-    const HOST = process.env.OPEN_WEBSEARCH_HOST || process.env.HOST || '127.0.0.1';
+    const HOST = getOptionalString('OPEN_WEBSEARCH_HOST') ?? getOptionalString('HOST') ?? '127.0.0.1';
     // DNS rebinding 保护（与本地 REST daemon 共用同一套白名单解析，见 adapters/http/sharedMiddleware）
     applyHostValidation(app, [HOST]);
 
@@ -236,15 +237,15 @@ async function main() {
     // 会话卫生：客户端异常断开（未触发 onclose）时条目会永久滞留，
     // 因此给每个会话记录最后活跃时间，由 reaper 回收空闲会话，并对总量设上限。
     // 三个参数可用环境变量覆盖（默认 30 分钟空闲 / 上限 100 / 每 5 分钟巡检），便于测试与调优。
-    const parsePositiveNumber = (val: string | undefined, defaultVal: number, minVal: number, maxVal: number): number => {
-      const num = Number(val);
+    const parsePositiveNumber = (name: string, defaultVal: number, minVal: number, maxVal: number): number => {
+      const num = Number(getEnv(name));
       if (!Number.isFinite(num) || num <= 0) return defaultVal;
       return Math.min(Math.max(num, minVal), maxVal);
     };
 
-    const SESSION_IDLE_TTL_MS = parsePositiveNumber(process.env.MCP_SESSION_TTL_MS, 30 * 60 * 1000, 10_000, 7 * 24 * 3600 * 1000);
-    const MAX_SESSIONS = parsePositiveNumber(process.env.MCP_MAX_SESSIONS, 100, 1, 10_000);
-    const SESSION_REAPER_INTERVAL_MS = parsePositiveNumber(process.env.MCP_SESSION_REAPER_MS, 5 * 60 * 1000, 5_000, 24 * 3600 * 1000);
+    const SESSION_IDLE_TTL_MS = parsePositiveNumber('MCP_SESSION_TTL_MS', 30 * 60 * 1000, 10_000, 7 * 24 * 3600 * 1000);
+    const MAX_SESSIONS = parsePositiveNumber('MCP_MAX_SESSIONS', 100, 1, 10_000);
+    const SESSION_REAPER_INTERVAL_MS = parsePositiveNumber('MCP_SESSION_REAPER_MS', 5 * 60 * 1000, 5_000, 24 * 3600 * 1000);
     const sessionCapacity = createSessionCapacityManager(
       MAX_SESSIONS,
       () => Object.keys(transports.streamable).length + Object.keys(transports.sse).length
@@ -509,7 +510,7 @@ async function main() {
 
     // Read the port number from the environment variable; use the default port 3211 if it is not set.
     // 3211 与 CLI daemon 的默认端口 3210 相邻，避免与常见的前端 dev server（3000）等撞端口。
-    const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3211;
+    const PORT = getNumber('PORT', 3211, { integer: true, min: 1, max: 65535 });
 
     // 默认只绑定回环地址，避免端口暴露到局域网/公网（配合上面的 DNS rebinding 保护）。
     // 如需局域网/公网或容器访问，设置 OPEN_WEBSEARCH_HOST=0.0.0.0 或 HOST=0.0.0.0 显式放开。
@@ -522,7 +523,7 @@ async function main() {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
         clearInterval(sessionReaper);
-        if (process.env.MODE !== 'http') {
+        if (modeValue !== 'http') {
           console.error(`⚠️ HTTP port ${PORT} is already in use (${HOST}:${PORT}); HTTP server disabled for this instance, continuing in STDIO mode only.`);
           return;
         }
