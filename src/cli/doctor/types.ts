@@ -3,8 +3,8 @@ import { ConfigValueSource } from '../../configLoader.js';
 
 /**
  * 只列出**真正会被读取**的环境变量（用于 doctor 展示配置来源）。
- * 已废弃的历史变量（PLAYWRIGHT_ENGINES / PLAYWRIGHT_WS_ENDPOINT / ENABLE_HTTP_SERVER 等）
- * 不再列进来：它们不会生效，列出来会让用户误以为配置已生效。
+ * 从未生效的历史变量（PLAYWRIGHT_ENGINES / PLAYWRIGHT_WS_ENDPOINT / ENABLE_HTTP_SERVER 等）
+ * 不列进来：它们不会被读取，列出来会让用户误以为配置已生效。
  */
 export const RECOGNIZED_ENV_KEYS = [
     'DEFAULT_SEARCH_ENGINE',

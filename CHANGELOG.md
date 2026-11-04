@@ -2,6 +2,36 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
+## [1.5.0] - 2026-11-04
+
+### Added
+- **Brave 429「浏览器优先」窗口（180s）**：无 Key 路径 curl 命中 429 后打开 180s 软窗口，窗口内完全跳过 HTTP、所有 Brave 调用直接走伪装 CDP 浏览器；浏览器也失败才升级为硬熔断（60 → 120 → 240 → 300s）。窗口内引擎仍算可用，但会被 auto 路由与级联排到最后，避免拖慢其它搜索。
+- **`doctor --network` 指标补全**：报告新增搜索/抓取缓存命中率、各引擎熔断剩余时间、引擎 P50/P95 耗时（文本与 `--json` 同步输出）。
+- **浏览器自动探测扩展**：Windows/macOS/Linux 自动探测 Brave / Vivaldi / Opera，错误提示明确仅支持 Chromium 系（Firefox/WebKit 不支持）并列出 `CHROME_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH` / `PLAYWRIGHT_CDP_ENDPOINT` / `doctor --browser`。
+- **环境变量访问层** `src/config/env.ts`：`getEnv / getString / getOptionalString / getNumber / getBoolean / getList`，支持注入 env；ESLint 禁止 `src/config/` 与测试之外直接读 `process.env`。
+- **环境变量文档单一事实源**：`docs/env-schema.json` + `tools/env-docs.mjs`（extract/write/check），`npm run docs:env` 重生成、`npm run check:docs` 进 CI；中英两份 README 表格与 schema 强一致（跨语言漂移也判失败）。
+- **Windows CI + Node 20/22 矩阵**：CI 增加 windows-latest 与 ubuntu Node 20/22；`docsCache` / `pageCache` 对 `node:sqlite` 增加 `nodeMajor >= 22` 守卫并回退 JSON 分片缓存。
+
+### Changed
+- **CLI 冷启动**：`runCli` 命令处理器与 `index.ts` 服务器栈（express/MCP SDK/浏览器栈）改为按需动态导入，`--help` 从 ~1.38s 降到 ~0.32s。
+- **引擎超时接入 registry**：单引擎超时改读 `defaultTimeoutMs`（yahoo 12s 生效），浏览器兜底引擎再叠加 1.5x/2x，不再统一硬顶 10s。
+- **测试体系统一**：17 个 legacy 脚本全部迁入 Vitest，删除 legacy 目录与 deterministic runner；CI 收敛为 `typecheck → manifests → docs → lint → vitest → build`，并保留 `test:timing`。
+- **大文件拆分**：`browserSession`(1790)、`remoteCodeIntel`(1132)、`github`(968)、`bing`(951) 按职责拆至 <500 行，导出路径保持不变。
+- **依赖升级**：MCP SDK 1.32.2、axios 1.21、cheerio 1.2、express 5.3、ipaddr.js 2.5、cors 2.8.6、zod 4、https-proxy-agent 9、jsdom 30、domhandler 6、vitest 5、@types/node 26、eslint 10.14、typescript-eslint 8.72。TypeScript 保持 5.9：typescript-eslint 8.x 尚不支持 TS 7 的编译器 API。
+- **Brave 回退轮询**：固定 300ms 改为前 2s 200ms、之后 500ms 的阶梯轮询，并复用浏览器 session；页面与临时目录清理改为并发。
+- **注释校正**：修正 Brave「8s 超时」为 9s 轮询预算、熔断首档说明（默认 30s / Brave 60s + 180s 软窗口）、`SEARCH_MODE=playwright` 标明底层为 CDP、`doctor` 未实现变量措辞。
+
+### Fixed
+- **Brave 兜底空结果误判**：浏览器返回 0 条且页面不是验证页时返回空列表，不再当作 `bot_challenge` 误熔断 180s。
+- **浏览器栈错误提示**：移除引用不存在的 `PLAYWRIGHT_MODULE_PATH` / `PLAYWRIGHT_PACKAGE` / `PLAYWRIGHT_WS_ENDPOINT`，改为可操作的浏览器与代理提示；`RECOGNIZED_ENV_KEYS` 移除 3 个从未生效的变量。
+- **Brave 冷启动首次必失败**：PoW 验证按钮在 `domcontentloaded` 后才渲染，改为轮询点击（冷启动 3/3 成功）。
+- **Startpage 文案**：不再声称「requires a Playwright browser session」，明确为 CDP + Anubis 反爬。
+
+### Performance
+- CLI 冷启动 1.38s → 0.32s（`--help` / `status` 不再加载引擎与服务器栈）。
+- Brave 429 后 60s 内重复调用的成功率提升（软窗口直接走浏览器，避免 curl 白撞并延长服务端窗口）。
+- 页面/会话与临时目录清理并发化（`Promise.all` / `allSettled`）。
+
 ## [1.4.2] - 2026-11-02
 
 ### Added

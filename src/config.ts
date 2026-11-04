@@ -32,11 +32,11 @@ export interface AppConfig {
     defaultSearchEngine: 'auto' | 'bing' | 'bing-news' | 'duckduckgo' | 'exa' | 'brave' | 'baidu' | 'csdn' | 'juejin' | 'startpage' | 'yahoo' | 'sogou' | 'github' | 'stackoverflow' | 'hackernews' | 'arxiv' | 'code';
     // List of allowed search engines (if empty, all engines are available)
     allowedSearchEngines: string[];
-    // Search mode: request only, auto request then fallback, or force Playwright
+    // Search mode: request only, auto request then fallback, or force the browser (CDP; historical name "playwright")
     searchMode: SearchEngineMode;
     // 单个引擎的检索模式精准覆盖（支持多启动方式混合配置）
     engineSearchModes?: Record<string, SearchEngineMode>;
-    // 允许启用/回退至 Playwright 浏览器的引擎列表（如 ['bing', 'startpage']）
+    // 允许启用/回退至浏览器（CDP 驱动；历史名为 Playwright）的引擎列表（如 ['bing', 'startpage']）
     playwrightEngines: string[];
     // 全局并发搜索限制：同时进行的搜索请求数上限（0 = 不限制）。
     // CLI 一次性调用不受此限制，仅 daemon 模式下多客户端并发时生效。

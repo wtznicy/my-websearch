@@ -7,8 +7,8 @@
  * - Bing/其它 bot_challenge：可能持续数分钟。
  *
  * 固定 5 分钟会把一次瞬时 202 放大成整段会话不可用，因此改用自适应冷却：
- * - 首次熔断 30s；
- * - 同一引擎连续触发时指数退避（60s → 120s → 240s → 300s 上限）；
+ * - 首次熔断：默认 30s，Brave 覆盖为 60s（见 ENGINE_INITIAL_COOLDOWN_MS）；
+ * - 同一引擎连续触发时每次翻倍，上限 300s（Brave 即 60s → 120s → 240s → 300s）；
  * - 任意一次成功调用立即清零；
  * - 期间 searchService 跳过该引擎并把配额平移给其他引擎，级联候选同样排除。
  */
@@ -20,8 +20,9 @@ const DEFAULT_MAX_COOLDOWN_MS = 5 * 60 * 1000;
 
 /**
  * 按引擎覆盖的首档冷却时间。
- * Brave 的 429 是分钟级窗口（实测多次 1–4 分钟才恢复），30s 后重试必然再撞 429；
+ * Brave 的 429 是分钟级窗口（实测常见 1–4 分钟，硬封可达 10 分钟以上），30s 后重试必然再撞 429；
  * 先给 60s，若仍失败由指数退避自动拉长到 120s → 240s → 300s。
+ * 注意：这只管「熔断冷却」；Brave 429 后的 180s「浏览器优先窗口」在 engineBrowserOnly 里单独维护。
  * 显式设置 ENGINE_CIRCUIT_BASE_COOLDOWN_MS 时以用户配置为准。
  */
 const ENGINE_INITIAL_COOLDOWN_MS: Record<string, number> = {

@@ -486,7 +486,7 @@ export async function searchBraveWithBrowser(
 
             // 轮询等待结果或 PoW「验证」按钮：
             // 冷启动（首次拉起浏览器/新 profile）时 SvelteKit 页面渲染晚于 domcontentloaded，
-            // 只点一次会打空，随后只能看着 8s 超时失败——这正是「首次必失败、暖机后正常」的根因。
+            // 只点一次会打空，随后只能看着 9s 轮询预算耗尽而失败——这正是「首次必失败、暖机后正常」的根因。
             // 采用阶梯轮询（前 2 秒 200ms 快速捕获渲染，之后 500ms 减小 CPU 开销）：
             // 有结果立刻结束；出现「验证/Verify」按钮就点击触发 Argon2 挑战。
             const startTime = Date.now();

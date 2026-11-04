@@ -64,7 +64,7 @@
 | **`arxiv`** | 🌐 Direct API | None | Official arXiv Atom XML API parsing titles, authors & abstracts | Scientific papers, machine learning & AI research |
 | **`code`** | 🌐 Proxy in CN | None | grep.app API search across global GitHub code with repo, path & exact line numbers | Source code implementations, API usage patterns |
 
-> **Version note**: this README tracks the current source tree (**1.4.2**). **Search operators**, **MCP Prompts/Resources**, **Maven docs fallback**, **Reddit/Zhihu/Cnblogs purifiers**, and the **raw-CDP browser fallback** ship in **1.3.11**; **1.3.12** fixes a flaky browser-budget test/behavior; **1.4.0** adds `codeSymbol`, CDP device profiles, DDG 202 browser fallback, and Brave curl/Schannel; **1.4.1** fixes Windows curl 8.4 compatibility; **1.4.2** adds Brave 429 challenge detection (`captcha` vs `quota`), a disguised headless CDP browser fallback that auto-triggers the Argon2 PoW, and `doctor` challenge classification. npm latest may lag until the package is published.
+> **Version note**: this README tracks the current source tree (**1.5.0**). **1.5.0** unifies the test suite (all legacy scripts migrated to Vitest, single runner in CI), centralizes every `process.env` read behind `src/config/env.ts` (enforced by ESLint), splits the four largest modules, adds a **180 s browser-only window** after a Brave 429 (HTTP is skipped and the disguised browser serves the window; a failing fallback trips the circuit), lazy-loads the server stack for a ~0.32 s CLI cold start, adds `doctor --network` cache-hit-rate / circuit-remaining / P50-P95 metrics, upgrades core dependencies (MCP SDK 1.32, axios 1.21, cheerio 1.2, express 5.3, zod 4), and adds a Windows CI job plus a Node 20/22 matrix with a `node:sqlite` fallback. Earlier: **1.4.2** added Brave 429 challenge detection (`captcha` vs `quota`) and the disguised CDP browser fallback; **1.4.1** fixed Windows curl 8.4 compatibility; **1.4.0** added `codeSymbol`, CDP device profiles and DDG 202 fallback. npm latest may lag until the package is published.
 
 ---
 
@@ -215,7 +215,7 @@ my-websearch doctor --network --engine bing,duckduckgo --json
 my-websearch doctor --reset-health
 ```
 
-The report separates configuration, proxy TCP reachability, HTTP reachability, application parsing, browser launch, and challenge verification status. For Brave, a 429 is additionally classified as `captcha` (human verification — retrying usually stays challenged) or `quota` (rate-limit window) in both the text report (`challenge=...`) and `--json` (`challengeKind`). Network mode performs real requests and should not be used as a high-frequency health check.
+The report separates configuration, proxy TCP reachability, HTTP reachability, application parsing, browser launch, and challenge verification status. For Brave, a 429 is additionally classified as `captcha` (human verification — retrying usually stays challenged) or `quota` (rate-limit window) in both the text report (`challenge=...`) and `--json` (`challengeKind`). Network mode also summarizes cache hit rates (search cache and fetch page cache), remaining circuit cooldowns per engine, and P50/P95 engine latency when persisted samples exist. Network mode performs real requests and should not be used as a high-frequency health check.
 
 ### 🌐 Proxy Troubleshooting & Upstream Rate Limiting
 

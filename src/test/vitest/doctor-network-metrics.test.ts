@@ -34,7 +34,7 @@ describe('P2-12: doctor --network 指标扩展', () => {
         metrics.recordFetchCacheMiss(); // 1 hit, 1 miss -> 50%
 
         const report = await buildDoctorReport(runtime, {
-            version: '1.4.2-test',
+            version: '0.0.0-test',
             network: true
         });
 
@@ -58,7 +58,7 @@ describe('P2-12: doctor --network 指标扩展', () => {
         tripEngineCircuit('bing');
 
         const report = await buildDoctorReport(runtime, {
-            version: '1.4.2-test',
+            version: '0.0.0-test',
             network: false
         });
 
@@ -81,7 +81,7 @@ describe('P2-12: doctor --network 指标扩展', () => {
         metrics.recordEngineSearch('bing', 500, true, now);
 
         const report = await buildDoctorReport(runtime, {
-            version: '1.4.2-test',
+            version: '0.0.0-test',
             network: false
         });
 
