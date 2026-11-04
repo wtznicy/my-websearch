@@ -159,7 +159,7 @@ export const __csdnArticleInternals = { extractArticleContent, isPromotionParagr
 
 /**
  * 浏览器兜底（cookie 预热 / 渲染抓取）的**总预算**。
- * 实测：文章页返回 521 时，兜底链最多会触发 4 次 Playwright 操作（cookie×2 + 渲染×2），
+ * 实测：文章页返回 521 时，兜底链最多会触发 4 次浏览器操作（CDP）（cookie×2 + 渲染×2），
  * 每次导航上限 20s，累积到 **64s 才失败**——远超 MCP 客户端 30s 预算，调用方只会看到超时。
  * 因此给整条兜底链一个总预算，超时即失败并保留上游真实原因（如 521）。
  */

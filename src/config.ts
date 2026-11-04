@@ -69,7 +69,7 @@ export interface AppConfig {
     /** 搜索级总时间预算（ms）：到点后未完成的引擎按超时处理 */
     searchDeadlineMs: number;
     fetchWebAllowInsecureTls: boolean;
-    // Playwright configuration (auto-detects local system Edge/Chrome or connects via CDP)
+    // Browser configuration (CDP driver by default; auto-detects local Edge/Chrome or connects via a CDP endpoint)
     playwrightExecutablePath?: string;
     playwrightCdpEndpoint?: string;
     playwrightHeadless: boolean;
@@ -199,7 +199,7 @@ export function parseSearchModeConfig(
         defaultMode = 'request';
     }
 
-    // 计算哪些引擎允许使用 Playwright（mode 为 auto 或 playwright）
+    // 计算哪些引擎允许使用浏览器渲染（CDP；mode 为 auto 或 playwright）
     const playwrightEngines: string[] = [];
     for (const eng of KNOWN_PLAYWRIGHT_ENGINES) {
         const effectiveMode = engineSearchModes[eng] ?? defaultMode;
@@ -646,7 +646,7 @@ export function getEngineSearchMode(engine: string, cfg: AppConfig = config): Se
     return cfg.searchMode;
 }
 
-// 判断某个引擎是否允许回退到 Playwright（模式为 auto 或 playwright）
+// 判断某个引擎是否允许回退到浏览器渲染（CDP；模式为 auto 或 playwright）
 export function engineShouldUsePlaywrightFallback(engine: string, cfg: AppConfig = config): boolean {
     const mode = getEngineSearchMode(engine, cfg);
     return mode === 'auto' || mode === 'playwright';

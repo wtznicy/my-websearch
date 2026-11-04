@@ -2,12 +2,12 @@
  * Browser Resource Blocker
  *
  * 借鉴 Scrapling 的 Aggressive Resource Blocking 机制：
- * 无头浏览器（Playwright）在加载目标网页或预热防反爬 Cookie 时，默认会下载页面中包含的
+ * 无头浏览器（CDP 驱动；Playwright 仅为历史兼容层）在加载目标网页或预热 Cookie 时，默认会下载页面中包含的
  * 大量高带宽无用资源（图片、音视频、外部字体）以及高频轮询的第三方广告与统计打点脚本
  * （如 Google Analytics、百度统计、Sentry、Clarity 等）。
  *
  * 这些请求不仅消耗数倍的带宽与内存，还常常导致 networkidle 超时。
- * 本模块在 Playwright Route 层直接 abort 掉这些无用资源，大幅降低延迟与资源占用，
+ * 本模块在浏览器路由层直接 abort 掉这些无用资源，大幅降低延迟与资源占用，
  * 同时完全保留 DOM 结构、CSS 布局与正文内容提取（Readability / Turndown）所需的 HTML 标签与属性。
  */
 
@@ -28,7 +28,7 @@ export interface ResourceBlockerPageLike {
 export const RESOURCE_BLOCKER_INSTALLED = Symbol('resourceBlockerInstalled');
 
 /**
- * Playwright 明确支持的且在纯文本提取与 Cookie 预热中完全不需要下载的资源类型
+ * 浏览器明确支持的且在纯文本提取与 Cookie 预热中完全不需要下载的资源类型
  */
 export const BLOCKED_RESOURCE_TYPES: ReadonlySet<string> = new Set([
     'image',

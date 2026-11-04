@@ -39,10 +39,10 @@ export const FETCH_JUEJIN_TIMEOUT_MS = 10000;
 /** CSDN 抓取浏览器渲染兜底总时间预算（毫秒） */
 export const CSDN_BROWSER_BUDGET_MS = 20000;
 
-/** Playwright 浏览器远程连接超时基线（毫秒） */
+/** 浏览器远程连接超时基线（毫秒，CDP 驱动与 Playwright 兼容层共用） */
 export const PLAYWRIGHT_CONNECT_TIMEOUT_MS = 30000;
 
-/** Playwright 页面导航默认超时（毫秒） */
+/** 浏览器页面导航默认超时（毫秒，CDP 驱动与 Playwright 兼容层共用） */
 export const PLAYWRIGHT_NAVIGATION_TIMEOUT_MS = 20000;
 
 /** 本地浏览器 CDP 调试端点就绪等待上限（毫秒） */

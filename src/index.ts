@@ -16,7 +16,7 @@ import { configureLogging, installConsoleBridge } from './core/log.js';
 
 // 注意：express / MCP SDK transports / 浏览器栈全部改为**按需动态导入**。
 // CLI 一次性命令（--help、status、search…）不再为 HTTP 服务器与浏览器付启动成本，
-// 实测 `--help` 从 ~1.38s 降到 ~0.4s（见 docs/architecture/overview.md）。
+// 实测 `--help` 从 ~1.38s 降到 ~0.32s（本机 PowerShell / Node 22）。
 
 // 统一日志：级别来自 LOG_LEVEL；启动静默时默认 warn。console.* 统一转 stderr，
 // 避免污染 CLI --json 的 stdout。

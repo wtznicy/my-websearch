@@ -5,7 +5,7 @@ import { CliIo, CommandContext, RunCliOptions } from './shared.js';
 
 // Re-export shared types for backward compatibility.
 // 注意：命令处理器改为**按需动态导入**（见 runCommand），这样 `--help` / `status`
-// 不会因为静态 import 把 16 个引擎和浏览器栈全部加载进来（实测冷启动 1.38s → 目标 <0.4s）。
+// 不会因为静态 import 把 16 个引擎和浏览器栈全部加载进来（实测冷启动 1.38s → 0.32s）。
 export type { CliIo, RunCliOptions };
 export { requireFlagValue } from './shared.js';
 

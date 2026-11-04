@@ -294,7 +294,7 @@ async function runAnubisPowWarmup(signal?: AbortSignal): Promise<AnubisSession |
 
     const challenge = parseAnubisChallenge(homeHtml);
     if (!challenge) {
-        // "Startpage Blocked" 等硬封禁页没有挑战 payload —— 交给 Playwright 兜底或上层报错
+        // "Startpage Blocked" 等硬封禁页没有挑战 payload —— 交给浏览器兜底（CDP）或上层报错
         return null;
     }
 

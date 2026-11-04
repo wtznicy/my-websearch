@@ -163,8 +163,8 @@ export function shouldHostUseProxy(hostnameOrUrl: string, cfg: AppConfig = confi
 }
 
 /**
- * 构造传给 Playwright `chromium.launch({ proxy })` 的代理配置。
- * 注意：Playwright API 按逗号 `,` 解析 `proxy.bypass`（而非分号 `;`），
+ * 构造浏览器代理配置（CDP 驱动与 Playwright 兼容层共用）。
+ * 注意：Playwright 兼容层按逗号 `,` 解析 `proxy.bypass`（而非分号 `;`），
  * 自建 Chromium 命令行启动时再通过 `formatChromiumProxyBypassList` 转为分号。
  */
 export function buildPlaywrightProxy(cfg: AppConfig = config): PlaywrightProxyOptions | undefined {

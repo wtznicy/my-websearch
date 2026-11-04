@@ -66,7 +66,7 @@ function applyPrimaryHealthFilter(baseGroup: string[], isChinese: boolean, hasCu
     const fallbackPool = isChinese
         ? ['bing', 'sogou', 'baidu']
         // Yahoo 排第一：DDG 被限流/202 时，Yahoo 只需一次首页 cookie 预热即可稳定返回；
-        // Brave 429 是常态，放在其后由健康过滤自动跳过。
+        // Brave 429 后可能进入浏览器优先窗口（每次 4–13s），放在其后并会被下面的稳定降权排到最后。
         : ['yahoo', ...(hasExaKey ? ['exa'] : []), 'brave', 'duckduckgo', 'bing'];
 
     // 浏览器优先窗口内的引擎（如 Brave 429 后）仍可用，但每次要走 4–13s 的浏览器兜底；

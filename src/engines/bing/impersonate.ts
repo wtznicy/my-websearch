@@ -9,7 +9,7 @@ import { getString } from '../../config/env.js';
  * Bing HTTP 模式的浏览器指纹请求层（wreq-js，Rust 实现）。
  *
  * 背景：Bing 对纯 HTTP 请求按请求特征（TLS/JA3、HTTP/2、头顺序等）做软降级——
- * 同一 IP 下真实浏览器（Playwright）返回完整结果，而 Node 默认 TLS（OpenSSL）
+ * 同一 IP 下真实浏览器（CDP）返回完整结果，而 Node 默认 TLS（OpenSSL）
  * 的请求会被降级为无关结果。wreq-js 通过 Rust 的 wreq 客户端在 TLS/HTTP2 层
  * 复刻 Chrome 指纹，规避该降级（spike 实测：与 curl-cffi-node 等价——同为
  * 10 条完整结果、无验证码、首条相同）。

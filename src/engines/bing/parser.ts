@@ -90,7 +90,7 @@ export function sanitizeBingUrl(rawUrl?: string): string {
         const pathname = url.pathname.toLowerCase();
 
         // 解决 Bing 新结果页把真实目标站点包装成 /ck/a 跳转链接后被解析器整条丢弃的问题。
-        // 这里先从 u 参数中解出真实目标 URL，再按外链继续走统一清洗逻辑，避免 Playwright 页面明明有结果却最终返回 0 条。
+        // 这里先从 u 参数中解出真实目标 URL，再按外链继续走统一清洗逻辑，避免浏览器渲染页面明明有结果却最终返回 0 条。
         if (hostname.endsWith('bing.com') && pathname.startsWith('/ck/a')) {
             const decodedTarget = decodeBingRedirectTarget(url);
             return decodedTarget ? sanitizeBingUrl(decodedTarget) : '';

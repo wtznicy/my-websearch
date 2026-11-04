@@ -23,7 +23,7 @@ const COMMON_HEADERS = {
 let cachedScCode: string | undefined;
 let cachedCookies: string | undefined;
 let cachedScAt = 0;
-/** 当前缓存的会话 TTL（PoW 会话 4 分钟 / Playwright 会话 30 分钟） */
+/** 当前缓存的会话 TTL（PoW 会话 4 分钟 / 浏览器会话 30 分钟） */
 let currentSessionTtlMs = STARTPAGE_SC_TTL_MS;
 
 export function resetStartpageCache(): void {
@@ -71,7 +71,7 @@ function extractInterstitialPayload(html: string): Record<string, string> | unde
 // 纯 HTTP 请求无法获取搜索 token（返回 "Verifying your request..." 或 "Startpage Blocked"）。
 // 实测 headless 模式会被 startpage 直接屏蔽（返回 captcha-block 页 "Startpage Blocked"），
 // 只有 headed/hidden-headed（隐藏有头）模式能完成 Anubis 挑战拿到搜索表单。
-// 方案：用 Playwright hidden-headed 模式打开首页完成 Anubis 挑战，
+// 方案：用浏览器 hidden-headed 模式（CDP）打开首页完成 Anubis 挑战，
 // 提取放行 cookie（spchal-auth 等）+ sc token 并缓存复用；cookie 失效时重新预热。
 async function warmupStartpageSession(signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) {
@@ -96,7 +96,7 @@ async function warmupStartpageSession(signal?: AbortSignal): Promise<void> {
         const { openPlaywrightBrowser, acquirePooledPlaywrightPage } = await import('../../utils/playwrightClient.js');
         const { prepareStealthPage } = await import('../../utils/browserStealth.js');
 
-        // 复用项目统一的 Playwright 基础设施（openPlaywrightBrowser + 页面池 + stealth 反检测），
+        // 复用项目统一的浏览器基础设施（CDP：openPlaywrightBrowser + 页面池 + stealth 反检测），
         // 自动处理：浏览器路径/WS/CDP 端点、按引擎代理、指纹伪装。
         // 注意：playwright 1.62+ 已移除 page.setUserAgent，需通过 contextOptions.userAgent 设置。
         // startpage 会屏蔽 headless 浏览器，必须用 hidden-headed（隐藏有头）模式打开。
@@ -235,7 +235,7 @@ async function getScCode(signal?: AbortSignal): Promise<string> {
                 console.warn('Startpage Anubis PoW warmup failed, falling back to Playwright:', error instanceof Error ? error.message : String(error));
             }
 
-            // ② Playwright 兜底（hidden-headed 模式，见 warmupStartpageSession）
+            // ② 浏览器兜底（CDP）（hidden-headed 模式，见 warmupStartpageSession）
             await warmupStartpageSession(warmupController.signal);
             if (!cachedScCode) {
                 throw new AppError({

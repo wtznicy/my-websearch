@@ -644,10 +644,10 @@ export async function startLocalDaemon(
             });
 
             // 修复本地 daemon 结束后浏览器残留的问题：
-            // daemon 原来只关闭 HTTP server，没有显式销毁共享 Playwright 浏览器会话。
+            // daemon 原来只关闭 HTTP server，没有显式销毁共享浏览器会话（CDP）。
             // 这里在服务停止后同步回收当前进程持有的浏览器实例，确保 Edge 根进程一并退出。
             // hidden-headed 模式走 forceKill 分支，保证杀死浏览器进程；
-            // 纯 headed 模式由 Playwright 自己 launch，browser.close() 即可结束进程。
+            // 纯 headed 模式由浏览器进程自己 launch，browser.close() 即可结束进程。
             // 这里做 best-effort 清理：即使浏览器回收失败，也不应让 daemon close() 抛异常，
             // 否则调用方（测试/自动化）会收到一个跟 HTTP 服务无关的拒绝，使清理流程变脆弱。
             try {

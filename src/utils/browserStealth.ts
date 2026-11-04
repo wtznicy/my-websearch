@@ -1,5 +1,5 @@
 /**
- * Shared Playwright anti-detection utilities.
+ * Shared browser anti-detection utilities (CDP driver; legacy Playwright compat layer).
  *
  * bing.ts 原先内置了完整的 stealth 初始化脚本（webdriver/plugins/chrome/WebGL
  * 指纹伪造等）。抽取到本模块后，bing 搜索与 fetchWebContent 的浏览器兜底

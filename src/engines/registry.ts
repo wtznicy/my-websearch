@@ -64,7 +64,7 @@ export interface EngineDescriptor {
     };
     /** 是否原生支持 site: 域名过滤语法 */
     supportsNativeSite: boolean;
-    /** 是否支持 Playwright 浏览器渲染模式兜底 */
+    /** 是否支持浏览器渲染模式兜底（CDP；历史名 Playwright） */
     supportsPlaywright: boolean;
     /** 单引擎默认超时预算（毫秒） */
     defaultTimeoutMs: number;

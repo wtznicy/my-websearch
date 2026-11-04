@@ -93,7 +93,8 @@ function getPersistedLatencyMap(now = Date.now()): Map<string, EngineLatencyStat
  *
  * 数据源优先用进程内滑动窗口（更及时）；没有样本时回退到持久化的
  * `engine-latency.jsonl`（CLI 每次都是新进程，否则永远冷启动）。
- * 注意：这里只调整**同类候选之间**的先后——类别错配由路由层的 fallbackPool 负责拦截。
+ * 注意：这里只调整**同类候选之间**的先后——类别错配由路由层的 fallbackPool 负责拦截；
+ * 浏览器优先窗口内的引擎（如 Brave 429 后）延迟高，排在同级最后但仍保留在候选池里。
  */
 export function sortCandidatesByRecentHealth(candidates: string[]): string[] {
     if (candidates.length <= 1) {

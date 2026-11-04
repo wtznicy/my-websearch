@@ -1,11 +1,16 @@
 /**
- * Playwright client facade.
+ * Browser client facade（默认 CDP 驱动；Playwright 仅为历史兼容层）。
  *
  * Re-exports components decomposed into focused modules under src/utils/playwright/:
- * - types.ts: Type definitions and interfaces
- * - browserDiscovery.ts: Binary executable discovery, port allocation, proxy setup, and module loading
- * - browserSession.ts: Process lifecycle, CDP readiness, domain session locks, and cleanup
- * - pagePool.ts: Page pooling, target ID retrieval, and lockfile synchronization
+ * - types.ts: shared type definitions and interfaces
+ * - browserDiscovery.ts: executable discovery, port allocation, proxy setup, module loading
+ * - sessionLifecycle.ts: process lifecycle and browser launch
+ * - cdpReadiness.ts: CDP endpoint readiness checks
+ * - domainLock.ts: cross-process domain session locks
+ * - profileStore.ts: temporary profile directories and cleanup
+ * - pagePool.ts: page pooling, target-id and lockfile synchronization
+ * - candidateDiscovery.ts: local browser process discovery
+ * - browserSessionTemp.ts: safe temp-directory checks
  */
 
 export * from './playwright/types.js';

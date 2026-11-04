@@ -54,7 +54,7 @@ export async function searchBing(
     try {
         const httpResults = await searchBingWithHttp(query, limit, signal, timeRange);
         // P0-2：cn.bing HTTP 对英文多词 query 常发生“首词漂移”（只按第一个词匹配，后续词全丢），
-        // auto 模式下检测到首词漂移时同样触发 Playwright 交互回退。
+        // auto 模式下检测到首词漂移时同样触发浏览器交互回退（CDP）。
         // 熔断冷却期不要为「注定失败」的请求再花 20s 起浏览器；
         // 冷却本身就是失败学习的结果，浏览器兜底救不回来，只会把 200ms 的失败拉长到 20s。
         if (hasFirstTokenDrift(httpResults, query) && config.bingPlaywrightFallback && !signal?.aborted
