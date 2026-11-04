@@ -2,7 +2,7 @@ import { AppError } from '../errors.js';
 import { analyzeWithTreeSitter, type CodeSymbolCallSite } from './treeSitter.js';
 import { inferTypeInfo } from './typeInference.js';
 import { fileAnalysisCache, fileContentCache, hashContent, symbolResultCache } from './codeIntelCache.js';
-import { getBoolean, getNumber } from '../../config/env.js';
+import { getBoolean, getNumber, getOptionalString } from '../../config/env.js';
 import {
     CodeSymbolDefinition,
     CodeSymbolInput,
@@ -79,6 +79,18 @@ export async function analyzeFileContent(
 }
 
 export async function findCodeSymbol(input: CodeSymbolInput): Promise<CodeSymbolResult> {
+    // codeSymbol 强依赖 GitHub Code Search（必须认证）：没有 token 直接快速失败，
+    // 不做任何网络请求，也不走 8s 预算/重试。
+    if (!getOptionalString('GITHUB_TOKEN')) {
+        throw new AppError({
+            code: 'missing_api_key',
+            retryable: false,
+            engine: 'github',
+            message: 'codeSymbol requires GITHUB_TOKEN for GitHub code search.',
+            hint: '配置 GITHUB_TOKEN（~/.my-websearch/config.json 的 apiKeys.github）后重启 MCP server；未配置时可用 fetchGithubContent 直接读取已知路径。'
+        });
+    }
+
     const parsed = parseGitHubRepoSpec(input.repo);
     if (!parsed) {
         throw new AppError({

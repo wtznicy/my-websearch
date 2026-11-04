@@ -122,7 +122,7 @@ describe('codeSymbol tool contract', () => {
 
 describe('codeSymbol core validation (no network)', () => {
     it('rejects a repo spec that is neither owner/repo nor a github.com URL', async () => {
-        vi.stubEnv('GITHUB_TOKEN', '');
+        vi.stubEnv('GITHUB_TOKEN', 'ghp_dummy');
 
         await expect(findCodeSymbol({ repo: 'not a repo', symbol: 'Depends' }))
             .rejects.toMatchObject({ code: 'invalid_arguments', retryable: false });
@@ -131,7 +131,7 @@ describe('codeSymbol core validation (no network)', () => {
     });
 
     it('rejects symbols that are not a single identifier before spending the GitHub quota', async () => {
-        vi.stubEnv('GITHUB_TOKEN', '');
+        vi.stubEnv('GITHUB_TOKEN', 'ghp_dummy');
 
         for (const symbol of ['foo bar', 'foo(bar)', 'foo/bar', 'foo:bar', '']) {
             await expect(findCodeSymbol({ repo: 'fastapi/fastapi', symbol }), `symbol=${JSON.stringify(symbol)}`)
@@ -139,13 +139,17 @@ describe('codeSymbol core validation (no network)', () => {
         }
     });
 
-    it('requires GITHUB_TOKEN and points at the keyless fetchGithubContent fallback', async () => {
+    it('requires GITHUB_TOKEN and fails fast without any network request', async () => {
         vi.stubEnv('GITHUB_TOKEN', '   ');
 
+        const startedAt = Date.now();
         const error = await findCodeSymbol({ repo: 'fastapi/fastapi', symbol: 'Depends' }).catch((caught: unknown) => caught);
+        const elapsedMs = Date.now() - startedAt;
 
         expect(error).toMatchObject({ code: 'missing_api_key', retryable: false, engine: 'github' });
         expect((error as Error).message).toContain('requires GITHUB_TOKEN');
         expect((error as { hint?: string }).hint).toContain('fetchGithubContent');
+        // 快速失败：不进入 8s 预算、不发任何网络请求
+        expect(elapsedMs).toBeLessThan(500);
     });
 });

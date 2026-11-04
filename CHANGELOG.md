@@ -2,6 +2,11 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **codeSymbol 快速失败**：缺少 `GITHUB_TOKEN` 时在入口立即返回 `missing_api_key`，不再进入 8s 预算、也不发起任何网络请求；契约测试补充「耗时 <500ms」断言。
+
 ## [1.5.0] - 2026-11-04
 
 ### Added
