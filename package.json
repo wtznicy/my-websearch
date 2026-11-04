@@ -57,7 +57,6 @@
     "lint:fix": "eslint src --fix",
     "test:list": "tsc && node build/test/runners/runCurrentTests.js --list",
     "test:core-search": "tsc && node build/test/legacy/test-core-search.js",
-    "test:core-fetch-services": "tsc && node build/test/legacy/test-core-fetch-services.js",
     "test:engine-normalization": "tsc && node build/test/legacy/test-engine-normalization.js",
     "test:startpage": "tsc && node build/test/legacy/test-startpage.js",
     "test:redirect-safety": "tsc && node build/test/legacy/test-redirect-safety.js",
