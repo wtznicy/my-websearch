@@ -1,3 +1,15 @@
+import {
+    FRESHNESS_KEYWORDS,
+    computeFreshnessAdjustment,
+    computeVersionPathAdjustment,
+    computeTitleFocusPenalty
+} from './rankingAdjustments.js';
+
+export {
+    computeFreshnessAdjustment,
+    computeVersionPathAdjustment,
+    computeTitleFocusPenalty
+};
 import { SearchResult } from '../../types.js';
 import { isRrfFusionEnabled, extractRootDomain } from './mergeResults.js';
 import {
@@ -314,77 +326,6 @@ export function countUsableResults(results: SearchResult[], query: string): numb
     return usable;
 }
 
-const FRESHNESS_KEYWORDS = /\b(202[4-9]|latest|recent|newest|today)\b|最新|新版|新特性|升级|版本|\bv\d+\b/i;
-
-/** 时效性平滑微调（P2-8） */
-export function computeFreshnessAdjustment(dateStr?: string, queryHasFreshness?: boolean): number {
-    if (!queryHasFreshness || !dateStr) {
-        return 0;
-    }
-    const yearMatch = dateStr.match(/\b(20\d{2})\b/);
-    if (!yearMatch || !yearMatch[1]) {
-        return 0;
-    }
-    const year = parseInt(yearMatch[1], 10);
-    const currentYear = new Date().getFullYear();
-    const diff = currentYear - year;
-
-    if (diff <= 0) {
-        return 0.12;
-    }
-    if (diff === 1) {
-        return 0.06;
-    }
-    if (diff === 2) {
-        return 0;
-    }
-    return Math.max(-0.20, -0.04 * (diff - 1));
-}
-
-/** 版本与规范路径偏好微调（含日期型规范路径，如 /specification/2026-07-28） */
-export function computeVersionPathAdjustment(urlStr: string): number {
-    try {
-        const url = new URL(urlStr);
-        const path = url.pathname.toLowerCase();
-
-        // 1. 规范日期型路径（如 /specification/2026-07-28 vs /specification/2025-03-26）
-        const specDateMatch = path.match(/\b(20\d{2})[-_.](\d{2})[-_.](\d{2})\b/);
-        if (specDateMatch && (path.includes('spec') || path.includes('draft') || path.includes('standard') || path.includes('protocol'))) {
-            const specYear = parseInt(specDateMatch[1]!, 10);
-            const currentYear = new Date().getFullYear();
-            const yearDiff = currentYear - specYear;
-            if (yearDiff <= 0) {
-                return 0.18;
-            }
-            if (yearDiff === 1) {
-                return 0.04;
-            }
-            return Math.max(-0.20, -0.06 * yearDiff);
-        }
-
-        // 2. 陈旧/归档路径
-        if (
-            /\/(legacy|archive|archived|deprecated|obsolete|historic)(\/|$)/.test(path)
-            || /\/v0\.[0-9]+(\/|$)/.test(path)
-            || /\/(old|older)-version/.test(path)
-        ) {
-            return -0.12;
-        }
-
-        // 3. 最新/活跃/标准路径
-        if (
-            /\/(latest|current|stable|draft|next|main)(\/|$)/.test(path)
-            || /\/v[2-9](\.[0-9]+)?(\/|$)/.test(path)
-        ) {
-            return 0.08;
-        }
-
-        return 0;
-    } catch {
-        return 0;
-    }
-}
-
 /** 对融合后的结果做混合重排 */
 export function rankSearchResults(
     results: SearchResult[],
@@ -438,6 +379,7 @@ export function rankSearchResults(
         const authority = (isEntryPage || !hasQueryMatch) ? 0 : authorityScore(result.url, options?.authorityDomains);
         const consensus = Math.min(result.engineHits ?? 1, 3) / 3;
         const entryPagePenalty = isEntryPage ? 0.25 : 0;
+        const titleFocusPenalty = computeTitleFocusPenalty(result.title, coreTokens);
         const freshnessAdjustment = computeFreshnessAdjustment(result.date, queryHasFreshness);
         const versionAdjustment = computeVersionPathAdjustment(result.url);
 
@@ -451,6 +393,7 @@ export function rankSearchResults(
                 + consensusWeight * consensus)
             + (result.rankBoost ?? 0)
             + titleCoreBonus
+            + titleFocusPenalty
             - entryPagePenalty
             - zeroMatchPenalty
             + freshnessAdjustment

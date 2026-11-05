@@ -5,7 +5,8 @@ import {
     countUsableResults,
     hasFirstTokenDrift,
     computeVersionPathAdjustment,
-    computeFreshnessAdjustment
+    computeFreshnessAdjustment,
+    computeTitleFocusPenalty
 } from '../../core/search/resultRanking.js';
 import type { SearchResult } from '../../types.js';
 
@@ -409,6 +410,44 @@ describe('rankSearchResults', () => {
             const usable = countUsableResults(results, 'MCP 协议 官方文档');
             expect(usable).toBe(5);
         });
+        it('penalizes newsletter and roundup aggregators where core entity is buried at the end', () => {
+            const core = ['vitest'];
+            // 典型蹭热词周刊：标题主体是 React 18，Vitest 仅在末尾列举
+            const aggregatorTitle = 'React 18 / Electron 18 正式发布，汇总 Vue 3 与 Vitest 更新';
+            expect(computeTitleFocusPenalty(aggregatorTitle, core)).toBe(-0.30);
+
+            // 真正的官方或专注于 Vitest 的标题不降权
+            const officialTitle = 'GitHub - vitest-dev/docs-cn: Vitest 中文文档';
+            expect(computeTitleFocusPenalty(officialTitle, core)).toBe(0);
+
+            const guideTitle = '快速起步 | 指南 | Vitest';
+            expect(computeTitleFocusPenalty(guideTitle, core)).toBe(0);
+
+            const directTitle = 'Vitest 入门教程与配置指南';
+            expect(computeTitleFocusPenalty(directTitle, core)).toBe(0);
+        });
+
+        it('deprioritizes aggregated news below specialized guides in rankSearchResults', () => {
+            const results = [
+                // 位置排第 1，但标题是周刊末尾蹭词
+                makeResult({
+                    title: 'React 18 正式发布，汇总 Electron 18 与 Vitest',
+                    url: 'https://blog.csdn.net/news/article/1',
+                    description: '本期周刊汇总多个库的发布动态，包含 React 18、Electron 18 以及测试框架 Vitest。'
+                }),
+                // 位置排第 2，但标题和内容高度聚焦 Vitest
+                makeResult({
+                    title: 'Vitest 快速起步与官方配置指南',
+                    url: 'https://cn.vitest.dev/guide/',
+                    description: 'Vitest 是下一代由 Vite 驱动的超快单元测试框架。'
+                })
+            ];
+
+            const ranked = rankSearchResults(results, 'Vitest 中文文档');
+            // 聚焦的专门指南应成功反超蹭词周刊
+            expect(ranked[0].url).toBe('https://cn.vitest.dev/guide/');
+        });
+
         it('does NOT trigger Chinese entity fast-path when query consists solely of generic terms', () => {
             const results = [
                 makeResult({ title: '官方公告', description: '关于近期系统维护的官方说明' }),
