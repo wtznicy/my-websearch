@@ -1,30 +1,33 @@
 import { config } from '../../config.js';
 import { extractRootDomain } from './mergeResults.js';
 
-/** 领域权威白名单（文档/代码/百科类站点；可用 SEARCH_AUTHORITY_DOMAINS 追加） */
+/**
+ * 领域权威白名单（纯正官方文档/标准库/技术规范与学术站点；可用 SEARCH_AUTHORITY_DOMAINS 追加）。
+ * 注意：严禁收录掘金、CSDN、知乎、博客园等 UGC 社区，避免社区二次搬运站压制原始官方文档。
+ */
 export const DEFAULT_AUTHORITY_DOMAINS = [
+    // 官方规范与核心平台
+    'modelcontextprotocol.io',
+    'vitest.dev',
+    'vite.dev',
+    'vitejs.dev',
     'github.com',
     'stackoverflow.com',
-    'stackexchange.com',
     'developer.mozilla.org',
-    'docs.python.org',
-    'docs.rs',
-    'npmjs.com',
     'nodejs.org',
+    'docs.python.org',
     'python.org',
+    'docs.rs',
     'rust-lang.org',
+    'npmjs.com',
     'wikipedia.org',
     'wikimedia.org',
     'arxiv.org',
     'news.ycombinator.com',
-    'zhihu.com',
-    'juejin.cn',
-    'segmentfault.com',
-    'cnblogs.com',
     'openai.com',
     'anthropic.com',
     'docs.aws.amazon.com',
-    // 主流官方文档站（中文查询容易被 runoob/镜像站挤占，官方站需要加权）
+    // 主流官方开发框架与规范文档站
     'tailwindcss.com',
     'react.dev',
     'vuejs.org',
@@ -35,7 +38,8 @@ export const DEFAULT_AUTHORITY_DOMAINS = [
     'typescriptlang.org',
     'deno.com',
     'bun.sh',
-    'vitejs.dev',
+    'pnpm.io',
+    'playwright.dev',
     'webpack.js.org',
     'fastapi.tiangolo.com',
     'docs.djangoproject.com',
@@ -49,7 +53,9 @@ export const DEFAULT_AUTHORITY_DOMAINS = [
     'golang.org',
     'kotlinlang.org',
     'git-scm.com',
-    'nginx.org'
+    'nginx.org',
+    'prisma.io',
+    'astro.build'
 ];
 
 export function getAuthorityDomains(customDomains?: string[]): string[] {
@@ -83,7 +89,17 @@ export function isTier1OfficialDomain(rawUrl: string, customDomains?: string[]):
     if (COMMUNITY_DOMAINS.has(root)) {
         return false;
     }
-    if (/^docs\./.test(host) || /\.github\.io$/.test(host) || /^developer\./.test(host) || /\.readthedocs\.io$/.test(host) || host.endsWith('.dev')) {
+    if (
+        /^docs\./.test(host)
+        || /\.github\.io$/.test(host)
+        || /^developer\./.test(host)
+        || /\.readthedocs\.io$/.test(host)
+        || host.endsWith('.dev')
+        || host === 'modelcontextprotocol.io'
+        || host.endsWith('.modelcontextprotocol.io')
+        || host === 'nodejs.org'
+        || host.endsWith('.nodejs.org')
+    ) {
         return true;
     }
     if (getAuthorityDomains(customDomains).some((domain) => host === domain || host.endsWith(`.${domain}`))) {

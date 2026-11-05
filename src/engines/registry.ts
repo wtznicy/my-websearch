@@ -123,7 +123,7 @@ export const ENGINE_REGISTRY: readonly EngineDescriptor[] = [
         cascade: { zhPriority: 50 },
         supportsNativeSite: false,
         supportsPlaywright: false,
-        defaultTimeoutMs: 8000,
+        defaultTimeoutMs: 3500,
         probeUrl: 'https://so.csdn.net/api/v3/search?q=mcp&t=all&p=1&s=0&tm=0&lv=-1&ft=0&l=&u=',
         execute: searchCsdn
     },

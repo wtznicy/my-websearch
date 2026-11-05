@@ -338,5 +338,76 @@ describe('rankSearchResults', () => {
             // No freshness query -> 0
             expect(computeFreshnessAdjustment(`${currentYear}-01-01`, false)).toBe(0);
         });
+        it('supports date-shaped specification paths (e.g. 2026 vs 2025)', () => {
+            expect(computeVersionPathAdjustment('https://spec.modelcontextprotocol.io/specification/2026-07-28')).toBe(0.18);
+            expect(computeVersionPathAdjustment('https://spec.modelcontextprotocol.io/specification/2025-03-26')).toBe(0.04);
+            expect(computeVersionPathAdjustment('https://spec.modelcontextprotocol.io/specification/2023-01-01')).toBeLessThan(0);
+
+            const results = [
+                makeResult({
+                    title: 'MCP Specification 2025-03-26',
+                    url: 'https://spec.modelcontextprotocol.io/specification/2025-03-26',
+                    description: 'Specification 2025 version'
+                }),
+                makeResult({
+                    title: 'MCP Specification 2026-07-28',
+                    url: 'https://spec.modelcontextprotocol.io/specification/2026-07-28',
+                    description: 'Specification 2026 version'
+                })
+            ];
+            const ranked = rankSearchResults(results, 'MCP specification');
+            expect(ranked[0].url).toBe('https://spec.modelcontextprotocol.io/specification/2026-07-28');
+        });
+
+        it('strictly demotes results that only match generic words like 最新/版本 (e.g. LetPub)', () => {
+            const results = [
+                makeResult({
+                    title: 'LetPub 期刊查询 - 最新影响因子与分区版本发布',
+                    url: 'https://example.com/letpub',
+                    description: 'LetPub 整理最新中科院期刊分区与版本更新说明'
+                }),
+                makeResult({
+                    title: 'Node.js 官方发布说明 - Node.js 22 LTS',
+                    url: 'https://nodejs.org/en/blog/release/v22',
+                    description: 'Node.js 22 is the latest active LTS version'
+                })
+            ];
+
+            const ranked = rankSearchResults(results, 'Node.js 最新 LTS 版本');
+            expect(ranked[0].url).toBe('https://nodejs.org/en/blog/release/v22');
+            expect(ranked[1].url).toBe('https://example.com/letpub');
+        });
+
+        it('prioritizes title hits over body-only keyword drops (e.g. Vitest doc vs React 18 news)', () => {
+            const results = [
+                makeResult({
+                    title: 'React 18 / Electron 18 正式发布',
+                    url: 'https://example.com/react-18',
+                    description: '前端技术周刊：React 18 正式发布，文章末尾提到推荐搭配 Vitest 做单元测试。'
+                }),
+                makeResult({
+                    title: 'Vitest 官方中文文档 - 下一代前端测试框架',
+                    url: 'https://cn.vitest.dev/guide/',
+                    description: 'Vitest 中文文档与完整指南教程。'
+                })
+            ];
+
+            const ranked = rankSearchResults(results, 'Vitest 中文文档');
+            expect(ranked[0].url).toBe('https://cn.vitest.dev/guide/');
+        });
+
+        it('correctly counts usable results for Chinese tech queries without harsh misclassification', () => {
+            const results = [
+                makeResult({ title: 'MCP 协议详解', description: 'Model Context Protocol 规范介绍与教程' }),
+                makeResult({ title: '深入浅出 MCP 协议', description: 'MCP 协议架构与官方文档阅读' }),
+                makeResult({ title: '华为开发者：MCP 协议实践指南', description: '基于 MCP 协议构建 Agent' }),
+                makeResult({ title: '知乎专栏：MCP 协议与大模型应用', description: '文档解读与实现' }),
+                makeResult({ title: 'CSDN：MCP 协议从入门到精通', description: '官方规范中文翻译' }),
+                makeResult({ title: '无关的随机生活杂记', description: '今天天气真好，出去散步。' })
+            ];
+
+            const usable = countUsableResults(results, 'MCP 协议 官方文档');
+            expect(usable).toBe(5);
+        });
     });
 });

@@ -219,8 +219,10 @@ export async function executeCascade(
     const cancelledEngines: Array<{ engine: string; reason: 'satisfied'; message: string }> = [];
 
     const CASCADE_BATCH_SIZE = 2;
-    const MIN_CASCADE_BATCH_BUDGET_MS = 3000;
+    const MIN_CASCADE_BATCH_BUDGET_MS = 1000;
     const MAX_CASCADE_BATCHES = 3;
+    const CASCADE_MAX_TOTAL_BUDGET_MS = 3500;
+    const cascadeDeadlineAt = Math.min(deadlineAt, Date.now() + CASCADE_MAX_TOTAL_BUDGET_MS);
 
     const usableCount = countUsableResults(merged, cleanQuery);
     if (!minResults || minResults <= usableCount) {
@@ -259,7 +261,7 @@ export async function executeCascade(
         if (remainingCandidates.length === 0) {
             break;
         }
-        const remaining = deadlineAt - Date.now();
+        const remaining = cascadeDeadlineAt - Date.now();
         if (remaining < MIN_CASCADE_BATCH_BUDGET_MS) {
             break;
         }
@@ -283,7 +285,7 @@ export async function executeCascade(
             const baseTimeoutMs = resolvePerEngineTimeoutMs(perEngineTimeoutMs, candidate);
             const candidateBudget = ['startpage', 'bing', 'brave'].includes(candidate)
                 ? Math.max(baseTimeoutMs, Math.min(remaining - 500, Math.round(baseTimeoutMs * (candidate === 'brave' ? 2 : 1.5))))
-                : baseTimeoutMs;
+                : Math.min(baseTimeoutMs, 3500);
             const wait = Math.max(0, Math.min(remaining, candidateBudget));
             const controller = new AbortController();
             if (options.signal) {
