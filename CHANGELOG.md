@@ -2,13 +2,35 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
-## [Unreleased]
+## [1.5.1] - 2026-11-05
+
+### Added
+- **官方意图权威锚点注入**：查询命中「官方文档 / 官网 / specification / docs」且实体可识别时，若候选池缺少对应官方域，注入官方锚点（MCP、Vitest、Node.js、Next.js、React、Vue、TypeScript、Docker、PostgreSQL、Zustand）；`Node.js 最新 LTS 版本` 这类版本意图直接补官方 releases/LTS 页（中英）。
+- **搜索质量基准套件** `tools/eval-search-quality.mjs`（10 个固定场景 × 3 轮）：输出 P50/P95 墙钟、域名多样性、官方域命中、噪声数、Top1 稳定性与级联引擎；入口 `npm run eval:quality`。
+- **标题主体焦点分析**：核心实体只出现在标题末尾、前半段被其它技术列举占据的资讯聚合页做 -0.30 软降权，避免周刊蹭词抢占 Top1。
+- **日期型规范路径加权**：`/specification/2026-07-28` 等路径 +0.18，旧日期 +0.04 / 每年 -0.06，修复日期型规范的新旧倒挂。
+- **域名打散（Host Cap）**：同一注册域在 Top-K 最多 2 条（Tier1 官方域 3 条），超出条目软降权沉底、不删除。
 
 ### Changed
-- **codeSymbol 快速失败**：缺少 `GITHUB_TOKEN` 时在入口立即返回 `missing_api_key`，不再进入 8s 预算、也不发起任何网络请求；契约测试补充「耗时 <500ms」断言。
-- **密钥类空 env 不再堵死 config.json**：`*_TOKEN` / `*_KEY` / `*_SECRET` 在进程 env 中为纯空白时视为未配置，允许 config.json 注入（`PROXY_URL=""` 等开关语义保持不变）。
-- **env 与 config 冲突提示**：两者同时存在且值不同时，启动日志提示 key 名与来源（不打印值，每进程一次），并明确 env 优先。
-- **doctor 显示 key 来源**：`API keys` 行现在标注每个 key 来自 `env` / `config` / `project` / `.env`；`RECOGNIZED_ENV_KEYS` 补入 `GITEE_TOKEN`。
+- **主引擎早退改为「相关性 + 多样性」双门控**：可用结果数达标且（≥2 个引擎或 ≥3 个域名）才启动 800ms 宽限；单一来源凑数时宽限 1500ms，避免快社区站把慢的官方引擎杀掉。
+- **中文技术默认路由**：`['bing','juejin','baidu']` → `['bing','baidu','sogou']`，掘金下沉到级联备选池。
+- **中文可用性判定校准**：同时命中核心技术词与中文限定词即计为可用，避免 6 条合理结果只认 2 条、误触发级联。
+- **级联与慢引擎预算**：级联总预算封顶 3500ms（候选含 Brave 时 5500ms），CSDN 单引擎超时 8000ms → 3500ms，消除单个慢引擎拖满整次搜索。
+- **权威白名单净化**：移除掘金 / CSDN / 知乎 / 博客园 / SegmentFault，补入 `modelcontextprotocol.io`、`vitest.dev`、`playwright.dev`、`astro.build`、`prisma.io` 等官方域。
+- **技术专名强制精确匹配**：CamelCase、大写技术缩写与框架白名单术语自动加引号；主引擎 0 结果时自动回退无引号查询重试。
+- **百度真实 URL 提取**：优先从 `mu` / `data-landurl` / `data-tools` 提取直链，缺失时仅对前 3 条做 HEAD 解析，恢复跨引擎 URL 去重。
+- **时效性平滑衰减**：`timeRange` 的本地硬过滤改为按年份差线性微调；无日期结果保留、不扣分。
+- **codeSymbol 快速失败**：缺少 `GITHUB_TOKEN` 时在入口 1ms 内返回 `missing_api_key`，不进入 8s 预算、不发网络请求。
+- **密钥类空 env 不再堵死 config.json**：`*_TOKEN` / `*_KEY` / `*_SECRET` 为纯空白时视为未配置，允许 config.json 注入（`PROXY_URL=""` 等开关语义不变）。
+- **env / config 冲突提示**：两者同时存在且值不同时，启动日志提示 key 名与来源（不打印值，每进程一次），明确 env 优先。
+- **doctor 显示 key 来源**：`API keys` 行标注 `env` / `config` / `project` / `.env`；`RECOGNIZED_ENV_KEYS` 补入 `GITEE_TOKEN`。
+
+### Fixed
+- **`apiKeys.gitee` 不生效**：`config.json` 的 `apiKeys.gitee` 现在映射为 `GITEE_TOKEN`（此前只能靠环境变量）。
+- **中文查询单一社区霸屏**：`MCP 协议 官方文档` 等查询不再出现前 6 条全部来自掘金。
+- **百度跳转链接未解码**：结果 URL 恢复为真实站点，跨引擎去重与点击均正常。
+- **codeSymbol 缺 token 排查困难**：错误 hint 补充 `~/.my-websearch/config.json` 的 `apiKeys.github` 与重启说明。
+- **Node LTS / 期刊噪声**：LetPub 等仅命中泛化词的页面被核心实体护栏压到尾部；官方 LTS 页在版本意图查询中补入。
 
 ## [1.5.0] - 2026-11-04
 

@@ -99,5 +99,39 @@ describe('officialRecall', () => {
             const injected = injectOfficialRecallIfNeeded(results, 'Vitest 官方文档');
             expect(injected[0].url).toBe('https://cn.vitest.dev/');
         });
+
+        it('does NOT treat third-party mirrors as official domains', () => {
+            const results = [
+                makeResult({ title: 'Vite 中文网', url: 'https://vitejs.cn/guide/' }),
+                makeResult({ title: 'CSDN 教程', url: 'https://blog.csdn.net/user/123' })
+            ];
+
+            const injected = injectOfficialRecallIfNeeded(results, 'Vitest 官方文档');
+            expect(injected.length).toBe(3);
+            expect(injected[0].url).toBe('https://cn.vitest.dev/');
+        });
+
+        it('injects the official LTS release page for version intent even without an official keyword', () => {
+            const results = [
+                makeResult({
+                    title: 'Node.js — Node.js 16.15.0 (LTS)',
+                    url: 'https://nodejs.org/en/blog/release/v16.15.0/'
+                })
+            ];
+
+            const injected = injectOfficialRecallIfNeeded(results, 'Node.js 最新 LTS 版本');
+            expect(injected.length).toBe(2);
+            expect(injected[0].url).toBe('https://nodejs.org/zh-cn/about/previous-releases');
+            expect(injected[0].source).toBe('official');
+        });
+
+        it('does NOT duplicate the LTS page when it is already present', () => {
+            const results = [
+                makeResult({ url: 'https://nodejs.org/zh-cn/about/previous-releases' })
+            ];
+
+            const injected = injectOfficialRecallIfNeeded(results, 'Node.js 最新 LTS 版本');
+            expect(injected).toBe(results);
+        });
     });
 });

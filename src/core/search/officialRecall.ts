@@ -16,6 +16,10 @@ export interface OfficialEntityDefinition {
     domains: string[];
     defaultUrl: string;
     zhUrl?: string;
+    /** 版本/发布页意图（如“最新 LTS 版本”），命中时即使没有“官方”字样也补召回 */
+    versionIntentRegex?: RegExp;
+    versionUrl?: string;
+    zhVersionUrl?: string;
     description: string;
 }
 
@@ -33,7 +37,7 @@ export const KNOWN_OFFICIAL_ENTITIES: readonly OfficialEntityDefinition[] = [
         id: 'vitest',
         canonicalName: 'Vitest',
         aliasRegex: /\bvitest\b/i,
-        domains: ['vitest.dev', 'vitejs.cn'],
+        domains: ['vitest.dev'],
         defaultUrl: 'https://vitest.dev/',
         zhUrl: 'https://cn.vitest.dev/',
         description: 'Next generation testing framework powered by Vite. Fast, native ESM, TypeScript and JSX support out of the box.'
@@ -42,9 +46,12 @@ export const KNOWN_OFFICIAL_ENTITIES: readonly OfficialEntityDefinition[] = [
         id: 'nodejs',
         canonicalName: 'Node.js',
         aliasRegex: /\b(nodejs|node\.js)\b/i,
-        domains: ['nodejs.org', 'nodejs.cn'],
+        domains: ['nodejs.org'],
         defaultUrl: 'https://nodejs.org/en',
         zhUrl: 'https://nodejs.org/zh-cn',
+        versionIntentRegex: /\b(lts|releases?|schedule)\b|最新.*版本|长期支持|稳定版/i,
+        versionUrl: 'https://nodejs.org/en/about/previous-releases',
+        zhVersionUrl: 'https://nodejs.org/zh-cn/about/previous-releases',
         description: 'Open-source, cross-platform JavaScript runtime environment that executes JavaScript code outside a web browser.'
     },
     {
@@ -146,12 +153,37 @@ export function injectOfficialRecallIfNeeded(
     results: SearchResult[],
     query: string
 ): SearchResult[] {
-    if (!hasOfficialIntent(query)) {
+    const entity = matchOfficialEntity(query);
+    if (!entity) {
         return results;
     }
 
-    const entity = matchOfficialEntity(query);
-    if (!entity) {
+    const isChinese = /[\u4e00-\u9fff]/.test(query);
+    const wantsVersion = Boolean(entity.versionUrl && entity.versionIntentRegex?.test(query));
+
+    // 版本/发布页意图（如“Node.js 最新 LTS 版本”）：即使没有“官方”字样，也补召回官方版本页
+    if (wantsVersion) {
+        const versionUrl = (isChinese && entity.zhVersionUrl) ? entity.zhVersionUrl : entity.versionUrl!;
+        if (results.some((r) => r.url.trim().toLowerCase().startsWith(versionUrl.toLowerCase()))) {
+            return results;
+        }
+        const versionItem: SearchResult = {
+            title: isChinese
+                ? `${entity.canonicalName} 版本与 LTS 发布说明`
+                : `${entity.canonicalName} Releases & LTS Schedule`,
+            url: versionUrl,
+            description: isChinese
+                ? `${entity.canonicalName} 官方发布记录与 LTS 时间表（含当前 LTS 版本）。`
+                : `Official ${entity.canonicalName} release history and LTS schedule (including the current LTS line).`,
+            source: 'official',
+            engine: 'official',
+            rankBoost: 0.35
+        };
+        metrics.debug(`[officialRecall] Injected version entry for ${entity.id} (${versionUrl})`);
+        return [versionItem, ...results];
+    }
+
+    if (!hasOfficialIntent(query)) {
         return results;
     }
 
@@ -160,7 +192,6 @@ export function injectOfficialRecallIfNeeded(
         return results;
     }
 
-    const isChinese = /[\u4e00-\u9fff]/.test(query);
     const targetUrl = (isChinese && entity.zhUrl) ? entity.zhUrl : entity.defaultUrl;
     const title = isChinese
         ? `${entity.canonicalName} 官方文档与权威规范`

@@ -40,7 +40,7 @@ export const BENCHMARK_CASES = [
         query: 'Vitest 中文文档',
         category: '中文技术搜索',
         limit: 6,
-        officialDomains: ['vitest.dev', 'vitejs.cn', 'github.com', 'apachecn.org'],
+        officialDomains: ['vitest.dev', 'github.com'],
         noiseRegex: /ping|测速|React 18.*Electron|pytest.*文档/i
     },
     {
@@ -49,7 +49,7 @@ export const BENCHMARK_CASES = [
         query: 'MCP 协议 官方文档',
         category: '中文权威多样性',
         limit: 6,
-        officialDomains: ['modelcontextprotocol.io', 'anthropic.com', 'github.com'],
+        officialDomains: ['modelcontextprotocol.io', 'github.com'],
         noiseRegex: /chatgpt.*镜像|openai.*账号购买/i
     },
     {
@@ -58,7 +58,7 @@ export const BENCHMARK_CASES = [
         query: 'Node.js 最新 LTS 版本',
         category: '时效性版本检索',
         limit: 6,
-        officialDomains: ['nodejs.org', 'nodejs.cn'],
+        officialDomains: ['nodejs.org'],
         noiseRegex: /letpub|sci期刊|影响因子|download\.csdn\.net/i
     },
     {
@@ -76,7 +76,7 @@ export const BENCHMARK_CASES = [
         query: 'Docker 无法拉取镜像 connection refused',
         category: '中文实战排障',
         limit: 6,
-        officialDomains: ['docker.com', 'aliyun.com', 'csdn.net', 'zhihu.com', 'juejin.cn'],
+        officialDomains: ['docker.com'],
         noiseRegex: /游戏私服|传奇挂机/i
     },
     {
@@ -85,7 +85,7 @@ export const BENCHMARK_CASES = [
         query: 'Zustand vs Redux Toolkit 状态管理对比',
         category: '中文技术对比',
         limit: 6,
-        officialDomains: ['pmnd.rs', 'redux-toolkit.js.org', 'juejin.cn', 'zhihu.com', 'segmentfault.com'],
+        officialDomains: ['pmnd.rs', 'redux-toolkit.js.org'],
         noiseRegex: /低价代写|论文辅导/i
     },
     {
@@ -94,7 +94,7 @@ export const BENCHMARK_CASES = [
         query: 'PostgreSQL 官网',
         category: '导航官网查询',
         limit: 6,
-        officialDomains: ['postgresql.org', 'postgres.cn'],
+        officialDomains: ['postgresql.org'],
         noiseRegex: /破解版|绿色安装包|天空下载|华军软件/i
     },
     {
@@ -103,7 +103,7 @@ export const BENCHMARK_CASES = [
         query: 'OAuth 2.1 RFC authorization code flow',
         category: '英文协议规范',
         limit: 6,
-        officialDomains: ['ietf.org', 'datatracker.ietf.org', 'oauth.net', 'auth0.com'],
+        officialDomains: ['ietf.org', 'datatracker.ietf.org'],
         noiseRegex: /free.*download.*crack/i
     }
 ];

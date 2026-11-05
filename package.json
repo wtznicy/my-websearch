@@ -62,7 +62,8 @@
     "prepublishOnly": "npm run build",
     "canary": "node tools/canary.mjs",
     "docs:env": "node tools/env-docs.mjs write",
-    "check:docs": "node tools/env-docs.mjs check"
+    "check:docs": "node tools/env-docs.mjs check",
+    "eval:quality": "node tools/eval-search-quality.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

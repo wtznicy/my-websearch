@@ -63,7 +63,7 @@
 | **`arxiv`** | 🌐 直连 API | 无 | 官方 Atom XML API 检索论文标题、作者与摘要 | 计算机科学、AI/ML 与自然科学最新论文 |
 | **`code`** | 🌐 国内需代理 | 无 | grep.app API 实时检索全球 GitHub 代码，含仓库、文件路径与精确代码行 | 源码实现翻查、API 使用范例、开源语法实战 |
 
-> **版本说明**：本 README 跟随当前源码树（**1.5.0**）。**1.5.0** 统一测试体系（legacy 脚本全部迁入 Vitest，CI 只保留单一 runner）、把所有 `process.env` 读取收敛到 `src/config/env.ts`（ESLint 强制）、拆分四个最大模块、Brave 429 后新增 **180 秒「浏览器优先」窗口**（窗口内跳过 HTTP 由伪装浏览器服务，兜底失败才熔断）、CLI 服务器栈惰性加载（冷启动约 0.32s）、`doctor --network` 新增缓存命中率 / 熔断剩余 / P50-P95 指标、核心依赖升级（MCP SDK 1.32、axios 1.21、cheerio 1.2、express 5.3、zod 4），并要求 **Node.js ≥22**（Vitest 5 与可选依赖 `unpdf` PDF 解析均要求；`node:sqlite` 可用时优先使用，否则回退分片 JSON），同时新增 Node 22 的 Windows CI job。此前：**1.4.2** 新增 Brave 429 挑战分类与伪装 CDP 浏览器回退；**1.4.1** 修复 Windows 旧版 curl 兼容；**1.4.0** 新增 `codeSymbol`、CDP 设备 profile 与 DDG 202 回退；npm latest 可能滞后到包发布完成。
+> **版本说明**：本 README 跟随当前源码树（**1.5.1**）。**1.5.1** 是搜索质量版本：早退改为「相关性 + 多样性」双门控、域名打散 Host Cap（单域 ≤2、官方域 ≤3）、中文技术路由改为 Bing/百度/搜狗、实体与标题焦点护栏、官方意图锚点注入（MCP/Vitest/Node.js/Next.js/React/Vue/TypeScript/Docker/PostgreSQL/Zustand）并为 Node.js 版本查询补官方 LTS 页、百度真实 URL 提取、日期型规范版本加权、级联 3.5s 封顶与 CSDN 3.5s 超时、支持 `apiKeys.gitee`、`codeSymbol` 缺 token 快速失败，以及 `npm run eval:quality` 10 场景基准套件。**1.5.0** 统一测试体系（legacy 脚本全部迁入 Vitest，CI 只保留单一 runner）、把所有 `process.env` 读取收敛到 `src/config/env.ts`（ESLint 强制）、拆分四个最大模块、Brave 429 后新增 **180 秒「浏览器优先」窗口**、CLI 服务器栈惰性加载（冷启动约 0.32s）、`doctor --network` 新增缓存命中率 / 熔断剩余 / P50-P95 指标、核心依赖升级（MCP SDK 1.32、axios 1.21、cheerio 1.2、express 5.3、zod 4），并要求 **Node.js ≥22**（Vitest 5 与可选依赖 `unpdf` PDF 解析均要求；`node:sqlite` 可用时优先使用，否则回退分片 JSON），同时新增 Node 22 的 Windows CI job。此前：**1.4.2** 新增 Brave 429 挑战分类与伪装 CDP 浏览器回退；**1.4.1** 修复 Windows 旧版 curl 兼容；**1.4.0** 新增 `codeSymbol`、CDP 设备 profile 与 DDG 202 回退；npm latest 可能滞后到包发布完成。
 
 ---
 
