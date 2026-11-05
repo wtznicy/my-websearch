@@ -71,4 +71,29 @@ describe('parseBaiduResultsPage', () => {
         const results = await parseBaiduResultsPage(emptyHtml, new Set());
         expect(results).toEqual([]);
     });
+    it('prefers direct target URL from mu and data-tools attributes over baidu redirect url', async () => {
+        const html = `<!DOCTYPE html>
+<html>
+<body>
+<div id="content_left">
+  <!-- 结果 1: 带 mu 属性 -->
+  <div class="result c-container" tpl="se_com_default" mu="https://vitest.dev/guide/">
+    <h3 class="t"><a href="https://www.baidu.com/link?url=should_not_use_this">Vitest 指南</a></h3>
+    <div class="c-abstract">下一代测试框架</div>
+  </div>
+
+  <!-- 结果 2: 带 data-tools JSON 属性 -->
+  <div class="result c-container" tpl="se_com_default" data-tools='{"title":"NodeJS","url":"https://nodejs.org/en/about"}'>
+    <h3 class="t"><a href="https://www.baidu.com/link?url=skip_me">关于 Node.js</a></h3>
+    <div class="c-abstract">Node.js 介绍</div>
+  </div>
+</div>
+</body>
+</html>`;
+
+        const results = await parseBaiduResultsPage(html, new Set());
+        expect(results).toHaveLength(2);
+        expect(results[0]?.url).toBe('https://vitest.dev/guide/');
+        expect(results[1]?.url).toBe('https://nodejs.org/en/about');
+    });
 });

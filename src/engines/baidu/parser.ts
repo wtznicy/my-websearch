@@ -30,6 +30,50 @@ function hostnameOf(url: string): string {
     }
 }
 
+/**
+ * 优先从百度 DOM 节点的属性中提取真实的原始目标 URL：
+ * 百度自然结果元素常带有 mu 属性、data-landurl 属性，或包含 JSON 的 data-tools 属性，
+ * 直接包含未加密的目标网址（如 https://vitest.dev/...）。
+ * 提取到即可直接使用，避免触发耗时的 HEAD 网络跳转请求。
+ */
+export function extractDirectUrlFromElement(
+    container: ReturnType<cheerio.CheerioAPI>,
+    link: ReturnType<cheerio.CheerioAPI>
+): string | undefined {
+    // 1. 容器上的 mu 属性（百度自然结果最常见的原始目标直链）
+    const mu = container.attr('mu')?.trim();
+    if (mu && /^https?:\/\//i.test(mu) && !BAIDU_LINK_REGEX.test(mu)) {
+        return mu;
+    }
+
+    // 2. data-landurl 属性（容器或链接本身）
+    const landUrl = (container.attr('data-landurl') || link.attr('data-landurl'))?.trim();
+    if (landUrl && /^https?:\/\//i.test(landUrl) && !BAIDU_LINK_REGEX.test(landUrl)) {
+        return landUrl;
+    }
+
+    // 3. data-tools 属性（JSON 结构，包含 title 和 url）
+    const dataTools = container.attr('data-tools') || link.attr('data-tools');
+    if (dataTools) {
+        try {
+            const parsed = JSON.parse(dataTools);
+            if (typeof parsed?.url === 'string' && /^https?:\/\//i.test(parsed.url) && !BAIDU_LINK_REGEX.test(parsed.url)) {
+                return parsed.url.trim();
+            }
+        } catch {
+            // ignore JSON parse error
+        }
+    }
+
+    // 4. data-href 属性
+    const dataHref = (container.attr('data-href') || link.attr('data-href'))?.trim();
+    if (dataHref && /^https?:\/\//i.test(dataHref) && !BAIDU_LINK_REGEX.test(dataHref)) {
+        return dataHref;
+    }
+
+    return undefined;
+}
+
 import { isBaiduAntiBotPage } from '../../core/antiBot/antiBotDetection.js';
 export { isBaiduAntiBotPage };
 
@@ -123,7 +167,7 @@ const BAIDU_NOISE_TEMPLATES = new Set(['recommend_list', 'uer_feedback', 'san_']
 const DIRECT_ANSWER_MAX_CHARS = 300;
 
 /**
- * 解析一页百度结果（提取 + 中转链接解析 + 页内去重）。
+ * 解析一页百度结果（提取 + 真实链接解码 + 页内去重）。
  * HTTP/impersonate 两条请求路径共用，保证两边的结果结构一致。
  * 返回的数组带 `directAnswer` 属性（若首屏存在汇率/百科等直接答案卡片）。
  */
@@ -131,8 +175,15 @@ export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>)
     const $ = cheerio.load(html);
     const elements = $('#content_left').children().toArray();
 
-    // 第一遍：只收集原始数据，避免在循环里串行 await 解析跳转链
-    const collected: Array<{ title: string; href: string; description: string; source: string; date?: string }> = [];
+    // 第一遍：收集原始数据并优先提取 DOM 直链，避免在循环里串行 await 解析跳转链
+    const collected: Array<{
+        title: string;
+        href: string;
+        directUrl?: string;
+        description: string;
+        source: string;
+        date?: string;
+    }> = [];
     let directAnswer: string | undefined;
     for (const element of elements) {
         const template = String($(element).attr('tpl') || '');
@@ -176,21 +227,44 @@ export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>)
         const dateText = normalizeWhitespace($(element).find('.c-color-gray2, .c-gap-right').first().text());
         const date = extractBaiduDate(dateText) || extractBaiduDate(description);
 
+        const directUrl = extractDirectUrlFromElement($(element), linkElement);
+
         collected.push({
             title: normalizeWhitespace(titleElement.text()),
             href,
+            directUrl,
             description,
             source: sourceText,
             date
         });
     }
 
-    // 第二遍：并发解析真实 URL，再统一入结果（页内按 URL 去重）
-    const resolvedHrefs = await resolveBaiduRedirectUrls(collected.map((item) => item.href));
+    // 第二遍：解析真实 URL（优先使用 DOM 直链，缺失时对前 3 条中转链接进行 HEAD 重定向解析）
+    const needResolveIndices: number[] = [];
+    const needResolveHrefs: string[] = [];
+    collected.forEach((item, index) => {
+        if (!item.directUrl && BAIDU_LINK_REGEX.test(item.href)) {
+            if (needResolveHrefs.length < 3) {
+                needResolveIndices.push(index);
+                needResolveHrefs.push(item.href);
+            }
+        }
+    });
+
+    const resolvedHrefs = needResolveHrefs.length > 0
+        ? await resolveBaiduRedirectUrls(needResolveHrefs)
+        : [];
+    const resolvedMap = new Map<number, string>();
+    needResolveIndices.forEach((itemIndex, i) => {
+        if (resolvedHrefs[i]) {
+            resolvedMap.set(itemIndex, resolvedHrefs[i]);
+        }
+    });
+
     const results: SearchResult[] = [];
     collected.forEach((item, index) => {
-        const resolvedHref = resolvedHrefs[index];
-        const url = resolvedHref ? normalizeResultUrl(resolvedHref) : '';
+        const finalHref = item.directUrl || resolvedMap.get(index) || item.href;
+        const url = finalHref ? normalizeResultUrl(finalHref) : '';
         if (!url || seenUrls.has(url)) {
             return;
         }
