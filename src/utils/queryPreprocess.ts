@@ -1,16 +1,31 @@
 /**
- * 查询预处理：给"含数字的连字符/点号紧凑串"（型号/版本形态，如 GLM-4.6V-Flash、
- * DeepSeek-V4）自动加引号，让搜索引擎按精确短语匹配而非拆词——
- * 不加引号时 "GLM-4.6V-Flash" 会被拆成 GLM/4/6V/Flash 多个词，
- * 返回大量泛化的新版本信息（如搜 GLM-4.6V-Flash 却命中 GLM-5.2）。
- *
- * 约束（避免误伤）：
- * - 查询中已有引号时不处理（用户显式精确匹配优先）
- * - 不含数字的域名/普通词不匹配（docs.bigmodel.cn、hello 不受影响）
- * - site: 操作符后的域名不受影响（无数字），操作符本身不匹配
+ * 查询预处理：
+ * 1. 堆栈降噪：剥离报错堆栈中的私有路径与行号。
+ * 2. 技术专名与型号引号包裹：给技术专名、库名（Vitest、Next.js）、
+ *    型号版本（GLM-4.6V-Flash）与大写技术缩写（MCP）自动加引号，避免搜索引擎拆词漂移。
  */
 
 const MODEL_LIKE_TERM = /(?<![\w.-])(?=[A-Za-z0-9.-]*\d)[A-Za-z][A-Za-z0-9.-]*[-.][A-Za-z0-9][A-Za-z0-9.-]*(?![\w.-])/g;
+
+const TECH_TERMS_WHITELIST = new Set([
+    'vitest', 'vite', 'next.js', 'nuxt.js', 'node.js', 'vue.js', 'react.js',
+    'express.js', 'mcp', 'typescript', 'javascript', 'playwright', 'puppeteer',
+    'tailwind', 'tailwindcss', 'postcss', 'webpack', 'rollup', 'esbuild',
+    'prisma', 'drizzle', 'zustand', 'redux', 'fastapi', 'django', 'flask',
+    'spring', 'springboot', 'kubernetes', 'docker', 'graphql', 'grpc',
+    'redis', 'mongodb', 'postgresql', 'mysql', 'sqlite', 'elasticsearch',
+    'cheerio', 'axios', 'zod', 'langchain', 'llamaindex', 'huggingface',
+    'pytorch', 'tensorflow', 'turborepo', 'turbopack', 'selenium', 'cypress'
+]);
+
+const ENGLISH_COMMON_CAPS = new Set([
+    'THE', 'AND', 'FOR', 'NOT', 'YOU', 'ALL', 'CAN', 'HER', 'WAS', 'ONE',
+    'OUR', 'OUT', 'DAY', 'GET', 'HAS', 'HIM', 'HIS', 'HOW', 'MAN', 'NEW',
+    'NOW', 'OLD', 'SEE', 'TWO', 'WAY', 'WHO', 'BOY', 'DID', 'ITS', 'LET',
+    'PUT', 'SAY', 'SHE', 'TOO', 'USE', 'YES', 'WHY', 'TOP', 'MAX', 'MIN',
+    'ADD', 'SET', 'RUN', 'END', 'ASK', 'BIG', 'KEY', 'TRY', 'FIX', 'DOC',
+    'TXT', 'APP', 'WEB', 'NET', 'DEV'
+]);
 
 /**
  * 报错堆栈查询自动降噪：
@@ -57,8 +72,35 @@ export function quoteModelLikeTerms(query: string): string {
     return query.replace(MODEL_LIKE_TERM, '"$&"');
 }
 
-/** 统一查询预处理管道：堆栈降噪 -> 型号引号包裹 */
+/**
+ * 技术专名加引号：
+ * 自动识别技术专名、库名、CamelCase 与特定技术大写缩写并加引号，
+ * 避免搜索引擎将专名拆散或模糊音近漂移（如 Vitest -> Ping 测速 / Windows 蓝牙）。
+ */
+export function quoteTechnicalTerms(query: string): string {
+    if (query.includes('"')) {
+        return query;
+    }
+    let result = query.replace(/(?<![\w.-])([A-Za-z][A-Za-z0-9]*\.(?:js|ts|org|io|dev|com))(?![\w.-])/gi, '"$1"');
+    result = result.replace(MODEL_LIKE_TERM, '"$&"');
+    result = result.replace(/(?<!["\w])([A-Za-z][A-Za-z0-9+]*)(?!["\w])/g, (token) => {
+        const lower = token.toLowerCase();
+        if (TECH_TERMS_WHITELIST.has(lower)) {
+            return `"${token}"`;
+        }
+        if (/^[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*$/.test(token)) {
+            return `"${token}"`;
+        }
+        if (/^[A-Z]{2,6}$/.test(token) && !ENGLISH_COMMON_CAPS.has(token)) {
+            return `"${token}"`;
+        }
+        return token;
+    });
+    return result;
+}
+
+/** 统一查询预处理管道：堆栈降噪 -> 技术专名与型号引号包裹 */
 export function preprocessSearchQuery(query: string): string {
     const denoised = cleanStackTraceNoise(query);
-    return quoteModelLikeTerms(denoised);
+    return quoteTechnicalTerms(denoised);
 }

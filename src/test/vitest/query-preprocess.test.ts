@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { quoteModelLikeTerms } from '../../utils/queryPreprocess.js';
+import {
+    quoteModelLikeTerms,
+    quoteTechnicalTerms,
+    preprocessSearchQuery,
+    cleanStackTraceNoise
+} from '../../utils/queryPreprocess.js';
 
 describe('utils/queryPreprocess quoteModelLikeTerms', () => {
     it('quotes hyphenated model/version tokens with digits', () => {
@@ -24,5 +29,33 @@ describe('utils/queryPreprocess quoteModelLikeTerms', () => {
         expect(quoteModelLikeTerms('硅基流动 免费模型')).toBe('硅基流动 免费模型');
         expect(quoteModelLikeTerms('hello world')).toBe('hello world');
         expect(quoteModelLikeTerms('"GLM-4.6V-Flash" 文档')).toBe('"GLM-4.6V-Flash" 文档');
+    });
+});
+
+describe('utils/queryPreprocess quoteTechnicalTerms', () => {
+    it('quotes framework/library names and uppercase technical acronyms', () => {
+        expect(quoteTechnicalTerms('Vitest 5 Node.js 22 configuration'))
+            .toBe('"Vitest" 5 "Node.js" 22 configuration');
+        expect(quoteTechnicalTerms('MCP specification')).toBe('"MCP" specification');
+        expect(quoteTechnicalTerms('Next.js 15 Hydration failed')).toBe('"Next.js" 15 Hydration failed');
+        expect(quoteTechnicalTerms('中文 Vitest 教程')).toBe('中文 "Vitest" 教程');
+    });
+
+    it('quotes camelCase names while keeping common uppercase English unquoted', () => {
+        expect(quoteTechnicalTerms('SpringBoot Playwright')).toBe('"SpringBoot" "Playwright"');
+        expect(quoteTechnicalTerms('NEW TOP FEATURES')).toBe('NEW TOP FEATURES');
+    });
+
+    it('does not double quote if query already has quotes', () => {
+        expect(quoteTechnicalTerms('"Vitest" configuration')).toBe('"Vitest" configuration');
+    });
+});
+
+describe('utils/queryPreprocess preprocessSearchQuery pipeline', () => {
+    it('cleans stack trace noise and quotes technical terms', () => {
+        const noisy = 'Error at D:\\Desktop\\app.ts:142:18 Vitest test failed';
+        const processed = preprocessSearchQuery(noisy);
+        expect(processed).toContain('"Vitest"');
+        expect(processed).not.toContain('D:\\Desktop');
     });
 });

@@ -364,7 +364,7 @@ export function createSearchService(
 
             const operators = parseSearchOperators(cleanQuery);
             const baseQuery = preprocessSearchQuery(operators.text);
-            let effectiveOperators = operators;
+            let effectiveOperators = { ...operators, text: baseQuery };
             const nativeSiteEngines = new Set<string>(
                 ENGINE_REGISTRY
                     // cn.bing.com ignores site: and Bing explicitly errors when it detects the
@@ -443,7 +443,7 @@ export function createSearchService(
                         ...extractedSites,
                         ...explicitSites.map((s) => s.trim().toLowerCase())
                     ])].filter(Boolean);
-                    effectiveOperators = { ...operators, siteDomains };
+                    effectiveOperators = { ...operators, text: baseQuery, siteDomains };
 
                     // 单引擎基础超时：优先用 registry 的 defaultTimeoutMs（yahoo 12s、其它 8–10s），
                     // 未登记引擎回退到 deadline 的一半（最多 10s）；浏览器兜底引擎由 executor 再叠 1.5x–2x。
@@ -452,7 +452,7 @@ export function createSearchService(
                         getEngineDescriptor(engine)?.defaultTimeoutMs ?? perEngineTimeoutMs;
 
                     // 管道第 1 阶段：主引擎并发执行器
-                    const primary = await executePrimaryEngines({
+                    let primary = await executePrimaryEngines({
                         query: cleanQuery,
                         searchQuery,
                         queryForEngine,
@@ -482,6 +482,40 @@ export function createSearchService(
                     let merged = mergeSearchResults(primary.engineResults)
                         .filter((result) => !isPlaceholderResult(result))
                         .filter((result) => matchesSearchOperators(result, effectiveOperators));
+
+                    // P1-4：若加了技术专名引号后主引擎返回 0 条结果，自动回退为不加引号的原始查询重试
+                    if (merged.length === 0 && baseQuery !== operators.text && !effectiveSignal?.aborted && Date.now() < deadlineAt) {
+                        const fallbackOperators = { ...operators, text: operators.text, siteDomains };
+                        const fallbackQueryForEngine = (engine: string): string =>
+                            buildEngineQuery(fallbackOperators, nativeSiteEngines.has(engine));
+                        primary = await executePrimaryEngines({
+                            query: cleanQuery,
+                            searchQuery: operators.text,
+                            queryForEngine: fallbackQueryForEngine,
+                            executableEngines,
+                            limits,
+                            effectiveSearchMode,
+                            engineMap,
+                            deadlineAt,
+                            perEngineTimeoutMs: perEngineTimeoutMsFor,
+                            satisfiedResults: requestedEngines && requestedEngines.length > 0
+                                ? undefined
+                                : (minResults && minResults > 0 ? minResults : limit),
+                            countableResult: (item) => !isPlaceholderResult(item) && matchesSearchOperators(item, fallbackOperators),
+                            signal: effectiveSignal,
+                            timeRange,
+                            site: siteDomains,
+                            requestContext: rc
+                        });
+                        allFailures.length = 0;
+                        allFailures.push(...initialFailures, ...primary.partialFailures);
+                        allMetrics.length = 0;
+                        allMetrics.push(...primary.engineMetrics);
+                        effectiveOperators = fallbackOperators;
+                        merged = mergeSearchResults(primary.engineResults)
+                            .filter((result) => !isPlaceholderResult(result))
+                            .filter((result) => matchesSearchOperators(result, effectiveOperators));
+                    }
 
                     // 管道第 2 阶段：级联补位执行器（结果不足时按批补位）
                     const cascade = await executeCascade({
