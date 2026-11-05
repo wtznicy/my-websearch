@@ -221,8 +221,6 @@ export async function executeCascade(
     const CASCADE_BATCH_SIZE = 2;
     const MIN_CASCADE_BATCH_BUDGET_MS = 1000;
     const MAX_CASCADE_BATCHES = 3;
-    const CASCADE_MAX_TOTAL_BUDGET_MS = 3500;
-    const cascadeDeadlineAt = Math.min(deadlineAt, Date.now() + CASCADE_MAX_TOTAL_BUDGET_MS);
 
     const usableCount = countUsableResults(merged, cleanQuery);
     if (!minResults || minResults <= usableCount) {
@@ -245,6 +243,10 @@ export async function executeCascade(
         allowedEngines,
         requestedEngines
     );
+
+    const includesBrave = initialCandidates.includes('brave');
+    const cascadeBudgetMs = includesBrave ? 5500 : 3500;
+    const cascadeDeadlineAt = Math.min(deadlineAt, Date.now() + cascadeBudgetMs);
 
     let cascadeBatches = 0;
     let remainingCandidates = [...initialCandidates];

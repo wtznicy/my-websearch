@@ -209,12 +209,12 @@ const GENERIC_QUERY_TERMS = new Set([
     'tutorial', 'guide', 'overview', 'docs', 'documentation', 'manual',
     'download', 'error', 'failed', 'issue', 'problem', 'fix',
     'solve', 'solution', 'how', 'what', 'why', 'use', 'using', 'usage',
-    'example', 'examples', 'sample',
+    'example', 'examples', 'sample', 'official',
     // 时效与版本泛化修饰词（不可单靠它们充当核心实体）
     'latest', 'recent', 'newest', 'version', 'versions', 'v1', 'v2', 'v3', 'v4', 'v5',
     'lts', 'release', 'releases', 'current', 'update', 'updates', 'news', 'changelog',
     // 中文技术动作与形态通用词
-    '配置', '安装', '教程', '指南', '文档', '手册', '下载', '报错',
+    '官方', '官网', '配置', '安装', '教程', '指南', '文档', '手册', '下载', '报错',
     '错误', '解决', '怎么', '什么', '如何', '使用', '用法', '简介', '概述', '原理',
     '示例', '样例',
     // 中文时效与版本泛化修饰词
@@ -277,8 +277,9 @@ export function countUsableResults(results: SearchResult[], query: string): numb
         return df > 0 && df < total && df <= rarityCap;
     });
 
+    const hasNonGenericCore = substantive.some((t) => !GENERIC_QUERY_TERMS.has(t));
     const requiredTerms = discriminativeTerms.length > 0 ? discriminativeTerms : uniqueQueryTokens;
-    const minHits = discriminativeTerms.length > 0 ? 1 : Math.min(2, requiredTerms.length);
+    const minHits = discriminativeTerms.length > 0 && hasNonGenericCore ? 1 : Math.min(2, requiredTerms.length);
     const highCoverageThreshold = Math.max(3, Math.ceil(uniqueQueryTokens.length * 0.75));
 
     const nonCoreTokens = uniqueQueryTokens.filter((t) => !coreTokens.includes(t));
@@ -302,10 +303,10 @@ export function countUsableResults(results: SearchResult[], query: string): numb
         const hasCjkQuery = /[\u4e00-\u9fff]/.test(query);
         const cjkTokens = uniqueQueryTokens.filter((t) => /[\u4e00-\u9fff]/.test(t));
         const hitsCjk = cjkTokens.some((t) => docTokens.has(t));
-        if (
+                if (
             hits >= minHits
             || (uniqueQueryTokens.length >= 3 && totalQueryHits >= highCoverageThreshold)
-            || (hasCjkQuery && hitsCore && hitsCjk)
+            || (hasCjkQuery && hasNonGenericCore && hitsCore && hitsCjk)
         ) {
             usable += 1;
         }

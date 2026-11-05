@@ -409,5 +409,15 @@ describe('rankSearchResults', () => {
             const usable = countUsableResults(results, 'MCP 协议 官方文档');
             expect(usable).toBe(5);
         });
+        it('does NOT trigger Chinese entity fast-path when query consists solely of generic terms', () => {
+            const results = [
+                makeResult({ title: '官方公告', description: '关于近期系统维护的官方说明' }),
+                makeResult({ title: '文档中心', description: '各类服务文档汇总' }),
+                makeResult({ title: '天气预报', description: '北京今天晴朗' })
+            ];
+            // 纯泛化词查询（无具体技术实体），必须严格要求区分词/高覆盖率，不得靠通用词直通
+            const usable = countUsableResults(results, '官方 文档 教程 指南');
+            expect(usable).toBe(0);
+        });
     });
 });
