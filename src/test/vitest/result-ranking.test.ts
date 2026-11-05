@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { rankSearchResults, tokenizeForRanking, countUsableResults, hasFirstTokenDrift } from '../../core/search/resultRanking.js';
+import {
+    rankSearchResults,
+    tokenizeForRanking,
+    countUsableResults,
+    hasFirstTokenDrift,
+    computeVersionPathAdjustment,
+    computeFreshnessAdjustment
+} from '../../core/search/resultRanking.js';
 import type { SearchResult } from '../../types.js';
 
 function makeResult(overrides: Partial<SearchResult>): SearchResult {
@@ -286,4 +293,50 @@ describe('rankSearchResults', () => {
     // 注：共识因子（engineHits，权重 0.1）按设计无法翻转位置分（权重 0.4）——
     // 共识排序由 mergeSearchResults 层保证（按不同引擎命中数主导排序），此处不重复断言。
 
+    describe('P2-7 & P2-8: Version path preference & Smooth freshness decay', () => {
+        it('computeVersionPathAdjustment identifies latest vs legacy paths', () => {
+            expect(computeVersionPathAdjustment('https://spec.modelcontextprotocol.io/latest/overview')).toBe(0.08);
+            expect(computeVersionPathAdjustment('https://spec.modelcontextprotocol.io/draft/schema')).toBe(0.08);
+            expect(computeVersionPathAdjustment('https://spec.modelcontextprotocol.io/v2/docs')).toBe(0.08);
+
+            expect(computeVersionPathAdjustment('https://spec.modelcontextprotocol.io/legacy/overview')).toBe(-0.12);
+            expect(computeVersionPathAdjustment('https://spec.modelcontextprotocol.io/archive/2023')).toBe(-0.12);
+            expect(computeVersionPathAdjustment('https://spec.modelcontextprotocol.io/v0.1/specification')).toBe(-0.12);
+
+            expect(computeVersionPathAdjustment('https://example.com/normal/page')).toBe(0);
+        });
+
+        it('re-orders outdated specification inverted results to prioritize latest spec', () => {
+            const results = [
+                // Old spec was returned first by search engine
+                makeResult({
+                    title: 'Model Context Protocol Specification v0.1',
+                    url: 'https://spec.modelcontextprotocol.io/v0.1/specification',
+                    description: 'Draft legacy specification for Model Context Protocol version 0.1'
+                }),
+                // Latest spec was returned second
+                makeResult({
+                    title: 'Model Context Protocol Specification Latest',
+                    url: 'https://spec.modelcontextprotocol.io/latest/specification',
+                    description: 'Official latest specification for Model Context Protocol'
+                })
+            ];
+
+            const ranked = rankSearchResults(results, 'MCP specification');
+            expect(ranked[0].url).toBe('https://spec.modelcontextprotocol.io/latest/specification');
+            expect(ranked[1].url).toBe('https://spec.modelcontextprotocol.io/v0.1/specification');
+        });
+
+        it('computeFreshnessAdjustment decays smoothly without harsh hard drop', () => {
+            const currentYear = new Date().getFullYear();
+            expect(computeFreshnessAdjustment(`${currentYear}-01-01`, true)).toBe(0.12);
+            expect(computeFreshnessAdjustment(`${currentYear - 1}-01-01`, true)).toBe(0.06);
+            expect(computeFreshnessAdjustment(`${currentYear - 2}-01-01`, true)).toBe(0);
+            expect(computeFreshnessAdjustment(`${currentYear - 4}-01-01`, true)).toBeLessThan(0);
+            // No date -> 0 (retained softly, not penalized)
+            expect(computeFreshnessAdjustment(undefined, true)).toBe(0);
+            // No freshness query -> 0
+            expect(computeFreshnessAdjustment(`${currentYear}-01-01`, false)).toBe(0);
+        });
+    });
 });

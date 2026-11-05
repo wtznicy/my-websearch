@@ -1,6 +1,18 @@
 import { SearchResult } from '../../types.js';
-import { config } from '../../config.js';
 import { isRrfFusionEnabled, extractRootDomain } from './mergeResults.js';
+import {
+    DEFAULT_AUTHORITY_DOMAINS,
+    getAuthorityDomains,
+    COMMUNITY_DOMAINS,
+    isTier1OfficialDomain
+} from './rankingDomains.js';
+
+export {
+    DEFAULT_AUTHORITY_DOMAINS,
+    getAuthorityDomains,
+    COMMUNITY_DOMAINS,
+    isTier1OfficialDomain
+};
 
 /**
  * 轻量本地结果重排（无外部依赖、毫秒级）。
@@ -18,64 +30,6 @@ import { isRrfFusionEnabled, extractRootDomain } from './mergeResults.js';
  *
  * 中文用字符 bigram（无分词库依赖），英文用词；全部本地计算。
  */
-
-/** 领域权威白名单（文档/代码/百科类站点；可用 SEARCH_AUTHORITY_DOMAINS 追加） */
-const DEFAULT_AUTHORITY_DOMAINS = [
-    'github.com',
-    'stackoverflow.com',
-    'stackexchange.com',
-    'developer.mozilla.org',
-    'docs.python.org',
-    'docs.rs',
-    'npmjs.com',
-    'nodejs.org',
-    'python.org',
-    'rust-lang.org',
-    'wikipedia.org',
-    'wikimedia.org',
-    'arxiv.org',
-    'news.ycombinator.com',
-    'zhihu.com',
-    'juejin.cn',
-    'segmentfault.com',
-    'cnblogs.com',
-    'openai.com',
-    'anthropic.com',
-    'docs.aws.amazon.com',
-    // 主流官方文档站（中文查询容易被 runoob/镜像站挤占，官方站需要加权）
-    'tailwindcss.com',
-    'react.dev',
-    'vuejs.org',
-    'angular.dev',
-    'angular.io',
-    'nextjs.org',
-    'svelte.dev',
-    'typescriptlang.org',
-    'deno.com',
-    'bun.sh',
-    'vitejs.dev',
-    'webpack.js.org',
-    'fastapi.tiangolo.com',
-    'docs.djangoproject.com',
-    'spring.io',
-    'kubernetes.io',
-    'docs.docker.com',
-    'postgresql.org',
-    'dev.mysql.com',
-    'redis.io',
-    'go.dev',
-    'golang.org',
-    'kotlinlang.org',
-    'git-scm.com',
-    'nginx.org'
-];
-
-function getAuthorityDomains(customDomains?: string[]): string[] {
-    const list = customDomains ?? config.authorityDomains;
-    return list.length > 0
-        ? [...DEFAULT_AUTHORITY_DOMAINS, ...list]
-        : DEFAULT_AUTHORITY_DOMAINS;
-}
 
 /** 文本分词：英文/数字词（长度 ≥2 或特定技术单字/独立数字/常见标记）+ 中文 bigram */
 export function tokenizeForRanking(text: string): string[] {
@@ -179,7 +133,6 @@ function authorityScore(url: string, customDomains?: string[]): number {
         return 1;
     }
     // 官方文档域：docs.*、*.github.io（官方文档站）、developer.*、*.readthedocs.io
-    // ——实测英文查询失败模式多为"召回到无关仓库/镜像站"，官方文档域加权可压制
     if (/^docs\./.test(host) || /\.github\.io$/.test(host) || /^developer\./.test(host) || /\.readthedocs\.io$/.test(host)) {
         return 0.9;
     }
@@ -195,8 +148,6 @@ function authorityScore(url: string, customDomains?: string[]): number {
 
 /**
  * 疑似"站点入口页"（首页/登录/注册/索引）：对非导航类查询属低价值结果。
- * 实测：bing 对含域名的长尾技术 query（如 "github-mcp-server v1.12 release notes"）
- * 会退化成站点首页/登录页，而真正的 release 页反而排后。
  */
 export function isLikelySiteEntryPage(rawUrl: string): boolean {
     try {
@@ -237,21 +188,8 @@ export function relevanceScores(results: SearchResult[], query: string): number[
 }
 
 /**
- * 统计"可用结果"数：必须是**命中查询区分性词**、且不是站点入口页（非导航查询下）的结果。
- *
- * 区分性词判据（与池子大小无关，经典 IDF 口径）：
- * - `df === N`（所有候选都含，如品牌查询里的品牌词 "model"）→ 无区分度，剔除；
- * - `df === 0`（无人命中）→ 与本次结果无关，剔除；
- * - 余下 `0 < df < N` 的词即区分性词，命中**任一**即视为与查询有实质关联。
- *
- * 早期版本用 `df < floor(N/2)` 界定稀有词，存在"池子刚好凑够 minResults 时判据失效"的
- * 漏洞：N=5 时区分词 df=2 卡在边界外（2 < 2 不成立）→ 无稀有词 → 回退成"命中任一 token"
- * → 只含通用词的噪声也算可用 → 级联不触发。现在回退分支要求**至少命中 2 个不同 token**。
- */
-/**
  * 检测结果集是否发生"首词漂移"（First-token drift）：
- * cn.bing HTTP 请求对英文多词查询常退化为只按第一个词匹配（如搜 "model context protocol specification"
- * 返回特斯拉 Model Y 和百科，搜 "rust tokio select" 返回 Rust 官网），前 N 条结果仅命中首词而对第 2 个及以后的词零命中。
+ * cn.bing HTTP 请求对英文多词查询常退化为只按第一个词匹配。
  */
 export function hasFirstTokenDrift(results: SearchResult[], query: string): boolean {
     const rawTokens = tokenizeForRanking(query || '');
@@ -291,14 +229,7 @@ export function countUsableResults(results: SearchResult[], query: string): numb
         }
     }
 
-    // 区分性词口径（与池子大小无关的经典 IDF 近似）：
-    // - df === 0：无人命中，与本批结果无关 → 剔除
-    // - df === total：全员命中（品牌查询里的品牌词）→ 无区分度 → 剔除
-    // - df > ceil(sqrt(total))：出现得太普遍（如 5 条里 4 条都含的通用词）→ 剔除
-    //   （仅靠 df < total 不够：实测 "model" 在 5 条里 df=4 仍会放行纯噪声结果）
     const uniqueQueryTokens = [...new Set(queryTokens)];
-    // 首词漂移提前拦截：多词查询下，若前 N（最多 5）条结果对第 2 个及以后的所有词零命中，
-    // 即使首词因 df <= sqrt(total) 被误算进 discriminativeTerms，也整批判为 0 可用，提前触发回退或级联。
     if (uniqueQueryTokens.length >= 2) {
         const tailTokens = uniqueQueryTokens.slice(1);
         const topSample = docs.slice(0, Math.min(docs.length, 5));
@@ -316,16 +247,8 @@ export function countUsableResults(results: SearchResult[], query: string): numb
         return df > 0 && df < total && df <= rarityCap;
     });
 
-    // 有区分性词：命中任一即算可用；否则（query 全是通用词）回退为"至少命中 2 个不同 token"
     const requiredTerms = discriminativeTerms.length > 0 ? discriminativeTerms : uniqueQueryTokens;
     const minHits = discriminativeTerms.length > 0 ? 1 : Math.min(2, requiredTerms.length);
-    // 高覆盖率直通阈值（收紧边界）：
-    // 当主引擎返回的整页结果整体质量很高、多个核心查询词因 df > sqrt(total) 被踢出 discriminativeTerms
-    // （仅剩个别长尾词留在 discriminativeTerms）时，必须同时满足：
-    // 1. 查询本身包含 ≥3 个不同 token；
-    // 2. 单条结果至少命中 max(3, ceil(uniqueQueryTokens.length * 0.75)) 个不同查询 token。
-    // 这样既放行整页命中 3/4 核心词的高相关结果（如 "Model Context Protocol 教程" 命中前 3 词），
-    // 又严防 3~4 词查询（如 "model context protocol" 或 "react hooks 性能优化"）中只命中 1~2 个泛化词的噪声页蒙混过关。
     const highCoverageThreshold = Math.max(3, Math.ceil(uniqueQueryTokens.length * 0.75));
 
     const navigational = isNavigationalQuery(query);
@@ -346,6 +269,11 @@ export function countUsableResults(results: SearchResult[], query: string): numb
 
 const FRESHNESS_KEYWORDS = /\b(202[4-9]|latest|recent|newest|today)\b|最新|新版|新特性|升级|版本|\bv\d+\b/i;
 
+/**
+ * 时效性平滑微调（P2-8）：
+ * 当查询显式包含时效性意图时，按结果发布年份与当前年份的差值进行线性平滑微调。
+ * 无日期结果保持 0（不扣分、不硬剔除），避免误杀官方文档。
+ */
 export function computeFreshnessAdjustment(dateStr?: string, queryHasFreshness?: boolean): number {
     if (!queryHasFreshness || !dateStr) {
         return 0;
@@ -356,15 +284,50 @@ export function computeFreshnessAdjustment(dateStr?: string, queryHasFreshness?:
     }
     const year = parseInt(yearMatch[1], 10);
     const currentYear = new Date().getFullYear();
-    // 近 1~2 年（如 2025、2026）加 +0.10 分
-    if (year >= currentYear - 1) {
-        return 0.10;
+    const diff = currentYear - year;
+
+    if (diff <= 0) {
+        return 0.12;
     }
-    // 3 年以前（如 2023 及更早）扣 -0.10 分
-    if (year <= currentYear - 3) {
-        return -0.10;
+    if (diff === 1) {
+        return 0.06;
     }
-    return 0;
+    if (diff === 2) {
+        return 0;
+    }
+    // 3 年及以上平滑线性衰减，每多 1 年 -0.04，最多 -0.20
+    return Math.max(-0.20, -0.04 * (diff - 1));
+}
+
+/**
+ * 版本与规范路径偏好微调（P2-7）：
+ * 针对官方文档与规范站中的旧版倒挂问题（如 /v0.1/ 排在 /latest/ 或 /draft/ 前面），
+ * 识别 URL 路径中的版本特征：
+ * - 较新/活跃/规范最新路径（/latest/, /current/, /v[2-9]/, /draft/, /stable/）：+0.08
+ * - 陈旧/归档路径（/legacy/, /archive/, /archived/, /v0\./, /v1\.0/）：-0.12
+ */
+export function computeVersionPathAdjustment(urlStr: string): number {
+    try {
+        const url = new URL(urlStr);
+        const path = url.pathname.toLowerCase();
+
+        // 陈旧/归档路径
+        if (/\/(legacy|archive|archived|deprecated|obsolete|historic)(\/|$)/.test(path)
+            || /\/v0\.[0-9]+(\/|$)/.test(path)
+            || /\/(old|older)-version/.test(path)) {
+            return -0.12;
+        }
+
+        // 最新/活跃/标准路径
+        if (/\/(latest|current|stable|draft|next|main)(\/|$)/.test(path)
+            || /\/v[2-9](\.[0-9]+)?(\/|$)/.test(path)) {
+            return 0.08;
+        }
+
+        return 0;
+    } catch {
+        return 0;
+    }
 }
 
 const GENERIC_QUERY_TERMS = new Set([
@@ -411,21 +374,15 @@ export function rankSearchResults(
     const bm25 = bm25Scores(queryTokens, docs);
     const maxBm25 = Math.max(...bm25, 1e-6);
 
-    // 非导航类查询下对"站点入口页"降权：惩罚 + 取消权威加分
-    // （github.com/ 这类入口页此前因域在白名单里拿满权威分，仍能压过真实结果页）
     const applyEntryPagePenalty = !isNavigationalQuery(query);
     const queryHasFreshness = FRESHNESS_KEYWORDS.test(query);
 
-    // 权重归一：positionWeight 默认 0.4（单查询内位置分有意义）；
-    // 多查询合并后重排传 0——配额顺序不代表排名，位置分应让位给内容信号
     const positionWeight = options?.positionWeight ?? 0.4;
     const restWeight = 1 - positionWeight;
     const relevanceWeight = restWeight * 0.5;
     const authorityWeight = restWeight * (1 / 3);
     const consensusWeight = restWeight * (1 / 6);
 
-    // RRF 模式：RRF 分数已经融合了「各引擎内的排名」，再叠加 position/consensus 就是重复计分。
-    // 因此用单一 rrfNorm 替换这两项，只保留 BM25 与权威度。
     const useRrf = isRrfFusionEnabled() && results.some((result) => typeof result.rrfScore === 'number');
     const maxRrf = useRrf ? Math.max(...results.map((result) => result.rrfScore ?? 0), 1e-6) : 1;
 
@@ -443,6 +400,8 @@ export function rankSearchResults(
         const consensus = Math.min(result.engineHits ?? 1, 3) / 3;
         const entryPagePenalty = isEntryPage ? 0.25 : 0;
         const freshnessAdjustment = computeFreshnessAdjustment(result.date, queryHasFreshness);
+        const versionAdjustment = computeVersionPathAdjustment(result.url);
+
         const score = (useRrf
             ? 0.45 * ((result.rrfScore ?? 0) / maxRrf)
                 + 0.35 * relevance
@@ -454,7 +413,8 @@ export function rankSearchResults(
             + (result.rankBoost ?? 0)
             - entryPagePenalty
             - zeroMatchPenalty
-            + freshnessAdjustment;
+            + freshnessAdjustment
+            + versionAdjustment;
         return { result, score, index };
     });
 
@@ -463,35 +423,6 @@ export function rankSearchResults(
         .map((entry) => entry.result);
 
     return applyHostCap(sorted, { authorityDomains: options?.authorityDomains });
-}
-
-const COMMUNITY_DOMAINS = new Set([
-    'juejin.cn',
-    'csdn.net',
-    'zhihu.com',
-    'cnblogs.com',
-    'segmentfault.com',
-    'bilibili.com'
-]);
-
-export function isTier1OfficialDomain(rawUrl: string, customDomains?: string[]): boolean {
-    let host = '';
-    try {
-        host = new URL(rawUrl).hostname.toLowerCase();
-    } catch {
-        return false;
-    }
-    const root = extractRootDomain(rawUrl);
-    if (COMMUNITY_DOMAINS.has(root)) {
-        return false;
-    }
-    if (/^docs\./.test(host) || /\.github\.io$/.test(host) || /^developer\./.test(host) || /\.readthedocs\.io$/.test(host) || host.endsWith('.dev')) {
-        return true;
-    }
-    if (getAuthorityDomains(customDomains).some((domain) => host === domain || host.endsWith(`.${domain}`))) {
-        return true;
-    }
-    return false;
 }
 
 /**
