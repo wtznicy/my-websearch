@@ -10,6 +10,7 @@ import { recordEngineSuccess, tripEngineCircuit } from './engineCircuitBreaker.j
 import { hintProxyConnectionError } from '../../utils/httpRequest.js';
 import { recordEngineLatency, compactEngineLatencyFile, type EngineLatencySample } from '../engineLatency.js';
 import { stripCssFragments } from '../../utils/htmlText.js';
+import { countUsableResults } from './resultRanking.js';
 
 /**
  * P1-5：按引擎细粒度并发限流（避免突发并发把 sogou/baidu 等脆弱引擎打满 10s 超时或触发反爬）：
@@ -151,22 +152,69 @@ export interface ExecutePrimaryEnginesResult {
     cancelledEngines?: Array<{ engine: string; reason: 'early_return'; message: string }>;
 }
 
-/** 结果足够后给慢引擎的宽限窗口：有人已满足 minResults 时，最多再等这么久 */
+/** 结果足够且满足多源多样性后给慢引擎的宽限窗口：最多再等 800ms */
 const EARLY_RETURN_GRACE_MS = 800;
+/** 单一来源凑满时（未满足多源多样性门控），给慢引擎更充裕的时间（1500ms）返回，避免快速垂直社区把全网官方引擎杀掉 */
+const EARLY_RETURN_SINGLE_SOURCE_GRACE_MS = 1500;
 
-function countUniqueResultUrls(
+/** 提取 URL 的主注册域（如 juejin.cn、github.com、sina.com.cn） */
+export function extractRootDomain(rawUrl: string): string {
+    try {
+        const hostname = new URL(rawUrl).hostname.toLowerCase();
+        const parts = hostname.split('.');
+        if (parts.length <= 2) {
+            return hostname;
+        }
+        const sldList = ['com.cn', 'net.cn', 'org.cn', 'gov.cn', 'edu.cn', 'co.uk', 'org.uk', 'co.jp', 'com.tw', 'com.hk'];
+        const lastTwo = parts.slice(-2).join('.');
+        if (sldList.includes(lastTwo) && parts.length >= 3) {
+            return parts.slice(-3).join('.');
+        }
+        return parts.slice(-2).join('.');
+    } catch {
+        return rawUrl.trim();
+    }
+}
+
+function getSettledCountsAndDiversity(
     results: Array<SearchResult[] | undefined>,
+    executableEngines: string[],
     countable: (result: SearchResult) => boolean
-): number {
-    const seen = new Set<string>();
-    for (const engineResult of results) {
-        for (const item of engineResult ?? []) {
+): { merged: SearchResult[]; distinctEngines: Set<string>; distinctDomains: Set<string> } {
+    const seen = new Map<string, SearchResult>();
+    const distinctEngines = new Set<string>();
+    const distinctDomains = new Set<string>();
+
+    for (let index = 0; index < results.length; index += 1) {
+        const engineResult = results[index];
+        if (!engineResult || engineResult.length === 0) {
+            continue;
+        }
+        const engineName = executableEngines[index] ?? `engine_${index}`;
+        let contributed = false;
+        for (const item of engineResult) {
             if (item.url && countable(item)) {
-                seen.add(item.url);
+                contributed = true;
+                const normUrl = item.url.trim().toLowerCase();
+                if (!seen.has(normUrl)) {
+                    seen.set(normUrl, item);
+                }
+                const rootDomain = extractRootDomain(item.url);
+                if (rootDomain) {
+                    distinctDomains.add(rootDomain);
+                }
             }
         }
+        if (contributed) {
+            distinctEngines.add(engineName);
+        }
     }
-    return seen.size;
+
+    return {
+        merged: [...seen.values()],
+        distinctEngines,
+        distinctDomains
+    };
 }
 
 function resolveSatisfiedTarget(limits: number[], requested?: number): number {
@@ -179,14 +227,15 @@ function resolveSatisfiedTarget(limits: number[], requested?: number): number {
 }
 
 /**
- * 收集主引擎结果，「满意即止」：
- * 只要已完成引擎的去重结果数达到目标，就再给未完成引擎一个宽限窗口（800ms），
- * 到期直接 abort 并返回——避免最慢的那个引擎把整次搜索拖满
- * （实测中文 baidu 9.3s vs sogou 3.0s）。单引擎不启用：用户点名一个引擎时就该给它完整预算。
+ * 收集主引擎结果，「相关性 + 多样性」双门控早退：
+ * 满足 countUsableResults(merged, query) >= target 时检查来源多样性：
+ * - 若满足多样性（≥2 引擎或 ≥3 主域名），启动 800ms 宽限窗口；
+ * - 若为单一来源凑数，则给慢引擎 1500ms 宽限，避免快引擎劣币驱逐良币。
  */
 async function collectPrimaryResults(
     races: Array<Promise<SearchResult[]>>,
     context: {
+        query?: string;
         satisfiedTarget: number;
         controllers: AbortController[];
         executableEngines: string[];
@@ -205,6 +254,8 @@ async function collectPrimaryResults(
     await new Promise<void>((resolve) => {
         let remaining = races.length;
         let graceTimer: NodeJS.Timeout | undefined;
+        let graceArmedAt = 0;
+        let currentGraceMs = 0;
         let finished = false;
         const finish = () => {
             if (finished) {
@@ -217,16 +268,50 @@ async function collectPrimaryResults(
             resolve();
         };
         const maybeArmGrace = () => {
-            if (finished || graceTimer) {
+            if (finished) {
                 return;
             }
-            if (countUniqueResultUrls(settled, context.countableResult) < context.satisfiedTarget) {
+            const { merged, distinctEngines, distinctDomains } = getSettledCountsAndDiversity(
+                settled,
+                context.executableEngines,
+                context.countableResult
+            );
+            const usableCount = context.query?.trim()
+                ? countUsableResults(merged, context.query)
+                : merged.length;
+
+            if (usableCount < context.satisfiedTarget) {
                 return;
             }
-            graceTimer = setTimeout(() => {
-                earlyReturn = true;
-                finish();
-            }, EARLY_RETURN_GRACE_MS);
+
+            const isDiverse = distinctEngines.size >= 2 || distinctDomains.size >= 3;
+            const targetGraceMs = isDiverse ? EARLY_RETURN_GRACE_MS : EARLY_RETURN_SINGLE_SOURCE_GRACE_MS;
+
+            if (!graceTimer) {
+                graceArmedAt = Date.now();
+                currentGraceMs = targetGraceMs;
+                graceTimer = setTimeout(() => {
+                    earlyReturn = true;
+                    finish();
+                }, targetGraceMs);
+                return;
+            }
+
+            // 若之前只有单源凑数（1500ms），现满足了多样性门控（>=2 引擎或 >=3 域名），动态缩短至 800ms
+            if (isDiverse && currentGraceMs > EARLY_RETURN_GRACE_MS) {
+                const elapsed = Date.now() - graceArmedAt;
+                clearTimeout(graceTimer);
+                if (elapsed >= EARLY_RETURN_GRACE_MS) {
+                    earlyReturn = true;
+                    finish();
+                } else {
+                    currentGraceMs = EARLY_RETURN_GRACE_MS;
+                    graceTimer = setTimeout(() => {
+                        earlyReturn = true;
+                        finish();
+                    }, EARLY_RETURN_GRACE_MS - elapsed);
+                }
+            }
         };
         races.forEach((race, index) => {
             race.then((results) => {
@@ -466,6 +551,7 @@ export async function executePrimaryEngines(
 
     const satisfiedTarget = resolveSatisfiedTarget(limits, options.satisfiedResults);
     const collected = await collectPrimaryResults(engineRaces, {
+        query: options.query,
         satisfiedTarget,
         controllers,
         executableEngines,

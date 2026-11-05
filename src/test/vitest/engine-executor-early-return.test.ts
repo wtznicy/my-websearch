@@ -106,4 +106,79 @@ describe('executePrimaryEngines early return', () => {
         expect(value.earlyReturn).toBeUndefined();
         expect(value.engineResults[0]).toHaveLength(3);
     });
+
+    it('extends grace to 1500ms when results are from a single source, allowing slow engine to return within 1200ms', async () => {
+        let slowAborted = false;
+        const startedAt = Date.now();
+
+        // fast returns 3 results from juejin.cn (single engine, single domain)
+        // slow takes 1100ms (which is > 800ms old grace, but < 1500ms new single source grace)
+        const value = await executePrimaryEngines(makeOptions({
+            fast: async () => [
+                result('https://juejin.cn/post/1', 'fast'),
+                result('https://juejin.cn/post/2', 'fast'),
+                result('https://juejin.cn/post/3', 'fast')
+            ],
+            slow: async (_q: string, _l: number, ctx?: { signal?: AbortSignal }) => {
+                await new Promise<void>((resolve) => {
+                    const timer = setTimeout(resolve, 1100);
+                    ctx?.signal?.addEventListener('abort', () => {
+                        slowAborted = true;
+                        clearTimeout(timer);
+                        resolve();
+                    }, { once: true });
+                });
+                return [result('https://bing.com/search?q=1', 'slow')];
+            }
+        }, { satisfiedResults: 2 }));
+
+        const elapsed = Date.now() - startedAt;
+        expect(slowAborted).toBe(false);
+        expect(value.engineResults[1]).toHaveLength(1);
+        expect(elapsed).toBeGreaterThanOrEqual(1050);
+    });
+
+    it('does not trigger early return when results are irrelevant to the query according to countUsableResults', async () => {
+        let slowCompleted = false;
+        const startedAt = Date.now();
+
+        // query is "vitest configuration", but fast returns irrelevant "windows bluetooth" results
+        const value = await executePrimaryEngines(makeOptions({
+            fast: async () => [
+                {
+                    title: 'Windows Bluetooth Driver Support',
+                    url: 'https://example.com/bt-1',
+                    description: 'Wireless bluetooth adapter config',
+                    source: 'example.com',
+                    engine: 'fast'
+                },
+                {
+                    title: 'Bluetooth Headset Configuration',
+                    url: 'https://example.com/bt-2',
+                    description: 'Windows 11 audio device setup',
+                    source: 'example.com',
+                    engine: 'fast'
+                }
+            ],
+            slow: async () => {
+                await sleep(1000);
+                slowCompleted = true;
+                return [{
+                    title: 'Vitest Official Documentation',
+                    url: 'https://vitest.dev/config',
+                    description: 'Vitest configuration and setup guide',
+                    source: 'vitest.dev',
+                    engine: 'slow'
+                }];
+            }
+        }, {
+            query: 'Vitest configuration',
+            searchQuery: 'Vitest configuration',
+            satisfiedResults: 2
+        }));
+
+        expect(slowCompleted).toBe(true);
+        expect(value.engineResults[1]).toHaveLength(1);
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(950);
+    });
 });

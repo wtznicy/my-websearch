@@ -4,10 +4,10 @@ import type { SearchResult } from '../../types.js';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const makeResult = (engine: string, index: number): SearchResult => ({
-    title: `${engine} result number ${index + 1}`,
+const makeResult = (engine: string, index: number, query = ''): SearchResult => ({
+    title: `${engine} ${query} result number ${index + 1}`.trim(),
     url: `https://example.com/${engine}/${index}`,
-    description: `A substantive snippet for ${engine} result ${index}`,
+    description: `A substantive snippet for ${engine} ${query} result ${index}`.trim(),
     source: 'example.com',
     engine
 });
@@ -20,10 +20,10 @@ const makeResult = (engine: string, index: number): SearchResult => ({
 describe('search cancellation reporting', () => {
     const makeService = () => {
         const engineMap: SearchEngineExecutorMap = {
-            bing: async (_q, _limit) => Array.from({ length: 2 }, (_, i) => makeResult('bing', i)),
-            duckduckgo: async (_q, _limit) => {
-                await sleep(1500);
-                return Array.from({ length: 2 }, (_, i) => makeResult('duckduckgo', i));
+            bing: async (q, _limit) => Array.from({ length: 2 }, (_, i) => makeResult('bing', i, q)),
+            duckduckgo: async (q, _limit) => {
+                await sleep(2500);
+                return Array.from({ length: 2 }, (_, i) => makeResult('duckduckgo', i, q));
             }
         };
         return createSearchService(engineMap);
