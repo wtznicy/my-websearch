@@ -251,6 +251,38 @@ describe('rankSearchResults', () => {
         });
     });
 
+    describe('P1-5: Relevance hard guard (zero core match demotion)', () => {
+        it('should demote completely irrelevant results (e.g. bluetooth or ping test) to the very tail', () => {
+            const results = [
+                // Result 1: At position 0, but only hits generic word 'configuration' (Windows bluetooth)
+                makeResult({
+                    title: 'Windows 11 Bluetooth Adapter Configuration',
+                    url: 'https://example.com/bt-config',
+                    description: 'Wireless bluetooth adapter device configuration guide'
+                }),
+                // Result 2: Hits core entity 'vitest' and 'node'
+                makeResult({
+                    title: 'Vitest 5 Release Notes - Node.js 22 Support',
+                    url: 'https://vitest.dev/blog/vitest-5',
+                    description: 'Vitest 5 configuration and compatibility with Node.js 22'
+                }),
+                // Result 3: Another relevant result
+                makeResult({
+                    title: 'Configuring Vitest in Node.js Projects',
+                    url: 'https://example.com/vitest-node',
+                    description: 'Setup and configuration guide for Vitest with Node.js 22'
+                })
+            ];
+
+            const ranked = rankSearchResults(results, 'Vitest 5 Node.js 22 configuration');
+            // The Bluetooth result (even though it started at index 0 and matched 'configuration')
+            // must be demoted to the tail because it has zero match on core tokens (vitest, node)
+            expect(ranked[0].url).toBe('https://vitest.dev/blog/vitest-5');
+            expect(ranked[1].url).toBe('https://example.com/vitest-node');
+            expect(ranked[2].url).toBe('https://example.com/bt-config');
+        });
+    });
+
     // 注：共识因子（engineHits，权重 0.1）按设计无法翻转位置分（权重 0.4）——
     // 共识排序由 mergeSearchResults 层保证（按不同引擎命中数主导排序），此处不重复断言。
 

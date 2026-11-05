@@ -367,6 +367,27 @@ export function computeFreshnessAdjustment(dateStr?: string, queryHasFreshness?:
     return 0;
 }
 
+const GENERIC_QUERY_TERMS = new Set([
+    'configuration', 'config', 'setup', 'install', 'installation',
+    'tutorial', 'guide', 'overview', 'docs', 'documentation',
+    'download', 'error', 'failed', 'issue', 'problem', 'fix',
+    'solve', 'solution', 'how', 'what', 'why', 'use', 'using', 'usage',
+    '配置', '安装', '教程', '指南', '文档', '下载', '报错',
+    '错误', '解决', '怎么', '什么', '如何', '使用', '用法', '简介', '概述', '原理'
+]);
+
+export function extractCoreQueryTokens(queryTokens: string[]): string[] {
+    const substantive = queryTokens.filter(isSubstantiveRankingToken);
+    const nonGeneric = substantive.filter((t) => !GENERIC_QUERY_TERMS.has(t));
+    if (nonGeneric.length > 0) {
+        return nonGeneric;
+    }
+    if (substantive.length > 0) {
+        return substantive;
+    }
+    return queryTokens;
+}
+
 /**
  * 对融合后的结果做混合重排；查询为空或结果数 ≤1 时原样返回。
  * 只调整顺序，不增删结果、不修改字段。
@@ -385,6 +406,7 @@ export function rankSearchResults(
         return results;
     }
 
+    const coreTokens = extractCoreQueryTokens(queryTokens);
     const docs = results.map(getDocTokens);
     const bm25 = bm25Scores(queryTokens, docs);
     const maxBm25 = Math.max(...bm25, 1e-6);
@@ -413,6 +435,10 @@ export function rankSearchResults(
         const relevance = rawBm25 / maxBm25;
         const isEntryPage = applyEntryPagePenalty && isLikelySiteEntryPage(result.url);
         const hasQueryMatch = rawBm25 > 0;
+        const docTokenSet = new Set(docs[index]);
+        // P1-5：相关性硬护栏：若对 query 的核心 token 零命中，强力惩罚降至尾部，严防噪声霸榜
+        const hasCoreMatch = coreTokens.length === 0 || coreTokens.some((t) => docTokenSet.has(t));
+        const zeroMatchPenalty = hasCoreMatch ? 0 : 2.0;
         const authority = (isEntryPage || !hasQueryMatch) ? 0 : authorityScore(result.url, options?.authorityDomains);
         const consensus = Math.min(result.engineHits ?? 1, 3) / 3;
         const entryPagePenalty = isEntryPage ? 0.25 : 0;
@@ -427,6 +453,7 @@ export function rankSearchResults(
                 + consensusWeight * consensus)
             + (result.rankBoost ?? 0)
             - entryPagePenalty
+            - zeroMatchPenalty
             + freshnessAdjustment;
         return { result, score, index };
     });
