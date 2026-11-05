@@ -3,6 +3,7 @@ import { ensureSystemProxyDetected } from '../../utils/systemProxy.js';
 import { AppConfig, config } from '../../config.js';
 import { SUPPORTED_SEARCH_ENGINES } from './searchEngines.js';
 import { rankSearchResults } from './resultRanking.js';
+import { injectOfficialRecallIfNeeded } from './officialRecall.js';
 import { isEngineCircuitOpen, getEngineCircuitRemainingMs } from './engineCircuitBreaker.js';
 import { preprocessSearchQuery } from '../../utils/queryPreprocess.js';
 import { buildEngineQuery, matchesSearchOperators, parseSearchOperators } from '../../utils/searchOperators.js';
@@ -545,6 +546,9 @@ export function createSearchService(
                     merged = cascade.merged.filter((result) => matchesSearchOperators(result, effectiveOperators));
                     allFailures.push(...cascade.cascadeFailures);
                     allMetrics.push(...cascade.cascadeMetrics);
+
+                    // 官方意图补召回：当明确请求官网/官方文档但引擎池漏召回时，安全注入官方权威锚点
+                    merged = injectOfficialRecallIfNeeded(merged, cleanQuery);
 
                     // 管道第 3 阶段：全局重排与截断；剥离内部 rankBoost，避免泄漏到公共 JSON。
                     // P2-15：所有引擎结果先过统一出口（URL 协议校验 / description 截断 / source 补全），
