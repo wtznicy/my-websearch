@@ -21,7 +21,7 @@ const MIN_CJK_CHARS = 2;
 
 const DEFAULT_EN_ENGINES = ['bing', 'duckduckgo'];
 const DEFAULT_ZH_ENGINES = ['baidu', 'sogou'];
-const DEFAULT_MIXED_TECH_ENGINES = ['bing', 'juejin', 'baidu'];
+const DEFAULT_MIXED_TECH_ENGINES = ['bing', 'baidu', 'sogou'];
 
 function parseEnvEngineList(raw: string | undefined): string[] | undefined {
     if (!raw || !raw.trim()) {

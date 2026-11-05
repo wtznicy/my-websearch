@@ -75,15 +75,15 @@ describe('pickDefaultEngineForQuery', () => {
         expect(zhFallback).not.toContain('juejin');
     });
 
-    it('should route mixed Chinese-English technical queries to [bing, juejin, baidu]', () => {
+    it('should route mixed Chinese-English technical queries to [bing, baidu, sogou]', () => {
         expect(pickDefaultEnginesForQuery('Next.js 15 Hydration failed 怎么解决', 'auto'))
-            .toEqual(['bing', 'juejin', 'baidu']);
+            .toEqual(['bing', 'baidu', 'sogou']);
         expect(pickDefaultEnginesForQuery('TypeScript satisfies 用法', 'auto'))
-            .toEqual(['bing', 'juejin', 'baidu']);
+            .toEqual(['bing', 'baidu', 'sogou']);
         expect(pickDefaultEnginesForQuery('rust tokio 死锁排查', 'auto'))
-            .toEqual(['bing', 'juejin', 'baidu']);
+            .toEqual(['bing', 'baidu', 'sogou']);
         expect(pickDefaultEnginesForQuery('vue3 响应式原理', 'auto'))
-            .toEqual(['bing', 'juejin', 'baidu']);
+            .toEqual(['bing', 'baidu', 'sogou']);
     });
 
     it('should route pure Chinese general queries to [baidu, sogou]', () => {
