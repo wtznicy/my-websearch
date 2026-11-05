@@ -1,6 +1,6 @@
 import { SearchResult } from '../../types.js';
 import { config } from '../../config.js';
-import { isRrfFusionEnabled } from './mergeResults.js';
+import { isRrfFusionEnabled, extractRootDomain } from './mergeResults.js';
 
 /**
  * 轻量本地结果重排（无外部依赖、毫秒级）。
@@ -431,7 +431,73 @@ export function rankSearchResults(
         return { result, score, index };
     });
 
-    return scored
+    const sorted = scored
         .sort((left, right) => right.score - left.score || left.index - right.index)
         .map((entry) => entry.result);
+
+    return applyHostCap(sorted, { authorityDomains: options?.authorityDomains });
+}
+
+const COMMUNITY_DOMAINS = new Set([
+    'juejin.cn',
+    'csdn.net',
+    'zhihu.com',
+    'cnblogs.com',
+    'segmentfault.com',
+    'bilibili.com'
+]);
+
+export function isTier1OfficialDomain(rawUrl: string, customDomains?: string[]): boolean {
+    let host = '';
+    try {
+        host = new URL(rawUrl).hostname.toLowerCase();
+    } catch {
+        return false;
+    }
+    const root = extractRootDomain(rawUrl);
+    if (COMMUNITY_DOMAINS.has(root)) {
+        return false;
+    }
+    if (/^docs\./.test(host) || /\.github\.io$/.test(host) || /^developer\./.test(host) || /\.readthedocs\.io$/.test(host) || host.endsWith('.dev')) {
+        return true;
+    }
+    if (getAuthorityDomains(customDomains).some((domain) => host === domain || host.endsWith(`.${domain}`))) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * 域名打散与 Host Cap 软降权：
+ * 同一注册域在 Top 结果中最多保留 2 条（Tier 1 官方文档域最多 3 条），超出的条目打散降权到末尾，
+ * 避免单一垂直社区（如掘金/CSDN）或 SEO 站群包揽前排，同时不硬删数据。
+ */
+export function applyHostCap(
+    results: SearchResult[],
+    options?: { authorityDomains?: string[]; maxPerDomain?: number; maxPerOfficialDomain?: number }
+): SearchResult[] {
+    if (results.length <= 2) {
+        return results;
+    }
+    const maxPerDomain = options?.maxPerDomain ?? 2;
+    const maxPerOfficialDomain = options?.maxPerOfficialDomain ?? 3;
+    const domainCounts = new Map<string, number>();
+    const selected: SearchResult[] = [];
+    const overflow: SearchResult[] = [];
+
+    for (const result of results) {
+        const rootDomain = extractRootDomain(result.url);
+        const isOfficial = isTier1OfficialDomain(result.url, options?.authorityDomains);
+        const cap = isOfficial ? maxPerOfficialDomain : maxPerDomain;
+        const currentCount = domainCounts.get(rootDomain) || 0;
+
+        if (currentCount < cap) {
+            domainCounts.set(rootDomain, currentCount + 1);
+            selected.push(result);
+        } else {
+            overflow.push(result);
+        }
+    }
+
+    return [...selected, ...overflow];
 }

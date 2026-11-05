@@ -212,6 +212,45 @@ describe('rankSearchResults', () => {
         expect(ranked[0].url).toBe('https://github.com/');
     });
 
+    describe('applyHostCap (Host Cap & Domain Diversity)', () => {
+        it('should demote overflow results from the same root domain beyond cap=2 to the tail', () => {
+            const results = [
+                makeResult({ title: 'Juejin 1', url: 'https://juejin.cn/post/1', description: 'react tutorial' }),
+                makeResult({ title: 'Juejin 2', url: 'https://juejin.cn/post/2', description: 'react tutorial' }),
+                makeResult({ title: 'Juejin 3', url: 'https://juejin.cn/post/3', description: 'react tutorial' }),
+                makeResult({ title: 'Juejin 4', url: 'https://juejin.cn/post/4', description: 'react tutorial' }),
+                makeResult({ title: 'React Official', url: 'https://react.dev/learn', description: 'react tutorial official' }),
+                makeResult({ title: 'Zhihu Post', url: 'https://zhuanlan.zhihu.com/p/1', description: 'react tutorial' })
+            ];
+
+            const ranked = rankSearchResults(results, 'react tutorial');
+            const top4Urls = ranked.slice(0, 4).map((r) => r.url);
+            expect(top4Urls).toContain('https://react.dev/learn');
+            expect(top4Urls).toContain('https://zhuanlan.zhihu.com/p/1');
+            expect(top4Urls.filter((url) => url.includes('juejin.cn')).length).toBe(2);
+            expect(ranked.slice(4).map((r) => r.url)).toEqual([
+                'https://juejin.cn/post/3',
+                'https://juejin.cn/post/4'
+            ]);
+        });
+
+        it('should allow Tier1 official documentation domains up to cap=3', () => {
+            const results = [
+                makeResult({ title: 'React Learn 1', url: 'https://react.dev/learn/1', description: 'react guide 1' }),
+                makeResult({ title: 'React Learn 2', url: 'https://react.dev/learn/2', description: 'react guide 2' }),
+                makeResult({ title: 'React Learn 3', url: 'https://react.dev/learn/3', description: 'react guide 3' }),
+                makeResult({ title: 'React Learn 4', url: 'https://react.dev/learn/4', description: 'react guide 4' }),
+                makeResult({ title: 'Other site', url: 'https://example.com/react', description: 'react guide' })
+            ];
+
+            const ranked = rankSearchResults(results, 'react guide');
+            const top4Urls = ranked.slice(0, 4).map((r) => r.url);
+            expect(top4Urls.filter((url) => url.includes('react.dev')).length).toBe(3);
+            expect(top4Urls).toContain('https://example.com/react');
+            expect(ranked[4].url).toBe('https://react.dev/learn/4');
+        });
+    });
+
     // 注：共识因子（engineHits，权重 0.1）按设计无法翻转位置分（权重 0.4）——
     // 共识排序由 mergeSearchResults 层保证（按不同引擎命中数主导排序），此处不重复断言。
 

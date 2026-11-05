@@ -34,6 +34,25 @@ export function normalizeResultUrl(url: string): string {
     }
 }
 
+/** 提取 URL 的主注册域（如 juejin.cn、github.com、sina.com.cn） */
+export function extractRootDomain(rawUrl: string): string {
+    try {
+        const hostname = new URL(rawUrl).hostname.toLowerCase();
+        const parts = hostname.split('.');
+        if (parts.length <= 2) {
+            return hostname;
+        }
+        const sldList = ['com.cn', 'net.cn', 'org.cn', 'gov.cn', 'edu.cn', 'co.uk', 'org.uk', 'co.jp', 'com.tw', 'com.hk'];
+        const lastTwo = parts.slice(-2).join('.');
+        if (sldList.includes(lastTwo) && parts.length >= 3) {
+            return parts.slice(-3).join('.');
+        }
+        return parts.slice(-2).join('.');
+    } catch {
+        return rawUrl.trim();
+    }
+}
+
 /** 空描述占位结果：description 无实质内容且 title 过短，对 LLM 没有信息量。 */
 export function isPlaceholderResult(result: SearchResult): boolean {
     const description = (result.description ?? '').trim();

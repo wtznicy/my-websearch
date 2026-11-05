@@ -11,6 +11,7 @@ import { hintProxyConnectionError } from '../../utils/httpRequest.js';
 import { recordEngineLatency, compactEngineLatencyFile, type EngineLatencySample } from '../engineLatency.js';
 import { stripCssFragments } from '../../utils/htmlText.js';
 import { countUsableResults } from './resultRanking.js';
+import { extractRootDomain } from './mergeResults.js';
 
 /**
  * P1-5：按引擎细粒度并发限流（避免突发并发把 sogou/baidu 等脆弱引擎打满 10s 超时或触发反爬）：
@@ -156,25 +157,6 @@ export interface ExecutePrimaryEnginesResult {
 const EARLY_RETURN_GRACE_MS = 800;
 /** 单一来源凑满时（未满足多源多样性门控），给慢引擎更充裕的时间（1500ms）返回，避免快速垂直社区把全网官方引擎杀掉 */
 const EARLY_RETURN_SINGLE_SOURCE_GRACE_MS = 1500;
-
-/** 提取 URL 的主注册域（如 juejin.cn、github.com、sina.com.cn） */
-export function extractRootDomain(rawUrl: string): string {
-    try {
-        const hostname = new URL(rawUrl).hostname.toLowerCase();
-        const parts = hostname.split('.');
-        if (parts.length <= 2) {
-            return hostname;
-        }
-        const sldList = ['com.cn', 'net.cn', 'org.cn', 'gov.cn', 'edu.cn', 'co.uk', 'org.uk', 'co.jp', 'com.tw', 'com.hk'];
-        const lastTwo = parts.slice(-2).join('.');
-        if (sldList.includes(lastTwo) && parts.length >= 3) {
-            return parts.slice(-3).join('.');
-        }
-        return parts.slice(-2).join('.');
-    } catch {
-        return rawUrl.trim();
-    }
-}
 
 function getSettledCountsAndDiversity(
     results: Array<SearchResult[] | undefined>,
