@@ -29,15 +29,18 @@ const STARTPAGE_BASE_URL = 'https://www.startpage.com';
 const ANUBIS_PASS_PATH = '/.within.website/x/cmd/anubis/api/pass-challenge';
 /** PoW 迭代上限（difficulty 正常为 4~5；被标记 IP 升至 6+ 时直接跳过） */
 const POW_MAX_NONCE = 48_000_000;
-/**
- * 默认内联求解的最大 difficulty。
- * difficulty=6 期望约 16.7M 次哈希；单核约 16s，多 Worker 分片后约 4–6s，
- * 因此默认放宽到 6（>=7 的期望成本仍在数十秒级，继续跳过）。
- */
-export const ANUBIS_DEFAULT_MAX_POW_DIFFICULTY = 6;
+/** 单引擎显式调用时允许求解的最大 difficulty（difficulty=6 期望 16.7M 次，4 核 Worker 约 4-6s 可完成） */
+export const ANUBIS_SINGLE_ENGINE_MAX_DIFFICULTY = 6;
+/** 多引擎并发/级联补位时允许求解的最大 difficulty（difficulty<=5 仅需 <400ms，遇 6 快速失败让位给 Bing/Brave 等快引擎） */
+export const ANUBIS_MULTI_ENGINE_MAX_DIFFICULTY = 5;
+/** 向后兼容导出 */
+export const ANUBIS_DEFAULT_MAX_POW_DIFFICULTY = ANUBIS_SINGLE_ENGINE_MAX_DIFFICULTY;
 
-export function getMaxAnubisPowDifficulty(): number {
-    return getNumber('ANUBIS_MAX_POW_DIFFICULTY', ANUBIS_DEFAULT_MAX_POW_DIFFICULTY, { min: 1, max: 8, integer: true });
+export function getMaxAnubisPowDifficulty(isMultiEngine = false): number {
+    const defaultMax = isMultiEngine
+        ? ANUBIS_MULTI_ENGINE_MAX_DIFFICULTY
+        : ANUBIS_SINGLE_ENGINE_MAX_DIFFICULTY;
+    return getNumber('ANUBIS_MAX_POW_DIFFICULTY', defaultMax, { min: 1, max: 8, integer: true });
 }
 
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
@@ -264,7 +267,7 @@ async function requestStartpageAnubisStep(
 
 let inflightAnubisWarmup: Promise<AnubisSession | null> | null = null;
 
-async function runAnubisPowWarmup(signal?: AbortSignal): Promise<AnubisSession | null> {
+async function runAnubisPowWarmup(signal?: AbortSignal, isMultiEngine = false): Promise<AnubisSession | null> {
     const startedAt = Date.now();
     const requestOptions = (forceDirect: boolean): AxiosRequestConfig => buildAxiosRequestOptions({
         engine: 'startpage',
@@ -294,14 +297,14 @@ async function runAnubisPowWarmup(signal?: AbortSignal): Promise<AnubisSession |
 
     const challenge = parseAnubisChallenge(homeHtml);
     if (!challenge) {
-        // "Startpage Blocked" 等硬封禁页没有挑战 payload —— 交给浏览器兜底（CDP）或上层报错
+        // "Startpage Blocked" 等硬封禁页没有挑战 payload —— 上层快速失败
         return null;
     }
 
-    const maxDifficulty = getMaxAnubisPowDifficulty();
+    const maxDifficulty = getMaxAnubisPowDifficulty(isMultiEngine);
     if (challenge.difficulty > maxDifficulty) {
         console.warn(
-            `Startpage Anubis PoW difficulty ${challenge.difficulty} exceeds max inline threshold (${maxDifficulty}); skipping PoW to avoid blocking/timeout`
+            `Startpage Anubis PoW difficulty ${challenge.difficulty} exceeds max threshold (${maxDifficulty}, isMultiEngine=${isMultiEngine}); skipping PoW to fail-fast`
         );
         return null;
     }
@@ -358,12 +361,12 @@ async function runAnubisPowWarmup(signal?: AbortSignal): Promise<AnubisSession |
  * 纯 HTTP 走通 Anubis 挑战，返回放行 cookie 与 sc token。
  * 并发调用共享同一 in-flight 预热（singleflight 去重），避免多个并发请求各自重复求解 PoW。
  */
-export async function warmupWithAnubisPow(signal?: AbortSignal): Promise<AnubisSession | null> {
+export async function warmupWithAnubisPow(signal?: AbortSignal, isMultiEngine = false): Promise<AnubisSession | null> {
     if (signal?.aborted) {
         return null;
     }
     if (!inflightAnubisWarmup) {
-        inflightAnubisWarmup = runAnubisPowWarmup(signal).finally(() => {
+        inflightAnubisWarmup = runAnubisPowWarmup(signal, isMultiEngine).finally(() => {
             inflightAnubisWarmup = null;
         });
     }

@@ -10,6 +10,8 @@ export type SearchExecutionContext = {
     timeRange?: TimeRange;
     site?: string[];
     requestContext?: RequestContext;
+    /** 是否属于多引擎并发/级联补位场景（用于引擎内部调整 PoW 难度预算与快速失败策略） */
+    isMultiEngine?: boolean;
 };
 
 export type SearchEngineExecutor = (query: string, limit: number, context?: SearchExecutionContext) => Promise<SearchResult[]>;

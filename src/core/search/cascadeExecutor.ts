@@ -329,7 +329,8 @@ export async function executeCascade(
                         signal: controller.signal,
                         timeRange: options.timeRange,
                         site: options.siteDomains,
-                        requestContext: options.requestContext
+                        requestContext: options.requestContext,
+                        isMultiEngine: true
                     })
                 );
                 if (!done) {

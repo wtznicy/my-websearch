@@ -474,7 +474,8 @@ export function createSearchService(
                         signal: effectiveSignal,
                         timeRange,
                         site: siteDomains,
-                        requestContext: rc
+                        requestContext: rc,
+                        isMultiEngine: !Boolean(requestedEngines && requestedEngines.length === 1)
                     });
 
                     const allFailures: SearchExecutionFailure[] = [...initialFailures, ...primary.partialFailures];
@@ -506,7 +507,8 @@ export function createSearchService(
                             signal: effectiveSignal,
                             timeRange,
                             site: siteDomains,
-                            requestContext: rc
+                            requestContext: rc,
+                            isMultiEngine: !Boolean(requestedEngines && requestedEngines.length === 1)
                         });
                         allFailures.length = 0;
                         allFailures.push(...initialFailures, ...primary.partialFailures);

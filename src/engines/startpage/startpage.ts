@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { config, getEngineSearchMode, type AppConfig } from '../../config.js';
+import type { AppConfig } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
@@ -67,105 +67,6 @@ function extractInterstitialPayload(html: string): Record<string, string> | unde
     }
 }
 
-// startpage 自 2025 年起部署 Anubis 反爬（proof-of-work + JS 执行，专防 AI/LLM 爬虫），
-// 纯 HTTP 请求无法获取搜索 token（返回 "Verifying your request..." 或 "Startpage Blocked"）。
-// 实测 headless 模式会被 startpage 直接屏蔽（返回 captcha-block 页 "Startpage Blocked"），
-// 只有 headed/hidden-headed（隐藏有头）模式能完成 Anubis 挑战拿到搜索表单。
-// 方案：用浏览器 hidden-headed 模式（CDP）打开首页完成 Anubis 挑战，
-// 提取放行 cookie（spchal-auth 等）+ sc token 并缓存复用；cookie 失效时重新预热。
-async function warmupStartpageSession(signal?: AbortSignal): Promise<void> {
-    if (signal?.aborted) {
-        throw signal.reason instanceof Error ? signal.reason : new Error('Request aborted');
-    }
-    // SEARCH_MODE 控制：若 startpage 不在 playwright 允许名单中（如 SEARCH_MODE=bing 或 request），
-    // 不启动重型浏览器预热，HTTP 被反爬直接报错，配合 minResults 级联自动换其他轻量引擎。
-    const startpageMode = getEngineSearchMode('startpage', config);
-    if (startpageMode === 'request') {
-        const { AppError } = await import('../../core/errors.js');
-        throw new AppError({
-            code: 'invalid_config',
-            retryable: false,
-            engine: 'startpage',
-            message: 'Startpage needs a real browser session (CDP, Anubis anti-bot), but SEARCH_MODE disables the browser for startpage. Enable startpage in SEARCH_MODE (e.g. SEARCH_MODE=auto or SEARCH_MODE=startpage), or use another engine (e.g. bing/baidu/sogou).'
-        });
-    }
-    let session: import('../../utils/playwright/types.js').PlaywrightBrowserSession | undefined;
-    let releasePage: (() => Promise<void>) | undefined;
-    let removeAbortListener: (() => void) | undefined;
-    try {
-        const { openPlaywrightBrowser, acquirePooledPlaywrightPage } = await import('../../utils/playwrightClient.js');
-        const { prepareStealthPage } = await import('../../utils/browserStealth.js');
-
-        // 复用项目统一的浏览器基础设施（CDP：openPlaywrightBrowser + 页面池 + stealth 反检测），
-        // 自动处理：浏览器路径/WS/CDP 端点、按引擎代理、指纹伪装。
-        // 注意：playwright 1.62+ 已移除 page.setUserAgent，需通过 contextOptions.userAgent 设置。
-        // startpage 会屏蔽 headless 浏览器，必须用 hidden-headed（隐藏有头）模式打开。
-        session = await openPlaywrightBrowser(false, [], { hideWindow: true });
-        if (signal?.aborted) {
-            throw signal.reason instanceof Error
-                ? signal.reason
-                : new AppError({ code: 'aborted', engine: 'startpage', message: 'Request aborted', retryable: false });
-        }
-        const pooled = await acquirePooledPlaywrightPage(session.browser, {
-            poolKey: 'startpage-warmup',
-            contextOptions: {
-                userAgent: COMMON_HEADERS['User-Agent'],
-                locale: 'en-US',
-                viewport: { width: 1920, height: 1080 }
-            },
-            preparePage: prepareStealthPage
-        });
-        releasePage = pooled.releasePage;
-        const page = pooled.page;
-        if (signal) {
-            const onAbort = () => {
-                if (releasePage) {
-                    const release = releasePage;
-                    releasePage = undefined;
-                    void release().catch(() => undefined);
-                }
-            };
-            signal.addEventListener('abort', onAbort, { once: true });
-            removeAbortListener = () => signal.removeEventListener('abort', onAbort);
-        }
-        await page.goto(`${STARTPAGE_BASE_URL}/`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        // 等待 Anubis PoW 完成：搜索表单出现即放行
-        await page.waitForSelector('form[action="/sp/search"]', { timeout: 30000 });
-        const scCode = await page.locator('form[action="/sp/search"] input[name="sc"]').first()
-            .getAttribute('value')
-            .catch(() => null);
-        if (!scCode) {
-            throw new AppError({
-                code: 'engine_parse_error',
-                retryable: true,
-                engine: 'startpage',
-                message: 'Failed to extract Startpage search token after Anubis challenge'
-            });
-        }
-        const cookies = await page.context().cookies(STARTPAGE_BASE_URL);
-        const cookieStr = cookies.map((cookie: { name: string; value: string }) => `${cookie.name}=${cookie.value}`).join('; ');
-        if (!cookieStr) {
-            throw new AppError({
-                code: 'engine_parse_error',
-                retryable: true,
-                engine: 'startpage',
-                message: 'Failed to extract Startpage session cookies after Anubis challenge'
-            });
-        }
-        cachedScCode = scCode;
-        cachedCookies = cookieStr;
-        cachedScAt = Date.now();
-    } finally {
-        removeAbortListener?.();
-        if (releasePage) {
-            await releasePage().catch(() => undefined);
-        }
-        if (session) {
-            await session.release().catch(() => undefined);
-        }
-    }
-}
-
 let inflightScWarmupPromise: Promise<string> | null = null;
 
 async function awaitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -197,7 +98,14 @@ async function awaitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Pr
     });
 }
 
-async function getScCode(signal?: AbortSignal): Promise<string> {
+/**
+ * 获取搜索表单的 sc token。
+ * 纯 HTTP + Node Worker 异步求解 Anubis PoW 挑战，完全不依赖 CDP / Playwright 浏览器兜底：
+ * - 单引擎调用：最多允许求解 difficulty <= 6（约 4–6s），超限快速失败；
+ * - 多引擎/级联补位：最多允许求解 difficulty <= 5（<400ms），遇 6 快速失败让位给 Bing/Brave 等快引擎；
+ * - 求解失败或超限立即抛出 bot_challenge 异常，绝不唤起耗时数十秒的重型浏览器。
+ */
+async function getScCode(signal?: AbortSignal, isMultiEngine = false): Promise<string> {
     if (signal?.aborted) {
         throw signal.reason instanceof Error
             ? signal.reason
@@ -214,39 +122,24 @@ async function getScCode(signal?: AbortSignal): Promise<string> {
 
     inflightScWarmupPromise = (async () => {
         const warmupController = new AbortController();
-        const warmupTimer = setTimeout(() => warmupController.abort(), 35000);
+        const warmupTimeoutMs = isMultiEngine ? 8000 : 20000;
+        const warmupTimer = setTimeout(() => warmupController.abort(), warmupTimeoutMs);
         try {
-            // ① 纯 HTTP Anubis PoW 求解（Worker 异步无阻塞；difficulty<=5 时全流程约 2.6s）
-            try {
-                const session = await warmupWithAnubisPow(warmupController.signal);
-                if (session) {
-                    cachedScCode = session.scCode;
-                    cachedCookies = session.cookies;
-                    cachedScAt = Date.now();
-                    currentSessionTtlMs = ANUBIS_SESSION_TTL_MS;
-                    console.error('✅ Startpage warmup via Anubis PoW (no browser needed)');
-                    return cachedScCode;
-                }
-                console.warn('Startpage Anubis PoW warmup returned no session, falling back to Playwright');
-            } catch (error) {
-                if (warmupController.signal.aborted) {
-                    throw error;
-                }
-                console.warn('Startpage Anubis PoW warmup failed, falling back to Playwright:', error instanceof Error ? error.message : String(error));
+            const session = await warmupWithAnubisPow(warmupController.signal, isMultiEngine);
+            if (session) {
+                cachedScCode = session.scCode;
+                cachedCookies = session.cookies;
+                cachedScAt = Date.now();
+                currentSessionTtlMs = ANUBIS_SESSION_TTL_MS;
+                console.error('✅ Startpage warmup via Anubis PoW (pure HTTP, no browser)');
+                return cachedScCode;
             }
-
-            // ② 浏览器兜底（CDP）（hidden-headed 模式，见 warmupStartpageSession）
-            await warmupStartpageSession(warmupController.signal);
-            if (!cachedScCode) {
-                throw new AppError({
-                    code: 'engine_parse_error',
-                    retryable: true,
-                    engine: 'startpage',
-                    message: 'Failed to extract Startpage search token'
-                });
-            }
-            currentSessionTtlMs = STARTPAGE_SC_TTL_MS;
-            return cachedScCode;
+            throw new AppError({
+                code: 'bot_challenge',
+                retryable: false,
+                engine: 'startpage',
+                message: `Startpage Anubis PoW challenge failed or exceeded max difficulty (isMultiEngine: ${isMultiEngine}); fail-fast without browser fallback`
+            });
         } finally {
             clearTimeout(warmupTimer);
         }
@@ -304,8 +197,13 @@ export function extractResultsFromHtml(html: string): SearchResult[] {
     return results;
 }
 
-async function searchStartpagePage(query: string, page: number, signal?: AbortSignal): Promise<SearchResult[]> {
-    const scCode = await getScCode(signal);
+async function searchStartpagePage(
+    query: string,
+    page: number,
+    signal?: AbortSignal,
+    isMultiEngine = false
+): Promise<SearchResult[]> {
+    const scCode = await getScCode(signal, isMultiEngine);
     const formData = new URLSearchParams({
         query,
         cat: 'web',
@@ -371,9 +269,14 @@ import { paginateSearch } from '../../utils/pagination.js';
 export async function searchStartpage(
     query: string,
     limit: number,
-    options?: { searchMode?: AppConfig['searchMode']; signal?: AbortSignal }
+    options?: {
+        searchMode?: AppConfig['searchMode'];
+        signal?: AbortSignal;
+        isMultiEngine?: boolean;
+    }
 ): Promise<SearchResult[]> {
     const signal = options?.signal;
+    const isMultiEngine = options?.isMultiEngine ?? false;
     // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂超时拖累整次搜索
     await assertOverseasEngineUsable('startpage');
 
@@ -382,7 +285,7 @@ export async function searchStartpage(
         initialPage: 1,
         pageStep: 1,
         signal,
-        fetchPage: (page) => searchStartpagePage(query, page, signal),
+        fetchPage: (page) => searchStartpagePage(query, page, signal, isMultiEngine),
         dedupKey: (result) => result.url
     });
 }

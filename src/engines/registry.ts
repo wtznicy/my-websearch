@@ -183,7 +183,7 @@ export const ENGINE_REGISTRY: readonly EngineDescriptor[] = [
         region: 'overseas',
         cascade: { zhPriority: 90, enPriority: 50 },
         supportsNativeSite: true,
-        supportsPlaywright: true,
+        supportsPlaywright: false,
         defaultTimeoutMs: 10000,
         probeUrl: 'https://www.startpage.com/sp/search?query=mcp',
         execute: searchStartpage,

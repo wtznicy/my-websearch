@@ -140,6 +140,7 @@ export interface ExecutePrimaryEnginesOptions {
     timeRange?: 'day' | 'week' | 'month' | 'year';
     site?: string[];
     requestContext?: RequestContext;
+    isMultiEngine?: boolean;
 }
 
 export interface ExecutePrimaryEnginesResult {
@@ -399,7 +400,8 @@ export async function executePrimaryEngines(
                         signal,
                         timeRange,
                         site,
-                        requestContext
+                        requestContext,
+                        isMultiEngine: options.isMultiEngine ?? (executableEngines.length > 1)
                     })
                 );
                 if (signal.aborted) {

@@ -4,6 +4,8 @@ import {
     solveAnubisPow,
     solveAnubisPowAsync,
     getMaxAnubisPowDifficulty,
+    ANUBIS_SINGLE_ENGINE_MAX_DIFFICULTY,
+    ANUBIS_MULTI_ENGINE_MAX_DIFFICULTY,
     parseAnubisChallenge,
     extractStartpageScToken
 } from '../../engines/startpage/anubisSolver.js';
@@ -33,7 +35,10 @@ describe('solveAnubisPow & solveAnubisPowAsync', () => {
         controller.abort();
         const abortedResult = await solveAnubisPowAsync('worker-test-seed', 5, controller.signal);
         expect(abortedResult).toBeNull();
-        expect(getMaxAnubisPowDifficulty()).toBe(6);
+        expect(getMaxAnubisPowDifficulty()).toBe(ANUBIS_SINGLE_ENGINE_MAX_DIFFICULTY);
+        expect(getMaxAnubisPowDifficulty(false)).toBe(6);
+        expect(getMaxAnubisPowDifficulty(true)).toBe(ANUBIS_MULTI_ENGINE_MAX_DIFFICULTY);
+        expect(getMaxAnubisPowDifficulty(true)).toBe(5);
     });
 });
 
