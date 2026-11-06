@@ -1,12 +1,24 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { AppError, isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
+import { AppError, extractErrorStatus, isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { analyzeBlockedPage, buildBingAxiosRequestOptions } from './blockedPage.js';
-import { buildBingSearchUrl, extractSiteDomains, matchesSiteDomains } from './query.js';
+import {
+    buildBingSearchUrl,
+    extractSiteDomains,
+    getEffectiveBingBaseUrl,
+    matchesSiteDomains,
+    setEffectiveBingBaseUrl
+} from './query.js';
 import { isBingImpersonateCircuitOpen, isImpersonateAvailable, searchBingWithImpersonate } from './impersonate.js';
 import { parseBingSearchResults } from './parser.js';
+
+export function isBingRedirectError(error: unknown): boolean {
+    const status = extractErrorStatus(error);
+    const message = error instanceof Error ? error.message : String(error);
+    return status === 301 || status === 302 || /status code (?:301|302)/i.test(message) || /redirect/i.test(message);
+}
 
 export function applySiteDomainFilter(results: EngineSearchResponse, query: string): EngineSearchResponse {
     const siteDomains = extractSiteDomains(query);
@@ -69,14 +81,31 @@ export async function searchBingWithHttp(query: string, limit: number, signal?: 
                 : new AppError({ code: 'aborted', engine: 'bing', message: 'Bing HTTP search aborted', retryable: false });
         }
         let response: import('axios').AxiosResponse;
+        let currentBaseUrl = getEffectiveBingBaseUrl();
         try {
-            response = await axios.get(buildBingSearchUrl(query, pageNumber, timeRange), buildBingAxiosRequestOptions(signal));
+            response = await axios.get(buildBingSearchUrl(query, pageNumber, timeRange, currentBaseUrl), buildBingAxiosRequestOptions(signal));
         } catch (pageError) {
-            if (pageNumber > 0 && allResults.length > 0) {
-                console.warn(`Bing pagination page ${pageNumber} failed, gracefully returning ${allResults.length} partial results:`, pageError instanceof Error ? pageError.message : String(pageError));
-                break;
+            // cn.bing.com 在境外节点/代理下会被微软 301 永久重定向到 www.bing.com，导致 maxRedirects:0 抛错；
+            // 此时以纯 HTTP 优雅降级为 www.bing.com/search 极速重试，毫秒级直接拿结果，无需进入重型 CDP 浏览器
+            if (isBingRedirectError(pageError) && currentBaseUrl.includes('cn.bing.com')) {
+                console.warn('cn.bing.com returned 301/302 redirect; automatically falling back to www.bing.com/search via HTTP');
+                currentBaseUrl = 'https://www.bing.com/search';
+                setEffectiveBingBaseUrl(currentBaseUrl);
+                try {
+                    response = await axios.get(buildBingSearchUrl(query, pageNumber, timeRange, currentBaseUrl), buildBingAxiosRequestOptions(signal));
+                } catch (retryError) {
+                    if (pageNumber > 0 && allResults.length > 0) {
+                        break;
+                    }
+                    throw retryError;
+                }
+            } else {
+                if (pageNumber > 0 && allResults.length > 0) {
+                    console.warn(`Bing pagination page ${pageNumber} failed, gracefully returning ${allResults.length} partial results:`, pageError instanceof Error ? pageError.message : String(pageError));
+                    break;
+                }
+                throw pageError;
             }
-            throw pageError;
         }
         const html = String(response.data || '');
         const $ = cheerio.load(html);

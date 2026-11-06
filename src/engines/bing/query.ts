@@ -44,8 +44,27 @@ export function shouldSuggestRemovingSiteOperator(query: string, error: unknown)
     return message.includes('waitforselector') || message.includes('timeout');
 }
 
-export function buildBingSearchUrl(query: string, pageNumber: number, timeRange?: 'day' | 'week' | 'month' | 'year'): string {
-    const baseUrl = config.bingBaseUrl;
+let effectiveBingBaseUrl: string | undefined;
+
+export function getEffectiveBingBaseUrl(): string {
+    return effectiveBingBaseUrl || config.bingBaseUrl;
+}
+
+export function setEffectiveBingBaseUrl(url: string | undefined): void {
+    effectiveBingBaseUrl = url;
+}
+
+export function resetEffectiveBingBaseUrl(): void {
+    effectiveBingBaseUrl = undefined;
+}
+
+export function buildBingSearchUrl(
+    query: string,
+    pageNumber: number,
+    timeRange?: 'day' | 'week' | 'month' | 'year',
+    customBaseUrl?: string
+): string {
+    const baseUrl = customBaseUrl || getEffectiveBingBaseUrl();
     const url = new URL(baseUrl);
     url.searchParams.set('q', query);
     // 仅在 cn.bing.com（面向大陆默认）时强制 zh-CN 区域；自定义 host（如 www.bing.com）让 Bing 按访问者自动定位

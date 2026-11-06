@@ -1,6 +1,7 @@
 import { config, engineShouldUseProxy, getProxyUrl } from '../../config.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
+import { getEffectiveBingBaseUrl } from './query.js';
 import { AppError } from '../../core/errors.js';
 import { PER_ENGINE_TIMEOUT_MS } from '../../utils/timeouts.js';
 import { getString } from '../../config/env.js';
@@ -100,7 +101,7 @@ export function isImpersonateAvailable(): Promise<boolean> {
 }
 
 function buildImpersonateSearchUrl(query: string, pageNumber: number, timeRange?: 'day' | 'week' | 'month' | 'year'): string {
-    const baseUrl = config.bingBaseUrl || 'https://cn.bing.com/search';
+    const baseUrl = getEffectiveBingBaseUrl();
     const url = new URL(baseUrl);
     url.searchParams.set('q', query);
     if (url.hostname.includes('cn.bing.com')) {
