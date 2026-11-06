@@ -552,7 +552,7 @@ export async function requestDirectFirst(
 
     const rawDirectOptions = buildOptions(true);
     const probeTimeoutCap = getNumber('DIRECT_FIRST_PROBE_TIMEOUT_MS', DEFAULT_DIRECT_FIRST_PROBE_TIMEOUT_MS, { min: 1 });
-    const directOptions: AxiosRequestConfig = hasConfiguredProxy
+    const directOptions: AxiosRequestConfig = hasProxyAvailable
         && typeof rawDirectOptions.timeout === 'number'
         && rawDirectOptions.timeout > probeTimeoutCap
         ? { ...rawDirectOptions, timeout: probeTimeoutCap }

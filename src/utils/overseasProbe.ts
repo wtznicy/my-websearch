@@ -29,14 +29,15 @@ const PROBE_CACHE_TTL_MS = 5 * 60 * 1000;
 const PROBE_FAILURE_CACHE_TTL_MS = 60 * 1000;
 const PROBE_MAX_ENTRIES = 20;
 
-type OverseasEngine = 'duckduckgo' | 'brave' | 'startpage' | 'yahoo';
+type OverseasEngine = 'duckduckgo' | 'brave' | 'startpage' | 'yahoo' | 'bing-news';
 
 /** 探测目标：与各引擎实际请求的 host 保持一致（固定 https URL，无 SSRF 面） */
 const PROBE_TARGETS: Record<OverseasEngine, string> = {
     duckduckgo: 'https://duckduckgo.com/',
     brave: 'https://search.brave.com/',
     startpage: 'https://www.startpage.com/',
-    yahoo: 'https://search.yahoo.com/'
+    yahoo: 'https://search.yahoo.com/',
+    'bing-news': 'https://www.bing.com/news/search'
 };
 
 type ProbeState = { reachable: boolean; checkedAt: number };

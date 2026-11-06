@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { parseJuejinResults, highlightToText } from '../../engines/juejin/juejin.js';
+import https from 'node:https';
+import axios from 'axios';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { parseJuejinResults, highlightToText, searchJuejin, __clearJuejinDirectAgentForTests } from '../../engines/juejin/juejin.js';
+import * as domesticNetwork from '../../utils/domesticDirectNetwork.js';
 
 const DATA = [
     {
@@ -84,5 +87,42 @@ describe('parseJuejinResults 容错（上游字段缺失）', () => {
     it('data 不是数组时返回空数组（不再抛 reading map）', () => {
         expect(parseJuejinResults(undefined as never)).toEqual([]);
         expect(parseJuejinResults({} as never)).toEqual([]);
+    });
+});
+
+describe('searchJuejin 物理直连兜底', () => {
+    afterEach(() => {
+        __clearJuejinDirectAgentForTests();
+        vi.restoreAllMocks();
+    });
+
+    it('当首发请求遇到 ECONNRESET / 超时且判定应直连重试时，自动尝试物理直连 Agent', async () => {
+        let callCount = 0;
+        const fakeAgent = new https.Agent();
+        vi.spyOn(domesticNetwork, 'shouldAttemptDomesticDirectRetry').mockReturnValue(true);
+        vi.spyOn(domesticNetwork, 'createDomesticDirectAgent').mockResolvedValue(fakeAgent);
+
+        vi.spyOn(axios, 'get').mockImplementation(async () => {
+            callCount++;
+            if (callCount === 1) {
+                const err = new Error('Client network socket disconnected');
+                (err as { code?: string }).code = 'ECONNRESET';
+                throw err;
+            }
+            return {
+                status: 200,
+                data: {
+                    err_no: 0,
+                    err_msg: 'success',
+                    data: DATA,
+                    cursor: '1',
+                    has_more: false
+                }
+            } as never;
+        });
+
+        const results = await searchJuejin('react', 1);
+        expect(results).toHaveLength(1);
+        expect(callCount).toBe(2);
     });
 });

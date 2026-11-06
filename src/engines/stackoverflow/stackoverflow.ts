@@ -101,7 +101,7 @@ async function fetchStackOverflowData(
                 'Accept': 'application/json'
             },
             params,
-            timeout: 10000,
+            timeout: 8000,
             forceDirect
         })
     }), 'StackExchange API');

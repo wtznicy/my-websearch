@@ -1,10 +1,13 @@
+import https from 'node:https';
 import axios from 'axios';
+import type { AxiosResponse } from 'axios';
 import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { AppError, isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
+import { createDomesticDirectAgent, shouldAttemptDomesticDirectRetry } from '../../utils/domesticDirectNetwork.js';
 
 interface JuejinSearchResponse {
     err_no: number;
@@ -90,6 +93,92 @@ export function parseJuejinResults(data: JuejinSearchResponse['data']): SearchRe
     });
 }
 
+/** 掘金长连接池与物理网卡直连回退：避免 TUN/代理环境下被路由出境导致 15s 假死 */
+const juejinHttpsAgent = new https.Agent({
+    keepAlive: true,
+    maxFreeSockets: 10,
+    keepAliveMsecs: 60000,
+    timeout: 3000
+});
+
+let cachedJuejinDirectAgent: https.Agent | null = null;
+
+export function __clearJuejinDirectAgentForTests(): void {
+    cachedJuejinDirectAgent = null;
+}
+
+const JUEJIN_API_TIMEOUT_MS = 3500;
+
+async function requestJuejinApi(
+    params: Record<string, unknown>,
+    signal?: AbortSignal
+): Promise<AxiosResponse<JuejinSearchResponse>> {
+    const url = 'https://api.juejin.cn/search_api/v1/search';
+    const baseOpts = buildAxiosRequestOptions({
+        engine: 'juejin',
+        trustedStaticHost: true,
+        signal,
+        timeout: JUEJIN_API_TIMEOUT_MS,
+        params,
+        headers: {
+            'pragma': 'no-cache',
+            'priority': 'u=1, i',
+            'User-Agent': BROWSER_USER_AGENT,
+            'content-type': 'application/json',
+            'Accept': '*/*',
+            'Connection': 'keep-alive'
+        }
+    });
+
+    if (cachedJuejinDirectAgent) {
+        try {
+            return await axios.get<JuejinSearchResponse>(url, {
+                ...baseOpts,
+                httpsAgent: cachedJuejinDirectAgent,
+                proxy: false
+            });
+        } catch (cachedError) {
+            if (isAbortedError(cachedError, signal)) {
+                throw cachedError;
+            }
+            cachedJuejinDirectAgent = null;
+        }
+    }
+
+    try {
+        return await axios.get<JuejinSearchResponse>(url, {
+            ...baseOpts,
+            httpsAgent: juejinHttpsAgent
+        });
+    } catch (error) {
+        if (isAbortedError(error, signal)) {
+            throw error;
+        }
+
+        // TUN / Fake-IP 路由导致字节跳动拒绝握手或超时，尝试物理网卡直连兜底
+        if (shouldAttemptDomesticDirectRetry(error, 'api.juejin.cn')) {
+            try {
+                const directAgent = await createDomesticDirectAgent('api.juejin.cn');
+                if (directAgent) {
+                    const directRes = await axios.get<JuejinSearchResponse>(url, {
+                        ...baseOpts,
+                        httpsAgent: directAgent,
+                        proxy: false,
+                        timeout: JUEJIN_API_TIMEOUT_MS
+                    });
+                    cachedJuejinDirectAgent = directAgent;
+                    return directRes;
+                }
+            } catch (retryError) {
+                if (isAbortedError(retryError, signal)) {
+                    throw retryError;
+                }
+            }
+        }
+        throw error;
+    }
+}
+
 export async function searchJuejin(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
     const signal = options?.signal;
     let allResults: SearchResult[] = [];
@@ -102,30 +191,17 @@ export async function searchJuejin(query: string, limit: number, options?: { sig
             }
             console.error(`🔍 Searching Juejin with query: "${query}", cursor: ${cursor}`);
 
-            const response = await axios.get<JuejinSearchResponse>('https://api.juejin.cn/search_api/v1/search', buildAxiosRequestOptions({ engine: 'juejin',
-                trustedStaticHost: true,
-                signal,
-                params: {
-                    aid: '2608',
-                    // 不再硬编码设备 uuid（所有安装共享同一 ID，易被识别）；让服务端生成
-                    spider: '0',
-                    query: query,
-                    id_type: '0',
-                    cursor: cursor,
-                    limit: Math.min(20, limit - allResults.length),
-                    search_type: '0',
-                    sort_type: '0',
-                    version: '1'
-                },
-                headers: {
-                    'pragma': 'no-cache',
-                    'priority': 'u=1, i',
-                    'User-Agent': BROWSER_USER_AGENT,
-                    'content-type': 'application/json',
-                    'Accept': '*/*',
-                    'Connection': 'keep-alive'
-                }
-            }));
+            const response = await requestJuejinApi({
+                aid: '2608',
+                spider: '0',
+                query: query,
+                id_type: '0',
+                cursor: cursor,
+                limit: Math.min(20, limit - allResults.length),
+                search_type: '0',
+                sort_type: '0',
+                version: '1'
+            }, signal);
 
             const responseData = response.data;
 

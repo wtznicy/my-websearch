@@ -47,4 +47,16 @@ describe('assertOverseasEngineUsable with a system proxy', () => {
 
         await expect(assertOverseasEngineUsable('duckduckgo')).resolves.toBeUndefined();
     });
+
+    it('covers bing-news in assertion and probe targets', async () => {
+        mocks.detect.mockResolvedValue('http://127.0.0.1:7897');
+        await expect(assertOverseasEngineUsable('bing-news')).resolves.toBeUndefined();
+
+        mocks.detect.mockResolvedValue(null);
+        __setOverseasReachableForTests(null);
+        vi.spyOn(axios, 'get').mockRejectedValue(new Error('ECONNRESET'));
+        await expect(assertOverseasEngineUsable('bing-news')).rejects.toMatchObject({
+            code: 'overseas_unreachable'
+        });
+    });
 });

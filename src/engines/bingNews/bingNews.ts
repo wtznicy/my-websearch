@@ -4,6 +4,7 @@ import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { AppError } from '../../core/errors.js';
+import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 
 const BING_NEWS_ENDPOINT = 'https://www.bing.com/news/search';
 const WINDOW_24H_MS = 24 * 60 * 60 * 1000;
@@ -114,6 +115,7 @@ export async function searchBingNews(
     limit: number,
     options?: { signal?: AbortSignal }
 ): Promise<SearchResult[]> {
+    await assertOverseasEngineUsable('bing-news');
     const params = new URLSearchParams({ q: query, format: 'RSS' });
     const url = `${BING_NEWS_ENDPOINT}?${params.toString()}`;
 

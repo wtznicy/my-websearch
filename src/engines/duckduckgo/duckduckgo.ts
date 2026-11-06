@@ -430,6 +430,31 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
       : new AppError({ code: 'aborted', retryable: false, engine: 'duckduckgo', message: 'Request aborted' });
   }
 
+  if (preloadError && shouldUseDuckDuckGoBrowserFallback(preloadError)) {
+    // 预加载已明确遇到 202（反爬/人机挑战），属于 IP/TLS 级拦截，
+    // 同一出口 IP 访问 HTML 端点必定同样返回 202；跳过 HTML 请求直接走浏览器兜底
+    if (getString('DDG_BROWSER_FALLBACK', '') !== '0') {
+      try {
+        const browserResults = await searchDuckDuckGoWithBrowser(query, limit, signal);
+        if (browserResults.length > 0) {
+          return browserResults;
+        }
+      } catch (browserError) {
+        console.warn('DDG browser fallback failed:', browserError instanceof Error ? browserError.message : String(browserError));
+      }
+    }
+    const publicCode = isAppError(preloadError) ? preloadError.code : (normalizePublicErrorCode(extractErrorCode(preloadError)) ?? 'network_error');
+    throw new AppError({
+      code: publicCode,
+      retryable: isAppError(preloadError) ? preloadError.retryable : isRetryableError(preloadError),
+      status: extractErrorStatus(preloadError),
+      engine: 'duckduckgo',
+      ...(publicCode === 'bot_challenge' ? { hint: DDG_BLOCK_HINT } : {}),
+      cause: preloadError,
+      message: `${preloadError instanceof Error ? preloadError.message : String(preloadError)} (preload path)`
+    });
+  }
+
   try {
     return await searchDuckDuckGoHtml(query, limit, signal, timeRange);
   } catch (htmlError) {
