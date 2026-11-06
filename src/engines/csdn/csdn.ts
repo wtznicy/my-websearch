@@ -1,3 +1,4 @@
+import https from 'https';
 import axios from 'axios';
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { SearchResult } from '../../types.js';
@@ -5,9 +6,20 @@ import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { paginateSearch } from '../../utils/pagination.js';
 import { impersonateHttpGet } from '../../utils/impersonateRequest.js';
-import { createDomesticDirectAgent, shouldAttemptDomesticDirectRetry } from '../../utils/domesticDirectNetwork.js';
 import { AppError, isAbortedError, isCascadeAbortedError } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
+
+/** CSDN 专用持久长连接池：避免单次调用反复遭受 WAF 冷启动 TLS 握手断开 */
+const csdnHttpsAgent = new https.Agent({
+    keepAlive: true,
+    maxFreeSockets: 10,
+    keepAliveMsecs: 60000,
+    timeout: 3000
+});
+
+function generateCsdnUuid(): string {
+    return `${Math.random().toString(36).substring(2, 10)}${Date.now().toString(36)}`;
+}
 
 /** CSDN 搜索结果里的 <em> 高亮标签，剥离后返回纯文本 */
 export function stripHighlightTags(value: string): string {
@@ -100,7 +112,7 @@ export function parseCsdnResults(
 const CSDN_SEARCH_API = 'https://so.csdn.net/api/v3/search';
 
 /** 首屏"合法但为空"时重试前等待（给 WAF 软降级留出恢复窗口） */
-const EMPTY_FIRST_PAGE_RETRY_DELAY_MS = 300;
+const EMPTY_FIRST_PAGE_RETRY_DELAY_MS = 150;
 
 const defaultCsdnHttpGet = async (url: string, options: AxiosRequestConfig): Promise<AxiosResponse> => {
     const signal = options.signal as AbortSignal | undefined;
@@ -113,33 +125,15 @@ const defaultCsdnHttpGet = async (url: string, options: AxiosRequestConfig): Pro
             }
             throw error;
         }
-        const status = (error as { response?: { status?: number } })?.response?.status;
-        if (typeof status === 'number' && status !== 521 && status !== 522) {
-            throw error;
-        }
 
-        // 仅在 TLS 握手被 WAF 重置或 521 时触发物理接口补偿兜底
-        try {
-            const hostname = new URL(url).hostname;
-            if (shouldAttemptDomesticDirectRetry(error, hostname)) {
-                const directAgent = await createDomesticDirectAgent(hostname);
-                if (directAgent) {
-                    return await axios.get(url, {
-                        ...options,
-                        httpsAgent: directAgent,
-                        proxy: false
-                    });
-                }
-            }
-        } catch (directError) {
-            if (isAbortedError(directError, signal)) {
-                throw directError;
-            }
-            console.warn('[csdn] Domestic direct physical retry failed:', directError instanceof Error ? directError.message : String(directError));
-        }
-
-        console.warn('CSDN impersonate request failed, falling back to axios:', error instanceof Error ? error.message : String(error));
-        return axios.get(url, options);
+        // 遇到 WAF 握手重置、521 或其他瞬态异常时，快速回退到带长连接池的 axios，
+        // 不再做耗时 3~6s 的多重串行探测，确保整体耗时稳定在 3500ms 预算内
+        console.warn('CSDN impersonate request failed, falling back to axios with keep-alive:', error instanceof Error ? error.message : String(error));
+        return axios.get(url, {
+            ...options,
+            httpsAgent: csdnHttpsAgent,
+            timeout: 2500
+        });
     }
 };
 
@@ -175,19 +169,24 @@ function buildCsdnSearchUrl(query: string, page: number): string {
 }
 
 function buildCsdnRequestOptions(query: string, signal?: AbortSignal): AxiosRequestConfig {
-    return buildAxiosRequestOptions({
+    const opts = buildAxiosRequestOptions({
         engine: 'csdn',
         trustedStaticHost: true,
-        timeout: 15000,
+        timeout: 2500,
         signal,
         headers: {
             'Accept': 'application/json, text/plain, */*',
-            // 补齐真实前端从搜索页发起该 API 时会带的 Referer（缺失可能被 WAF 视为非浏览器请求；此为防御性补齐，未独立抓包核验）
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             'Referer': `https://so.csdn.net/so/search?q=${encodeURIComponent(query)}&t=blog`,
-            // wreq 路径由指纹 profile 注入 UA，这个头只在 axios 回退路径生效
-            'User-Agent': BROWSER_USER_AGENT
+            'User-Agent': BROWSER_USER_AGENT,
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site',
+            'Cookie': `uuid_tt_x=${generateCsdnUuid()}; c_first_ref=default; c_first_page=https%3A//so.csdn.net/so/search`
         }
     });
+    opts.httpsAgent = csdnHttpsAgent;
+    return opts;
 }
 
 /**

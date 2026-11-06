@@ -29,11 +29,14 @@ const PROBE_CACHE_TTL_MS = 5 * 60 * 1000;
 const PROBE_FAILURE_CACHE_TTL_MS = 60 * 1000;
 const PROBE_MAX_ENTRIES = 20;
 
+type OverseasEngine = 'duckduckgo' | 'brave' | 'startpage' | 'yahoo';
+
 /** 探测目标：与各引擎实际请求的 host 保持一致（固定 https URL，无 SSRF 面） */
-const PROBE_TARGETS: Record<'duckduckgo' | 'brave' | 'startpage', string> = {
+const PROBE_TARGETS: Record<OverseasEngine, string> = {
     duckduckgo: 'https://duckduckgo.com/',
     brave: 'https://search.brave.com/',
-    startpage: 'https://www.startpage.com/'
+    startpage: 'https://www.startpage.com/',
+    yahoo: 'https://search.yahoo.com/'
 };
 
 type ProbeState = { reachable: boolean; checkedAt: number };
@@ -118,7 +121,7 @@ async function anyProbeSucceeded(attempts: Array<Promise<boolean>>): Promise<boo
     });
 }
 
-async function isDirectlyReachable(engine: 'duckduckgo' | 'brave' | 'startpage'): Promise<boolean> {
+async function isDirectlyReachable(engine: OverseasEngine): Promise<boolean> {
     const now = Date.now();
     const cached = probeCache.get(engine);
     if (cached) {
@@ -234,7 +237,7 @@ export function __setOverseasReachableForTests(reachable: boolean | null): void 
  *    还会缓存失败 60s；实测 2.3s 的代理被 3s 阈值误杀。）
  * - 完全没有代理 → 探测直连，不可达时快速失败
  */
-export async function assertOverseasEngineUsable(engine: 'duckduckgo' | 'brave' | 'startpage'): Promise<void> {
+export async function assertOverseasEngineUsable(engine: OverseasEngine): Promise<void> {
     if (engineShouldUseProxy(engine)) {
         return;
     }

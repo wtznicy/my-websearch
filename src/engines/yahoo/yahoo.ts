@@ -6,6 +6,7 @@ import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { detectSystemProxy } from '../../utils/systemProxy.js';
 import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { AppError } from '../../core/errors.js';
+import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 import { createWreqSession, loadWreqModule } from '../bing/impersonate.js';
 
 const YAHOO_HOME = 'https://search.yahoo.com/';
@@ -232,6 +233,8 @@ export async function searchYahoo(
 ): Promise<SearchResult[]> {
     const signal = options?.signal;
     const timeRange = options?.timeRange;
+
+    await assertOverseasEngineUsable('yahoo');
 
     const viaWreq = await fetchYahooWithWreq(query, limit, signal, timeRange);
     if (viaWreq !== null) {
