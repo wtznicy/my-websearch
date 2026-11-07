@@ -1,6 +1,10 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { isChineseQuery, buildBingSearchUrl } from '../../engines/bing/query.js';
-import { buildImpersonateSearchUrl } from '../../engines/bing/impersonate.js';
+import {
+    buildImpersonateSearchUrl,
+    getRecommendedWreqBindingPackage,
+    formatWreqUnavailableMessage
+} from '../../engines/bing/impersonate.js';
 import * as httpSearchModule from '../../engines/bing/httpSearch.js';
 import * as browserFallbackModule from '../../engines/bing/browserFallback.js';
 import * as launchArgsModule from '../../engines/bing/launchArgs.js';
@@ -122,4 +126,35 @@ describe('Bing query awareness and fast recovery', () => {
             expect(results).toEqual(playwrightResults);
         });
     });
+
+    describe('wreq diagnostics and package recommendation', () => {
+        it('resolves correct precompiled package across all platforms', () => {
+            expect(getRecommendedWreqBindingPackage('darwin', 'x64')).toBe('@wreq-js/binding-darwin-x64');
+            expect(getRecommendedWreqBindingPackage('darwin', 'arm64')).toBe('@wreq-js/binding-darwin-arm64');
+            expect(getRecommendedWreqBindingPackage('win32', 'x64')).toBe('@wreq-js/binding-win32-x64-msvc');
+            expect(getRecommendedWreqBindingPackage('win32', 'arm64')).toBe('@wreq-js/binding-win32-arm64-msvc');
+            expect(getRecommendedWreqBindingPackage('android', 'arm64')).toBe('@wreq-js/binding-android-arm64');
+            expect(getRecommendedWreqBindingPackage('linux', 'x64', false)).toBe('@wreq-js/binding-linux-x64-gnu');
+            expect(getRecommendedWreqBindingPackage('linux', 'x64', true)).toBe('@wreq-js/binding-linux-x64-musl');
+            expect(getRecommendedWreqBindingPackage('linux', 'arm64', false)).toBe('@wreq-js/binding-linux-arm64-gnu');
+            expect(getRecommendedWreqBindingPackage('linux', 'arm64', true)).toBe('@wreq-js/binding-linux-arm64-musl');
+            expect(getRecommendedWreqBindingPackage('freebsd' as any, 'x64')).toBeNull();
+        });
+
+        it('formats informative diagnostic message with fix command when module is missing', () => {
+            const err = new Error("Cannot find module 'wreq-js'");
+            const msg = formatWreqUnavailableMessage(err, 'linux', 'x64', true);
+            expect(msg).toContain("package 'wreq-js' is not installed");
+            expect(msg).toContain('npm i @wreq-js/binding-linux-x64-musl');
+            expect(msg).toContain('Falling back to default HTTP / axios client');
+        });
+
+        it('formats informative diagnostic message when binding dlopen fails', () => {
+            const err = new Error('ERR_DLOPEN_FAILED: symbol not found');
+            const msg = formatWreqUnavailableMessage(err, 'win32', 'x64');
+            expect(msg).toContain('native binary binding for current platform (win32-x64) is missing or incompatible');
+            expect(msg).toContain('npm i @wreq-js/binding-win32-x64-msvc');
+        });
+    });
+
 });

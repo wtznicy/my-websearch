@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { config, engineShouldUseProxy, getProxyUrl } from '../../config.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
@@ -80,6 +81,84 @@ export async function createWreqSession(mod: WreqModule, engine?: string, proxyO
     });
 }
 
+/**
+ * 检测当前 Linux 运行环境是否基于 musl libc（如 Alpine Linux）
+ */
+export function detectIsMusl(): boolean {
+    if (process.platform !== 'linux') {
+        return false;
+    }
+    try {
+        const report = typeof process.report?.getReport === 'function'
+            ? (process.report.getReport() as { header?: { glibcVersionRuntime?: string } })
+            : null;
+        if (report?.header?.glibcVersionRuntime) {
+            return false;
+        }
+    } catch {
+        // ignore report error
+    }
+    try {
+        if (fs.existsSync('/etc/alpine-release')) {
+            return true;
+        }
+    } catch {
+        // ignore fs error
+    }
+    return false;
+}
+
+/**
+ * 根据平台与芯片架构推导推荐安装的 @wreq-js 预编译平台包名
+ */
+export function getRecommendedWreqBindingPackage(
+    platform: NodeJS.Platform = process.platform,
+    arch: string = process.arch,
+    isMusl: boolean = detectIsMusl()
+): string | null {
+    if (platform === 'darwin') {
+        if (arch === 'x64') return '@wreq-js/binding-darwin-x64';
+        if (arch === 'arm64') return '@wreq-js/binding-darwin-arm64';
+    } else if (platform === 'win32') {
+        if (arch === 'x64') return '@wreq-js/binding-win32-x64-msvc';
+        if (arch === 'arm64') return '@wreq-js/binding-win32-arm64-msvc';
+    } else if (platform === 'android') {
+        if (arch === 'arm64') return '@wreq-js/binding-android-arm64';
+    } else if (platform === 'linux') {
+        const libc = isMusl ? 'musl' : 'gnu';
+        if (arch === 'x64') return `@wreq-js/binding-linux-x64-${libc}`;
+        if (arch === 'arm64') return `@wreq-js/binding-linux-arm64-${libc}`;
+    }
+    return null;
+}
+
+/**
+ * 格式化原生库不可用时的精准诊断日志与建议安装命令
+ */
+export function formatWreqUnavailableMessage(
+    error: unknown,
+    platform: NodeJS.Platform = process.platform,
+    arch: string = process.arch,
+    isMusl: boolean = detectIsMusl()
+): string {
+    const errMessage = error instanceof Error ? error.message : String(error);
+    const recommendedPkg = getRecommendedWreqBindingPackage(platform, arch, isMusl);
+    const platformInfo = `${platform}-${arch}${platform === 'linux' ? (isMusl ? '-musl' : '-gnu') : ''}`;
+
+    let reason = 'native library probe failed';
+    if (/cannot find module 'wreq-js'/i.test(errMessage)) {
+        reason = "package 'wreq-js' is not installed (likely omitted via --no-optional or --omit=optional)";
+    } else if (/binding|cannot find module '@wreq-js/i.test(errMessage) || /ERR_DLOPEN_FAILED/i.test(errMessage)) {
+        reason = `native binary binding for current platform (${platformInfo}) is missing or incompatible`;
+    }
+
+    const fixHint = recommendedPkg
+        ? ` Run "npm i ${recommendedPkg}" or ensure optionalDependencies are installed (omit --no-optional).`
+        : ` Current platform (${platformInfo}) may not be supported by precompiled binaries.`;
+
+    return `wreq-js native library unavailable (${reason}: ${errMessage}).${fixHint} Falling back to default HTTP / axios client.`;
+}
+
 /** 检测 wreq-js 原生模块是否可用（懒加载 + 结果缓存，进程内只探测一次） */
 export function isImpersonateAvailable(): Promise<boolean> {
     if (!availabilityPromise) {
@@ -92,7 +171,7 @@ export function isImpersonateAvailable(): Promise<boolean> {
                 cachedModule = mod as unknown as WreqModule;
                 return true;
             } catch (error) {
-                console.warn(`wreq-js unavailable, Bing will fall back to the default HTTP client: ${error instanceof Error ? error.message : String(error)}`);
+                console.warn(formatWreqUnavailableMessage(error));
                 return false;
             }
         })();
