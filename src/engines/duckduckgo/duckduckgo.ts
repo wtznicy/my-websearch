@@ -436,7 +436,7 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
     if (signal?.aborted) {
       throw error;
     }
-    // 202（挑战）：直接失败 bot_challenge，不跑 preload、不跑 axios HTML、不跑 CDP
+    // 202（挑战）：直接失败 bot_challenge，不跑 preload
     if (isDuckDuckGoBotChallenge(error)) {
       throw error;
     }
@@ -449,56 +449,8 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
       : new AppError({ code: 'aborted', retryable: false, engine: 'duckduckgo', message: 'Request aborted' });
   }
 
-  // 2. preload GET https://duckduckgo.com/?q=
-  let preloadError: unknown = null;
-  try {
-    const results = await searchDuckDuckGoPreloadUrl(query, limit, signal, timeRange);
-    if (results.length > 0) {
-      return results;
-    }
-  } catch (error) {
-    if (signal?.aborted) {
-      throw error;
-    }
-    // 202（挑战）：直接失败 bot_challenge，不跑 axios HTML、不跑 CDP
-    if (isDuckDuckGoBotChallenge(error)) {
-      throw error;
-    }
-    preloadError = error;
-    console.warn('预加载URL方法失败，尝试HTML方法:', error instanceof Error ? error.message : String(error));
-  }
-
-  if (signal?.aborted) {
-    throw signal.reason instanceof Error
-      ? signal.reason
-      : new AppError({ code: 'aborted', retryable: false, engine: 'duckduckgo', message: 'Request aborted' });
-  }
-
-  // 3. axios HTML POST https://html.duckduckgo.com/html/
-  try {
-    return await searchDuckDuckGoHtml(query, limit, signal, timeRange);
-  } catch (htmlError) {
-    if (signal?.aborted) {
-      throw htmlError;
-    }
-    // 202（挑战）：直接失败 bot_challenge，不跑 CDP
-    if (isDuckDuckGoBotChallenge(htmlError)) {
-      throw htmlError;
-    }
-    if (preloadError instanceof Error && htmlError instanceof Error) {
-      const publicCode = isAppError(htmlError) ? htmlError.code : (normalizePublicErrorCode(extractErrorCode(htmlError)) ?? 'network_error');
-      throw new AppError({
-        code: publicCode,
-        retryable: isAppError(htmlError) ? htmlError.retryable : isRetryableError(htmlError),
-        status: extractErrorStatus(htmlError),
-        engine: 'duckduckgo',
-        ...(publicCode === 'bot_challenge' ? { hint: DDG_BLOCK_HINT } : {}),
-        cause: htmlError,
-        message: `${htmlError.message} (preload path: ${preloadError.message})`
-      });
-    }
-    throw htmlError;
-  }
+  // 2. 纯 JS 结构化数据兜底：preload GET https://duckduckgo.com/?q=
+  return await searchDuckDuckGoPreloadUrl(query, limit, signal, timeRange);
 }
 
 /**
@@ -693,8 +645,7 @@ async function searchDuckDuckGoPreloadUrl(query: string, maxResults = 10, signal
 
       return results.slice(0, maxResults);
     } catch (error) {
-      // 不要静默吞成"0 结果"：re-throw 让主入口 fallback 到 HTML 路径，
-      // 若 HTML 也失败，真实原因（网络/限流/解析）能通过 partialFailures 暴露出来
+      // 不要静默吞成"0 结果"：re-throw 让主入口/级联能通过 partialFailures 暴露真实原因
       console.error('DuckDuckGo预加载URL搜索失败:', error instanceof Error ? error.message : String(error));
       throw error;
     }
@@ -763,105 +714,7 @@ async function searchDuckDuckGoPreloadUrl(query: string, maxResults = 10, signal
       if (signal?.aborted) {
         throw error;
       }
-      console.warn('[duckduckgo] impersonated GET failed, falling back to preload/axios:', error instanceof Error ? error.message : String(error));
+      console.warn('[duckduckgo] impersonated GET failed, falling back to preload:', error instanceof Error ? error.message : String(error));
       return null;
     }
   }
-
-  async function searchDuckDuckGoHtml(query: string, maxResults = 10, signal?: AbortSignal, timeRange?: 'day' | 'week' | 'month' | 'year'): Promise<SearchResult[]> {
-  const requestUrl = 'https://html.duckduckgo.com/html/';
-
-    // Configure request options
-    const requestOptions = buildAxiosRequestOptions({ engine: 'duckduckgo',
-    trustedStaticHost: true,
-    timeout: 10000,
-    signal,
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': BROWSER_USER_AGENT,
-      'Accept': '*/*',
-      'Connection': 'keep-alive'
-    },
-  });
-
-  try {
-    const seenUrls = new Set<string>();
-    const results: SearchResult[] = [];
-    let offset = 0;
-    let pageCount = 0;
-
-    const bodyParams = new URLSearchParams({ q: query });
-    if (timeRange) {
-      const dfMap: Record<string, string> = { day: 'd', week: 'w', month: 'm', year: 'y' };
-      if (dfMap[timeRange]) {
-        bodyParams.set('df', dfMap[timeRange]);
-      }
-    }
-
-    let response = await axios.post(
-      requestUrl,
-      bodyParams.toString(),
-      requestOptions
-    );
-
-    if (
-      response.status === 202 ||
-      /anomaly-modal|challenge-form/i.test(String(response.data || '')) ||
-      String(response.data || '').includes('anomalyDetectionBlock')
-    ) {
-      throw createDuckDuckGoBotChallengeError();
-    }
-
-    let parsedPage = parseDuckDuckGoHtmlResults(String(response.data || ''), maxResults, seenUrls);
-    results.push(...parsedPage.results);
-
-    while (results.length < maxResults && parsedPage.rawCount > 0 && pageCount < 10) {
-      if (signal?.aborted) {
-        throw signal.reason instanceof Error
-          ? signal.reason
-          : new AppError({ code: 'aborted', retryable: false, engine: 'duckduckgo', message: 'Request aborted' });
-      }
-      offset += parsedPage.rawCount;
-      pageCount += 1;
-
-      // 记录本页 URL 集合，用于检测服务端重复返回导致的无进展死循环
-      const beforeDedup = results.length;
-
-      response = await axios.post(
-        requestUrl,
-        new URLSearchParams({
-          q: query,
-          s: offset.toString(),
-          dc: offset.toString(),
-          v: 'l',
-          o: 'json',
-          api: 'd.js'
-        }).toString(),
-        requestOptions
-      );
-
-      if (
-        response.status === 202 ||
-        /anomaly-modal|challenge-form/i.test(String(response.data || '')) ||
-        String(response.data || '').includes('anomalyDetectionBlock')
-      ) {
-        throw createDuckDuckGoBotChallengeError();
-      }
-
-      parsedPage = parseDuckDuckGoHtmlResults(String(response.data || ''), maxResults, seenUrls);
-      results.push(...parsedPage.results);
-
-      // 安全阀：本页没有新增任何去重后的结果，说明分页无进展，终止循环避免死循环
-      if (results.length === beforeDedup) {
-        console.warn('⚠️ DuckDuckGo pagination made no progress, stopping to avoid infinite loop');
-        break;
-      }
-    }
-
-    return results.slice(0, maxResults);
-  } catch (error) {
-    console.error('DuckDuckGo HTML search failed:', error instanceof Error ? error.message : String(error));
-    // 向上抛错，由 searchService 的重试 + partialFailures 机制接管
-    throw error;
-  }
-}
