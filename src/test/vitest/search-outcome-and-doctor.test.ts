@@ -1100,6 +1100,8 @@ describe('CLI search failed outcome, configLoader priority & doctor command', ()
         };
         const { metrics } = await import('../../core/metrics.js');
         metrics.resetMetrics();
+        const { resetEngineCircuits } = await import('../../core/search/engineCircuitBreaker.js');
+        resetEngineCircuits();
 
         const enCandidates = pickCascadeCandidates('typescript 5 satisfies operator', new Set(['bing', 'duckduckgo']), fullEngineMap, false);
         expect(enCandidates).toEqual(['brave', 'startpage']);

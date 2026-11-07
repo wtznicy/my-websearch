@@ -52,7 +52,7 @@ export class CDPPage implements BrowserPage {
         });
     }
 
-    public async init(options?: { blockMediaAndTrackers?: boolean }): Promise<void> {
+    public async init(): Promise<void> {
         const { Page, Runtime, Network } = this.client;
         await Promise.all([
             Page.enable(),
@@ -60,20 +60,11 @@ export class CDPPage implements BrowserPage {
             Network.enable()
         ]);
 
-        if (options?.blockMediaAndTrackers !== false) {
-            try {
-                await Network.setBlockedURLs({ urls: [...DEFAULT_CDP_BLOCKED_URLS] });
-            } catch {
-                // 部分 Chromium 环境或定制版可能不支持 setBlockedURLs，静默降级
-            }
-        }
-    }
-
-    public async setBlockedURLs(urls: readonly string[] | string[]): Promise<void> {
+        // 强力阻断无用媒体与第三方追踪遥测：内核级丢弃，零 IPC 与网络流量浪费
         try {
-            await this.client.Network.setBlockedURLs({ urls: [...urls] });
+            await Network.setBlockedURLs({ urls: [...DEFAULT_CDP_BLOCKED_URLS] });
         } catch {
-            // ignore
+            // 部分定制 Chromium 环境可能不支持 setBlockedURLs，静默降级
         }
     }
 
