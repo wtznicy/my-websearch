@@ -41,15 +41,11 @@ export interface AppConfig {
     // 全局并发搜索限制：同时进行的搜索请求数上限（0 = 不限制）。
     // CLI 一次性调用不受此限制，仅 daemon 模式下多客户端并发时生效。
     maxConcurrentSearches: number;
-    // 向后兼容保留的独立兜底开关属性（由 SEARCH_MODE 自动推导）
-    bingPlaywrightFallback: boolean;
     /** Bing 搜索请求基础 URL（默认 https://cn.bing.com/search，面向国内免翻；支持配置为 www.bing.com 或自建反代） */
     bingBaseUrl: string;
     /** 指纹请求（wreq-js）的浏览器 profile 与平台，如 chrome_149 / windows */
     impersonateBrowser: string;
     impersonateOs: string;
-    // 向后兼容保留的独立兜底开关属性（由 SEARCH_MODE 自动推导）
-    startpagePlaywrightFallback: boolean;
     // Proxy configuration
     proxyUrl?: string;
     useProxy: boolean;
@@ -133,24 +129,17 @@ function splitModeSegments(raw: string): string[] {
  * 2. 一种模式多选引擎：`playwright:bing,startpage` 或 `auto:bing,startpage`
  * 3. 多种启动方式组合：`playwright:bing;auto:startpage` 或 `auto;request:startpage`
  * 4. 纯引擎简写白名单：`bing,startpage`（自动进入 auto，未列出引擎纯 HTTP）
- * 同时静默向后兼容历史环境变量 BING_PLAYWRIGHT_FALLBACK 与 STARTPAGE_PLAYWRIGHT_FALLBACK。
  */
 export function parseSearchModeConfig(
-    rawMode?: string,
-    legacyBingFallback?: string,
-    legacyStartpageFallback?: string
+    rawMode?: string
 ): ParsedSearchMode {
     const raw = (rawMode || '').trim();
     if (!raw) {
-        return applyLegacyOverrides(
-            {
-                searchMode: 'auto',
-                engineSearchModes: {},
-                playwrightEngines: [...KNOWN_PLAYWRIGHT_ENGINES]
-            },
-            legacyBingFallback,
-            legacyStartpageFallback
-        );
+        return {
+            searchMode: 'auto',
+            engineSearchModes: {},
+            playwrightEngines: [...KNOWN_PLAYWRIGHT_ENGINES]
+        };
     }
 
     const segments = splitModeSegments(raw);
@@ -208,31 +197,11 @@ export function parseSearchModeConfig(
         }
     }
 
-    return applyLegacyOverrides(
-        {
-            searchMode: defaultMode,
-            engineSearchModes,
-            playwrightEngines
-        },
-        legacyBingFallback,
-        legacyStartpageFallback
-    );
-}
-
-function applyLegacyOverrides(
-    parsed: ParsedSearchMode,
-    legacyBingFallback?: string,
-    legacyStartpageFallback?: string
-): ParsedSearchMode {
-    if (legacyBingFallback === 'false') {
-        parsed.engineSearchModes['bing'] = 'request';
-        parsed.playwrightEngines = parsed.playwrightEngines.filter(e => e !== 'bing');
-    }
-    if (legacyStartpageFallback === 'false') {
-        parsed.engineSearchModes['startpage'] = 'request';
-        parsed.playwrightEngines = parsed.playwrightEngines.filter(e => e !== 'startpage');
-    }
-    return parsed;
+    return {
+        searchMode: defaultMode,
+        engineSearchModes,
+        playwrightEngines
+    };
 }
 
 export const DEFAULT_PROXY_URL = 'http://127.0.0.1:7897';
@@ -391,9 +360,7 @@ export function createConfig(
     loadApplicationConfigEnv(env, { quiet: options.quiet });
 
     const parsedSearchMode = parseSearchModeConfig(
-        getEnv('SEARCH_MODE', env),
-        getEnv('BING_PLAYWRIGHT_FALLBACK', env),
-        getEnv('STARTPAGE_PLAYWRIGHT_FALLBACK', env)
+        getEnv('SEARCH_MODE', env)
     );
 
     const parsedProxy = parseProxyConfig(
@@ -408,9 +375,7 @@ export function createConfig(
         searchMode: parsedSearchMode.searchMode,
         engineSearchModes: parsedSearchMode.engineSearchModes,
         playwrightEngines: parsedSearchMode.playwrightEngines,
-        bingPlaywrightFallback: parsedSearchMode.playwrightEngines.includes('bing') && (parsedSearchMode.engineSearchModes['bing'] ?? parsedSearchMode.searchMode) !== 'request',
         bingBaseUrl: (getString('BING_BASE_URL', '', env) || getString('OPEN_WEBSEARCH_BING_HOST', '', env) || 'https://cn.bing.com/search').trim().replace(/\/$/, ''),
-        startpagePlaywrightFallback: parsedSearchMode.playwrightEngines.includes('startpage') && (parsedSearchMode.engineSearchModes['startpage'] ?? parsedSearchMode.searchMode) !== 'request',
         maxConcurrentSearches: parsePositiveIntEnv(getOptionalString('MAX_CONCURRENT_SEARCHES', env), 20, 0),
         impersonateBrowser: getOptionalString('IMPERSONATE_BROWSER', env) || 'chrome_149',
         impersonateOs: getOptionalString('IMPERSONATE_OS', env) || 'windows',

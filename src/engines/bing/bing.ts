@@ -57,8 +57,7 @@ export async function searchBing(
         // auto 模式下检测到首词漂移时同样触发浏览器交互回退（CDP）。
         // 熔断冷却期不要为「注定失败」的请求再花 20s 起浏览器；
         // 冷却本身就是失败学习的结果，浏览器兜底救不回来，只会把 200ms 的失败拉长到 20s。
-        if (hasFirstTokenDrift(httpResults, query) && config.bingPlaywrightFallback && !signal?.aborted
-            && !isEngineCircuitOpen('bing')) {
+        if (hasFirstTokenDrift(httpResults, query) && !signal?.aborted && !isEngineCircuitOpen('bing')) {
             const canUsePlaywright = await isPlaywrightAvailable();
             if (canUsePlaywright && !signal?.aborted) {
                 console.warn('Request-based Bing search returned first-token drift for multi-word query, falling back to Playwright mode');
@@ -81,14 +80,7 @@ export async function searchBing(
             throw requestError;
         }
 
-        // SEARCH_MODE 控制：若 bing 不在 playwright 允许名单中（或显式禁用），
-        // 反爬直接抛错，不启动重型浏览器。错误进入 partialFailures，配置 minResults 级联更轻量引擎补位。
-        if (!config.bingPlaywrightFallback) {
-            tripEngineCircuit('bing');
-            throw requestError;
-        }
-
-        // 同上：冷却期内直接抛错，交给级联换更轻量的引擎，而不是起浏览器再等一次超时。
+        // 冷却期内直接抛错，交给级联换更轻量的引擎，而不是起浏览器再等一次超时。
         if (isEngineCircuitOpen('bing')) {
             throw requestError;
         }

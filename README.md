@@ -373,7 +373,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 #### 5. 🧭 CDP Browser & Stealth Controls (legacy Playwright env names kept)
 
 > [!NOTE]
-> The browser fallback uses **raw Chrome DevTools Protocol** via `chrome-remote-interface`, so it requires a **Chromium-based** browser: Chrome, Edge, Chromium, Brave, Vivaldi or Opera (Firefox/WebKit are **not** supported). Standard install paths for all of these are auto-detected; override with `CHROME_PATH` / `BROWSER_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH`, or connect a remote browser via `PLAYWRIGHT_CDP_ENDPOINT` (no local install needed). `my-websearch doctor --browser` reports which browser was found and how to fix a missing one. The `PLAYWRIGHT_*` env names and `SEARCH_MODE=playwright` value are kept for backward compatibility only. `BING_PLAYWRIGHT_FALLBACK` and `STARTPAGE_PLAYWRIGHT_FALLBACK` have been consolidated into `SEARCH_MODE`.
+> The browser fallback uses **raw Chrome DevTools Protocol** via `chrome-remote-interface`, so it requires a **Chromium-based** browser: Chrome, Edge, Chromium, Brave, Vivaldi or Opera (Firefox/WebKit are **not** supported). Standard install paths for all of these are auto-detected; override with `CHROME_PATH` / `BROWSER_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH`, or connect a remote browser via `PLAYWRIGHT_CDP_ENDPOINT` (no local install needed). `my-websearch doctor --browser` reports which browser was found and how to fix a missing one. The `PLAYWRIGHT_*` env names and `SEARCH_MODE=playwright` value are kept for backward compatibility only. Browser fallback behavior is governed by `SEARCH_MODE`.
 
 Two independent knobs — don't mix them up:
 

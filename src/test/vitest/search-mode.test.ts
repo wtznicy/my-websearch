@@ -109,27 +109,6 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
             expect(parsed.playwrightEngines).toEqual(['bing']);
         });
 
-        it('preserves backward compatibility with legacy BING_PLAYWRIGHT_FALLBACK=false', () => {
-            const parsed = parseSearchModeConfig('auto', 'false', undefined);
-            expect(parsed.searchMode).toBe('auto');
-            expect(parsed.playwrightEngines).toEqual(['startpage']);
-            expect(parsed.engineSearchModes['bing']).toBe('request');
-        });
-
-        it('preserves backward compatibility with legacy STARTPAGE_PLAYWRIGHT_FALLBACK=false', () => {
-            const parsed = parseSearchModeConfig('auto', undefined, 'false');
-            expect(parsed.searchMode).toBe('auto');
-            expect(parsed.playwrightEngines).toEqual(['bing']);
-            expect(parsed.engineSearchModes['startpage']).toBe('request');
-        });
-
-        it('preserves backward compatibility when both legacy fallbacks are false', () => {
-            const parsed = parseSearchModeConfig('auto', 'false', 'false');
-            expect(parsed.searchMode).toBe('auto');
-            expect(parsed.playwrightEngines).toEqual([]);
-            expect(parsed.engineSearchModes['bing']).toBe('request');
-            expect(parsed.engineSearchModes['startpage']).toBe('request');
-        });
     });
 
     describe('createConfig, getEngineSearchMode and AppConfig integration', () => {
@@ -137,8 +116,6 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
             const cfg = createConfig({ SEARCH_MODE: 'bing' }, { quiet: true });
             expect(cfg.searchMode).toBe('request');
             expect(cfg.playwrightEngines).toEqual(['bing']);
-            expect(cfg.bingPlaywrightFallback).toBe(true);
-            expect(cfg.startpagePlaywrightFallback).toBe(false);
             expect(getEngineSearchMode('bing', cfg)).toBe('auto');
             expect(getEngineSearchMode('startpage', cfg)).toBe('request');
             expect(engineShouldUsePlaywrightFallback('bing', cfg)).toBe(true);
@@ -149,8 +126,6 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
             const cfg = createConfig({ SEARCH_MODE: 'request' }, { quiet: true });
             expect(cfg.searchMode).toBe('request');
             expect(cfg.playwrightEngines).toEqual([]);
-            expect(cfg.bingPlaywrightFallback).toBe(false);
-            expect(cfg.startpagePlaywrightFallback).toBe(false);
             expect(getEngineSearchMode('bing', cfg)).toBe('request');
             expect(getEngineSearchMode('startpage', cfg)).toBe('request');
             expect(engineShouldUsePlaywrightFallback('bing', cfg)).toBe(false);
@@ -162,8 +137,6 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
             expect(getEngineSearchMode('bing', cfg)).toBe('playwright');
             expect(getEngineSearchMode('startpage', cfg)).toBe('auto');
             expect(cfg.playwrightEngines).toEqual(['bing', 'startpage']);
-            expect(cfg.bingPlaywrightFallback).toBe(true);
-            expect(cfg.startpagePlaywrightFallback).toBe(true);
             expect(engineShouldUsePlaywrightFallback('bing', cfg)).toBe(true);
             expect(engineShouldUsePlaywrightFallback('startpage', cfg)).toBe(true);
         });
@@ -174,23 +147,10 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
             expect(getEngineSearchMode('bing', cfg)).toBe('auto');
             expect(getEngineSearchMode('startpage', cfg)).toBe('request');
             expect(cfg.playwrightEngines).toEqual(['bing']);
-            expect(cfg.bingPlaywrightFallback).toBe(true);
-            expect(cfg.startpagePlaywrightFallback).toBe(false);
             expect(engineShouldUsePlaywrightFallback('bing', cfg)).toBe(true);
             expect(engineShouldUsePlaywrightFallback('startpage', cfg)).toBe(false);
         });
 
-        it('supports legacy env BING_PLAYWRIGHT_FALLBACK=false', () => {
-            const cfg = createConfig({
-                SEARCH_MODE: 'auto',
-                BING_PLAYWRIGHT_FALLBACK: 'false'
-            }, { quiet: true });
-            expect(cfg.bingPlaywrightFallback).toBe(false);
-            expect(cfg.startpagePlaywrightFallback).toBe(true);
-            expect(cfg.playwrightEngines).toEqual(['startpage']);
-            expect(getEngineSearchMode('bing', cfg)).toBe('request');
-            expect(getEngineSearchMode('startpage', cfg)).toBe('auto');
-        });
 
         it('configures BING_BASE_URL with default and custom values', () => {
             const defaultCfg = createConfig({}, { quiet: true });
