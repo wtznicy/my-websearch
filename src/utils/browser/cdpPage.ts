@@ -106,7 +106,7 @@ export class CDPPage implements BrowserPage {
                 Page.domContentEventFired(handler);
                 this.pageEventCleanup = () => this.removeListener('Page.domContentEventFired', handler);
             } else if (waitUntil === 'networkidle') {
-                const idleWindowMs = 200; // 优化为 200ms 静止窗口，兼顾彻底加载与快速返回
+                const idleWindowMs = 350; // 稳健折中：350ms 既防止死等，又能充分吸收延迟 XHR 串联请求抖动
                 const interval = setInterval(() => {
                     if (this.inFlightRequests === 0 && Date.now() - this.lastRequestTime >= idleWindowMs) {
                         clearInterval(interval);

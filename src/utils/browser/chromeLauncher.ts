@@ -164,9 +164,7 @@ export function buildChromeArgs(options: LaunchOptions, tempDir: string): string
         '--mute-audio',
         '--no-crash-dump',
         '--remote-allow-origins=*',
-        // 极速无头爬取与数据提取优化：禁用 GPU 进程、软光栅与后台冗余特性，大幅降低内存与 CPU 抖动
-        '--disable-gpu',
-        '--disable-software-rasterizer',
+        // 极速无头爬取与数据提取优化：禁用后台冗余特性与定时器节流（保留 GPU 加速以避免反爬 WebGL 指纹异常与滑块卡顿）
         '--disable-features=Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider,CalculateNativeWinOcclusion,InterestFeedContentSuggestions',
         '--disable-component-update',
         '--disable-domain-reliability',
@@ -190,9 +188,7 @@ export function buildChromeArgs(options: LaunchOptions, tempDir: string): string
     if (options.headless !== false) {
         flags.push(
             '--disable-blink-features=AutomationControlled',
-            '--window-size=1920,1080',
-            // Blink 内核级禁止图片：比网络层 abort 更轻量，HTML 解析器直接跳过无用图片资源下载与排版
-            '--blink-settings=imagesEnabled=false'
+            '--window-size=1920,1080'
         );
         if (!options.args?.some((arg) => arg.startsWith('--user-agent='))) {
             flags.push(`--user-agent=${DEFAULT_DESKTOP_UA}`);
