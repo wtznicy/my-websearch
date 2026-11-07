@@ -2,7 +2,7 @@ import { config, getEngineSearchMode } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { hasFirstTokenDrift } from '../../core/search/resultRanking.js';
 import { isEngineCircuitOpen, tripEngineCircuit } from '../../core/search/engineCircuitBreaker.js';
-import { searchBingWithHttp } from './httpSearch.js';
+import { recoverBingDriftWithHttp, searchBingWithHttp } from './httpSearch.js';
 import { searchBingWithPlaywright, searchBingWithPlaywrightFallback } from './browserFallback.js';
 import { isPlaywrightAvailable } from './launchArgs.js';
 
@@ -58,6 +58,16 @@ export async function searchBing(
         // 熔断冷却期不要为「注定失败」的请求再花 20s 起浏览器；
         // 冷却本身就是失败学习的结果，浏览器兜底救不回来，只会把 200ms 的失败拉长到 20s。
         if (hasFirstTokenDrift(httpResults, query) && !signal?.aborted && !isEngineCircuitOpen('bing')) {
+            // 优先尝试 HTTP 链路内极速纠偏重试（Fast Drift Recovery），数百毫秒内解决漂移，无需唤醒 CDP 浏览器
+            try {
+                const recovered = await recoverBingDriftWithHttp(query, limit, signal, timeRange);
+                if (recovered && recovered.length > 0 && !hasFirstTokenDrift(recovered, query)) {
+                    return recovered;
+                }
+            } catch {
+                // 忽略纠偏异常，继续向下进入 CDP 兜底
+            }
+
             const canUsePlaywright = await isPlaywrightAvailable();
             if (canUsePlaywright && !signal?.aborted) {
                 console.warn('Request-based Bing search returned first-token drift for multi-word query, falling back to Playwright mode');

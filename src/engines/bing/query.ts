@@ -44,6 +44,14 @@ export function shouldSuggestRemovingSiteOperator(query: string, error: unknown)
     return message.includes('waitforselector') || message.includes('timeout');
 }
 
+/**
+ * 判定查询是否为中文查询（含 ≥2 个 CJK 字符，口径与核心路由层一致）。
+ */
+export function isChineseQuery(query: string): boolean {
+    const cjkMatches = query.match(/[\u4e00-\u9fff]/g);
+    return (cjkMatches ? cjkMatches.length : 0) >= 2;
+}
+
 let effectiveBingBaseUrl: string | undefined;
 
 export function getEffectiveBingBaseUrl(): string {
@@ -62,15 +70,27 @@ export function buildBingSearchUrl(
     query: string,
     pageNumber: number,
     timeRange?: 'day' | 'week' | 'month' | 'year',
-    customBaseUrl?: string
+    customBaseUrl?: string,
+    options?: { forceEnsearch?: boolean; setLang?: string }
 ): string {
     const baseUrl = customBaseUrl || getEffectiveBingBaseUrl();
     const url = new URL(baseUrl);
     url.searchParams.set('q', query);
-    // 仅在 cn.bing.com（面向大陆默认）时强制 zh-CN 区域；自定义 host（如 www.bing.com）让 Bing 按访问者自动定位
+    const isChinese = isChineseQuery(query);
+    // 仅在 cn.bing.com（面向大陆默认）时处理语言/区域；自定义 host（如 www.bing.com）让 Bing 按访问者自动定位
     if (baseUrl.includes('cn.bing.com')) {
-        url.searchParams.set('setlang', 'zh-CN');
-        url.searchParams.set('ensearch', '0');
+        if (options?.forceEnsearch !== undefined) {
+            url.searchParams.set('ensearch', options.forceEnsearch ? '1' : '0');
+            url.searchParams.set('setlang', options.setLang || (options.forceEnsearch ? 'en-US' : 'zh-CN'));
+        } else if (isChinese) {
+            url.searchParams.set('setlang', 'zh-CN');
+            url.searchParams.set('ensearch', '0');
+        } else {
+            // 纯英文/技术短语：避免硬编码 ensearch=0 将其锁定到国内特供中文粗分词库导致首词漂移
+            url.searchParams.set('setlang', options?.setLang || 'en-US');
+        }
+    } else if (options?.setLang) {
+        url.searchParams.set('setlang', options.setLang);
     }
     url.searchParams.set('first', String(1 + pageNumber * 10));
     if (timeRange) {

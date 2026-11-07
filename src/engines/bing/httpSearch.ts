@@ -154,3 +154,54 @@ export async function searchBingWithHttp(query: string, limit: number, signal?: 
     }
     return applySiteDomainFilter(httpResults, query);
 }
+
+/**
+ * 当常规 HTTP 请求命中首词漂移时（例如纯英文多词在 cn.bing 下只匹配第一个词），
+ * 优先在 HTTP 内部做极速纠偏重试（Fast Drift Recovery）：
+ * 尝试通过国际版端点 (https://www.bing.com/search) 或英文参数重试，
+ * 耗时仅数百毫秒；纠偏成功则无需唤醒庞大且耗时数秒的 CDP 浏览器。
+ */
+export async function recoverBingDriftWithHttp(
+    query: string,
+    limit: number,
+    signal?: AbortSignal,
+    timeRange?: 'day' | 'week' | 'month' | 'year'
+): Promise<EngineSearchResponse | undefined> {
+    if (signal?.aborted) {
+        return undefined;
+    }
+    const currentBaseUrl = getEffectiveBingBaseUrl();
+    const recoveryBaseUrl = currentBaseUrl.includes('cn.bing.com')
+        ? 'https://www.bing.com/search'
+        : currentBaseUrl;
+
+    // 1. 若 wreq 可用，优先走 wreq 指纹的国际版极速重试
+    if (!isBingImpersonateCircuitOpen() && await isImpersonateAvailable()) {
+        try {
+            const recovered = await searchBingWithImpersonate(query, limit, signal, timeRange, {
+                customBaseUrl: recoveryBaseUrl,
+                setLang: 'en-US'
+            });
+            if (recovered && recovered.length > 0) {
+                return applySiteDomainFilter(recovered, query);
+            }
+        } catch {
+            // wreq 快速纠偏失败，继续尝试 axios 兜底重试
+        }
+    }
+
+    // 2. axios 路径快速纠偏重试
+    try {
+        const url = buildBingSearchUrl(query, 0, timeRange, recoveryBaseUrl, { setLang: 'en-US' });
+        const response = await axios.get(url, buildBingAxiosRequestOptions(signal));
+        const html = String(response.data || '');
+        const results = parseBingSearchResults(html, limit);
+        if (results && results.length > 0) {
+            return applySiteDomainFilter(results, query);
+        }
+    } catch {
+        // 快速纠偏失败，返回 undefined 交由外部 CDP 兜底
+    }
+
+    return undefined;
+}

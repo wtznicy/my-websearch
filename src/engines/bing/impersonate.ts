@@ -1,7 +1,7 @@
 import { config, engineShouldUseProxy, getProxyUrl } from '../../config.js';
 import { EngineSearchResponse, SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
-import { getEffectiveBingBaseUrl } from './query.js';
+import { getEffectiveBingBaseUrl, isChineseQuery } from './query.js';
 import { AppError } from '../../core/errors.js';
 import { PER_ENGINE_TIMEOUT_MS } from '../../utils/timeouts.js';
 import { getString } from '../../config/env.js';
@@ -100,13 +100,30 @@ export function isImpersonateAvailable(): Promise<boolean> {
     return availabilityPromise;
 }
 
-function buildImpersonateSearchUrl(query: string, pageNumber: number, timeRange?: 'day' | 'week' | 'month' | 'year'): string {
-    const baseUrl = getEffectiveBingBaseUrl();
+export function buildImpersonateSearchUrl(
+    query: string,
+    pageNumber: number,
+    timeRange?: 'day' | 'week' | 'month' | 'year',
+    customBaseUrl?: string,
+    options?: { forceEnsearch?: boolean; setLang?: string }
+): string {
+    const baseUrl = customBaseUrl || getEffectiveBingBaseUrl();
     const url = new URL(baseUrl);
     url.searchParams.set('q', query);
+    const isChinese = isChineseQuery(query);
     if (url.hostname.includes('cn.bing.com')) {
-        url.searchParams.set('setlang', 'zh-CN');
-        url.searchParams.set('ensearch', '0');
+        if (options?.forceEnsearch !== undefined) {
+            url.searchParams.set('ensearch', options.forceEnsearch ? '1' : '0');
+            url.searchParams.set('setlang', options.setLang || (options.forceEnsearch ? 'en-US' : 'zh-CN'));
+        } else if (isChinese) {
+            url.searchParams.set('setlang', 'zh-CN');
+            url.searchParams.set('ensearch', '0');
+        } else {
+            // 纯英文/技术短语：避免硬编码 ensearch=0 将其锁定到国内特供中文粗分词库导致首词漂移
+            url.searchParams.set('setlang', options?.setLang || 'en-US');
+        }
+    } else if (options?.setLang) {
+        url.searchParams.set('setlang', options.setLang);
     }
     url.searchParams.set('first', String(1 + pageNumber * 10));
     if (timeRange) {
@@ -153,6 +170,11 @@ async function getOrCreateBingSession(): Promise<WreqSession | null> {
         }
         try {
             cachedBingSession = await createWreqSession(mod as unknown as WreqModule, 'bing');
+            // 会话预热：轻量请求一次 Bing 首页以获取基础客户端追踪 Cookie（MUID/SRCHD），
+            // 避免发送无 Cookie 的裸请求被微软后端风控判定为爬虫并执行首词截断。
+            const effectiveUrl = getEffectiveBingBaseUrl();
+            const homeUrl = effectiveUrl.replace(/\/search(?:\/.*)?$/i, '/');
+            await cachedBingSession.fetch(homeUrl, { timeout: 3000 }).catch(() => undefined);
             return cachedBingSession;
         } catch (error) {
             console.warn('Bing wreq session creation failed:', error instanceof Error ? error.message : String(error));
@@ -256,7 +278,8 @@ export async function searchBingWithImpersonate(
     query: string,
     limit: number,
     signal?: AbortSignal,
-    timeRange?: 'day' | 'week' | 'month' | 'year'
+    timeRange?: 'day' | 'week' | 'month' | 'year',
+    options?: { customBaseUrl?: string; forceEnsearch?: boolean; setLang?: string }
 ): Promise<EngineSearchResponse> {
     if (signal?.aborted) {
         throw createBingAbortError(signal);
@@ -280,7 +303,7 @@ export async function searchBingWithImpersonate(
             if (signal?.aborted) {
                 throw createBingAbortError(signal);
             }
-            const url = buildImpersonateSearchUrl(query, pageNumber, timeRange);
+            const url = buildImpersonateSearchUrl(query, pageNumber, timeRange, options?.customBaseUrl, options);
             const response = await raceWithSignal(signal, () => session.fetch(url, { timeout: PER_ENGINE_TIMEOUT_MS }));
             const html = await raceWithSignal(signal, () => response.text());
 
