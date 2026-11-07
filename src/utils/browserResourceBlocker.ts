@@ -82,6 +82,16 @@ export const BLOCKED_TRACKER_DOMAINS: readonly string[] = [
 ];
 
 /**
+ * 导出给 CDP Network.setBlockedURLs 使用的原生内核过滤规则模式集
+ */
+export const DEFAULT_CDP_BLOCKED_URLS: readonly string[] = [
+    '*.png', '*.jpg', '*.jpeg', '*.gif', '*.webp', '*.svg', '*.ico', '*.bmp', '*.avif',
+    '*.woff', '*.woff2', '*.ttf', '*.otf', '*.eot',
+    '*.mp4', '*.webm', '*.mp3', '*.ogg', '*.wav',
+    ...BLOCKED_TRACKER_DOMAINS.map((domain) => `*${domain}*`)
+];
+
+/**
  * 检查主机名是否属于已知的第三方分析追踪域名
  */
 export function isTrackerHost(hostname: string): boolean {
@@ -150,8 +160,26 @@ export function isBlockedBrowserSubresource(request: SubresourceRequestLike): bo
  * 若页面已挂载过拦截器（或已挂载导航守卫），则跳过以防重复注册。
  */
 export async function installBrowserResourceBlocker(page: unknown): Promise<void> {
-    const candidate = page as (ResourceBlockerPageLike & { [RESOURCE_BLOCKER_INSTALLED]?: boolean }) | null | undefined;
-    if (!candidate || candidate[RESOURCE_BLOCKER_INSTALLED] || typeof candidate.route !== 'function') {
+    const candidate = page as (ResourceBlockerPageLike & {
+        [RESOURCE_BLOCKER_INSTALLED]?: boolean;
+        setBlockedURLs?: (urls: string[]) => Promise<void>;
+    }) | null | undefined;
+    if (!candidate || candidate[RESOURCE_BLOCKER_INSTALLED]) {
+        return;
+    }
+
+    // 1. 原生 CDP 驱动优先：直接在内核层设置拦截规则，零 Node 运行时回调与 IPC 开销
+    if (typeof candidate.setBlockedURLs === 'function') {
+        try {
+            await candidate.setBlockedURLs([...DEFAULT_CDP_BLOCKED_URLS]);
+            candidate[RESOURCE_BLOCKER_INSTALLED] = true;
+            return;
+        } catch {
+            // 继续尝试 Playwright route 拦截
+        }
+    }
+
+    if (typeof candidate.route !== 'function') {
         return;
     }
 

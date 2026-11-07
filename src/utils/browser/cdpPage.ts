@@ -2,6 +2,9 @@ import type { Client } from 'chrome-remote-interface';
 import { BrowserKeyboard, BrowserLocator, BrowserPage, Cookie, LocatorOptions } from './driver.js';
 import { type DeviceProfile } from './deviceProfile.js';
 
+import { DEFAULT_CDP_BLOCKED_URLS } from '../browserResourceBlocker.js';
+export { DEFAULT_CDP_BLOCKED_URLS };
+
 export class CDPPage implements BrowserPage {
     private client: Client;
     public readonly targetId: string;
@@ -49,13 +52,29 @@ export class CDPPage implements BrowserPage {
         });
     }
 
-    public async init(): Promise<void> {
+    public async init(options?: { blockMediaAndTrackers?: boolean }): Promise<void> {
         const { Page, Runtime, Network } = this.client;
         await Promise.all([
             Page.enable(),
             Runtime.enable(),
             Network.enable()
         ]);
+
+        if (options?.blockMediaAndTrackers !== false) {
+            try {
+                await Network.setBlockedURLs({ urls: [...DEFAULT_CDP_BLOCKED_URLS] });
+            } catch {
+                // 部分 Chromium 环境或定制版可能不支持 setBlockedURLs，静默降级
+            }
+        }
+    }
+
+    public async setBlockedURLs(urls: readonly string[] | string[]): Promise<void> {
+        try {
+            await this.client.Network.setBlockedURLs({ urls: [...urls] });
+        } catch {
+            // ignore
+        }
     }
 
     public url(): string {
@@ -87,12 +106,13 @@ export class CDPPage implements BrowserPage {
                 Page.domContentEventFired(handler);
                 this.pageEventCleanup = () => this.removeListener('Page.domContentEventFired', handler);
             } else if (waitUntil === 'networkidle') {
+                const idleWindowMs = 200; // 优化为 200ms 静止窗口，兼顾彻底加载与快速返回
                 const interval = setInterval(() => {
-                    if (this.inFlightRequests === 0 && Date.now() - this.lastRequestTime >= 500) {
+                    if (this.inFlightRequests === 0 && Date.now() - this.lastRequestTime >= idleWindowMs) {
                         clearInterval(interval);
                         resolve();
                     }
-                }, 100);
+                }, 50);
                 this.pageEventCleanup = () => clearInterval(interval);
             } else {
                 const handler = () => resolve();

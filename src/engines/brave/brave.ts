@@ -425,6 +425,7 @@ export async function searchBraveWithBrowser(
 
     const { openPlaywrightBrowser } = await import('../../utils/playwrightClient.js');
     const { prepareStealthPage } = await import('../../utils/browserStealth.js');
+    const { installBrowserResourceBlocker } = await import('../../utils/browserResourceBlocker.js');
     const { selectDeviceProfile } = await import('../../utils/browser/deviceProfile.js');
 
     const session = await openPlaywrightBrowser(true);
@@ -477,6 +478,7 @@ export async function searchBraveWithBrowser(
             }
 
             await prepareStealthPage(p as never);
+            await installBrowserResourceBlocker(p);
             const selector = getString('BROWSER_PROFILE', 'windows-chrome-8');
             if (p.applyDeviceProfile) {
                 await p.applyDeviceProfile(selectDeviceProfile(selector));
@@ -511,7 +513,7 @@ export async function searchBraveWithBrowser(
                 if (state.hasResults) {
                     break;
                 }
-                const interval = (Date.now() - startTime < 2000) ? 200 : 500;
+                const interval = (Date.now() - startTime < 2000) ? 60 : 200;
                 await new Promise((resolve) => setTimeout(resolve, interval));
             }
 
