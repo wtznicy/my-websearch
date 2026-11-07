@@ -6,7 +6,6 @@ import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 import { getProxyUrl } from '../../config.js';
 import { detectSystemProxy } from '../../utils/systemProxy.js';
-import { getString } from '../../config/env.js';
 import { createWreqSession, loadWreqModule } from '../bing/impersonate.js';
 import {
   AppError,
@@ -19,6 +18,31 @@ import {
 
 const CHROME_133_SEC_CH_UA = '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"';
 const DDG_BLOCK_HINT = 'DuckDuckGo 返回的是人机验证页（HTTP 202 anomaly CAPTCHA，需要点选图片），不是普通限流；内置 d.js 求解器只处理算术挑战，无法绕过它。换节点只有在换到未被标记的出口时才有用——实测多节点仍 202。建议改用 bing/brave，或配置 BRAVE_API_KEY / EXA_API_KEY 使用官方 API。';
+
+function isDuckDuckGoBotChallenge(error: unknown): boolean {
+  if (isAppError(error) && (error.code === 'bot_challenge' || error.status === 202)) {
+    return true;
+  }
+  const status = extractErrorStatus(error);
+  if (status === 202) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /202|anomaly|captcha|bot_challenge/i.test(message);
+}
+
+function createDuckDuckGoBotChallengeError(
+  message = 'DuckDuckGo returned an anomaly CAPTCHA (HTTP 202) — human verification, not a simple rate limit'
+): AppError {
+  return new AppError({
+    code: 'bot_challenge',
+    retryable: false,
+    status: 202,
+    engine: 'duckduckgo',
+    hint: DDG_BLOCK_HINT,
+    message
+  });
+}
 
 export function isTrustedDuckDuckGoPreloadUrl(value: string): boolean {
   try {
@@ -402,15 +426,31 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
   // 未配置代理时先探测直连可达性：不可达立即报"需要代理"，避免直连挂 15s 超时拖累整次搜索
   await assertOverseasEngineUsable('duckduckgo');
 
-  // 首选浏览器指纹 GET：DDG 对 axios 的 TLS/方法组合返回 202，对 wreq Chrome profile 的 GET 返回 200。
-  // 放在 preload 之前，避免每次都先撞一次 202 再回退。
-  const impersonatedResults = await tryImpersonatedDuckDuckGoHtml(query, limit, signal, timeRange);
-  if (impersonatedResults && impersonatedResults.length > 0) {
-    return impersonatedResults;
+  // 1. 首选 wreq 浏览器指纹 GET
+  try {
+    const impersonatedResults = await tryImpersonatedDuckDuckGoHtml(query, limit, signal, timeRange);
+    if (impersonatedResults && impersonatedResults.length > 0) {
+      return impersonatedResults;
+    }
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    // 202（挑战）：直接失败 bot_challenge，不跑 preload、不跑 axios HTML、不跑 CDP
+    if (isDuckDuckGoBotChallenge(error)) {
+      throw error;
+    }
+    console.warn('[duckduckgo] impersonated GET 失败，尝试 preload 方法:', error instanceof Error ? error.message : String(error));
   }
 
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new AppError({ code: 'aborted', retryable: false, engine: 'duckduckgo', message: 'Request aborted' });
+  }
+
+  // 2. preload GET https://duckduckgo.com/?q=
   let preloadError: unknown = null;
-  // Try using the preloaded URL method
   try {
     const results = await searchDuckDuckGoPreloadUrl(query, limit, signal, timeRange);
     if (results.length > 0) {
@@ -418,6 +458,10 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
     }
   } catch (error) {
     if (signal?.aborted) {
+      throw error;
+    }
+    // 202（挑战）：直接失败 bot_challenge，不跑 axios HTML、不跑 CDP
+    if (isDuckDuckGoBotChallenge(error)) {
       throw error;
     }
     preloadError = error;
@@ -430,43 +474,16 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
       : new AppError({ code: 'aborted', retryable: false, engine: 'duckduckgo', message: 'Request aborted' });
   }
 
-  if (preloadError && shouldUseDuckDuckGoBrowserFallback(preloadError)) {
-    // 预加载已明确遇到 202（反爬/人机挑战），属于 IP/TLS 级拦截，
-    // 同一出口 IP 访问 HTML 端点必定同样返回 202；跳过 HTML 请求直接走浏览器兜底
-    if (getString('DDG_BROWSER_FALLBACK', '') !== '0') {
-      try {
-        const browserResults = await searchDuckDuckGoWithBrowser(query, limit, signal);
-        if (browserResults.length > 0) {
-          return browserResults;
-        }
-      } catch (browserError) {
-        console.warn('DDG browser fallback failed:', browserError instanceof Error ? browserError.message : String(browserError));
-      }
-    }
-    const publicCode = isAppError(preloadError) ? preloadError.code : (normalizePublicErrorCode(extractErrorCode(preloadError)) ?? 'network_error');
-    throw new AppError({
-      code: publicCode,
-      retryable: isAppError(preloadError) ? preloadError.retryable : isRetryableError(preloadError),
-      status: extractErrorStatus(preloadError),
-      engine: 'duckduckgo',
-      ...(publicCode === 'bot_challenge' ? { hint: DDG_BLOCK_HINT } : {}),
-      cause: preloadError,
-      message: `${preloadError instanceof Error ? preloadError.message : String(preloadError)} (preload path)`
-    });
-  }
-
+  // 3. axios HTML POST https://html.duckduckgo.com/html/
   try {
     return await searchDuckDuckGoHtml(query, limit, signal, timeRange);
   } catch (htmlError) {
-    if (getString('DDG_BROWSER_FALLBACK', '') !== '0' && shouldUseDuckDuckGoBrowserFallback(htmlError)) {
-      try {
-        const browserResults = await searchDuckDuckGoWithBrowser(query, limit, signal);
-        if (browserResults.length > 0) {
-          return browserResults;
-        }
-      } catch (browserError) {
-        console.warn('DDG browser fallback failed:', browserError instanceof Error ? browserError.message : String(browserError));
-      }
+    if (signal?.aborted) {
+      throw htmlError;
+    }
+    // 202（挑战）：直接失败 bot_challenge，不跑 CDP
+    if (isDuckDuckGoBotChallenge(htmlError)) {
+      throw htmlError;
     }
     if (preloadError instanceof Error && htmlError instanceof Error) {
       const publicCode = isAppError(htmlError) ? htmlError.code : (normalizePublicErrorCode(extractErrorCode(htmlError)) ?? 'network_error');
@@ -482,42 +499,12 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
     }
     throw htmlError;
   }
-  }
+}
 
-  function shouldUseDuckDuckGoBrowserFallback(error: unknown): boolean {
-    const message = error instanceof Error ? error.message : String(error);
-    const code = isAppError(error) ? error.code : extractErrorCode(error);
-    return code === 'bot_challenge' || code === 'rate_limited' || /202|anomaly|captcha|challenge/i.test(message);
-  }
-
-  async function searchDuckDuckGoWithBrowser(
-    query: string,
-    limit: number,
-    signal?: AbortSignal
-  ): Promise<SearchResult[]> {
-    const { fetchPageHtmlWithBrowser } = await import('../../utils/browserCookies.js');
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    // DDG's HTML anomaly check is sensitive to a generic browser fingerprint;
-    // use the coordinate default even when BROWSER_PROFILE is unset.
-    const profile = getString('BROWSER_PROFILE', 'windows-chrome-8');
-    const page = await fetchPageHtmlWithBrowser(url, signal, profile);
-    const parsed = parseDuckDuckGoHtmlResults(page.html, limit, new Set());
-    if (parsed.results.length === 0) {
-      throw new AppError({
-        code: 'bot_challenge',
-        retryable: false,
-        engine: 'duckduckgo',
-        hint: DDG_BLOCK_HINT,
-        message: 'DuckDuckGo browser fallback returned no parsable results (likely CAPTCHA).'
-      });
-    }
-    return parsed.results;
-  }
-
-  /**
-  * Extract preloaded d.js URL from DuckDuckGo search page and use it directly
-  */
-  async function searchDuckDuckGoPreloadUrl(query: string, maxResults = 10, signal?: AbortSignal, timeRange?: 'day' | 'week' | 'month' | 'year'): Promise<SearchResult[]> {
+/**
+ * Extract preloaded d.js URL from DuckDuckGo search page and use it directly
+ */
+async function searchDuckDuckGoPreloadUrl(query: string, maxResults = 10, signal?: AbortSignal, timeRange?: 'day' | 'week' | 'month' | 'year'): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
     let offset = 0;
 
@@ -552,15 +539,12 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
 
       // 上游反爬升级：DDG 对非浏览器请求返回 202 挑战页（页面无 d.js preload URL）——
       // 显式报错而非静默 0 结果，让 partialFailures 暴露真实原因
-      if (response.status === 202) {
-        throw new AppError({
-          code: 'bot_challenge',
-          retryable: false,
-          status: 202,
-          engine: 'duckduckgo',
-          hint: DDG_BLOCK_HINT,
-          message: 'DuckDuckGo returned an anomaly CAPTCHA (HTTP 202) — human verification, not a simple rate limit'
-        });
+      if (
+        response.status === 202 ||
+        /anomaly-modal|challenge-form/i.test(String(response.data || '')) ||
+        String(response.data || '').includes('anomalyDetectionBlock')
+      ) {
+        throw createDuckDuckGoBotChallengeError();
       }
 
       let basePreloadUrl = '';
@@ -754,11 +738,17 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
             'Accept-Language': 'en-US,en;q=0.9'
           }
         });
+        if (response.status === 202) {
+          throw createDuckDuckGoBotChallengeError();
+        }
         if (response.status !== 200) {
           return null;
         }
         const html = await response.text();
-        if (!html || html.length < 2000 || /anomaly-modal|challenge-form/i.test(html)) {
+        if (/anomaly-modal|challenge-form/i.test(html) || html.includes('anomalyDetectionBlock')) {
+          throw createDuckDuckGoBotChallengeError();
+        }
+        if (!html) {
           return null;
         }
         const parsed = parseDuckDuckGoHtmlResults(html, maxResults, new Set());
@@ -767,7 +757,13 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
         await session.close();
       }
     } catch (error) {
-      console.warn('[duckduckgo] impersonated GET failed, falling back to axios:', error instanceof Error ? error.message : String(error));
+      if (isDuckDuckGoBotChallenge(error)) {
+        throw error;
+      }
+      if (signal?.aborted) {
+        throw error;
+      }
+      console.warn('[duckduckgo] impersonated GET failed, falling back to preload/axios:', error instanceof Error ? error.message : String(error));
       return null;
     }
   }
@@ -808,15 +804,12 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
       requestOptions
     );
 
-    if (response.status === 202) {
-      throw new AppError({
-        code: 'bot_challenge',
-        retryable: false,
-        status: 202,
-        engine: 'duckduckgo',
-        hint: DDG_BLOCK_HINT,
-        message: 'DuckDuckGo returned an anomaly CAPTCHA (HTTP 202) — human verification, not a simple rate limit'
-      });
+    if (
+      response.status === 202 ||
+      /anomaly-modal|challenge-form/i.test(String(response.data || '')) ||
+      String(response.data || '').includes('anomalyDetectionBlock')
+    ) {
+      throw createDuckDuckGoBotChallengeError();
     }
 
     let parsedPage = parseDuckDuckGoHtmlResults(String(response.data || ''), maxResults, seenUrls);
@@ -846,6 +839,14 @@ export async function searchDuckDuckGo(query: string, limit: number, options?: {
         }).toString(),
         requestOptions
       );
+
+      if (
+        response.status === 202 ||
+        /anomaly-modal|challenge-form/i.test(String(response.data || '')) ||
+        String(response.data || '').includes('anomalyDetectionBlock')
+      ) {
+        throw createDuckDuckGoBotChallengeError();
+      }
 
       parsedPage = parseDuckDuckGoHtmlResults(String(response.data || ''), maxResults, seenUrls);
       results.push(...parsedPage.results);
