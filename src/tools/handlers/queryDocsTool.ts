@@ -14,11 +14,14 @@ import {
     capTextResponse
 } from '../toolShared.js';
 import { detectUnknownParameters } from '../../utils/toolValidation.js';
+import { queryDevDocs } from '../../core/docs/devdocsProvider.js';
+import { queryMdnDocs, isLikelyMdnTarget } from '../../core/docs/mdnProvider.js';
+import { queryJavadocDocs, isLikelyJavadocTarget } from '../../core/docs/javadocProvider.js';
 
 export type QueryDocsFormattedInput = {
     libraryId: string;
     query?: string;
-    source?: 'context7' | 'npm' | 'pypi' | 'crates' | 'go' | 'maven' | 'github-readme' | 'official' | 'docs.rs' | 'pkg.go.dev' | 'github';
+    source?: 'context7' | 'npm' | 'pypi' | 'crates' | 'go' | 'maven' | 'github-readme' | 'official' | 'docs.rs' | 'pkg.go.dev' | 'devdocs' | 'mdn' | 'javadoc' | 'github';
     confidence?: 'high' | 'medium' | 'low';
     warnings?: string[];
     resolvedFrom?: string;
@@ -30,6 +33,7 @@ export type QueryDocsFormattedInput = {
     infoSnippets?: Context7InfoSnippet[];
     codeSnippets?: Context7CodeSnippet[];
     alternativeLibraries?: Array<{ id: string; title: string; description?: string }>;
+    alternativeEntries?: Array<{ title?: string; name?: string; url?: string; description?: string } | string>;
 };
 
 export function formatQueryDocsMarkdown(result: QueryDocsFormattedInput): string {
@@ -65,6 +69,20 @@ export function formatQueryDocsMarkdown(result: QueryDocsFormattedInput): string
 
     if (result.content) {
         lines.push(result.content);
+        if (result.alternativeEntries && result.alternativeEntries.length > 0) {
+            lines.push('');
+            lines.push('---');
+            lines.push('**Related Documentation Entries:**');
+            for (const alt of result.alternativeEntries) {
+                if (typeof alt === 'string') {
+                    lines.push(`- \`${alt}\``);
+                } else if (alt.url) {
+                    lines.push(`- [${alt.title || alt.name || alt.url}](${alt.url})`);
+                } else {
+                    lines.push(`- \`${alt.title || alt.name}\``);
+                }
+            }
+        }
         return lines.join('\n').trim();
     }
 
@@ -172,9 +190,9 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
     server.registerTool(
         "queryDocs",
         {
-            description: "Get official docs, API references, and code snippets for libraries/packages (e.g. 'react', 'fastapi', 'tokio'). Supports multi-source selection ('auto', 'official', 'docs.rs', 'pkg.go.dev', 'context7', 'npm', 'pypi'). Direct, no proxy needed.",
+            description: "Get official docs, API references, and code snippets for libraries/packages. Supports multi-source selection ('auto', 'official', 'docs.rs', 'pkg.go.dev', 'devdocs', 'mdn', 'javadoc', 'context7', 'npm', 'pypi'). Direct.",
             inputSchema: z.object({
-                library: z.string().min(1).optional().describe("Library or package name (e.g. 'next.js', 'react', 'fastapi', 'tokio') or exact Context7 library ID (e.g. '/vercel/next.js', version-pinnable like '/vercel/next.js@v15.1.8')"),
+                library: z.string().min(1).optional().describe("Library or package name (e.g. 'react', 'fastapi', 'tokio', 'redis', 'fetch') or exact Context7 library ID (e.g. '/vercel/next.js')"),
                 libraryId: z.string().min(1).optional().describe("Legacy alias for library (e.g. /vercel/next.js)"),
                 version: z.string().min(1).optional().describe("Optional explicit version (e.g. '14.2.0' or 'v15.1.8'); overrides an @version embedded in library"),
                 query: z.string().min(1).optional().describe("The question, feature, or task to get relevant documentation for (optional; defaults to an overview when omitted, e.g. 'how to set up middleware with auth')"),
@@ -184,10 +202,13 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     'official',
                     'docs.rs',
                     'pkg.go.dev',
+                    'devdocs',
+                    'mdn',
+                    'javadoc',
                     'npm',
                     'pypi',
                     'github'
-                ]).optional().default('auto').describe("Documentation source: 'auto' (default: Context7 with smart fallback to official doc site and registries), 'official' (direct official documentation website), 'docs.rs' (Rust), 'pkg.go.dev' (Go), 'context7', 'npm', 'pypi', 'github'"),
+                ]).optional().default('auto').describe("Documentation source: 'auto' (smart routing & fallback), 'official' (standalone site), 'docs.rs' (Rust), 'pkg.go.dev' (Go), 'devdocs' (DevDocs: Redis, Docker, Python, C++, etc.), 'mdn' (MDN Web Docs), 'javadoc' (Java/Maven), 'context7', 'npm', 'pypi', 'github'"),
                 limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets or sections to return (default 5)"),
                 cache: z.enum(['default', 'reload']).optional().describe("Use the 24h local docs cache (default) or bypass/refresh it with 'reload'"),
                 strict: z.boolean().optional().describe("If true, rejects low-confidence library name matches with an error instead of returning loosely matched candidate docs (default false)")
@@ -203,7 +224,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 limit?: number;
                 strict?: boolean;
                 cache?: 'default' | 'reload';
-                source?: 'auto' | 'context7' | 'official' | 'docs.rs' | 'pkg.go.dev' | 'npm' | 'pypi' | 'github';
+                source?: 'auto' | 'context7' | 'official' | 'docs.rs' | 'pkg.go.dev' | 'devdocs' | 'mdn' | 'javadoc' | 'npm' | 'pypi' | 'github';
             } & Record<string, unknown>;
 
             const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, [
@@ -355,7 +376,114 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 };
             }
 
-            // 3. 显式指定 official 官方文档站
+            // 3. 显式指定 devdocs
+            if (reqSource === 'devdocs') {
+                logTool(`queryDocs directly querying DevDocs for: ${target} (query: ${query ?? ''})`);
+                const devdocsRes = await queryDevDocs({ library: target, query, signal });
+                if (devdocsRes) {
+                    metrics.recordQueryDocsAttempt('devdocs', false);
+                    const text = capTextResponse(formatQueryDocsMarkdown({
+                        libraryId: devdocsRes.libraryId,
+                        query,
+                        source: 'devdocs',
+                        confidence: 'high',
+                        documentationUrl: devdocsRes.documentationUrl,
+                        content: devdocsRes.content,
+                        alternativeEntries: devdocsRes.alternativeEntries,
+                        warnings: unknownWarnings
+                    }));
+                    setDocsCache(cacheKey, { text, source: 'devdocs', confidence: 'high', cachedAt: Date.now() });
+                    return {
+                        content: [{ type: 'text', text }],
+                        source: 'devdocs',
+                        confidence: 'high',
+                        warnings: unknownWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                }
+                return {
+                    content: [{
+                        type: 'text',
+                        text: withErrorHint(
+                            `Failed to find documentation in DevDocs for "${target}"`,
+                            `Verify documentation slug (e.g. "redis", "docker", "nginx", "python", "cpp") or try source="auto".`
+                        )
+                    }],
+                    isError: true
+                };
+            }
+
+            // 4. 显式指定 mdn
+            if (reqSource === 'mdn') {
+                logTool(`queryDocs directly querying MDN for: ${target} (query: ${query ?? ''})`);
+                const mdnRes = await queryMdnDocs({ library: target, query, signal, fetchWeb: fetchViaWeb });
+                if (mdnRes) {
+                    metrics.recordQueryDocsAttempt('mdn', false);
+                    const text = capTextResponse(formatQueryDocsMarkdown({
+                        libraryId: mdnRes.libraryId,
+                        query,
+                        source: 'mdn',
+                        confidence: 'high',
+                        documentationUrl: mdnRes.documentationUrl,
+                        content: mdnRes.content,
+                        alternativeEntries: mdnRes.alternativeEntries,
+                        warnings: unknownWarnings
+                    }));
+                    setDocsCache(cacheKey, { text, source: 'mdn', confidence: 'high', cachedAt: Date.now() });
+                    return {
+                        content: [{ type: 'text', text }],
+                        source: 'mdn',
+                        confidence: 'high',
+                        warnings: unknownWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                }
+                return {
+                    content: [{
+                        type: 'text',
+                        text: withErrorHint(
+                            `Failed to find documentation on MDN for "${target}"`,
+                            `Verify keyword or standard API name (e.g. "fetch", "Array.prototype.map", "WebSocket") or try source="auto".`
+                        )
+                    }],
+                    isError: true
+                };
+            }
+
+            // 5. 显式指定 javadoc
+            if (reqSource === 'javadoc') {
+                logTool(`queryDocs directly querying Javadoc.io for: ${target}`);
+                const javadocRes = await queryJavadocDocs({ library: target, version, signal, fetchWeb: fetchViaWeb });
+                if (javadocRes) {
+                    metrics.recordQueryDocsAttempt('javadoc', false);
+                    const text = capTextResponse(formatQueryDocsMarkdown({
+                        libraryId: javadocRes.libraryId,
+                        query,
+                        source: 'javadoc',
+                        confidence: 'high',
+                        documentationUrl: javadocRes.documentationUrl,
+                        content: javadocRes.content,
+                        warnings: unknownWarnings
+                    }));
+                    setDocsCache(cacheKey, { text, source: 'javadoc', confidence: 'high', cachedAt: Date.now() });
+                    return {
+                        content: [{ type: 'text', text }],
+                        source: 'javadoc',
+                        confidence: 'high',
+                        warnings: unknownWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                }
+                return {
+                    content: [{
+                        type: 'text',
+                        text: withErrorHint(
+                            `Failed to fetch documentation from Javadoc.io for "${target}"`,
+                            `Please verify Maven coordinates format: groupId:artifactId (e.g. "com.google.guava:guava" or "org.springframework:spring-core").`
+                        )
+                    }],
+                    isError: true
+                };
+            }
+
+            // 6. 显式指定 official 官方文档站
             if (reqSource === 'official') {
                 logTool(`queryDocs resolving official documentation site for: ${target}`);
                 const meta = await resolvePackageMetadata(target, { signal, version });
@@ -527,6 +655,83 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                         } as unknown as { content: Array<{ type: 'text'; text: string }> };
                     }
                 }
+
+                // 5c. MDN Web Docs (mdn:fetch, html:video, css:grid, webapi:WebSocket, or common web standards)
+                if (isLikelyMdnTarget(target)) {
+                    logTool(`auto-routing to MDN for: ${target}`);
+                    const mdnRes = await queryMdnDocs({ library: target, query, signal, fetchWeb: fetchViaWeb });
+                    if (mdnRes) {
+                        metrics.recordQueryDocsAttempt('mdn', false);
+                        const text = capTextResponse(formatQueryDocsMarkdown({
+                            libraryId: mdnRes.libraryId,
+                            query,
+                            source: 'mdn',
+                            confidence: 'high',
+                            documentationUrl: mdnRes.documentationUrl,
+                            content: mdnRes.content,
+                            alternativeEntries: mdnRes.alternativeEntries,
+                            warnings: unknownWarnings
+                        }));
+                        setDocsCache(cacheKey, { text, source: 'mdn', confidence: 'high', cachedAt: Date.now() });
+                        return {
+                            content: [{ type: 'text', text }],
+                            source: 'mdn',
+                            confidence: 'high',
+                            warnings: unknownWarnings
+                        } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                    }
+                }
+
+                // 5d. DevDocs 显式前缀 (devdocs:redis)
+                if (target.startsWith('devdocs:')) {
+                    logTool(`auto-routing to DevDocs for: ${target}`);
+                    const devdocsRes = await queryDevDocs({ library: target, query, signal });
+                    if (devdocsRes) {
+                        metrics.recordQueryDocsAttempt('devdocs', false);
+                        const text = capTextResponse(formatQueryDocsMarkdown({
+                            libraryId: devdocsRes.libraryId,
+                            query,
+                            source: 'devdocs',
+                            confidence: 'high',
+                            documentationUrl: devdocsRes.documentationUrl,
+                            content: devdocsRes.content,
+                            alternativeEntries: devdocsRes.alternativeEntries,
+                            warnings: unknownWarnings
+                        }));
+                        setDocsCache(cacheKey, { text, source: 'devdocs', confidence: 'high', cachedAt: Date.now() });
+                        return {
+                            content: [{ type: 'text', text }],
+                            source: 'devdocs',
+                            confidence: 'high',
+                            warnings: unknownWarnings
+                        } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                    }
+                }
+
+                // 5e. Javadoc.io (javadoc:..., maven:..., or groupId:artifactId)
+                if (isLikelyJavadocTarget(target)) {
+                    logTool(`auto-routing to Javadoc.io for: ${target}`);
+                    const javadocRes = await queryJavadocDocs({ library: target, version, signal, fetchWeb: fetchViaWeb });
+                    if (javadocRes) {
+                        metrics.recordQueryDocsAttempt('javadoc', false);
+                        const text = capTextResponse(formatQueryDocsMarkdown({
+                            libraryId: javadocRes.libraryId,
+                            query,
+                            source: 'javadoc',
+                            confidence: 'high',
+                            documentationUrl: javadocRes.documentationUrl,
+                            content: javadocRes.content,
+                            warnings: unknownWarnings
+                        }));
+                        setDocsCache(cacheKey, { text, source: 'javadoc', confidence: 'high', cachedAt: Date.now() });
+                        return {
+                            content: [{ type: 'text', text }],
+                            source: 'javadoc',
+                            confidence: 'high',
+                            warnings: unknownWarnings
+                        } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                    }
+                }
             }
 
             // 6. Context7 主路径（针对 auto 与 context7）
@@ -617,6 +822,41 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     }
                 } catch (offErr) {
                     logSafeError('Official docs probing failed', offErr);
+                }
+
+                // 尝试 DevDocs 检索（适用于 redis, docker, nginx, postgres 等主流语言和中间件）
+                try {
+                    const devdocsRes = await queryDevDocs({ library: target, query, signal });
+                    if (devdocsRes) {
+                        logTool(`DevDocs fallback succeeded: ${devdocsRes.documentationUrl}`);
+                        metrics.recordQueryDocsAttempt('devdocs', true);
+                        const fallbackNotice = getContext7FallbackNotice({
+                            context7Error,
+                            context7Result,
+                            target,
+                            destination: `DevDocs (${devdocsRes.documentationUrl})`
+                        });
+                        const combinedWarnings = [fallbackNotice, ...unknownWarnings];
+                        const text = capTextResponse(formatQueryDocsMarkdown({
+                            libraryId: devdocsRes.libraryId,
+                            query,
+                            source: 'devdocs',
+                            confidence: 'medium',
+                            documentationUrl: devdocsRes.documentationUrl,
+                            content: devdocsRes.content,
+                            alternativeEntries: devdocsRes.alternativeEntries,
+                            warnings: combinedWarnings
+                        }));
+                        setDocsCache(cacheKey, { text, source: 'devdocs', confidence: 'medium', cachedAt: Date.now() });
+                        return {
+                            content: [{ type: 'text', text }],
+                            source: 'devdocs',
+                            confidence: 'medium',
+                            warnings: combinedWarnings
+                        } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                    }
+                } catch (ddErr) {
+                    logSafeError('DevDocs fallback resolution failed', ddErr);
                 }
 
                 // 启动包管理器 README 兜底
