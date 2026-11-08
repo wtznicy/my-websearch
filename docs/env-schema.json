@@ -178,11 +178,6 @@
           "desc": "Toggle Chrome TLS impersonation for Bing HTTP mode (auto-trips circuit breaker after consecutive empty results)"
         },
         {
-          "name": "`ANUBIS_MAX_POW_DIFFICULTY`",
-          "default": "`6`",
-          "desc": "Maximum difficulty threshold for Startpage Anubis PoW solver; skips/falls back when difficulty exceeds this"
-        },
-        {
           "name": "`DIRECT_FIRST_PROBE_TIMEOUT_MS`",
           "default": "`3500`",
           "desc": "Timeout in ms for direct-first connection probes before proxy fallback"
@@ -520,11 +515,6 @@
           "name": "`BING_IMPERSONATE`",
           "default": "`true`",
           "desc": "是否启用 Bing 的 Chrome TLS 指纹模拟（连续多次返回 0 条时会自动熔断降级为标准 HTTP）"
-        },
-        {
-          "name": "`ANUBIS_MAX_POW_DIFFICULTY`",
-          "default": "`6`",
-          "desc": "Startpage Anubis 工作量证明（PoW）难度上限，超限时自动跳过或走降级策略"
         },
         {
           "name": "`DIRECT_FIRST_PROBE_TIMEOUT_MS`",

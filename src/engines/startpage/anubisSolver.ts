@@ -5,7 +5,6 @@ import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { config, engineShouldUseProxy } from '../../config.js';
 import { buildAxiosRequestOptions, isNetworkLayerError, requestDirectFirst, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { getSystemProxyFallbackUrl } from '../../utils/systemProxy.js';
-import { getNumber } from '../../config/env.js';
 
 /**
  * Startpage Anubis 反爬的纯 Node 求解器（无浏览器）。
@@ -37,10 +36,9 @@ export const ANUBIS_MULTI_ENGINE_MAX_DIFFICULTY = 5;
 export const ANUBIS_DEFAULT_MAX_POW_DIFFICULTY = ANUBIS_SINGLE_ENGINE_MAX_DIFFICULTY;
 
 export function getMaxAnubisPowDifficulty(isMultiEngine = false): number {
-    const defaultMax = isMultiEngine
+    return isMultiEngine
         ? ANUBIS_MULTI_ENGINE_MAX_DIFFICULTY
         : ANUBIS_SINGLE_ENGINE_MAX_DIFFICULTY;
-    return getNumber('ANUBIS_MAX_POW_DIFFICULTY', defaultMax, { min: 1, max: 8, integer: true });
 }
 
 import { DEFAULT_DESKTOP_UA } from '../../utils/userAgents.js';
