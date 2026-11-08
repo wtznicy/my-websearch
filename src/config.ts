@@ -16,7 +16,7 @@ import {
     type EnvLike
 } from './config/env.js';
 
-export const KNOWN_PLAYWRIGHT_ENGINES = ['bing', 'startpage'] as const;
+export const KNOWN_PLAYWRIGHT_ENGINES = ['bing', 'brave'] as const;
 export type KnownPlaywrightEngine = typeof KNOWN_PLAYWRIGHT_ENGINES[number];
 export type SearchEngineMode = 'request' | 'auto' | 'playwright';
 
@@ -36,7 +36,7 @@ export interface AppConfig {
     searchMode: SearchEngineMode;
     // 单个引擎的检索模式精准覆盖（支持多启动方式混合配置）
     engineSearchModes?: Record<string, SearchEngineMode>;
-    // 允许启用/回退至浏览器（CDP 驱动；历史名为 Playwright）的引擎列表（如 ['bing', 'startpage']）
+    // 允许启用/回退至浏览器（CDP 驱动；历史名为 Playwright）的引擎列表（如 ['bing', 'brave']）
     playwrightEngines: string[];
     // 全局并发搜索限制：同时进行的搜索请求数上限（0 = 不限制）。
     // CLI 一次性调用不受此限制，仅 daemon 模式下多客户端并发时生效。
@@ -126,9 +126,9 @@ function splitModeSegments(raw: string): string[] {
 /**
  * 解析 SEARCH_MODE 配置（支持运行模式声明、单一模式多选引擎、以及多启动方式组合）：
  * 1. 单一全局模式：`auto` / `request` / `playwright` / `none` / `all`
- * 2. 一种模式多选引擎：`playwright:bing,startpage` 或 `auto:bing,startpage`
- * 3. 多种启动方式组合：`playwright:bing;auto:startpage` 或 `auto;request:startpage`
- * 4. 纯引擎简写白名单：`bing,startpage`（自动进入 auto，未列出引擎纯 HTTP）
+ * 2. 一种模式多选引擎：`playwright:bing,brave` 或 `auto:bing,brave`
+ * 3. 多种启动方式组合：`playwright:bing;auto:brave` 或 `auto;request:brave`
+ * 4. 纯引擎简写白名单：`bing,brave`（自动进入 auto，未列出引擎纯 HTTP）
  */
 export function parseSearchModeConfig(
     rawMode?: string
@@ -170,7 +170,7 @@ export function parseSearchModeConfig(
                 hasEngineLists = true;
             }
         } else {
-            // 没有冒号的纯引擎列表，如 "bing,startpage"
+            // 没有冒号的纯引擎列表，如 "bing,brave"
             const engines = segment.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
             const matched = engines.filter(e => (KNOWN_PLAYWRIGHT_ENGINES as readonly string[]).includes(e));
             if (matched.length > 0) {

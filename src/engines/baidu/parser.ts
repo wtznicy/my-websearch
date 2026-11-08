@@ -14,7 +14,7 @@ function normalizeWhitespace(value: string): string {
 }
 
 /** URL 规范化：非 ASCII/空格由 URL 对象自动 percent-encode，避免 href 里的中文参数乱码 */
-function normalizeResultUrl(rawHref: string): string {
+function normalizeHrefEncoding(rawHref: string): string {
     try {
         return new URL(rawHref).toString();
     } catch {
@@ -264,7 +264,7 @@ export async function parseBaiduResultsPage(html: string, seenUrls: Set<string>)
     const results: SearchResult[] = [];
     collected.forEach((item, index) => {
         const finalHref = item.directUrl || resolvedMap.get(index) || item.href;
-        const url = finalHref ? normalizeResultUrl(finalHref) : '';
+        const url = finalHref ? normalizeHrefEncoding(finalHref) : '';
         if (!url || seenUrls.has(url)) {
             return;
         }

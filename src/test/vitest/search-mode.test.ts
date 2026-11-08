@@ -14,11 +14,11 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
         it('defaults to auto with all known playwright engines', () => {
             const parsed = parseSearchModeConfig(undefined);
             expect(parsed.searchMode).toBe('auto');
-            expect(parsed.playwrightEngines).toEqual(['bing', 'startpage']);
+            expect(parsed.playwrightEngines).toEqual(['bing', 'brave']);
 
             const parsedAuto = parseSearchModeConfig('auto');
             expect(parsedAuto.searchMode).toBe('auto');
-            expect(parsedAuto.playwrightEngines).toEqual(['bing', 'startpage']);
+            expect(parsedAuto.playwrightEngines).toEqual(['bing', 'brave']);
         });
 
         it('disables playwright for all engines when request, none, or false', () => {
@@ -38,11 +38,11 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
         it('forces playwright for all supported engines when playwright or all', () => {
             const parsedPw = parseSearchModeConfig('playwright');
             expect(parsedPw.searchMode).toBe('playwright');
-            expect(parsedPw.playwrightEngines).toEqual(['bing', 'startpage']);
+            expect(parsedPw.playwrightEngines).toEqual(['bing', 'brave']);
 
             const parsedAll = parseSearchModeConfig('all');
             expect(parsedAll.searchMode).toBe('playwright');
-            expect(parsedAll.playwrightEngines).toEqual(['bing', 'startpage']);
+            expect(parsedAll.playwrightEngines).toEqual(['bing', 'brave']);
         });
 
         it('supports single engine specification in SEARCH_MODE', () => {
@@ -51,54 +51,54 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
             expect(parsedBing.engineSearchModes['bing']).toBe('auto');
             expect(parsedBing.playwrightEngines).toEqual(['bing']);
 
-            const parsedStartpage = parseSearchModeConfig('startpage');
-            expect(parsedStartpage.searchMode).toBe('request');
-            expect(parsedStartpage.engineSearchModes['startpage']).toBe('auto');
-            expect(parsedStartpage.playwrightEngines).toEqual(['startpage']);
+            const parsedBrave = parseSearchModeConfig('brave');
+            expect(parsedBrave.searchMode).toBe('request');
+            expect(parsedBrave.engineSearchModes['brave']).toBe('auto');
+            expect(parsedBrave.playwrightEngines).toEqual(['brave']);
         });
 
         it('supports comma-separated engine multi-select in SEARCH_MODE', () => {
-            const parsedBoth = parseSearchModeConfig('bing,startpage');
+            const parsedBoth = parseSearchModeConfig('bing,brave');
             expect(parsedBoth.searchMode).toBe('request');
             expect(parsedBoth.engineSearchModes['bing']).toBe('auto');
-            expect(parsedBoth.engineSearchModes['startpage']).toBe('auto');
-            expect(parsedBoth.playwrightEngines).toEqual(['bing', 'startpage']);
+            expect(parsedBoth.engineSearchModes['brave']).toBe('auto');
+            expect(parsedBoth.playwrightEngines).toEqual(['bing', 'brave']);
         });
 
-        it('supports one mode with multiple engines: e.g. playwright:bing,startpage', () => {
-            const parsed = parseSearchModeConfig('playwright:bing,startpage');
+        it('supports one mode with multiple engines: e.g. playwright:bing,brave', () => {
+            const parsed = parseSearchModeConfig('playwright:bing,brave');
             expect(parsed.searchMode).toBe('request');
             expect(parsed.engineSearchModes['bing']).toBe('playwright');
-            expect(parsed.engineSearchModes['startpage']).toBe('playwright');
-            expect(parsed.playwrightEngines).toEqual(['bing', 'startpage']);
+            expect(parsed.engineSearchModes['brave']).toBe('playwright');
+            expect(parsed.playwrightEngines).toEqual(['bing', 'brave']);
 
-            const parsedAutoMulti = parseSearchModeConfig('auto:bing,startpage');
+            const parsedAutoMulti = parseSearchModeConfig('auto:bing,brave');
             expect(parsedAutoMulti.searchMode).toBe('request');
             expect(parsedAutoMulti.engineSearchModes['bing']).toBe('auto');
-            expect(parsedAutoMulti.engineSearchModes['startpage']).toBe('auto');
-            expect(parsedAutoMulti.playwrightEngines).toEqual(['bing', 'startpage']);
+            expect(parsedAutoMulti.engineSearchModes['brave']).toBe('auto');
+            expect(parsedAutoMulti.playwrightEngines).toEqual(['bing', 'brave']);
         });
 
-        it('supports multiple modes configuration using semicolons: e.g. playwright:bing;auto:startpage', () => {
-            const parsed = parseSearchModeConfig('playwright:bing;auto:startpage');
+        it('supports multiple modes configuration using semicolons: e.g. playwright:bing;auto:brave', () => {
+            const parsed = parseSearchModeConfig('playwright:bing;auto:brave');
             expect(parsed.searchMode).toBe('request');
             expect(parsed.engineSearchModes['bing']).toBe('playwright');
-            expect(parsed.engineSearchModes['startpage']).toBe('auto');
-            expect(parsed.playwrightEngines).toEqual(['bing', 'startpage']);
+            expect(parsed.engineSearchModes['brave']).toBe('auto');
+            expect(parsed.playwrightEngines).toEqual(['bing', 'brave']);
         });
 
-        it('supports multiple modes configuration using commas: e.g. playwright:bing,auto:startpage', () => {
-            const parsed = parseSearchModeConfig('playwright:bing,auto:startpage');
+        it('supports multiple modes configuration using commas: e.g. playwright:bing,auto:brave', () => {
+            const parsed = parseSearchModeConfig('playwright:bing,auto:brave');
             expect(parsed.searchMode).toBe('request');
             expect(parsed.engineSearchModes['bing']).toBe('playwright');
-            expect(parsed.engineSearchModes['startpage']).toBe('auto');
-            expect(parsed.playwrightEngines).toEqual(['bing', 'startpage']);
+            expect(parsed.engineSearchModes['brave']).toBe('auto');
+            expect(parsed.playwrightEngines).toEqual(['bing', 'brave']);
         });
 
-        it('supports global default mode with specific engine override: e.g. auto;request:startpage', () => {
-            const parsed = parseSearchModeConfig('auto;request:startpage');
+        it('supports global default mode with specific engine override: e.g. auto;request:brave', () => {
+            const parsed = parseSearchModeConfig('auto;request:brave');
             expect(parsed.searchMode).toBe('auto');
-            expect(parsed.engineSearchModes['startpage']).toBe('request');
+            expect(parsed.engineSearchModes['brave']).toBe('request');
             expect(parsed.playwrightEngines).toEqual(['bing']);
         });
 
@@ -117,9 +117,9 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
             expect(cfg.searchMode).toBe('request');
             expect(cfg.playwrightEngines).toEqual(['bing']);
             expect(getEngineSearchMode('bing', cfg)).toBe('auto');
-            expect(getEngineSearchMode('startpage', cfg)).toBe('request');
+            expect(getEngineSearchMode('brave', cfg)).toBe('request');
             expect(engineShouldUsePlaywrightFallback('bing', cfg)).toBe(true);
-            expect(engineShouldUsePlaywrightFallback('startpage', cfg)).toBe(false);
+            expect(engineShouldUsePlaywrightFallback('brave', cfg)).toBe(false);
         });
 
         it('derives boolean flags correctly when SEARCH_MODE=request', () => {
@@ -127,28 +127,28 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
             expect(cfg.searchMode).toBe('request');
             expect(cfg.playwrightEngines).toEqual([]);
             expect(getEngineSearchMode('bing', cfg)).toBe('request');
-            expect(getEngineSearchMode('startpage', cfg)).toBe('request');
+            expect(getEngineSearchMode('brave', cfg)).toBe('request');
             expect(engineShouldUsePlaywrightFallback('bing', cfg)).toBe(false);
-            expect(engineShouldUsePlaywrightFallback('startpage', cfg)).toBe(false);
+            expect(engineShouldUsePlaywrightFallback('brave', cfg)).toBe(false);
         });
 
-        it('supports hybrid multiple modes: SEARCH_MODE=playwright:bing;auto:startpage', () => {
-            const cfg = createConfig({ SEARCH_MODE: 'playwright:bing;auto:startpage' }, { quiet: true });
+        it('supports hybrid multiple modes: SEARCH_MODE=playwright:bing;auto:brave', () => {
+            const cfg = createConfig({ SEARCH_MODE: 'playwright:bing;auto:brave' }, { quiet: true });
             expect(getEngineSearchMode('bing', cfg)).toBe('playwright');
-            expect(getEngineSearchMode('startpage', cfg)).toBe('auto');
-            expect(cfg.playwrightEngines).toEqual(['bing', 'startpage']);
+            expect(getEngineSearchMode('brave', cfg)).toBe('auto');
+            expect(cfg.playwrightEngines).toEqual(['bing', 'brave']);
             expect(engineShouldUsePlaywrightFallback('bing', cfg)).toBe(true);
-            expect(engineShouldUsePlaywrightFallback('startpage', cfg)).toBe(true);
+            expect(engineShouldUsePlaywrightFallback('brave', cfg)).toBe(true);
         });
 
-        it('supports global default with override: SEARCH_MODE=auto;request:startpage', () => {
-            const cfg = createConfig({ SEARCH_MODE: 'auto;request:startpage' }, { quiet: true });
+        it('supports global default with override: SEARCH_MODE=auto;request:brave', () => {
+            const cfg = createConfig({ SEARCH_MODE: 'auto;request:brave' }, { quiet: true });
             expect(cfg.searchMode).toBe('auto');
             expect(getEngineSearchMode('bing', cfg)).toBe('auto');
-            expect(getEngineSearchMode('startpage', cfg)).toBe('request');
+            expect(getEngineSearchMode('brave', cfg)).toBe('request');
             expect(cfg.playwrightEngines).toEqual(['bing']);
             expect(engineShouldUsePlaywrightFallback('bing', cfg)).toBe(true);
-            expect(engineShouldUsePlaywrightFallback('startpage', cfg)).toBe(false);
+            expect(engineShouldUsePlaywrightFallback('brave', cfg)).toBe(false);
         });
 
 

@@ -1,5 +1,5 @@
 import { SearchResult } from '../../types.js';
-import { normalizeResultUrl } from './searchService.js';
+import { normalizeResultUrl } from './mergeResults.js';
 
 /**
  * 多查询扇出结果的公平合并。

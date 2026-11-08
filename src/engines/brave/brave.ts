@@ -14,6 +14,7 @@ import { getProxyUrl } from '../../config.js';
 import { getSystemProxyFallbackUrl } from '../../utils/systemProxy.js';
 import { braveHttpGetWithCurl } from '../../utils/braveCurl.js';
 import { getOptionalString, getString } from '../../config/env.js';
+import type { BrowserPage } from '../../utils/browser/driver.js';
 export { isBraveBlockedPage };
 
 /**
@@ -425,27 +426,29 @@ export async function searchBraveWithBrowser(
 
     const { openPlaywrightBrowser } = await import('../../utils/playwrightClient.js');
     const { prepareStealthPage } = await import('../../utils/browserStealth.js');
-    const { installBrowserResourceBlocker } = await import('../../utils/browserResourceBlocker.js');
     const { selectDeviceProfile } = await import('../../utils/browser/deviceProfile.js');
 
     const session = await openPlaywrightBrowser(true);
     try {
         const b = session.browser as {
-            newContext?: () => Promise<{ newPage: () => Promise<unknown>; close: () => Promise<void> }>;
-            contexts?: () => Array<{ newPage: () => Promise<unknown> }>;
+            newPage?: () => Promise<BrowserPage>;
+            newContext?: () => Promise<{ newPage: () => Promise<BrowserPage>; close?: () => Promise<void> }>;
+            contexts?: () => Array<{ newPage: () => Promise<BrowserPage>; clearCookies?: () => Promise<void> }>;
         };
-        let page: unknown;
+        let page: BrowserPage;
         let cleanupContext: (() => Promise<void>) | undefined;
 
         if (typeof b.newContext === 'function') {
             const ctx = await b.newContext();
             page = await ctx.newPage();
             cleanupContext = async () => {
-                await ctx.close().catch(() => undefined);
+                if (typeof ctx.close === 'function') {
+                    await ctx.close().catch(() => undefined);
+                }
             };
         } else if (typeof b.contexts === 'function') {
             const contexts = b.contexts();
-            const firstCtx = contexts[0] as { newPage: () => Promise<unknown>; clearCookies?: () => Promise<void> } | undefined;
+            const firstCtx = contexts[0];
             if (!firstCtx) {
                 throw new Error('No browser context available');
             }
@@ -453,20 +456,14 @@ export async function searchBraveWithBrowser(
                 await firstCtx.clearCookies().catch(() => undefined);
             }
             page = await firstCtx.newPage();
+        } else if (typeof b.newPage === 'function') {
+            page = await b.newPage();
         } else {
             throw new Error('Browser instance does not support creating pages');
         }
 
-        const p = page as {
-            applyDeviceProfile?: (profile: unknown) => Promise<void>;
-            goto: (url: string, opts?: { waitUntil?: string; timeout?: number }) => Promise<unknown>;
-            evaluate: <T>(fn: () => T) => Promise<T>;
-            content: () => Promise<string>;
-            close: () => Promise<void>;
-        };
-
         const onAbort = () => {
-            void p.close().catch(() => undefined);
+            void page.close().catch(() => undefined);
         };
         signal?.addEventListener('abort', onAbort, { once: true });
 
@@ -477,14 +474,13 @@ export async function searchBraveWithBrowser(
                     : new AppError({ code: 'aborted', retryable: false, engine: 'brave', message: 'Brave search aborted' });
             }
 
-            await prepareStealthPage(p as never);
-            await installBrowserResourceBlocker(p);
+            await prepareStealthPage(page as never);
             const selector = getString('BROWSER_PROFILE', 'windows-chrome-8');
-            if (p.applyDeviceProfile) {
-                await p.applyDeviceProfile(selectDeviceProfile(selector));
+            if (page.applyDeviceProfile) {
+                await page.applyDeviceProfile(selectDeviceProfile(selector));
             }
 
-            await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeoutMs: 20000 });
 
             // 轮询等待结果或 PoW「验证」按钮：
             // 冷启动（首次拉起浏览器/新 profile）时 SvelteKit 页面渲染晚于 domcontentloaded，
@@ -494,7 +490,7 @@ export async function searchBraveWithBrowser(
             const startTime = Date.now();
             const deadline = startTime + 9000;
             while (Date.now() < deadline && !signal?.aborted) {
-                const state = await p.evaluate(() => {
+                const state = await page.evaluate<{ hasResults: boolean; clicked: boolean }>(() => {
                     const hasResults = document.querySelectorAll('.snippet, .result-content').length > 0;
                     if (hasResults) {
                         return { hasResults: true, clicked: false };
@@ -523,7 +519,7 @@ export async function searchBraveWithBrowser(
                     : new AppError({ code: 'aborted', retryable: false, engine: 'brave', message: 'Brave search aborted' });
             }
 
-            const html = await p.content();
+            const html = await page.content();
             const results = parseBraveResults(html, new Set());
             if (results.length === 0) {
                 // 0 条可能是「查询本身没有结果」，也可能是验证页；只有后者才算被拦。
@@ -541,7 +537,7 @@ export async function searchBraveWithBrowser(
             return results.slice(0, limit);
         } finally {
             signal?.removeEventListener('abort', onAbort);
-            await p.close().catch(() => undefined);
+            await page.close().catch(() => undefined);
             if (cleanupContext) {
                 await cleanupContext();
             }
