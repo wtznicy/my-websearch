@@ -139,11 +139,25 @@ export async function queryMdnDocs(options: {
             } else if (lowerUrl.includes(`/${cleanLib}`) || lowerUrl.includes(`_${cleanLib}`)) {
                 score += 40;
             }
+
+            // 规范性生态加权：若查询目标为标准 Web API（如 fetch），对核心规范页加权，惩罚专有/边缘拓展
+            if (cleanLib === 'fetch') {
+                if (lowerUrl.includes('/web/api/fetch_api') || lowerUrl.includes('/window/fetch') || lowerUrl.includes('/web/api/request')) {
+                    score += 80;
+                }
+                // 惩罚非核心的事件类、后台任务类或 HTTP 动词页（如 FetchEvent、BackgroundFetch、OPTIONS 方法）
+                if (lowerUrl.includes('/fetchevent') || lowerUrl.includes('/backgroundfetch') || lowerUrl.includes('/methods/') || lowerUrl.includes('credential')) {
+                    score -= 100;
+                }
+            } else if (lowerUrl.includes('/methods/') && !cleanLib.includes('method')) {
+                score -= 60;
+            }
         }
 
         for (const token of queryTokens) {
             if (lowerTitle.includes(token)) score += 20;
             if (lowerSummary.includes(token)) score += 5;
+            if (lowerUrl.includes(`/${token}`)) score += 25;
         }
 
         return score;

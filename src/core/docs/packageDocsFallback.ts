@@ -546,10 +546,20 @@ export const WELL_KNOWN_GO_MODULES = new Set([
     'testify', 'go-redis'
 ]);
 
-export const WELL_KNOWN_JAVA_PACKAGES = new Set([
-    'hutool', 'mybatis', 'mybatis-plus', 'guava', 'lombok', 'fastjson', 'fastjson2',
-    'druid', 'redisson', 'dubbo', 'spring-boot', 'spring-framework'
-]);
+export const WELL_KNOWN_JAVA_PACKAGES: Record<string, string> = {
+    hutool: 'cn.hutool:hutool-all',
+    'mybatis-plus': 'com.baomidou:mybatis-plus',
+    mybatis: 'org.mybatis:mybatis',
+    guava: 'com.google.guava:guava',
+    lombok: 'org.projectlombok:lombok',
+    fastjson: 'com.alibaba:fastjson',
+    fastjson2: 'com.alibaba.fastjson2:fastjson2',
+    druid: 'com.alibaba:druid',
+    redisson: 'org.redisson:redisson',
+    dubbo: 'org.apache.dubbo:dubbo',
+    'spring-boot': 'org.springframework.boot:spring-boot',
+    'spring-framework': 'org.springframework:spring-core'
+};
 
 export function isPythonPackageName(name: string): boolean {
     const lower = name.toLowerCase();
@@ -573,6 +583,13 @@ export function isGoModuleName(name: string): boolean {
     return WELL_KNOWN_GO_MODULES.has(lower)
         || lower.startsWith('go-')
         || lower.endsWith('-go');
+}
+
+export function isJavaPackageName(name: string): boolean {
+    const lower = name.toLowerCase();
+    return lower in WELL_KNOWN_JAVA_PACKAGES
+        || lower.startsWith('java-')
+        || lower.endsWith('-java');
 }
 
 /**
@@ -629,6 +646,16 @@ export async function resolvePackageMetadata(
         if (goMeta && goMeta.documentationUrl) {
             return goMeta;
         }
+    } else if (isJavaPackageName(lower)) {
+        const coords = WELL_KNOWN_JAVA_PACKAGES[lower];
+        if (coords) {
+            const mavenMeta = await resolveMavenMetadata(coords, options?.signal, options?.version);
+            if (mavenMeta && (mavenMeta.documentationUrl || mavenMeta.repositoryUrl)) {
+                return mavenMeta;
+            }
+        }
+        // Java 知名包（如 hutool）未在 Maven 找到时，禁止回退到 npm/PyPI 抢注包
+        return null;
     }
 
     const npmMeta = await resolveNpmMetadata(target, options?.signal, options?.version);
@@ -704,6 +731,7 @@ export async function fetchPackageDocsFallback(options: {
     const preferPython = isPythonPackageName(lowerClean) || rawTarget.startsWith('pypi:');
     const preferRust = isRustCrateName(lowerClean) || rawTarget.startsWith('crate:') || rawTarget.startsWith('crates:');
     const preferGo = isGoModuleName(lowerClean) || rawTarget.startsWith('go:');
+    const preferJava = isJavaPackageName(lowerClean) || rawTarget.startsWith('maven:') || rawTarget.startsWith('javadoc:');
     const defaultConfidence: 'high' | 'medium' = hasExplicitPrefix ? 'high' : 'medium';
 
     const buildEcosystemWarning = (registry: string, repo: string): string[] => {
@@ -716,6 +744,34 @@ export async function fetchPackageDocsFallback(options: {
         }
         return base;
     };
+
+    // 如果优先 Java 生态（如 hutool, mybatis-plus, guava 等）
+    if (preferJava) {
+        try {
+            const coords = WELL_KNOWN_JAVA_PACKAGES[lowerClean] || cleanTarget;
+            const mavenRepo = await resolveMavenRepository(coords, options.signal, version);
+            if (mavenRepo) {
+                const readme = await options.fetchGithub(mavenRepo);
+                if (readme && readme.trim().length > 20) {
+                    return {
+                        source: 'maven',
+                        confidence: hasExplicitPrefix || lowerClean in WELL_KNOWN_JAVA_PACKAGES ? 'high' : defaultConfidence,
+                        libraryId: displayTarget,
+                        repositoryUrl: mavenRepo,
+                        readme: readme.trim(),
+                        warnings: buildEcosystemWarning('Maven Central', mavenRepo)
+                    };
+                }
+            }
+        } catch {
+            // 继续向下尝试其他源
+        }
+    }
+
+    if (lowerClean in WELL_KNOWN_JAVA_PACKAGES) {
+        // Java 知名包（如 hutool）未在 Maven 提取到 README 时，严禁向 npm / PyPI 兜底，防止命中 pypa 抢注垃圾包
+        return null;
+    }
 
     // 1. 如果优先 Python 生态（如 fastapi, django, pytest 等）
     if (preferPython) {

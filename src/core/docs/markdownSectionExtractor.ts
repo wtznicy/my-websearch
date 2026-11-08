@@ -75,6 +75,20 @@ function scoreSectionMatch(title: string, bodyText: string, queryTokens: string[
             score += Math.min(matches * 5, 30);
         }
     }
+
+    // 检查正文内部子标题（如 #### select! 或 ### func (c *Context) Middleware）
+    const subHeadings = bodyText.match(/^#{2,5}\s+(.+)$/gm);
+    if (subHeadings) {
+        for (const sub of subHeadings) {
+            const subClean = sub.toLowerCase();
+            for (const token of queryTokens) {
+                if (subClean.includes(token)) {
+                    score += 70;
+                }
+            }
+        }
+    }
+
     return score;
 }
 
@@ -154,8 +168,16 @@ export function extractRelevantSections(
     }
 
     // 4. 组装结果：Preamble + 选中的完整章节 + 目录提示
+    // 若前导 Preamble 冗长（> 1500 字符，例如 docs.rs 整页的 crate tour），截取前导概要，避免挤占核心章节
+    let displayPreamble = preambleText;
+    if (preambleText.length > 1500) {
+        const cut = preambleText.lastIndexOf('\n\n', 1200);
+        displayPreamble = (cut > 200 ? preambleText.slice(0, cut) : preambleText.slice(0, 1200))
+            + '\n\n*(... Overview truncated, focused section below ...)*';
+    }
+
     const selectedBlocks: MarkdownSectionBlock[] = [];
-    let currentLength = preambleText.length;
+    let currentLength = displayPreamble.length;
 
     for (const block of bestMatches) {
         const blockLen = block.lines.join('\n').length;
@@ -171,8 +193,8 @@ export function extractRelevantSections(
     selectedBlocks.sort((a, b) => (a.heading?.lineIndex ?? 0) - (b.heading?.lineIndex ?? 0));
 
     const resultParts: string[] = [];
-    if (preambleText) {
-        resultParts.push(preambleText);
+    if (displayPreamble) {
+        resultParts.push(displayPreamble);
     }
 
     const matchedTitles = selectedBlocks.map((b) => b.heading?.title ?? '').filter(Boolean);

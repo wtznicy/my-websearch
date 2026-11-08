@@ -149,7 +149,7 @@ export function formatQueryDocsHumanReadable(result: {
     alternativeLibraries?: Array<{ id: string; title: string }>;
     snippets?: Array<{ title?: string; code?: string; content?: string }>;
     codeSnippets?: Array<{ codeTitle?: string; pageTitle?: string; codeDescription?: string; codeList?: Array<{ code: string; language?: string; path?: string }> }>;
-    infoSnippets?: Array<{ title: string; content: string }>;
+    infoSnippets?: Array<{ title?: string; content: string }>;
 }): string {
     const titleHeader = result.resolvedFrom
         ? `Documentation for ${result.libraryId} (resolved from "${result.resolvedFrom}"):`

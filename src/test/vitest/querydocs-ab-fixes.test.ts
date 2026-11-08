@@ -81,6 +81,28 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             expect(result.warnings?.some((w) => w.includes('Showing library overview instead'))).toBe(true);
         });
 
+        it('handles Context7 infoSnippets without title (actual upstream structure) safely without throwing', async () => {
+            const mockGet: Context7GetImpl = vi.fn().mockResolvedValue({
+                status: 200,
+                data: {
+                    codeSnippets: [
+                        { codeTitle: 'QueryWrapper Example', codeList: [{ code: 'new QueryWrapper<User>().eq("name", "Tom");' }] }
+                    ],
+                    // Real Context7 response structure: has breadcrumb and content, no title field!
+                    infoSnippets: [
+                        { breadcrumb: 'MyBatis-Plus > Quick Start', content: 'MyBatis-Plus is an enhanced toolkit for MyBatis.', rank: 1 },
+                        { breadcrumb: 'MyBatis-Plus > Quick Start', content: 'MyBatis-Plus is an enhanced toolkit for MyBatis.', rank: 2 },
+                        { breadcrumb: 'MyBatis-Plus > Pagination', content: 'Pagination plugin configuration.', rank: 3 }
+                    ]
+                }
+            } as any);
+
+            const result = await fetchContext7Docs('/baomidou/mybatis-plus', 'pagination', 5, 0, mockGet);
+            expect(result).not.toBeNull();
+            expect(result.codeSnippets).toHaveLength(1);
+            expect(result.infoSnippets).toHaveLength(2); // deduped from 3 to 2
+        });
+
         it('deduplicates identical code snippets and info snippets', async () => {
             const mockGet: Context7GetImpl = vi.fn().mockResolvedValue({
                 status: 200,
@@ -151,6 +173,26 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             expect(result?.source).toBe('pypi');
             expect(result?.repositoryUrl).toMatch(/(?:fastapi|tiangolo)\/fastapi/);
             expect(result?.repositoryUrl).not.toContain('tkambler');
+        });
+
+        it('prevents Java packages like hutool from falling back to PyPI sampleproject', async () => {
+            const mockFetchGithub = vi.fn().mockImplementation(async (url: string) => {
+                if (url.includes('hutool')) {
+                    return '# Hutool\n\nA set of Java tools that keep Java sweet and simple.';
+                }
+                return '# Sample Project\n\nA sample Python project.';
+            });
+
+            const result = await fetchPackageDocsFallback({
+                library: 'hutool',
+                fetchGithub: mockFetchGithub
+            });
+
+            if (result) {
+                expect(result.source).toBe('maven');
+                expect(result.repositoryUrl).not.toContain('pypa/sampleproject');
+                expect(result.repositoryUrl).not.toContain('python');
+            }
         });
     });
 

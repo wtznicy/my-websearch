@@ -187,6 +187,9 @@ export function getContext7FallbackNotice(options: {
         if (isContext7QuotaExhaustedError(context7Error)) {
             return `Context7 monthly quota exhausted (HTTP 402). Automatically switched to ${destination}. Configure CONTEXT7_API_KEY in ~/.my-websearch/config.json to restore Context7 access.`;
         }
+        if (context7Error instanceof TypeError) {
+            return `Context7 retrieval encountered an internal processing error (${context7Error.message}). Failed over to ${destination}.`;
+        }
         const msg = context7Error instanceof Error ? context7Error.message : String(context7Error);
         return `Context7 service temporarily unavailable (${msg}). Automatically failed over to ${destination}.`;
     }
@@ -884,7 +887,9 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 const fallbackReason = context7Error
                     ? (isContext7QuotaExhaustedError(context7Error)
                         ? 'Context7 monthly quota exhausted (HTTP 402). Configure CONTEXT7_API_KEY in ~/.my-websearch/config.json to restore Context7 access.'
-                        : `Context7 service temporarily unavailable (${context7Error instanceof Error ? context7Error.message : String(context7Error)}).`)
+                        : (context7Error instanceof TypeError
+                            ? `Context7 processing encountered an internal error (${context7Error.message}).`
+                            : `Context7 service temporarily unavailable (${context7Error instanceof Error ? context7Error.message : String(context7Error)}).`))
                     : (context7Result && context7Result.matchConfidence === 'low'
                         ? `Library "${target}" was not indexed by Context7 or match confidence was low${context7Result.libraryId ? ` (closest candidate: "${context7Result.libraryId}")` : ''}.`
                         : 'Context7 match confidence was low or library was not found in Context7.');

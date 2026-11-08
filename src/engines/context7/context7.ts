@@ -49,7 +49,9 @@ export type Context7CodeSnippet = {
 };
 
 export type Context7InfoSnippet = {
-    title: string;
+    title?: string;
+    breadcrumb?: string;
+    pageId?: string;
     content: string;
 };
 
@@ -597,7 +599,8 @@ export async function fetchContext7Docs(
     const dedupedCodeSnippets: Context7CodeSnippet[] = [];
     for (const rawSnippet of data.codeSnippets ?? []) {
         const normalized = normalizeCodeSnippetPageTitle(rawSnippet as Context7RawCodeSnippet);
-        const codeKey = `${normalized.codeTitle}::${normalized.codeList.map((c) => c.code.trim()).join(';')}`;
+        const codeListStr = (normalized.codeList ?? []).map((c) => (c?.code ?? '').trim()).join(';');
+        const codeKey = `${(normalized.codeTitle ?? '').trim()}::${codeListStr}`;
         if (!seenCode.has(codeKey)) {
             seenCode.add(codeKey);
             dedupedCodeSnippets.push(normalized);
@@ -605,11 +608,17 @@ export async function fetchContext7Docs(
         if (dedupedCodeSnippets.length >= limit) break;
     }
 
-    // 信息片段按 title + content 去重
+    // 信息片段按 title/breadcrumb/pageId + content 去重（Context7 上游多为 breadcrumb/content，无 title）
     const seenInfo = new Set<string>();
     const dedupedInfoSnippets: Context7InfoSnippet[] = [];
     for (const info of data.infoSnippets ?? []) {
-        const infoKey = `${info.title.trim()}::${info.content.trim()}`;
+        const rawTitle = info.title
+            ?? (info as { breadcrumb?: string }).breadcrumb
+            ?? (info as { pageId?: string }).pageId
+            ?? '';
+        const titleStr = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+        const contentStr = typeof info.content === 'string' ? info.content.trim() : '';
+        const infoKey = `${titleStr}::${contentStr}`;
         if (!seenInfo.has(infoKey)) {
             seenInfo.add(infoKey);
             dedupedInfoSnippets.push(info);
