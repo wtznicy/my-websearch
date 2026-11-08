@@ -33,7 +33,7 @@
   - 若 `SEARCH_MODE=request`（纯 HTTP）或 Playwright 未就绪：触发下游智能级联，自动调用百度、DuckDuckGo 或 Brave 补齐结果。
 - **排查建议**：
   1. 单独验证 Bing 实时探测：`npm run test:bing:live`；
-  2. 若出口 IP 被 Bing 限制，可开启代理或使用国际版 Host：`BING_BASE_URL=https://www.bing.com/search`（兼容旧变量 `OPEN_WEBSEARCH_BING_HOST`）。
+  2. 若出口 IP 被 Bing 限制，可开启代理或使用国际版 Host：`BING_BASE_URL=https://www.bing.com/search`。
 
 ### ② Brave 遇到 HTTP 429 (Rate Limit)
 - **机制原理**：Brave 搜索公开接口对单一 IP 高频调用设有限频。

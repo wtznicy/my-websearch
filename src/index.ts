@@ -216,7 +216,7 @@ async function main() {
 
     // 绑定地址必须先解析：Host 白名单要和它联动，否则 HOST=0.0.0.0（Docker/容器）
     // 的部署会被 Host 校验 403 掉——文档里的生产配方直接失效。
-    const HOST = getOptionalString('OPEN_WEBSEARCH_HOST') ?? getOptionalString('HOST') ?? '127.0.0.1';
+    const HOST = getOptionalString('HOST') ?? '127.0.0.1';
     // DNS rebinding 保护（与本地 REST daemon 共用同一套白名单解析，见 adapters/http/sharedMiddleware）
     applyHostValidation(app, [HOST]);
 
@@ -245,7 +245,7 @@ async function main() {
 
     const SESSION_IDLE_TTL_MS = parsePositiveNumber('MCP_SESSION_TTL_MS', 30 * 60 * 1000, 10_000, 7 * 24 * 3600 * 1000);
     const MAX_SESSIONS = parsePositiveNumber('MCP_MAX_SESSIONS', 100, 1, 10_000);
-    const SESSION_REAPER_INTERVAL_MS = parsePositiveNumber('MCP_SESSION_REAPER_MS', 5 * 60 * 1000, 5_000, 24 * 3600 * 1000);
+    const SESSION_REAPER_INTERVAL_MS = 5 * 60 * 1000;
     const sessionCapacity = createSessionCapacityManager(
       MAX_SESSIONS,
       () => Object.keys(transports.streamable).length + Object.keys(transports.sse).length

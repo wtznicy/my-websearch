@@ -100,24 +100,6 @@ describe('codeSymbol tool contract', () => {
         expect(withUnknown.success).toBe(true);
         expect(withUnknown.data?.language).toBe('python');
     });
-
-    it('honours MCP_TOOL_CODE_SYMBOL_NAME and falls back to the default on invalid names', () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-        vi.stubEnv('MCP_TOOL_CODE_SYMBOL_NAME', 'findSymbol');
-        const renamed = new McpServer({ name: 'test', version: '1.0.0' });
-        registerCodeSymbolTool(renamed, createMyWebSearchRuntime());
-        const renamedTools = (renamed as unknown as { _registeredTools: Record<string, RegisteredTool> })._registeredTools;
-        expect(renamedTools['findSymbol']).toBeDefined();
-        expect(renamedTools['codeSymbol']).toBeUndefined();
-
-        vi.stubEnv('MCP_TOOL_CODE_SYMBOL_NAME', 'bad name!');
-        const fallback = new McpServer({ name: 'test', version: '1.0.0' });
-        registerCodeSymbolTool(fallback, createMyWebSearchRuntime());
-        const fallbackTools = (fallback as unknown as { _registeredTools: Record<string, RegisteredTool> })._registeredTools;
-        expect(fallbackTools['codeSymbol']).toBeDefined();
-        expect(warn).toHaveBeenCalled();
-    });
 });
 
 describe('codeSymbol core validation (no network)', () => {

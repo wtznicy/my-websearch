@@ -158,15 +158,6 @@ describe('SEARCH_MODE and Playwright Fallback Unification (Plan A)', () => {
 
             const customCfg = createConfig({ BING_BASE_URL: 'https://www.bing.com/search/' }, { quiet: true });
             expect(customCfg.bingBaseUrl).toBe('https://www.bing.com/search');
-
-            const legacyCfg = createConfig({ OPEN_WEBSEARCH_BING_HOST: 'https://intl.bing.com/search/' }, { quiet: true });
-            expect(legacyCfg.bingBaseUrl).toBe('https://intl.bing.com/search');
-
-            const bothCfg = createConfig({
-                BING_BASE_URL: 'https://primary.bing.com/search',
-                OPEN_WEBSEARCH_BING_HOST: 'https://legacy.bing.com/search'
-            }, { quiet: true });
-            expect(bothCfg.bingBaseUrl).toBe('https://primary.bing.com/search');
         });
     });
 

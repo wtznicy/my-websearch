@@ -4,7 +4,6 @@ import { validatePublicWebUrl } from '../../core/validation/targetValidation.js'
 import { validateExtractSchema } from '../../engines/web/extract.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import {
-    getToolName,
     logTool,
     logSafeError,
     withErrorHint,
@@ -49,7 +48,7 @@ const extractFieldInput = z.object({
 }).passthrough();
 
 export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRuntime): void {
-    const fetchWebToolName = getToolName('MCP_TOOL_FETCH_WEB_NAME', 'fetchWebContent');
+    const fetchWebToolName = 'fetchWebContent';
 
     server.registerTool(
         fetchWebToolName,

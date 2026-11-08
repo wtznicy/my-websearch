@@ -87,7 +87,7 @@ function normalizeModeToken(token: string): SearchEngineMode | undefined {
     const t = token.trim().toLowerCase();
     if (t === 'auto') return 'auto';
     if (t === 'request' || t === 'none' || t === 'false') return 'request';
-    if (t === 'playwright' || t === 'all') return 'playwright';
+    if (t === 'playwright' || t === 'browser' || t === 'all') return 'playwright';
     return undefined;
 }
 
@@ -375,7 +375,7 @@ export function createConfig(
         searchMode: parsedSearchMode.searchMode,
         engineSearchModes: parsedSearchMode.engineSearchModes,
         playwrightEngines: parsedSearchMode.playwrightEngines,
-        bingBaseUrl: (getString('BING_BASE_URL', '', env) || getString('OPEN_WEBSEARCH_BING_HOST', '', env) || 'https://cn.bing.com/search').trim().replace(/\/$/, ''),
+        bingBaseUrl: (getString('BING_BASE_URL', '', env) || 'https://cn.bing.com/search').trim().replace(/\/$/, ''),
         maxConcurrentSearches: parsePositiveIntEnv(getOptionalString('MAX_CONCURRENT_SEARCHES', env), 20, 0),
         impersonateBrowser: getOptionalString('IMPERSONATE_BROWSER', env) || 'chrome_149',
         impersonateOs: getOptionalString('IMPERSONATE_OS', env) || 'windows',
@@ -394,10 +394,10 @@ export function createConfig(
         defaultMinResults: parsePositiveIntEnv(getOptionalString('DEFAULT_MIN_RESULTS', env), 5, 0, 50),
         searchDeadlineMs: parsePositiveIntEnv(getOptionalString('SEARCH_DEADLINE_MS', env), 30000, 1000, 300000),
         fetchWebAllowInsecureTls: getBoolean('FETCH_WEB_INSECURE_TLS', false, env),
-        playwrightExecutablePath: getOptionalString('PLAYWRIGHT_EXECUTABLE_PATH', env),
-        playwrightCdpEndpoint: getOptionalString('PLAYWRIGHT_CDP_ENDPOINT', env),
-        playwrightHeadless: getString('PLAYWRIGHT_HEADLESS', 'true', env).toLowerCase() !== 'false',
-        playwrightNavigationTimeoutMs: parsePositiveIntEnv(getOptionalString('PLAYWRIGHT_NAVIGATION_TIMEOUT_MS', env), 20000, 1000, 300000),
+        playwrightExecutablePath: getOptionalString('BROWSER_PATH', env) || getOptionalString('CHROME_PATH', env) || getOptionalString('PLAYWRIGHT_EXECUTABLE_PATH', env),
+        playwrightCdpEndpoint: getOptionalString('BROWSER_CDP_ENDPOINT', env) || getOptionalString('CDP_ENDPOINT', env) || getOptionalString('PLAYWRIGHT_CDP_ENDPOINT', env),
+        playwrightHeadless: (getOptionalString('BROWSER_HEADLESS', env) ?? getString('PLAYWRIGHT_HEADLESS', 'true', env)).toLowerCase() !== 'false',
+        playwrightNavigationTimeoutMs: parsePositiveIntEnv(getOptionalString('BROWSER_TIMEOUT_MS', env) || getOptionalString('BROWSER_NAVIGATION_TIMEOUT_MS', env) || getOptionalString('PLAYWRIGHT_NAVIGATION_TIMEOUT_MS', env), 20000, 1000, 300000),
         enableHttpServer: getOptionalString('MODE', env) ? ['both', 'http'].includes(getOptionalString('MODE', env)!) : true,
         enableCors: getBoolean('ENABLE_CORS', false, env),
         corsOrigin: getOptionalString('CORS_ORIGIN', env) || '*'

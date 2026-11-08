@@ -443,9 +443,9 @@ export async function searchBingWithPlaywright(query: string, limit: number, sig
     }
 }
 
-/** 浏览器兜底（CDP）的独立预算：不能让它把整个搜索 deadline 吃光（默认 6s，可由 BING_PLAYWRIGHT_BUDGET_MS 覆盖）*/
+/** 浏览器兜底（CDP）的独立预算：不能让它把整个搜索 deadline 吃光（默认 6s，可由 BING_BROWSER_BUDGET_MS 或 BING_PLAYWRIGHT_BUDGET_MS 覆盖）*/
 export const BING_PLAYWRIGHT_FALLBACK_BUDGET_MS = (() => {
-    const parsed = getNumber('BING_PLAYWRIGHT_BUDGET_MS', 6000, { min: 1000, integer: true });
+    const parsed = getNumber('BING_BROWSER_BUDGET_MS', getNumber('BING_PLAYWRIGHT_BUDGET_MS', 6000, { min: 1000, integer: true }), { min: 1000, integer: true });
     return Number.isFinite(parsed) && parsed >= 1000 ? Math.floor(parsed) : 6000;
 })();
 

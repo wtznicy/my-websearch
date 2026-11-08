@@ -274,11 +274,11 @@ my-websearch doctor --reset-health
 
 | 变量名 | 默认值 | 可选值 / 说明 |
 | :--- | :--- | :--- |
-| `HOST` / `OPEN_WEBSEARCH_HOST` | `127.0.0.1` | MCP HTTP 监听地址；绑定到非回环地址时会自动加入 Host 白名单并打印无鉴权警告 |
+| `HOST` | `127.0.0.1` | MCP HTTP 监听地址；绑定到非回环地址时会自动加入 Host 白名单并打印无鉴权警告 |
 | `OPEN_WEBSEARCH_DAEMON_HOST` / `OPEN_WEBSEARCH_DAEMON_PORT` | `127.0.0.1` / `3210` | 本地 REST daemon 监听地址（无鉴权，保持回环） |
 | `METRICS_ENABLED` | `false` | 启用进程内计数器与 daemon `/metrics` 端点 |
 | `FETCH_WEB_DEADLINE_MS` | `45000` | 单次 `fetchWebContent` 的硬截止时间（cookie + 浏览器 + 重试合计） |
-| `BING_PLAYWRIGHT_BUDGET_MS` | `6000` | 旧变量名保留：Bing 浏览器兜底预算（现由 raw CDP 驱动），超时后保留 HTTP 结果 |
+| `BING_BROWSER_BUDGET_MS` / `BING_PLAYWRIGHT_BUDGET_MS` | `6000` | Bing 浏览器兜底预算（由 raw CDP 驱动），超时后保留 HTTP 结果；兼容旧变量名 `BING_PLAYWRIGHT_BUDGET_MS` |
 | `MYWEBSEARCH_NO_AUTO_BOOTSTRAP` | 未设置 | 设为 `1` 时，首次运行不再从其他应用的 MCP 配置中复制 API Key |
 
 #### 1. 🔍 检索与路由编排
@@ -287,7 +287,7 @@ my-websearch doctor --reset-health
 | :--- | :--- | :--- |
 | `DEFAULT_SEARCH_ENGINE` | `auto` | 默认搜索引擎。`auto`（智能感知路由：中文走 `baidu,sogou`，英文走 `bing,duckduckgo`）。支持全部 16 个引擎：`auto`、`bing`、`bing-news`、`baidu`、`sogou`、`duckduckgo`、`brave`、`csdn`、`juejin`、`startpage`、`yahoo`、`exa`、`github`、`stackoverflow`、`hackernews`、`arxiv`、`code`（垂直开发者引擎可配置为默认，全局默认推荐保持 `auto` 或通用网页引擎） |
 | `ALLOWED_SEARCH_ENGINES` | 全部 | 限制启用的引擎白名单（逗号分隔，如 `bing,baidu,duckduckgo`） |
-| `BING_BASE_URL` | `https://cn.bing.com/search` | Bing 搜索请求基址。国际用户可改为 `https://www.bing.com/search` 或自定义中转域名（兼容旧变量 `OPEN_WEBSEARCH_BING_HOST`） |
+| `BING_BASE_URL` | `https://cn.bing.com/search` | Bing 搜索请求基址。国际用户可改为 `https://www.bing.com/search` 或自定义中转域名 |
 | `DEFAULT_MIN_RESULTS` | `5` | 级联补位阈值：可用结果数不足该值时，自动调度备用引擎补齐 |
 | `DEFAULT_SEARCH_LIMIT` | `10` | 工具调用未显式传 `limit` 时的单次返回上限（最大 50） |
 | `SEARCH_DEADLINE_MS` | `30000` | 搜索任务全局超时硬预算（毫秒） |
@@ -296,9 +296,8 @@ my-websearch doctor --reset-health
 | `GITHUB_CONTENT_CDN_FIRST` | `false` | README 与源码文件优先走 jsDelivr（仅公开仓库）；旧名 `GITHUB_README_CDN_FIRST` 仍兼容。 |
 | `GITHUB_CONTENT_BUDGET_MS` | `12000`（CDN-first 时 `6000`） | 单次 `fetchGithubContent` 的总时间预算；单次尝试上限 4.5s。 |
 | `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | 引擎首次熔断冷却（429 / 202 / 验证状态）。连续失败指数退避（30s → 60s → 120s…）。Brave 的首档被覆盖为 **60s**（其 429 是「滚动 60 秒内 6 个请求」的窗口，第 7 个触发，且要等最早请求滑出窗口才恢复）；显式设置该变量会关闭按引擎覆盖。 |
-| `ENGINE_CIRCUIT_MAX_COOLDOWN_MS` | `300000` | 熔断指数退避上限（默认 5 分钟）。 |
 | `SEARCH_AUTHORITY_DOMAINS` | 空 | 结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单） |
-| `SEARCH_MODE` | `auto` | 检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`playwright`（全强走浏览器；旧值名，底层为 CDP）<br/>• **一种方式多选引擎**：`playwright:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`playwright:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP） |
+| `SEARCH_MODE` | `auto` | 检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`browser`/`playwright`（全强走CDP浏览器）<br/>• **一种方式多选引擎**：`browser:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`browser:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP） |
 | `BRAVE_BROWSER_FALLBACK` | `1` | Brave 无 Key 网页路径返回 HTTP 429 / 人机挑战时，是否用桌面指纹伪装的无头 CDP 浏览器重试一次，并自动点击 Argon2 PoW「验证」按钮（`1` 启用，`0` 关闭并快速失败）。命中 429 后会打开 **180 秒的「浏览器优先」窗口**：窗口内跳过 HTTP、所有 Brave 调用直接走浏览器；若浏览器也失败则升级为熔断（60 → 120 → 240 → 300 秒），由路由/级联换引擎。实测在 HTTP 持续 429 期间 8/8 成功、每次约 4–6s。仍是 best-effort：无法通过交互式滑块验证 |
 | `AUTO_ROUTE_EN_ENGINES` | `bing,duckduckgo` | 英文查询默认自动路由引擎列表（逗号分隔） |
 | `AUTO_ROUTE_ZH_ENGINES` | `baidu,sogou` | 中文查询默认自动路由引擎列表（逗号分隔） |
@@ -313,9 +312,7 @@ my-websearch doctor --reset-health
 | `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` 模拟的现代浏览器 TLS/H2 指纹（如 `chrome_149`, `safari_18`） |
 | `IMPERSONATE_OS` | `windows` | 指纹模拟使用的操作系统平台（`windows`, `macos`, `linux`） |
 | `BING_IMPERSONATE` | `true` | 是否启用 Bing 的 Chrome TLS 指纹模拟（连续多次返回 0 条时会自动熔断降级为标准 HTTP） |
-| `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `3500` | 直连优先策略探测超时时间（毫秒） |
 | `FETCH_WEB_INSECURE_TLS` | `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点旧证书链损坏时使用） |
-| `GITHUB_README_CDN_FIRST` | `false` | 为 `true` 时强制跳过 `raw.githubusercontent.com` 直连探测，优先走 jsDelivr CDN 镜像（国内无代理网络加速，免除 3 秒直连探测等待） |
 
 > **自定义代理引擎名单**：如果你在 `~/.my-websearch/config.json` 写了 `proxy.engines`，或用 `PROXY_URL` 的 `;engine1,engine2` 后缀，**`yahoo` 与 `bing-news` 会被自动补齐**——它们在墙内直连不可用（Yahoo 15–20s 超时；Bing News 返回 302/HTML）。仍然推荐直接删掉这份名单：默认名单已包含它们，并把 GitHub / Stack Overflow / Hacker News / arXiv 这些直连 API 引擎排除在代理之外。
 
@@ -339,7 +336,6 @@ my-websearch doctor --reset-health
 | `MAX_CONCURRENT_SEARCHES` | `20` | Daemon 模式下的全局最大并发搜索数（`0` 表示不限制） |
 | `MCP_MAX_SESSIONS` | `100` | 保留的最大并发会话上限，超限时返回 HTTP 429 保护服务器内存 |
 | `MCP_SESSION_TTL_MS` | `1800000` | 会话空闲回收时长（默认 30 分钟） |
-| `MCP_SESSION_REAPER_MS` | `300000` | 会话清理器扫描巡检间隔（默认 5 分钟） |
 | `LOG_LEVEL` | `info` | 日志输出级别：`quiet`（完全静默）、`debug`、`info`、`warn`、`error` |
 | `SECURITY_AUDIT` | `false` | 是否开启安全审计日志（输出 SSRF 拦截详情与主机头放行记录） |
 | `OPEN_WEBSEARCH_ALLOWED_HOSTS` | 本地回环 | HTTP 服务允许的 Host 域名白名单（DNS Rebinding 安全防护，逗号分隔） |
@@ -361,10 +357,10 @@ my-websearch doctor --reset-health
 | `BROWSER_DRIVER` | `cdp` | 浏览器后端：`cdp`（默认，raw CDP）；`playwright` 为旧版逃生口，需要你自行安装 `playwright-core`，不再随包提供 |
 | `BROWSER_PROFILE` | `off` | CDP 设备 profile：`off`、`windows-chrome-8`、`windows-chrome-16`、`macos-chrome-8` 或 `random`。对浏览器会话应用 UA、屏幕/DPR、时区、语言；不会影响 DuckDuckGo/Brave 等纯 HTTP 引擎。 |
 | `DDG_BROWSER_FALLBACK` | `1` | DuckDuckGo 的 HTTP 路径返回 202/CAPTCHA 时，改用 CDP 浏览器请求 HTML 端点；显式设置 `BROWSER_PROFILE` 时使用它，否则使用一致的 `windows-chrome-8` 默认 profile；设为 `0` 关闭。 |
-| `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 远程 Chrome/Edge CDP 调试端点（如 `http://127.0.0.1:9222` 或 `ws://...`）；旧变量名，由 CDP 驱动使用 |
-| `PLAYWRIGHT_EXECUTABLE_PATH` | 自动探测 | **Chromium 系**浏览器可执行文件的绝对路径；自动探测覆盖 Chrome / Edge / Chromium / Brave / Vivaldi / Opera 的标准安装位置，`CHROME_PATH` 与 `BROWSER_PATH` 优先且等价；旧变量名 |
-| `PLAYWRIGHT_HEADLESS` | `true` | 是否无头运行（Windows 下自动使用隐身独立桌面）；旧变量名 |
-| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | 页面导航硬超时（毫秒）；旧变量名，作用于 CDP 导航 |
+| `BROWSER_CDP_ENDPOINT` / `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 远程 Chrome/Edge CDP 调试端点（如 `http://127.0.0.1:9222` 或 `ws://...`）；旧变量名，由 CDP 驱动使用 |
+| `BROWSER_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH` | 自动探测 | **Chromium 系**浏览器可执行文件的绝对路径；自动探测覆盖 Chrome / Edge / Chromium / Brave / Vivaldi / Opera 的标准安装位置，`CHROME_PATH` 与 `BROWSER_PATH` 优先且等价；旧变量名 |
+| `BROWSER_HEADLESS` / `PLAYWRIGHT_HEADLESS` | `true` | 是否无头运行（Windows 下自动使用隐身独立桌面）；旧变量名 |
+| `BROWSER_TIMEOUT_MS` / `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | 页面导航硬超时（毫秒）；旧变量名，作用于 CDP 导航 |
 
 #### 6. 🛠️ 应用目录与工具微调
 
@@ -372,9 +368,6 @@ my-websearch doctor --reset-health
 | :--- | :--- | :--- |
 | `MYWEBSEARCH_DATA_DIR` | `~/.my-websearch` | 配置文件与持久化 Cookie 的根存储目录 |
 | `OPEN_WEBSEARCH_RESPONSE_CAP_BYTES` | `60000` | MCP 工具返回给大模型的最大字符上限，防止超长上下文撑爆模型窗口 |
-| `MCP_TOOL_SEARCH_NAME` | `search` | 自定义搜索工具在 MCP 中的注册名称 |
-| `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | 自定义正文抓取工具在 MCP 中的注册名称 |
-| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubContent` | 自定义 GitHub/Gitee 内容工具在 MCP 中的注册名称（设为 `fetchGithubReadme` 可保持旧名） |
 
 > 💡 **零配置升级说明（已精简移除的冗余变量）**：
 > - **CORS 跨域开关**（`ENABLE_CORS`/`CORS_ORIGIN`）：默认**关闭 CORS**；仅在浏览器跨域调用时显式开启，并限制允许来源。

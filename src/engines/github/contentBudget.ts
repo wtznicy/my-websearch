@@ -31,10 +31,10 @@ export const MIN_REMAINING_MS = 500;
 import { getBoolean, getNumber, type EnvLike } from '../../config/env.js';
 
 /**
- * CDN-first 开关。新名字覆盖 README + blob；旧名 GITHUB_README_CDN_FIRST 保留为别名。
+ * CDN-first 开关。优先使用 jsDelivr CDN 镜像加速 GitHub README 与源码文件抓取。
  */
 export function isGithubContentCdnFirst(env?: EnvLike): boolean {
-    return getBoolean('GITHUB_CONTENT_CDN_FIRST', false, env) || getBoolean('GITHUB_README_CDN_FIRST', false, env);
+    return getBoolean('GITHUB_CONTENT_CDN_FIRST', false, env);
 }
 
 export function contentBudgetMs(env?: EnvLike): number {

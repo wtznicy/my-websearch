@@ -215,18 +215,3 @@ export function serializeFetchWebResult(result: FetchWebContentResult): string {
         totalLength: core.totalLength ?? content.length
     }, null, 2);
 }
-
-// 获取工具名称，优先使用环境变量，否则使用默认值
-export function getToolName(envVarName: string, defaultName: string): string {
-    const configuredName = getOptionalString(envVarName);
-    if (configuredName) {
-        // Validate tool name to ensure it follows MCP naming conventions
-        if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(configuredName)) {
-            console.warn(`Invalid tool name "${configuredName}" from environment variable ${envVarName}. Using default: "${defaultName}"`);
-            return defaultName;
-        }
-        logTool(`Using custom tool name "${configuredName}" for ${envVarName}`);
-        return configuredName;
-    }
-    return defaultName;
-}

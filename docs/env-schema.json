@@ -11,7 +11,7 @@
           "desc": "`both` / `http` / `stdio`. `http` enables Streamable HTTP + SSE."
         },
         {
-          "name": "`HOST` / `OPEN_WEBSEARCH_HOST`",
+          "name": "`HOST`",
           "default": "`127.0.0.1`",
           "desc": "MCP HTTP bind address. Binding to a non-loopback address also registers that host in the Host allowlist and prints a no-auth warning."
         },
@@ -43,7 +43,7 @@
         {
           "name": "`GITHUB_CONTENT_CDN_FIRST`",
           "default": "`false`",
-          "desc": "Prefer jsDelivr over `raw.githubusercontent.com` for **README and source files** (public repos only). Legacy alias `GITHUB_README_CDN_FIRST` still works."
+          "desc": "Prefer jsDelivr over `raw.githubusercontent.com` for **README and source files** (public repos only)."
         },
         {
           "name": "`GITHUB_CONTENT_BUDGET_MS`",
@@ -51,9 +51,9 @@
           "desc": "Total time budget for one `fetchGithubContent` call; per-attempt timeout is capped at 4.5s."
         },
         {
-          "name": "`BING_PLAYWRIGHT_BUDGET_MS`",
+          "name": "`BING_BROWSER_BUDGET_MS` / `BING_PLAYWRIGHT_BUDGET_MS`",
           "default": "`6000`",
-          "desc": "Legacy name retained for compatibility: budget for the Bing browser fallback (now backed by raw CDP) before HTTP results are kept"
+          "desc": "Budget for the Bing browser fallback (now backed by raw CDP) before HTTP results are kept; legacy name `BING_PLAYWRIGHT_BUDGET_MS` supported"
         },
         {
           "name": "`MYWEBSEARCH_NO_AUTO_BOOTSTRAP`",
@@ -79,7 +79,7 @@
         {
           "name": "`BING_BASE_URL`",
           "default": "`https://cn.bing.com/search`",
-          "desc": "Base URL for Bing queries. Overseas users or reverse proxy nodes can set to `https://www.bing.com/search` (legacy alias `OPEN_WEBSEARCH_BING_HOST` supported)"
+          "desc": "Base URL for Bing queries. Overseas users or reverse proxy nodes can set to `https://www.bing.com/search`"
         },
         {
           "name": "`DEFAULT_MIN_RESULTS`",
@@ -112,11 +112,6 @@
           "desc": "First circuit-breaker cooldown for an engine (429 / 202 / bot_challenge). Repeated failures back off exponentially (30s → 60s → 120s…). Brave overrides the first step to **60s** because its 429 is a rolling 60-second window of 6 requests (the 7th is challenged) and recovery only starts once the oldest request ages out; setting this variable explicitly disables the per-engine override."
         },
         {
-          "name": "`ENGINE_CIRCUIT_MAX_COOLDOWN_MS`",
-          "default": "`300000`",
-          "desc": "Upper bound for the exponential circuit-breaker backoff (default 5 minutes)."
-        },
-        {
           "name": "`SEARCH_AUTHORITY_DOMAINS`",
           "default": "empty",
           "desc": "Additional authority domain whitelist for result re-ranking (comma-separated, appended to built-in list)"
@@ -124,7 +119,7 @@
         {
           "name": "`SEARCH_MODE`",
           "default": "`auto`",
-          "desc": "Search mode and browser policy. Supports single mode, multi-engine per mode, and compound multi-mode combinations:<br/>• **Global mode**: `auto` (default fallback), `request`/`none` (pure HTTP), `playwright` (force browser; legacy value name, now backed by CDP)<br/>• **Single mode, multiple engines**: `playwright:bing,startpage`, `auto:bing,startpage`, `bing,startpage`<br/>• **Compound multiple modes**: `playwright:bing;auto:startpage` (bing forces browser, startpage uses auto fallback), `auto;request:startpage` (global auto but startpage uses pure HTTP)"
+          "desc": "Search mode and browser policy. Supports single mode, multi-engine per mode, and compound multi-mode combinations:<br/>• **Global mode**: `auto` (default fallback), `request`/`none` (pure HTTP), `browser`/`playwright` (force CDP browser)<br/>• **Single mode, multiple engines**: `browser:bing,startpage`, `auto:bing,startpage`, `bing,startpage`<br/>• **Compound multiple modes**: `browser:bing;auto:startpage` (bing forces browser, startpage uses auto fallback), `auto;request:startpage` (global auto but startpage uses pure HTTP)"
         },
         {
           "name": "`BRAVE_BROWSER_FALLBACK`",
@@ -178,19 +173,9 @@
           "desc": "Toggle Chrome TLS impersonation for Bing HTTP mode (auto-trips circuit breaker after consecutive empty results)"
         },
         {
-          "name": "`DIRECT_FIRST_PROBE_TIMEOUT_MS`",
-          "default": "`3500`",
-          "desc": "Timeout in ms for direct-first connection probes before proxy fallback"
-        },
-        {
           "name": "`FETCH_WEB_INSECURE_TLS`",
           "default": "`false`",
           "desc": "Disable TLS certificate verification for `fetchWebContent` only (for broken legacy site certs)"
-        },
-        {
-          "name": "`GITHUB_README_CDN_FIRST`",
-          "default": "`false`",
-          "desc": "When `true`, forces skipping `raw.githubusercontent.com` direct probe and queries jsDelivr CDN first (domestic network acceleration)"
         }
       ]
     },
@@ -260,11 +245,6 @@
           "desc": "Idle session expiration duration before reaping (default 30 min)"
         },
         {
-          "name": "`MCP_SESSION_REAPER_MS`",
-          "default": "`300000`",
-          "desc": "Session reaper scan interval (default 5 min)"
-        },
-        {
           "name": "`LOG_LEVEL`",
           "default": "`info`",
           "desc": "Log level: `quiet` (completely silent), `debug`, `info`, `warn`, `error`"
@@ -301,22 +281,22 @@
           "desc": "When DuckDuckGo's HTTP paths return 202/CAPTCHA, retry the HTML endpoint through the CDP browser. Uses `BROWSER_PROFILE` when set, otherwise the coherent `windows-chrome-8` default; set `0` to disable."
         },
         {
-          "name": "`PLAYWRIGHT_CDP_ENDPOINT`",
+          "name": "`BROWSER_CDP_ENDPOINT` / `PLAYWRIGHT_CDP_ENDPOINT`",
           "default": "empty",
           "desc": "Remote Chrome/Edge CDP endpoint URL (e.g. `http://127.0.0.1:9222` or `ws://...`); legacy name, used by the CDP driver"
         },
         {
-          "name": "`PLAYWRIGHT_EXECUTABLE_PATH`",
+          "name": "`BROWSER_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH`",
           "default": "auto",
           "desc": "Absolute path to a **Chromium-based** browser executable. Auto-detection covers Chrome / Edge / Chromium / Brave / Vivaldi / Opera in standard locations; `CHROME_PATH` and `BROWSER_PATH` are checked first and work as equivalents; legacy name"
         },
         {
-          "name": "`PLAYWRIGHT_HEADLESS`",
+          "name": "`BROWSER_HEADLESS` / `PLAYWRIGHT_HEADLESS`",
           "default": "`true`",
           "desc": "Run headless (on Windows, an isolated hidden desktop window is used); legacy name"
         },
         {
-          "name": "`PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`",
+          "name": "`BROWSER_TIMEOUT_MS` / `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`",
           "default": "`20000`",
           "desc": "Hard page navigation timeout (milliseconds); legacy name, applied to CDP navigation"
         }
@@ -335,21 +315,6 @@
           "name": "`OPEN_WEBSEARCH_RESPONSE_CAP_BYTES`",
           "default": "`60000`",
           "desc": "Maximum character limit returned to LLMs to prevent prompt context explosion"
-        },
-        {
-          "name": "`MCP_TOOL_SEARCH_NAME`",
-          "default": "`search`",
-          "desc": "Custom registration name for the search tool in MCP"
-        },
-        {
-          "name": "`MCP_TOOL_FETCH_WEB_NAME`",
-          "default": "`fetchWebContent`",
-          "desc": "Custom registration name for the content extraction tool"
-        },
-        {
-          "name": "`MCP_TOOL_FETCH_GITHUB_NAME`",
-          "default": "`fetchGithubContent`",
-          "desc": "Custom registration name for the GitHub/Gitee content tool (set to `fetchGithubReadme` for backward compatibility)"
         }
       ]
     }
@@ -360,7 +325,7 @@
       "title": "🖥️ 服务器与运行时",
       "rows": [
         {
-          "name": "`HOST` / `OPEN_WEBSEARCH_HOST`",
+          "name": "`HOST`",
           "default": "`127.0.0.1`",
           "desc": "MCP HTTP 监听地址；绑定到非回环地址时会自动加入 Host 白名单并打印无鉴权警告"
         },
@@ -380,9 +345,9 @@
           "desc": "单次 `fetchWebContent` 的硬截止时间（cookie + 浏览器 + 重试合计）"
         },
         {
-          "name": "`BING_PLAYWRIGHT_BUDGET_MS`",
+          "name": "`BING_BROWSER_BUDGET_MS` / `BING_PLAYWRIGHT_BUDGET_MS`",
           "default": "`6000`",
-          "desc": "旧变量名保留：Bing 浏览器兜底预算（现由 raw CDP 驱动），超时后保留 HTTP 结果"
+          "desc": "Bing 浏览器兜底预算（由 raw CDP 驱动），超时后保留 HTTP 结果；兼容旧变量名 `BING_PLAYWRIGHT_BUDGET_MS`"
         },
         {
           "name": "`MYWEBSEARCH_NO_AUTO_BOOTSTRAP`",
@@ -408,7 +373,7 @@
         {
           "name": "`BING_BASE_URL`",
           "default": "`https://cn.bing.com/search`",
-          "desc": "Bing 搜索请求基址。国际用户可改为 `https://www.bing.com/search` 或自定义中转域名（兼容旧变量 `OPEN_WEBSEARCH_BING_HOST`）"
+          "desc": "Bing 搜索请求基址。国际用户可改为 `https://www.bing.com/search` 或自定义中转域名"
         },
         {
           "name": "`DEFAULT_MIN_RESULTS`",
@@ -451,11 +416,6 @@
           "desc": "引擎首次熔断冷却（429 / 202 / 验证状态）。连续失败指数退避（30s → 60s → 120s…）。Brave 的首档被覆盖为 **60s**（其 429 是「滚动 60 秒内 6 个请求」的窗口，第 7 个触发，且要等最早请求滑出窗口才恢复）；显式设置该变量会关闭按引擎覆盖。"
         },
         {
-          "name": "`ENGINE_CIRCUIT_MAX_COOLDOWN_MS`",
-          "default": "`300000`",
-          "desc": "熔断指数退避上限（默认 5 分钟）。"
-        },
-        {
           "name": "`SEARCH_AUTHORITY_DOMAINS`",
           "default": "空",
           "desc": "结果重排的额外权威域名白名单（逗号分隔，追加到内置白名单）"
@@ -463,7 +423,7 @@
         {
           "name": "`SEARCH_MODE`",
           "default": "`auto`",
-          "desc": "检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`playwright`（全强走浏览器；旧值名，底层为 CDP）<br/>• **一种方式多选引擎**：`playwright:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`playwright:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP）"
+          "desc": "检索模式与浏览器启动策略。支持单模式、一种方式多选引擎、以及多启动方式组合：<br/>• **全局模式**：`auto`（默认允许兜底）、`request`/`none`（全纯HTTP防爆内存）、`browser`/`playwright`（全强走CDP浏览器）<br/>• **一种方式多选引擎**：`browser:bing,startpage`、`auto:bing,startpage`、`bing,startpage`<br/>• **多选启动方式组合**：`browser:bing;auto:startpage`（bing强走渲染，startpage走自动兜底）、`auto;request:startpage`（全局auto但startpage走纯HTTP）"
         },
         {
           "name": "`BRAVE_BROWSER_FALLBACK`",
@@ -517,19 +477,9 @@
           "desc": "是否启用 Bing 的 Chrome TLS 指纹模拟（连续多次返回 0 条时会自动熔断降级为标准 HTTP）"
         },
         {
-          "name": "`DIRECT_FIRST_PROBE_TIMEOUT_MS`",
-          "default": "`3500`",
-          "desc": "直连优先策略探测超时时间（毫秒）"
-        },
-        {
           "name": "`FETCH_WEB_INSECURE_TLS`",
           "default": "`false`",
           "desc": "仅对 `fetchWebContent` 关闭 TLS 证书校验（目标站点旧证书链损坏时使用）"
-        },
-        {
-          "name": "`GITHUB_README_CDN_FIRST`",
-          "default": "`false`",
-          "desc": "为 `true` 时强制跳过 `raw.githubusercontent.com` 直连探测，优先走 jsDelivr CDN 镜像（国内无代理网络加速，免除 3 秒直连探测等待）"
         }
       ]
     },
@@ -599,11 +549,6 @@
           "desc": "会话空闲回收时长（默认 30 分钟）"
         },
         {
-          "name": "`MCP_SESSION_REAPER_MS`",
-          "default": "`300000`",
-          "desc": "会话清理器扫描巡检间隔（默认 5 分钟）"
-        },
-        {
           "name": "`LOG_LEVEL`",
           "default": "`info`",
           "desc": "日志输出级别：`quiet`（完全静默）、`debug`、`info`、`warn`、`error`"
@@ -640,22 +585,22 @@
           "desc": "DuckDuckGo 的 HTTP 路径返回 202/CAPTCHA 时，改用 CDP 浏览器请求 HTML 端点；显式设置 `BROWSER_PROFILE` 时使用它，否则使用一致的 `windows-chrome-8` 默认 profile；设为 `0` 关闭。"
         },
         {
-          "name": "`PLAYWRIGHT_CDP_ENDPOINT`",
+          "name": "`BROWSER_CDP_ENDPOINT` / `PLAYWRIGHT_CDP_ENDPOINT`",
           "default": "空",
           "desc": "远程 Chrome/Edge CDP 调试端点（如 `http://127.0.0.1:9222` 或 `ws://...`）；旧变量名，由 CDP 驱动使用"
         },
         {
-          "name": "`PLAYWRIGHT_EXECUTABLE_PATH`",
+          "name": "`BROWSER_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH`",
           "default": "自动探测",
           "desc": "**Chromium 系**浏览器可执行文件的绝对路径；自动探测覆盖 Chrome / Edge / Chromium / Brave / Vivaldi / Opera 的标准安装位置，`CHROME_PATH` 与 `BROWSER_PATH` 优先且等价；旧变量名"
         },
         {
-          "name": "`PLAYWRIGHT_HEADLESS`",
+          "name": "`BROWSER_HEADLESS` / `PLAYWRIGHT_HEADLESS`",
           "default": "`true`",
           "desc": "是否无头运行（Windows 下自动使用隐身独立桌面）；旧变量名"
         },
         {
-          "name": "`PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`",
+          "name": "`BROWSER_TIMEOUT_MS` / `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS`",
           "default": "`20000`",
           "desc": "页面导航硬超时（毫秒）；旧变量名，作用于 CDP 导航"
         }
@@ -674,21 +619,6 @@
           "name": "`OPEN_WEBSEARCH_RESPONSE_CAP_BYTES`",
           "default": "`60000`",
           "desc": "MCP 工具返回给大模型的最大字符上限，防止超长上下文撑爆模型窗口"
-        },
-        {
-          "name": "`MCP_TOOL_SEARCH_NAME`",
-          "default": "`search`",
-          "desc": "自定义搜索工具在 MCP 中的注册名称"
-        },
-        {
-          "name": "`MCP_TOOL_FETCH_WEB_NAME`",
-          "default": "`fetchWebContent`",
-          "desc": "自定义正文抓取工具在 MCP 中的注册名称"
-        },
-        {
-          "name": "`MCP_TOOL_FETCH_GITHUB_NAME`",
-          "default": "`fetchGithubContent`",
-          "desc": "自定义 GitHub/Gitee 内容工具在 MCP 中的注册名称（设为 `fetchGithubReadme` 可保持旧名）"
         }
       ]
     }

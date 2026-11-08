@@ -14,7 +14,6 @@ import { cachedDnsLookup, peekCachedLookup } from './dnsCache.js';
 import { detectSystemProxy, getSystemProxyFallbackUrl } from './systemProxy.js';
 import { metrics } from '../core/metrics.js';
 import { AppError } from '../core/errors.js';
-import { getNumber } from '../config/env.js';
 
 // 默认请求超时：调用方未显式传 timeout 时使用，避免引擎请求永不超时拖垮整个搜索。
 export const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
@@ -551,7 +550,7 @@ export async function requestDirectFirst(
     }
 
     const rawDirectOptions = buildOptions(true);
-    const probeTimeoutCap = getNumber('DIRECT_FIRST_PROBE_TIMEOUT_MS', DEFAULT_DIRECT_FIRST_PROBE_TIMEOUT_MS, { min: 1 });
+    const probeTimeoutCap = DEFAULT_DIRECT_FIRST_PROBE_TIMEOUT_MS;
     const directOptions: AxiosRequestConfig = hasProxyAvailable
         && typeof rawDirectOptions.timeout === 'number'
         && rawDirectOptions.timeout > probeTimeoutCap

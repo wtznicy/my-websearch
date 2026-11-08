@@ -16,7 +16,6 @@ import { computeSearchOutcome } from '../../core/search/searchService.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { isContext7QuotaExhausted, setContext7QuotaListener } from '../../engines/context7/context7.js';
 import {
-    getToolName,
     logTool,
     logSafeError,
     withErrorHint,
@@ -26,7 +25,7 @@ import { detectUnknownParameters } from '../../utils/toolValidation.js';
 import { createRequestContext } from '../../core/requestContext.js';
 
 export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntime): void {
-    const searchToolName = getToolName('MCP_TOOL_SEARCH_NAME', 'search');
+    const searchToolName = 'search';
 
     const DOCS_GUIDANCE = ' For OFFICIAL library/framework documentation, prefer queryDocs (more reliable, works without proxy). Use the site: operator for site-specific queries (e.g. "update site:docs.elastic.co").';
     const getDocsGuidance = () => {

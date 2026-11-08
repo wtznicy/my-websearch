@@ -65,7 +65,7 @@ export async function fetchStackOverflowQuestion(
         return null;
     }
 
-    const apiKey = getOptionalString('STACKOVERFLOW_API_KEY') || getOptionalString('STACKEXCHANGE_API_KEY');
+    const apiKey = getOptionalString('STACKOVERFLOW_API_KEY');
     const headers = {
         'User-Agent': 'Mozilla/5.0 (compatible; MyWebSearch/1.0)',
         'Accept': 'application/json'

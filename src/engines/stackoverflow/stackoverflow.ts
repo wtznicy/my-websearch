@@ -132,7 +132,7 @@ export async function searchStackOverflow(
     }
 
     const targetLimit = Math.max(1, Math.min(limit, 30));
-    const apiKey = getOptionalString('STACKOVERFLOW_API_KEY') || getOptionalString('STACKEXCHANGE_API_KEY');
+    const apiKey = getOptionalString('STACKOVERFLOW_API_KEY');
 
     try {
         const candidates = relaxStackOverflowQueries(cleanQuery);

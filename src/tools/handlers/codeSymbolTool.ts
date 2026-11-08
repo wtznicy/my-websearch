@@ -5,7 +5,6 @@ import { isAppError } from '../../core/errors.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import {
     capTextResponse,
-    getToolName,
     logSafeError,
     logTool,
     TOOL_ANNOTATION_HINTS,
@@ -73,7 +72,7 @@ function formatCodeSymbol(result: CodeSymbolResult): string {
 }
 
 export function registerCodeSymbolTool(server: McpServer, _runtime: MyWebSearchRuntime): void {
-    const toolName = getToolName('MCP_TOOL_CODE_SYMBOL_NAME', 'codeSymbol');
+    const toolName = 'codeSymbol';
 
     server.registerTool(
         toolName,

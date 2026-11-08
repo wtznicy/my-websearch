@@ -297,15 +297,15 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | Variable | Default | Allowed Values / Description |
 | :--- | :--- | :--- |
 | `MODE` | `both` | `both` / `http` / `stdio`. `http` enables Streamable HTTP + SSE. |
-| `HOST` / `OPEN_WEBSEARCH_HOST` | `127.0.0.1` | MCP HTTP bind address. Binding to a non-loopback address also registers that host in the Host allowlist and prints a no-auth warning. |
+| `HOST` | `127.0.0.1` | MCP HTTP bind address. Binding to a non-loopback address also registers that host in the Host allowlist and prints a no-auth warning. |
 | `PORT` | `3211` | MCP HTTP port |
 | `OPEN_WEBSEARCH_ALLOWED_HOSTS` | empty | Extra Host-header allowlist entries (comma-separated), needed when serving through a public domain/reverse proxy |
 | `OPEN_WEBSEARCH_DAEMON_HOST` / `OPEN_WEBSEARCH_DAEMON_PORT` | `127.0.0.1` / `3210` | Local REST daemon bind address (no auth: keep it on loopback) |
 | `METRICS_ENABLED` | `false` | Enables in-process counters and the daemon `/metrics` endpoint |
 | `FETCH_WEB_DEADLINE_MS` | `45000` | Hard deadline for one `fetchWebContent` call (cookie + browser + retries combined) |
-| `GITHUB_CONTENT_CDN_FIRST` | `false` | Prefer jsDelivr over `raw.githubusercontent.com` for **README and source files** (public repos only). Legacy alias `GITHUB_README_CDN_FIRST` still works. |
+| `GITHUB_CONTENT_CDN_FIRST` | `false` | Prefer jsDelivr over `raw.githubusercontent.com` for **README and source files** (public repos only). |
 | `GITHUB_CONTENT_BUDGET_MS` | `12000` (`6000` in CDN-first) | Total time budget for one `fetchGithubContent` call; per-attempt timeout is capped at 4.5s. |
-| `BING_PLAYWRIGHT_BUDGET_MS` | `6000` | Legacy name retained for compatibility: budget for the Bing browser fallback (now backed by raw CDP) before HTTP results are kept |
+| `BING_BROWSER_BUDGET_MS` / `BING_PLAYWRIGHT_BUDGET_MS` | `6000` | Budget for the Bing browser fallback (now backed by raw CDP) before HTTP results are kept; legacy name `BING_PLAYWRIGHT_BUDGET_MS` supported |
 | `MYWEBSEARCH_NO_AUTO_BOOTSTRAP` | unset | Set to `1` to stop copying API keys out of other apps' MCP configs on first run |
 
 #### 1. 🔍 Search & Routing Orchestration
@@ -314,16 +314,15 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | :--- | :--- | :--- |
 | `DEFAULT_SEARCH_ENGINE` | `auto` | Default engine: `auto` (smart query routing: Chinese `baidu,sogou`, English/foreign `bing,duckduckgo`). Supports all 16 engines: `auto`, `bing`, `bing-news`, `baidu`, `sogou`, `duckduckgo`, `brave`, `csdn`, `juejin`, `startpage`, `yahoo`, `exa`, `github`, `stackoverflow`, `hackernews`, `arxiv`, `code` (vertical developer engines can be configured as default, though `auto` or general web engines are recommended for global default) |
 | `ALLOWED_SEARCH_ENGINES` | all | Comma-separated whitelist of allowed search engines (e.g. `bing,baidu,duckduckgo`) |
-| `BING_BASE_URL` | `https://cn.bing.com/search` | Base URL for Bing queries. Overseas users or reverse proxy nodes can set to `https://www.bing.com/search` (legacy alias `OPEN_WEBSEARCH_BING_HOST` supported) |
+| `BING_BASE_URL` | `https://cn.bing.com/search` | Base URL for Bing queries. Overseas users or reverse proxy nodes can set to `https://www.bing.com/search` |
 | `DEFAULT_MIN_RESULTS` | `5` | Cascade threshold: triggers fallback engines when usable results are fewer than this value |
 | `DEFAULT_SEARCH_LIMIT` | `10` | Default result limit when not explicitly specified in tool calls (max 50) |
 | `SEARCH_DEADLINE_MS` | `30000` | Global hard deadline for multi-engine search execution (milliseconds) |
 | `SEARCH_FUSION` | `legacy` | Result fusion mode: `legacy` (engine-hit count + arrival order) or `rrf` (Reciprocal Rank Fusion over per-engine ranks, which also replaces the position/consensus terms in re-ranking). RRF stays opt-in until a larger evaluation exists. |
 | `SEARCH_FUSION_RRF_K` | `20` | RRF constant k; lower values amplify rank differences. Only used when `SEARCH_FUSION=rrf`. |
 | `ENGINE_CIRCUIT_BASE_COOLDOWN_MS` | `30000` | First circuit-breaker cooldown for an engine (429 / 202 / bot_challenge). Repeated failures back off exponentially (30s → 60s → 120s…). Brave overrides the first step to **60s** because its 429 is a rolling 60-second window of 6 requests (the 7th is challenged) and recovery only starts once the oldest request ages out; setting this variable explicitly disables the per-engine override. |
-| `ENGINE_CIRCUIT_MAX_COOLDOWN_MS` | `300000` | Upper bound for the exponential circuit-breaker backoff (default 5 minutes). |
 | `SEARCH_AUTHORITY_DOMAINS` | empty | Additional authority domain whitelist for result re-ranking (comma-separated, appended to built-in list) |
-| `SEARCH_MODE` | `auto` | Search mode and browser policy. Supports single mode, multi-engine per mode, and compound multi-mode combinations:<br/>• **Global mode**: `auto` (default fallback), `request`/`none` (pure HTTP), `playwright` (force browser; legacy value name, now backed by CDP)<br/>• **Single mode, multiple engines**: `playwright:bing,startpage`, `auto:bing,startpage`, `bing,startpage`<br/>• **Compound multiple modes**: `playwright:bing;auto:startpage` (bing forces browser, startpage uses auto fallback), `auto;request:startpage` (global auto but startpage uses pure HTTP) |
+| `SEARCH_MODE` | `auto` | Search mode and browser policy. Supports single mode, multi-engine per mode, and compound multi-mode combinations:<br/>• **Global mode**: `auto` (default fallback), `request`/`none` (pure HTTP), `browser`/`playwright` (force CDP browser)<br/>• **Single mode, multiple engines**: `browser:bing,startpage`, `auto:bing,startpage`, `bing,startpage`<br/>• **Compound multiple modes**: `browser:bing;auto:startpage` (bing forces browser, startpage uses auto fallback), `auto;request:startpage` (global auto but startpage uses pure HTTP) |
 | `BRAVE_BROWSER_FALLBACK` | `1` | When the keyless Brave web path returns HTTP 429 / an anti-bot challenge, retry once through a disguised desktop headless CDP browser that auto-triggers the Argon2 PoW `验证` button (`1` enabled, `0` disables and fails fast). A 429 then opens a **180 s browser-only window**: HTTP is skipped and every Brave call in the window goes straight to the browser; if that also fails the engine trips its circuit (60 → 120 → 240 → 300 s) and routing/cascade substitute other engines. Measured 8/8 success at ~4–6s per query while plain HTTP stayed 429. Still best-effort: it cannot pass the interactive slider CAPTCHA |
 | `AUTO_ROUTE_EN_ENGINES` | `bing,duckduckgo` | Comma-separated engines for default English auto-routing |
 | `AUTO_ROUTE_ZH_ENGINES` | `baidu,sogou` | Comma-separated engines for default Chinese auto-routing |
@@ -338,9 +337,7 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `IMPERSONATE_BROWSER` | `chrome_149` | `wreq-js` browser TLS/H2 fingerprint profile (e.g. `chrome_149`, `safari_18`) |
 | `IMPERSONATE_OS` | `windows` | Operating system platform for fingerprint impersonation (`windows`, `macos`, `linux`) |
 | `BING_IMPERSONATE` | `true` | Toggle Chrome TLS impersonation for Bing HTTP mode (auto-trips circuit breaker after consecutive empty results) |
-| `DIRECT_FIRST_PROBE_TIMEOUT_MS` | `3500` | Timeout in ms for direct-first connection probes before proxy fallback |
 | `FETCH_WEB_INSECURE_TLS` | `false` | Disable TLS certificate verification for `fetchWebContent` only (for broken legacy site certs) |
-| `GITHUB_README_CDN_FIRST` | `false` | When `true`, forces skipping `raw.githubusercontent.com` direct probe and queries jsDelivr CDN first (domestic network acceleration) |
 
 > **Custom proxy engine lists**: if you set `proxy.engines` in `~/.my-websearch/config.json` or use the `;engine1,engine2` suffix of `PROXY_URL`, **`yahoo` and `bing-news` are added automatically** because they cannot be reached directly from CN (Yahoo times out in 15–20s; Bing News returns a 302/HTML page). Removing the list entirely is still recommended: defaults include them and keep the direct API engines (GitHub / Stack Overflow / Hacker News / arXiv) off the proxy.
 
@@ -364,7 +361,6 @@ Can be set via the global configuration file (`~/.my-websearch/config.json`), lo
 | `MAX_CONCURRENT_SEARCHES` | `20` | Max concurrent searches in daemon mode (`0` for unlimited) |
 | `MCP_MAX_SESSIONS` | `100` | Max retained MCP HTTP sessions before returning HTTP 429 Too Many Requests |
 | `MCP_SESSION_TTL_MS` | `1800000` | Idle session expiration duration before reaping (default 30 min) |
-| `MCP_SESSION_REAPER_MS` | `300000` | Session reaper scan interval (default 5 min) |
 | `LOG_LEVEL` | `info` | Log level: `quiet` (completely silent), `debug`, `info`, `warn`, `error` |
 | `SECURITY_AUDIT` | `false` | Enable SSRF blocking and host header security audit logging |
 | `OPEN_WEBSEARCH_ALLOWED_HOSTS` | loopback | Host header whitelist for HTTP server (DNS Rebinding protection, comma-separated) |
@@ -386,10 +382,10 @@ Every browser path — Bing fallback, Startpage, DuckDuckGo, Brave, `fetchWebCon
 | `BROWSER_DRIVER` | `cdp` | Browser backend. `cdp` (default, raw CDP). `playwright` is a legacy escape hatch and requires you to install `playwright-core` manually; it is no longer bundled. |
 | `BROWSER_PROFILE` | `off` | CDP device profile: `off`, `windows-chrome-8`, `windows-chrome-16`, `macos-chrome-8`, or `random`. Applies UA, screen/DPR, timezone and locale to browser sessions. It does not affect HTTP-only engines such as DuckDuckGo/Brave. |
 | `DDG_BROWSER_FALLBACK` | `1` | When DuckDuckGo's HTTP paths return 202/CAPTCHA, retry the HTML endpoint through the CDP browser. Uses `BROWSER_PROFILE` when set, otherwise the coherent `windows-chrome-8` default; set `0` to disable. |
-| `PLAYWRIGHT_CDP_ENDPOINT` | empty | Remote Chrome/Edge CDP endpoint URL (e.g. `http://127.0.0.1:9222` or `ws://...`); legacy name, used by the CDP driver |
-| `PLAYWRIGHT_EXECUTABLE_PATH` | auto | Absolute path to a **Chromium-based** browser executable. Auto-detection covers Chrome / Edge / Chromium / Brave / Vivaldi / Opera in standard locations; `CHROME_PATH` and `BROWSER_PATH` are checked first and work as equivalents; legacy name |
-| `PLAYWRIGHT_HEADLESS` | `true` | Run headless (on Windows, an isolated hidden desktop window is used); legacy name |
-| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | Hard page navigation timeout (milliseconds); legacy name, applied to CDP navigation |
+| `BROWSER_CDP_ENDPOINT` / `PLAYWRIGHT_CDP_ENDPOINT` | empty | Remote Chrome/Edge CDP endpoint URL (e.g. `http://127.0.0.1:9222` or `ws://...`); legacy name, used by the CDP driver |
+| `BROWSER_PATH` / `PLAYWRIGHT_EXECUTABLE_PATH` | auto | Absolute path to a **Chromium-based** browser executable. Auto-detection covers Chrome / Edge / Chromium / Brave / Vivaldi / Opera in standard locations; `CHROME_PATH` and `BROWSER_PATH` are checked first and work as equivalents; legacy name |
+| `BROWSER_HEADLESS` / `PLAYWRIGHT_HEADLESS` | `true` | Run headless (on Windows, an isolated hidden desktop window is used); legacy name |
+| `BROWSER_TIMEOUT_MS` / `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | Hard page navigation timeout (milliseconds); legacy name, applied to CDP navigation |
 
 #### 6. 🛠️ Application Directory & Tool Customization
 
@@ -397,9 +393,6 @@ Every browser path — Bing fallback, Startpage, DuckDuckGo, Brave, `fetchWebCon
 | :--- | :--- | :--- |
 | `MYWEBSEARCH_DATA_DIR` | `~/.my-websearch` | Root directory for configuration and persistent cookie files |
 | `OPEN_WEBSEARCH_RESPONSE_CAP_BYTES` | `60000` | Maximum character limit returned to LLMs to prevent prompt context explosion |
-| `MCP_TOOL_SEARCH_NAME` | `search` | Custom registration name for the search tool in MCP |
-| `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | Custom registration name for the content extraction tool |
-| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubContent` | Custom registration name for the GitHub/Gitee content tool (set to `fetchGithubReadme` for backward compatibility) |
 
 > 💡 **Zero-Config Upgrades (Redundant Variables Removed)**:
 > - **CORS Switches** (`ENABLE_CORS`/`CORS_ORIGIN`): CORS is **disabled by default**; enable it explicitly and restrict origins when browser clients need cross-origin access.

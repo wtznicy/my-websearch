@@ -10,9 +10,8 @@ import {
 const env = (values: Record<string, string>): NodeJS.ProcessEnv => values as NodeJS.ProcessEnv;
 
 describe('github content budget', () => {
-    it('accepts both the new and legacy CDN-first switch names', () => {
+    it('accepts the CDN-first switch name', () => {
         expect(isGithubContentCdnFirst(env({ GITHUB_CONTENT_CDN_FIRST: 'true' }))).toBe(true);
-        expect(isGithubContentCdnFirst(env({ GITHUB_README_CDN_FIRST: 'true' }))).toBe(true);
         expect(isGithubContentCdnFirst(env({}))).toBe(false);
     });
 

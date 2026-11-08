@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { validateGithubRepositoryUrl } from '../../core/validation/targetValidation.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import {
-    getToolName,
     logTool,
     logSafeError,
     withErrorHint,
@@ -15,7 +14,7 @@ import { isAppError } from '../../core/errors.js';
 import { detectUnknownParameters } from '../../utils/toolValidation.js';
 
 export function registerFetchGithubTool(server: McpServer, runtime: MyWebSearchRuntime): void {
-    const fetchGithubToolName = getToolName('MCP_TOOL_FETCH_GITHUB_NAME', 'fetchGithubContent');
+    const fetchGithubToolName = 'fetchGithubContent';
 
     server.registerTool(
         fetchGithubToolName,

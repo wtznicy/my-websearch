@@ -73,21 +73,17 @@ describe('engineCircuitBreaker', () => {
         expect(tripEngineCircuit('duckduckgo')).toBe(30_000);
     });
 
-    it('honours ENGINE_CIRCUIT_BASE_COOLDOWN_MS / ENGINE_CIRCUIT_MAX_COOLDOWN_MS', () => {
+    it('honours ENGINE_CIRCUIT_BASE_COOLDOWN_MS', () => {
         vi.useFakeTimers();
         const prevBase = process.env.ENGINE_CIRCUIT_BASE_COOLDOWN_MS;
-        const prevMax = process.env.ENGINE_CIRCUIT_MAX_COOLDOWN_MS;
         process.env.ENGINE_CIRCUIT_BASE_COOLDOWN_MS = '5000';
-        process.env.ENGINE_CIRCUIT_MAX_COOLDOWN_MS = '10000';
         try {
             expect(tripEngineCircuit('bing')).toBe(5000);
             expect(tripEngineCircuit('bing')).toBe(10_000);
-            expect(tripEngineCircuit('bing')).toBe(10_000);
+            expect(tripEngineCircuit('bing')).toBe(20_000);
         } finally {
             if (prevBase === undefined) delete process.env.ENGINE_CIRCUIT_BASE_COOLDOWN_MS;
             else process.env.ENGINE_CIRCUIT_BASE_COOLDOWN_MS = prevBase;
-            if (prevMax === undefined) delete process.env.ENGINE_CIRCUIT_MAX_COOLDOWN_MS;
-            else process.env.ENGINE_CIRCUIT_MAX_COOLDOWN_MS = prevMax;
         }
     });
 

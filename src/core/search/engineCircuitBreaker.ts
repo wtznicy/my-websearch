@@ -44,7 +44,7 @@ export function getEngineCircuitBaseCooldownMs(): number {
 /** 指数退避后的最大冷却时间（毫秒），不会小于基础值 */
 export function getEngineCircuitMaxCooldownMs(): number {
     const base = getEngineCircuitBaseCooldownMs();
-    return Math.max(base, readPositiveIntEnv('ENGINE_CIRCUIT_MAX_COOLDOWN_MS', DEFAULT_MAX_COOLDOWN_MS));
+    return Math.max(base, DEFAULT_MAX_COOLDOWN_MS);
 }
 
 /** 熔断是否生效（到期自动清除） */

@@ -5,7 +5,7 @@ import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../.
 import { DEFAULT_DESKTOP_UA, DESKTOP_UA_POOL } from '../../utils/userAgents.js';
 import { analyzeBingBlockedPage } from '../../core/antiBot/antiBotDetection.js';
 
-// 默认面向大陆部署的 cn.bing.com；可通过 BING_BASE_URL（兼容 OPEN_WEBSEARCH_BING_HOST）覆盖为 www.bing.com 等获取国际区结果
+// 默认面向大陆部署的 cn.bing.com；可通过 BING_BASE_URL 覆盖为 www.bing.com 等获取国际区结果
 export function getBingHomeUrl(): string {
     try {
         const url = new URL(config.bingBaseUrl || 'https://cn.bing.com/search');
