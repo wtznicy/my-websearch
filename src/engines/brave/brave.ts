@@ -10,53 +10,25 @@ import { tripEngineCircuit } from '../../core/search/engineCircuitBreaker.js';
 import { isEngineBrowserOnly, setEngineBrowserOnly } from '../../core/search/engineBrowserOnly.js';
 import { isBraveBlockedPage, isBraveCaptchaChallengePage } from '../../core/antiBot/antiBotDetection.js';
 import { AppError, extractErrorCode, extractErrorStatus, isAppError } from '../../core/errors.js';
-import { getProxyUrl } from '../../config.js';
-import { getSystemProxyFallbackUrl } from '../../utils/systemProxy.js';
-import { braveHttpGetWithCurl } from '../../utils/braveCurl.js';
+import { impersonateHttpGet } from '../../utils/impersonateRequest.js';
 import { getOptionalString, getString } from '../../config/env.js';
 import type { BrowserPage } from '../../utils/browser/driver.js';
 export { isBraveBlockedPage };
 
 /**
- * Brave 的 CloudFront WAF 对 HTTP/2 浏览器指纹（wreq/primp）和 Node OpenSSL/axios
- * 都会返回 429；实测 curl HTTP/1.1（Windows Schannel）明显更耐久（7/10 后才 429）。
- * 因此 Brave 无 key 的网页路径固定走 curl，不再回退 axios。
+ * Brave 无 Key 网页检索使用内存级浏览器指纹（wreq-js）模拟请求；
+ * 当遇到 429 或人机挑战时，统一触发下游的 CDP 浏览器重试与 Argon2 验证。
  */
 const braveHttpGet = async (url: string, options: AxiosRequestConfig): Promise<AxiosResponse> => {
-    const proxyUrl = getProxyUrl() ?? getSystemProxyFallbackUrl('brave');
-    const rawHeaders = (options.headers ?? {}) as Record<string, string | number | undefined>;
-    const headers: Record<string, string> = {};
-    for (const [key, value] of Object.entries(rawHeaders)) {
-        if (value !== undefined) headers[key] = String(value);
-    }
-    const curl = await braveHttpGetWithCurl(url, proxyUrl, headers, options.signal as AbortSignal | undefined);
-    if ('error' in curl) {
-        throw new AppError({
-            code: curl.aborted ? 'aborted' : 'engine_error',
-            retryable: false,
-            engine: 'brave',
-            hint: curl.notFound
-                ? 'Install curl (Windows: curl.exe) or set BRAVE_API_KEY to use the official API.'
-                : 'Check the curl error above; if it is a TLS/proxy failure, set BRAVE_API_KEY or switch exit node.',
-            message: curl.aborted
-                ? 'Brave curl request aborted'
-                : `Brave curl request failed: ${curl.error}`
-        });
-    }
-    if (curl.status >= 400) {
-        const error = new Error(`Brave returned HTTP ${curl.status}`) as Error & {
+    const res = await impersonateHttpGet('brave', url, options, { failOnHttpError: false });
+    if (res.status >= 400) {
+        const error = new Error(`Brave returned HTTP ${res.status}`) as Error & {
             response?: { status: number; data: string };
         };
-        error.response = { status: curl.status, data: curl.data };
+        error.response = { status: res.status, data: typeof res.data === 'string' ? res.data : '' };
         throw error;
     }
-    return {
-        data: curl.data,
-        status: curl.status,
-        statusText: '',
-        headers: {},
-        config: options
-    } as AxiosResponse;
+    return res;
 };
 
 /** 从 axios 风格错误里取出响应体（curl 路径会把 body 放在 response.data） */
