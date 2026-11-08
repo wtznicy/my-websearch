@@ -160,7 +160,7 @@ export async function fetchDevDocsIndex(slug: string, signal?: AbortSignal): Pro
             'GET',
             indexUrl,
             (forceDirect) => buildAxiosRequestOptions({
-                timeout: 6000,
+                timeout: 10000,
                 responseType: 'json',
                 signal,
                 forceDirect
@@ -248,7 +248,7 @@ export async function queryDevDocs(options: {
             'GET',
             htmlUrl,
             (forceDirect) => buildAxiosRequestOptions({
-                timeout: 6000,
+                timeout: 10000,
                 responseType: 'text',
                 signal: options.signal,
                 forceDirect
