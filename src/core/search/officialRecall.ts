@@ -23,7 +23,7 @@ export interface OfficialEntityDefinition {
     description: string;
 }
 
-/** 常见高频前沿开源项目与技术规范权威白名单（按需轻量收录，避免庞大静态表） */
+/** 常见高频前沿开源项目与技术规范权威白名单（精简核心收录，避免冗余静态大字典） */
 export const KNOWN_OFFICIAL_ENTITIES: readonly OfficialEntityDefinition[] = [
     {
         id: 'mcp',
@@ -31,7 +31,7 @@ export const KNOWN_OFFICIAL_ENTITIES: readonly OfficialEntityDefinition[] = [
         aliasRegex: /\b(mcp|model\s*context\s*protocol)\b/i,
         domains: ['modelcontextprotocol.io'],
         defaultUrl: 'https://modelcontextprotocol.io/',
-        description: 'Open standard for secure, two-way connections between AI applications and data sources, tools, or development environments.'
+        description: 'Open standard for secure, two-way connections between AI applications and data sources or tools.'
     },
     {
         id: 'vitest',
@@ -40,7 +40,7 @@ export const KNOWN_OFFICIAL_ENTITIES: readonly OfficialEntityDefinition[] = [
         domains: ['vitest.dev'],
         defaultUrl: 'https://vitest.dev/',
         zhUrl: 'https://cn.vitest.dev/',
-        description: 'Next generation testing framework powered by Vite. Fast, native ESM, TypeScript and JSX support out of the box.'
+        description: 'Next generation testing framework powered by Vite. Fast, native ESM, TypeScript and JSX support.'
     },
     {
         id: 'nodejs',
@@ -52,50 +52,7 @@ export const KNOWN_OFFICIAL_ENTITIES: readonly OfficialEntityDefinition[] = [
         versionIntentRegex: /\b(lts|releases?|schedule)\b|最新.*版本|长期支持|稳定版/i,
         versionUrl: 'https://nodejs.org/en/about/previous-releases',
         zhVersionUrl: 'https://nodejs.org/zh-cn/about/previous-releases',
-        description: 'Open-source, cross-platform JavaScript runtime environment that executes JavaScript code outside a web browser.'
-    },
-    {
-        id: 'nextjs',
-        canonicalName: 'Next.js',
-        aliasRegex: /\b(nextjs|next\.js)\b/i,
-        domains: ['nextjs.org'],
-        defaultUrl: 'https://nextjs.org/docs',
-        description: 'The React Framework for the Web. Used by some of the world\'s largest companies to build full-stack web applications.'
-    },
-    {
-        id: 'react',
-        canonicalName: 'React',
-        aliasRegex: /\breact(\.js|js)?\b/i,
-        domains: ['react.dev'],
-        defaultUrl: 'https://react.dev/',
-        zhUrl: 'https://zh-hans.react.dev/',
-        description: 'The library for web and native user interfaces. Build user interfaces out of individual pieces called components.'
-    },
-    {
-        id: 'vue',
-        canonicalName: 'Vue.js',
-        aliasRegex: /\b(vue|vuejs|vue\.js)\b/i,
-        domains: ['vuejs.org'],
-        defaultUrl: 'https://vuejs.org/',
-        zhUrl: 'https://cn.vuejs.org/',
-        description: 'The Progressive JavaScript Framework. Approachable, performant and versatile framework for building web user interfaces.'
-    },
-    {
-        id: 'typescript',
-        canonicalName: 'TypeScript',
-        aliasRegex: /\b(typescript|ts)\b/i,
-        domains: ['typescriptlang.org'],
-        defaultUrl: 'https://www.typescriptlang.org/docs/',
-        zhUrl: 'https://www.typescriptlang.org/zh/docs/',
-        description: 'TypeScript is a strongly typed programming language that builds on JavaScript, giving you better tooling at any scale.'
-    },
-    {
-        id: 'docker',
-        canonicalName: 'Docker',
-        aliasRegex: /\bdocker\b/i,
-        domains: ['docker.com'],
-        defaultUrl: 'https://docs.docker.com/',
-        description: 'Accelerate how you build, share, and run applications. Official documentation for Docker engine, compose, and CLI.'
+        description: 'Open-source JavaScript runtime environment. Official documentation, release history, and LTS schedule.'
     },
     {
         id: 'postgresql',
@@ -103,15 +60,7 @@ export const KNOWN_OFFICIAL_ENTITIES: readonly OfficialEntityDefinition[] = [
         aliasRegex: /\b(postgresql|postgres)\b/i,
         domains: ['postgresql.org', 'postgres.cn'],
         defaultUrl: 'https://www.postgresql.org/docs/',
-        description: 'PostgreSQL: The World\'s Most Advanced Open Source Relational Database. Official documentation, manuals, and releases.'
-    },
-    {
-        id: 'zustand',
-        canonicalName: 'Zustand',
-        aliasRegex: /\bzustand\b/i,
-        domains: ['pmnd.rs'],
-        defaultUrl: 'https://zustand.docs.pmnd.rs/',
-        description: 'A small, fast, and scalable bearbones state management solution for React using simplified flux principles.'
+        description: 'The World\'s Most Advanced Open Source Relational Database. Official documentation and manuals.'
     }
 ];
 
