@@ -224,6 +224,9 @@ function readHeaderNumber(headers: Record<string, unknown> | undefined, name: st
 }
 
 function isQuotaExhaustedResponse(response: Context7ErrorResponse): boolean {
+    if (response.status === 402) {
+        return true;
+    }
     if (response.status !== 429) {
         return false;
     }
@@ -245,11 +248,19 @@ function isQuotaExhaustedResponse(response: Context7ErrorResponse): boolean {
  * 供内部重试逻辑与工具层 Hint 复用。
  */
 export function isContext7QuotaExhaustedError(error: unknown): boolean {
-    const response = (error as { response?: Context7ErrorResponse } | undefined)?.response;
+    const errObj = error as { status?: number; response?: Context7ErrorResponse } | undefined;
+    if (errObj?.status === 402 || errObj?.response?.status === 402) {
+        return true;
+    }
+    const response = errObj?.response;
     if (response && isQuotaExhaustedResponse(response)) {
         return true;
     }
-    return error instanceof Error && error.message.includes(CONTEXT7_QUOTA_EXHAUSTED_MARKER);
+    return error instanceof Error && (
+        error.message.includes(CONTEXT7_QUOTA_EXHAUSTED_MARKER) ||
+        /quota (exceeded|exhausted)/i.test(error.message) ||
+        /\b402\b/.test(error.message)
+    );
 }
 
 /** 重试等待：尊重 Retry-After 但封顶；无该头时指数退避（含抖动，避免多请求同拍重试） */

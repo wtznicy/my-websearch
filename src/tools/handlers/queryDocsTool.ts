@@ -147,6 +147,27 @@ export function formatContext7DocsAsMarkdown(result: Context7DocsResult): string
     });
 }
 
+export function getContext7FallbackNotice(options: {
+    context7Error?: unknown;
+    context7Result?: Context7DocsResult | null;
+    target: string;
+    destination: string;
+}): string {
+    const { context7Error, context7Result, target, destination } = options;
+    if (context7Error) {
+        if (isContext7QuotaExhaustedError(context7Error)) {
+            return `Context7 monthly quota exhausted (HTTP 402). Automatically switched to ${destination}. Configure CONTEXT7_API_KEY in ~/.my-websearch/config.json to restore Context7 access.`;
+        }
+        const msg = context7Error instanceof Error ? context7Error.message : String(context7Error);
+        return `Context7 service temporarily unavailable (${msg}). Automatically failed over to ${destination}.`;
+    }
+    if (context7Result && context7Result.matchConfidence === 'low') {
+        const closest = context7Result.libraryId ? ` (closest candidate: "${context7Result.libraryId}")` : '';
+        return `Library "${target}" was not indexed by Context7 or match confidence was low${closest}. Automatically retrieved from ${destination}.`;
+    }
+    return `Context7 did not return valid documentation for "${target}". Automatically switched to ${destination}.`;
+}
+
 export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRuntime): void {
     server.registerTool(
         "queryDocs",
@@ -234,10 +255,26 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     if (res.content && res.content.trim().length > 20) {
                         return res.content.trim();
                     }
-                    return null;
-                } catch {
-                    return null;
+                } catch (err) {
+                    logSafeError(`fetchViaWeb readability pass failed for ${url}`, err);
                 }
+
+                try {
+                    const resFallback = await runtime.services.fetchWeb.execute({
+                        url,
+                        maxChars: 30000,
+                        format: 'markdown',
+                        readability: false,
+                        signal
+                    });
+                    if (resFallback.content && resFallback.content.trim().length > 20) {
+                        return resFallback.content.trim();
+                    }
+                } catch (err) {
+                    logSafeError(`fetchViaWeb raw pass failed for ${url}`, err);
+                }
+
+                return null;
             };
 
             // 1. 显式指定 docs.rs
@@ -353,14 +390,12 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     library: target,
                     version,
                     signal,
-                    fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url })
+                    fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url }),
+                    reasonHint: `No standalone documentation website found for "${target}".`
                 });
                 if (fallback) {
                     metrics.recordQueryDocsAttempt('official', true);
-                    const combinedWarnings = [
-                        `No standalone documentation website found for "${target}"; resolved repository README instead.`,
-                        ...new Set([...fallback.warnings, ...unknownWarnings])
-                    ];
+                    const combinedWarnings = [...new Set([...fallback.warnings, ...unknownWarnings])];
                     const text = capTextResponse(formatQueryDocsMarkdown({
                         libraryId: fallback.libraryId,
                         query,
@@ -400,7 +435,8 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     library: target,
                     version,
                     signal,
-                    fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url })
+                    fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url }),
+                    reasonHint: ''
                 });
                 if (fallback) {
                     metrics.recordQueryDocsAttempt(fallback.source, false);
@@ -553,6 +589,13 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                         if (content) {
                             logTool(`Official doc site fetch succeeded: ${docUrl}`);
                             metrics.recordQueryDocsAttempt('official', true);
+                            const fallbackNotice = getContext7FallbackNotice({
+                                context7Error,
+                                context7Result,
+                                target,
+                                destination: `official documentation site (${docUrl})`
+                            });
+                            const combinedWarnings = [fallbackNotice, ...unknownWarnings];
                             const text = capTextResponse(formatQueryDocsMarkdown({
                                 libraryId: meta?.libraryId || target,
                                 query,
@@ -561,14 +604,14 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                                 documentationUrl: docUrl,
                                 repositoryUrl: meta?.repositoryUrl || undefined,
                                 content,
-                                warnings: unknownWarnings
+                                warnings: combinedWarnings
                             }));
                             setDocsCache(cacheKey, { text, source: 'official', confidence: 'medium', cachedAt: Date.now() });
                             return {
                                 content: [{ type: 'text', text }],
                                 source: 'official',
                                 confidence: 'medium',
-                                warnings: unknownWarnings
+                                warnings: combinedWarnings
                             } as unknown as { content: Array<{ type: 'text'; text: string }> };
                         }
                     }
@@ -579,12 +622,21 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 // 启动包管理器 README 兜底
                 logTool(`Attempting npm/PyPI/crates/Go fallback for "${target}"...`);
                 let fallbackResult: PackageDocsFallbackResult | null = null;
+                const fallbackReason = context7Error
+                    ? (isContext7QuotaExhaustedError(context7Error)
+                        ? 'Context7 monthly quota exhausted (HTTP 402). Configure CONTEXT7_API_KEY in ~/.my-websearch/config.json to restore Context7 access.'
+                        : `Context7 service temporarily unavailable (${context7Error instanceof Error ? context7Error.message : String(context7Error)}).`)
+                    : (context7Result && context7Result.matchConfidence === 'low'
+                        ? `Library "${target}" was not indexed by Context7 or match confidence was low${context7Result.libraryId ? ` (closest candidate: "${context7Result.libraryId}")` : ''}.`
+                        : 'Context7 match confidence was low or library was not found in Context7.');
+
                 try {
                     fallbackResult = await fetchPackageDocsFallback({
                         library: target,
                         version,
                         signal,
-                        fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url })
+                        fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url }),
+                        reasonHint: fallbackReason
                     });
                 } catch (fbErr) {
                     logSafeError('Fallback package docs resolution failed', fbErr);

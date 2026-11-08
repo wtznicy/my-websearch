@@ -1,8 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { registerQueryDocsTool, formatQueryDocsMarkdown } from '../../tools/handlers/queryDocsTool.js';
+import {
+    registerQueryDocsTool,
+    formatQueryDocsMarkdown,
+    getContext7FallbackNotice
+} from '../../tools/handlers/queryDocsTool.js';
 import { docsCacheKey } from '../../core/docs/docsCache.js';
 import { createMyWebSearchRuntime } from '../../runtime/createRuntime.js';
+import { fetchPackageDocsFallback } from '../../core/docs/packageDocsFallback.js';
 
 describe('queryDocs Multi-Source Engine & Provider Suite', () => {
     describe('formatQueryDocsMarkdown with multi-source capabilities', () => {
@@ -144,6 +149,101 @@ describe('queryDocs Multi-Source Engine & Provider Suite', () => {
             }));
             expect(result.content[0].text).toContain('> Source: docs.rs');
             expect(result.content[0].text).toContain('Serde Crate Documentation');
+        });
+
+        it('injects accurate 402 quota exhaustion warning when falling back from Context7 to official site', async () => {
+            const server = new McpServer({ name: 'test-server', version: '1.0.0' });
+            const runtime = createMyWebSearchRuntime();
+
+            // Mock Context7 throwing 402 Quota error
+            const quotaError = Object.assign(new Error('Request failed with status code 402'), {
+                status: 402,
+                response: { status: 402, data: { error: 'Monthly quota exceeded' } }
+            });
+            runtime.services.context7Docs.execute = vi.fn().mockRejectedValue(quotaError);
+
+            // Mock fetchWeb succeeding for official documentation site
+            runtime.services.fetchWeb.execute = vi.fn().mockResolvedValue({
+                content: '## Zod Documentation\n\nTypeScript-first schema validation.',
+                title: 'Zod'
+            });
+
+            registerQueryDocsTool(server, runtime);
+            const toolHandler = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })._registeredTools['queryDocs']?.handler;
+
+            const result = await toolHandler({
+                library: 'zod',
+                source: 'auto',
+                cache: 'reload'
+            });
+
+            expect(result.content[0].text).toContain('> Source: official');
+            expect(result.content[0].text).toContain('> ⚠️ **Warning:** Context7 monthly quota exhausted (HTTP 402)');
+            expect(result.content[0].text).toContain('CONTEXT7_API_KEY');
+        });
+    });
+
+    describe('getContext7FallbackNotice & packageDocsFallback reasonHint', () => {
+        it('formats 402 Quota exhaustion notice', () => {
+            const quotaErr = Object.assign(new Error('HTTP 402'), { status: 402 });
+            const notice = getContext7FallbackNotice({
+                context7Error: quotaErr,
+                target: 'express',
+                destination: 'official documentation site (https://expressjs.com)'
+            });
+            expect(notice).toContain('Context7 monthly quota exhausted (HTTP 402)');
+            expect(notice).toContain('https://expressjs.com');
+            expect(notice).toContain('CONTEXT7_API_KEY');
+        });
+
+        it('formats service outage notice', () => {
+            const netErr = new Error('getaddrinfo ENOTFOUND api.context7.com');
+            const notice = getContext7FallbackNotice({
+                context7Error: netErr,
+                target: 'express',
+                destination: 'package repository README'
+            });
+            expect(notice).toContain('Context7 service temporarily unavailable');
+            expect(notice).toContain('ENOTFOUND');
+        });
+
+        it('formats low match confidence notice', () => {
+            const notice = getContext7FallbackNotice({
+                context7Result: {
+                    libraryId: 'express-openid-connect',
+                    matchConfidence: 'low',
+                    query: 'auth',
+                    codeSnippets: [],
+                    infoSnippets: []
+                },
+                target: 'my-custom-express',
+                destination: 'official documentation site (https://example.com)'
+            });
+            expect(notice).toContain('Library "my-custom-express" was not indexed by Context7 or match confidence was low');
+            expect(notice).toContain('express-openid-connect');
+        });
+
+        it('fetchPackageDocsFallback respects empty reasonHint for direct queries', async () => {
+            const mockFetchGithub = vi.fn().mockResolvedValue('# Express\n' + 'A'.repeat(100));
+            const result = await fetchPackageDocsFallback({
+                library: 'express',
+                fetchGithub: mockFetchGithub,
+                reasonHint: '' // direct query, no fallback warning
+            });
+            expect(result).not.toBeNull();
+            expect(result?.warnings).toEqual([]);
+        });
+
+        it('fetchPackageDocsFallback prepends custom reasonHint when provided', async () => {
+            const mockFetchGithub = vi.fn().mockResolvedValue('# Express\n' + 'A'.repeat(100));
+            const result = await fetchPackageDocsFallback({
+                library: 'express',
+                fetchGithub: mockFetchGithub,
+                reasonHint: 'Context7 monthly quota exhausted (HTTP 402).'
+            });
+            expect(result).not.toBeNull();
+            expect(result?.warnings[0]).toContain('Context7 monthly quota exhausted (HTTP 402).');
+            expect(result?.warnings[0]).toContain('Fallback to npm package repository');
         });
     });
 });

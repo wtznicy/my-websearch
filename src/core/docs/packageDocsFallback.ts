@@ -566,6 +566,7 @@ export async function fetchPackageDocsFallback(options: {
     version?: string;
     signal?: AbortSignal;
     fetchGithub: (url: string) => Promise<string | null>;
+    reasonHint?: string;
 }): Promise<PackageDocsFallbackResult | null> {
     const rawTarget = options.library.trim();
     const version = options.version?.trim() || undefined;
@@ -574,6 +575,15 @@ export async function fetchPackageDocsFallback(options: {
         ? rawTarget.replace(/^\/+/, '').split('/')[1] || rawTarget.replace(/^\/+/, '')
         : rawTarget;
     const displayTarget = version ? `${cleanTarget}@${version}` : cleanTarget;
+
+    const buildWarning = (registryName: string, repoUrl: string): string[] => {
+        if (options.reasonHint === '') {
+            return [];
+        }
+        const reason = options.reasonHint ?? 'Context7 match confidence was low or library was not found in Context7.';
+        const suffix = version ? ` (requested version ${version})` : '';
+        return [`${reason} Fallback to ${registryName} package repository (${repoUrl}) README${suffix}.`];
+    };
 
     // 1. 尝试 npm 注册表
     try {
@@ -587,9 +597,7 @@ export async function fetchPackageDocsFallback(options: {
                     libraryId: displayTarget,
                     repositoryUrl: npmRepo,
                     readme: readme.trim(),
-                    warnings: [
-                        `Context7 match confidence was low or library was not found in Context7. Fallback to npm package repository (${npmRepo}) README${version ? ` (requested version ${version})` : ''}.`
-                    ]
+                    warnings: buildWarning('npm', npmRepo)
                 };
             }
         }
@@ -609,9 +617,7 @@ export async function fetchPackageDocsFallback(options: {
                     libraryId: displayTarget,
                     repositoryUrl: pypiRepo,
                     readme: readme.trim(),
-                    warnings: [
-                        `Context7 match confidence was low or library was not found in Context7. Fallback to PyPI package repository (${pypiRepo}) README${version ? ` (requested version ${version})` : ''}.`
-                    ]
+                    warnings: buildWarning('PyPI', pypiRepo)
                 };
             }
         }
@@ -631,9 +637,7 @@ export async function fetchPackageDocsFallback(options: {
                     libraryId: displayTarget,
                     repositoryUrl: cratesRepo,
                     readme: readme.trim(),
-                    warnings: [
-                        `Context7 match confidence was low or library was not found in Context7. Fallback to crates.io package repository (${cratesRepo}) README${version ? ` (requested version ${version})` : ''}.`
-                    ]
+                    warnings: buildWarning('crates.io', cratesRepo)
                 };
             }
         }
@@ -653,9 +657,7 @@ export async function fetchPackageDocsFallback(options: {
                     libraryId: displayTarget,
                     repositoryUrl: goRepo,
                     readme: readme.trim(),
-                    warnings: [
-                        `Context7 match confidence was low or library was not found in Context7. Fallback to Go module proxy repository (${goRepo}) README${version ? ` (requested version ${version})` : ''}.`
-                    ]
+                    warnings: buildWarning('Go module proxy', goRepo)
                 };
             }
         }
@@ -675,9 +677,7 @@ export async function fetchPackageDocsFallback(options: {
                     libraryId: displayTarget,
                     repositoryUrl: mavenRepo,
                     readme: readme.trim(),
-                    warnings: [
-                        `Context7 match confidence was low or library was not found in Context7. Fallback to Maven Central repository (${mavenRepo}) README${version ? ` (requested version ${version})` : ''}.`
-                    ]
+                    warnings: buildWarning('Maven Central', mavenRepo)
                 };
             }
         }
