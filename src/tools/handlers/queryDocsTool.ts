@@ -201,12 +201,12 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
     server.registerTool(
         "queryDocs",
         {
-            description: "Get official docs, API references, and code snippets for libraries/packages. Supports multi-source selection ('auto', 'official', 'docs.rs', 'pkg.go.dev', 'devdocs', 'mdn', 'javadoc', 'context7', 'npm', 'pypi'). Direct.",
+            description: "Fetch docs, API references & syntax-extracted sections for packages/APIs/tools. Multi-source: 'auto' (smart fallback), 'official', 'docs.rs', 'pkg.go.dev', 'devdocs' (800+ tools/langs), 'mdn' (Web standards), 'javadoc', 'context7', 'npm', 'pypi'.",
             inputSchema: z.object({
-                library: z.string().min(1).optional().describe("Library or package name (e.g. 'react', 'fastapi', 'tokio', 'redis', 'fetch') or exact Context7 library ID (e.g. '/vercel/next.js')"),
-                libraryId: z.string().min(1).optional().describe("Legacy alias for library (e.g. /vercel/next.js)"),
-                version: z.string().min(1).optional().describe("Optional explicit version (e.g. '14.2.0' or 'v15.1.8'); overrides an @version embedded in library"),
-                query: z.string().min(1).optional().describe("The question, feature, or task to get relevant documentation for (optional; defaults to an overview when omitted, e.g. 'how to set up middleware with auth')"),
+                library: z.string().min(1).optional().describe("Library, package, middleware, or Web API name (e.g. 'react', 'fastapi', 'tokio', 'redis', 'docker', 'fetch', 'Array.prototype.map', 'org.apache.commons:commons-lang3'). Also supports ecosystem prefixes like 'crates:tokio', 'go:gin', 'mdn:fetch', 'devdocs:redis', 'javadoc:com.google.guava:guava' or Context7 library ID (e.g. '/vercel/next.js')"),
+                libraryId: z.string().min(1).optional().describe("Legacy alias for library (e.g. '/vercel/next.js')"),
+                version: z.string().min(1).optional().describe("Optional explicit version for consistent multi-source pinning (e.g. '18.2.0', '3.11', '1.38.0', 'v1.9.1'). Overrides an @version embedded in library"),
+                query: z.string().min(1).optional().describe("The specific topic, method, command, or question to get relevant documentation for (e.g. 'hset', 'useMemo', 'middleware', 'asyncio'). For long documents (>8000 chars), syntax-level section extraction is performed, keeping the preamble (imports/setup) and targeted section intact."),
                 source: z.enum([
                     'auto',
                     'context7',
@@ -219,10 +219,10 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     'npm',
                     'pypi',
                     'github'
-                ]).optional().default('auto').describe("Documentation source: 'auto' (smart routing & fallback), 'official' (standalone site), 'docs.rs' (Rust), 'pkg.go.dev' (Go), 'devdocs' (DevDocs: Redis, Docker, Python, C++, etc.), 'mdn' (MDN Web Docs), 'javadoc' (Java/Maven), 'context7', 'npm', 'pypi', 'github'"),
+                ]).optional().default('auto').describe("Documentation source: 'auto' (smart routing & cascade fallback: Context7 -> Official Site -> DevDocs -> Registry), 'official' (standalone doc site), 'docs.rs' (Rust crates), 'pkg.go.dev' (Go packages), 'devdocs' (800+ middleware & languages: Redis, Docker, Nginx, Python, C++, etc.), 'mdn' (MDN Web Docs: JS, Web APIs, CSS), 'javadoc' (Javadoc.io for Maven packages), 'context7' (Context7 LLM doc index), 'npm', 'pypi', 'github' (registry fallback)"),
                 limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets or sections to return (default 5)"),
-                cache: z.enum(['default', 'reload']).optional().describe("Use the 24h local docs cache (default) or bypass/refresh it with 'reload'"),
-                strict: z.boolean().optional().describe("If true, rejects low-confidence library name matches with an error instead of returning loosely matched candidate docs (default false)")
+                cache: z.enum(['default', 'reload']).optional().describe("Use the 24h local docs cache (default 'default') or bypass/refresh it with 'reload'"),
+                strict: z.boolean().optional().describe("If true, rejects low-confidence matches with an error instead of returning loosely matched candidate docs or alternative libraries (default false)")
             }).passthrough(),
             annotations: TOOL_ANNOTATION_HINTS
         },

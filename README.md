@@ -79,7 +79,7 @@
 | **`search`** | Federated web & code search (16 engines) | Supports parallel queries, `timeRange: day\|week\|month\|year` date filter, `site: string[]` filter, and query operators (`site:`, `filetype:`, `after:`, `before:`, `-exclude`) translated per engine with local post-filtering; `fetchTop` preview injection, `code` engine (grep.app); explicit `engines` defaults to `minResults=0` (no unconstrained cascade); returns inline `diagnostics` on failure |
 | **`fetchWebContent`** | Web page extraction, Markdown & transparent PDF parsing | **All-in-one content extractor**: Built-in disk-level Markdown cache (Node 22 `node:sqlite` / partitioned JSON fallback, 200MB LRU, `cache: default\|reload`); transparent PDF parsing (up to 20MB / 50 pages, `[page N]` tags, scanned doc detection); pagination & `focus` keyword targeting (**`bm25`** relevance-ranked blocks by default, `window` for the legacy fixed window); **`selector`** to scope extraction to a CSS subtree (errors instead of silently returning the whole page); **`extract`** for CSS-selector JSON with no LLM; **`citations`** for numbered references; **`retainLinks`** to strip URLs (-50% on index pages) |
 | **`fetchGithubContent`** | Comprehensive GitHub / Gitee content reader | Fetches README, **one source file** (`/blob/<ref>/<path>`, optional `lines`/`#L120-L180` slicing with a 400-line cap), directory trees (`/tree/`, lock/build artifacts filtered), Issue / PR discussions, commits (`/commit/<sha>`), compare (`/compare/a...b`, capped patch + lockfile filtering), and releases (`/releases[/tag/<tag>]`, `releaseLimit` 1-30); `ref` may be a branch, tag, or commit; Gitee parity via API (optional `GITEE_TOKEN`); returns `warnings` |
-| **`queryDocs`** | All-in-one official library documentation | Resolves library names or Context7 IDs; optional **`source`** multi-source selection (`auto`, `official`, `docs.rs`, `pkg.go.dev`, `devdocs`, `mdn`, `javadoc`, `context7`, `npm`, `pypi`); optional **`version`** pins version; **24h local cache** (`cache: reload` bypasses it); connects directly to official doc sites & ecosystem standards, with fallback to registries; returns `source`, `confidence`, and `warnings` |
+| **`queryDocs`** | All-in-one official docs, middleware & Web standards API | **Multi-Source Authority**: Resolves package names, middleware, or Context7 IDs; optional **`source`** selection (`auto` smart cascade, `official` standalone sites, `docs.rs` Rust, `pkg.go.dev` Go, `devdocs` 800+ tools/langs, `mdn` Web standards, `javadoc` Maven packages, `context7`, `npm`, `pypi`, `github`); optional **`version`** multi-source pinning; **Syntax-Level Markdown Section Extraction** (for docs >8000 chars with `query`, keeps preamble `import` & bootstrap code 100% intact, extracts full matching sections with TOC; zero truncation for short docs); **24h local cache** (`cache: reload` bypasses); precise failover notices (402 Quota vs outages vs low-confidence); returns `source`, `confidence`, `documentationUrl` & `warnings` |
 | **`codeSymbol`** | Remote GitHub symbol lookup | GitHub code search + raw/CDN files; optional Tree-sitter AST (grammar downloaded/cached in background, scanner fallback, one parse for definitions + call sites); multi-line signatures, Python decorators, lexical brace matching, filtered call sites, re-export + monorepo tsconfig `extends`/paths; TypeScript/JavaScript checker types plus Python/Go/Rust annotation-level types; symbol/content/analysis TTL caches and a soft time budget with partial results; private repos via Contents API; requires `GITHUB_TOKEN`; unresolved imports become `any` |
 
 > 💡 **Backward Compatibility**: Legacy `fetchCsdnArticle` and `fetchJuejinArticle` are automatically routed under `fetchWebContent`; legacy `resolveLibraryId` is merged into `queryDocs` (which accepts a `library` name or the legacy `libraryId` alias). The separate legacy tools were removed — the `REGISTER_LEGACY_ARTICLE_TOOLS` switch is gone, because keeping three unregistered handlers around still cost tool-description budget for nothing.
@@ -87,6 +87,44 @@
 > 🧩 **MCP Prompts**: `deep-research` (multi-source research with citations) and `code-lookup` (official docs + source + release notes) are registered as server-side prompt templates; clients that support MCP Prompts can invoke them directly.
 
 > 🗂️ **MCP Resources**: read-only `websearch://cache/pages` / `websearch://cache/docs` indexes plus per-entry Markdown resources expose already-cached content without another tool call. Resources never trigger network fetches.
+
+### 📚 queryDocs Multi-Source Documentation & Syntax Section Extraction
+
+`queryDocs` is purpose-built for AI Agents, connecting directly to authoritative primary documentation for open-source libraries, infrastructure middleware, and Web standards:
+
+1. **Multi-Source Architecture (`source` parameter)**:
+   - `auto` (Default smart routing & cascade): Tries Context7 first; on quota exhaustion or missing index, automatically cascades to **Standalone Official Doc Sites** $\to$ **DevDocs** $\to$ **Registry Readmes (npm / PyPI / crates.io / Go Proxy / Maven) & GitHub**. Supports prefix shortcuts like `crates:`, `go:`, `mdn:`, `devdocs:`, and `javadoc:`.
+   - `official`: Connects directly to dedicated official documentation sites (e.g. FastAPI, Vue, Vite, Next.js).
+   - `devdocs`: Covers 800+ offline/standard API documentation sets (e.g. Redis, Docker, Nginx, PostgreSQL, Python, C++, Bash), with native versioned slugs (e.g. `python~3.12`, `angular~21`).
+   - `mdn`: Connects to official MDN Web Docs APIs (JavaScript standards, Web APIs, CSS, HTML), with automatic English/Chinese detection and localized `locale=zh-CN` extraction.
+   - `docs.rs`: Connects directly to the official Rust crates documentation ecosystem with precise version pinning.
+   - `pkg.go.dev`: Connects directly to official Go modules and standard library documentation.
+   - `javadoc`: Resolves Maven coordinates (`groupId:artifactId`) directly on Javadoc.io.
+   - `context7`: Context7 structured LLM codebase documentation index.
+   - `npm` / `pypi` / `github`: Ecosystem registry metadata sniffing and README fallbacks.
+
+2. **Syntax-Level Markdown Section Extraction (Preamble & Imports Protection)**:
+   - **Problem Solved**: Naive token chunking frequently strips out top-of-file dependencies (`import` / `require`) and initialization setup, causing LLMs to generate hallucinated or broken code.
+   - **Guaranteed Preamble Preservation**: When a document is large (>8000 characters) and a `query` is provided, the extractor **100% guarantees** complete preservation of the preamble: package declarations, installation instructions, every `import` statement, and bootstrap setup.
+   - **Closed Sections & Global TOC**: Matching sections are extracted completely in full context without mid-sentence truncations; untargeted sections are synthesized into a compact Table of Contents at the end. Short documents ($\le$ 8000 characters) are delivered in full without slicing.
+
+3. **Multi-Source Version Pinning & Transparent Failover**:
+   - Consistent `version` parameter across sources (e.g. `18.2.0`, `3.11`, `1.38.0`, `v1.9.1`).
+   - Clear distinction between Context7 **HTTP 402 (Monthly Quota Exhausted)**, transient service outages, and low-confidence unindexed targets. Failovers supply actionable hints in `warnings` for configuring `CONTEXT7_API_KEY` or switching sources.
+
+```json
+// Example 1: Query Redis commands via DevDocs
+{ "library": "redis", "query": "hset", "source": "devdocs" }
+
+// Example 2: Query Web standard APIs via MDN (localized extraction)
+{ "library": "fetch", "source": "mdn" }
+
+// Example 3: Query a specific Rust crate version via docs.rs
+{ "library": "tokio", "version": "1.38.0", "source": "docs.rs" }
+
+// Example 4: Long document with section extraction preserving imports
+{ "library": "fastapi", "query": "middleware" }
+```
 
 ---
 
