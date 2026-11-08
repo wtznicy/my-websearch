@@ -95,15 +95,38 @@ export async function fetchDevDocsCatalog(signal?: AbortSignal): Promise<DevDocs
 }
 
 /** 将用户传入的 library 转换为 DevDocs 的精确 slug */
-export async function resolveDevDocsSlug(rawName: string, signal?: AbortSignal): Promise<string | null> {
-    const clean = rawName.trim().replace(/^devdocs?:/, '').trim().toLowerCase();
+export async function resolveDevDocsSlug(rawName: string, signal?: AbortSignal, version?: string): Promise<string | null> {
+    const rawClean = rawName.trim().replace(/^devdocs?:/, '').trim().toLowerCase();
+    let clean = rawClean;
+    let reqVersion = version?.trim();
+    if (clean.includes('@')) {
+        const parts = clean.split('@');
+        clean = parts[0]?.trim() || clean;
+        if (!reqVersion && parts[1]) {
+            reqVersion = parts[1].trim();
+        }
+    }
     if (!clean) return null;
 
-    if (DEVDOCS_SLUG_ALIASES[clean]) {
-        return DEVDOCS_SLUG_ALIASES[clean];
+    const catalog = await fetchDevDocsCatalog(signal);
+
+    // 若指定了版本，优先匹配版本化 slug（如 python~3.11 或 angular~20）
+    if (reqVersion) {
+        const vClean = reqVersion.replace(/^v/, '').toLowerCase();
+        const aliasTarget = DEVDOCS_SLUG_ALIASES[clean]?.split('~')[0] || clean;
+        const versionedSlug = catalog.find((d) =>
+            d.slug.toLowerCase() === `${clean}~${vClean}` ||
+            d.slug.toLowerCase().startsWith(`${clean}~${vClean}`) ||
+            d.slug.toLowerCase() === `${aliasTarget}~${vClean}` ||
+            d.slug.toLowerCase().startsWith(`${aliasTarget}~${vClean}`)
+        );
+        if (versionedSlug) return versionedSlug.slug;
     }
 
-    const catalog = await fetchDevDocsCatalog(signal);
+    if (DEVDOCS_SLUG_ALIASES[clean]) {
+        return DEVDOCS_SLUG_ALIASES[clean] ?? null;
+    }
+
     if (catalog.length === 0) {
         return clean;
     }
@@ -204,10 +227,11 @@ export function findMatchingDevDocsEntry(entries: DevDocsEntry[], query?: string
 /** 核心查询入口：根据库名与关键词检索 DevDocs */
 export async function queryDevDocs(options: {
     library: string;
+    version?: string;
     query?: string;
     signal?: AbortSignal;
 }): Promise<DevDocsResult | null> {
-    const slug = await resolveDevDocsSlug(options.library, options.signal);
+    const slug = await resolveDevDocsSlug(options.library, options.signal, options.version);
     if (!slug) return null;
 
     logTool(`DevDocs resolved slug "${slug}" for "${options.library}"`);

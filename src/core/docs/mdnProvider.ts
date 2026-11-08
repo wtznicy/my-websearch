@@ -63,10 +63,14 @@ export function extractMdnQuery(library: string, query?: string): string {
     return cleanQuery;
 }
 
-/** 查询 MDN 官方 Search API */
-export async function searchMdn(query: string, signal?: AbortSignal): Promise<MdnDocumentItem[]> {
-    try {
-        const url = `${MDN_SEARCH_URL}?q=${encodeURIComponent(query)}`;
+/** 查询 MDN 官方 Search API（支持中文与多语言本地化） */
+export async function searchMdn(query: string, signal?: AbortSignal, locale?: 'zh-CN' | 'en-US'): Promise<MdnDocumentItem[]> {
+    const hasChinese = /[\u4e00-\u9fa5]/.test(query);
+    const targetLocale = locale ?? (hasChinese ? 'zh-CN' : undefined);
+
+    const doSearch = async (loc?: string): Promise<MdnDocumentItem[]> => {
+        const queryParam = loc ? `q=${encodeURIComponent(query)}&locale=${encodeURIComponent(loc)}` : `q=${encodeURIComponent(query)}`;
+        const url = `${MDN_SEARCH_URL}?${queryParam}`;
         const res = await requestDirectFirst(
             'GET',
             url,
@@ -76,12 +80,23 @@ export async function searchMdn(query: string, signal?: AbortSignal): Promise<Md
                 signal,
                 forceDirect
             }),
-            `MDN search for ${query}`
+            `MDN search for ${query} (${loc ?? 'default'})`
         );
 
         if (res.status === 200 && res.data && Array.isArray((res.data as MdnSearchResponse).documents)) {
             return (res.data as MdnSearchResponse).documents;
         }
+        return [];
+    };
+
+    try {
+        if (targetLocale) {
+            const localized = await doSearch(targetLocale);
+            if (localized.length > 0) {
+                return localized;
+            }
+        }
+        return await doSearch();
     } catch (err) {
         logSafeError(`MDN search failed for "${query}"`, err);
     }

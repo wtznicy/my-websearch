@@ -17,6 +17,7 @@ import { detectUnknownParameters } from '../../utils/toolValidation.js';
 import { queryDevDocs } from '../../core/docs/devdocsProvider.js';
 import { queryMdnDocs, isLikelyMdnTarget } from '../../core/docs/mdnProvider.js';
 import { queryJavadocDocs, isLikelyJavadocTarget } from '../../core/docs/javadocProvider.js';
+import { extractRelevantSections } from '../../core/docs/markdownSectionExtractor.js';
 
 export type QueryDocsFormattedInput = {
     libraryId: string;
@@ -68,7 +69,12 @@ export function formatQueryDocsMarkdown(result: QueryDocsFormattedInput): string
     }
 
     if (result.content) {
-        lines.push(result.content);
+        let displayContent = result.content;
+        if (result.query && result.content.length > 8000) {
+            const extracted = extractRelevantSections(result.content, result.query);
+            displayContent = extracted.content;
+        }
+        lines.push(displayContent);
         if (result.alternativeEntries && result.alternativeEntries.length > 0) {
             lines.push('');
             lines.push('---');
@@ -87,7 +93,12 @@ export function formatQueryDocsMarkdown(result: QueryDocsFormattedInput): string
     }
 
     if (result.readme) {
-        lines.push(result.readme);
+        let displayReadme = result.readme;
+        if (result.query && result.readme.length > 8000) {
+            const extracted = extractRelevantSections(result.readme, result.query);
+            displayReadme = extracted.content;
+        }
+        lines.push(displayReadme);
         return lines.join('\n').trim();
     }
 
@@ -378,8 +389,8 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
 
             // 3. 显式指定 devdocs
             if (reqSource === 'devdocs') {
-                logTool(`queryDocs directly querying DevDocs for: ${target} (query: ${query ?? ''})`);
-                const devdocsRes = await queryDevDocs({ library: target, query, signal });
+                logTool(`queryDocs directly querying DevDocs for: ${target} (query: ${query ?? ''}, version: ${version ?? ''})`);
+                const devdocsRes = await queryDevDocs({ library: target, version, query, signal });
                 if (devdocsRes) {
                     metrics.recordQueryDocsAttempt('devdocs', false);
                     const text = capTextResponse(formatQueryDocsMarkdown({
@@ -685,7 +696,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 // 5d. DevDocs 显式前缀 (devdocs:redis)
                 if (target.startsWith('devdocs:')) {
                     logTool(`auto-routing to DevDocs for: ${target}`);
-                    const devdocsRes = await queryDevDocs({ library: target, query, signal });
+                    const devdocsRes = await queryDevDocs({ library: target, version, query, signal });
                     if (devdocsRes) {
                         metrics.recordQueryDocsAttempt('devdocs', false);
                         const text = capTextResponse(formatQueryDocsMarkdown({
@@ -826,7 +837,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
 
                 // 尝试 DevDocs 检索（适用于 redis, docker, nginx, postgres 等主流语言和中间件）
                 try {
-                    const devdocsRes = await queryDevDocs({ library: target, query, signal });
+                    const devdocsRes = await queryDevDocs({ library: target, version, query, signal });
                     if (devdocsRes) {
                         logTool(`DevDocs fallback succeeded: ${devdocsRes.documentationUrl}`);
                         metrics.recordQueryDocsAttempt('devdocs', true);
