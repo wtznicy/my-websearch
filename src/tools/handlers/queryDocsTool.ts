@@ -429,22 +429,26 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 const mdnRes = await queryMdnDocs({ library: target, query, signal, fetchWeb: fetchViaWeb });
                 if (mdnRes) {
                     metrics.recordQueryDocsAttempt('mdn', false);
+                    const confidence = mdnRes.confidence ?? 'high';
+                    const combinedWarnings = [...(mdnRes.warnings ?? []), ...unknownWarnings];
                     const text = capTextResponse(formatQueryDocsMarkdown({
                         libraryId: mdnRes.libraryId,
                         query,
                         source: 'mdn',
-                        confidence: 'high',
+                        confidence,
                         documentationUrl: mdnRes.documentationUrl,
                         content: mdnRes.content,
                         alternativeEntries: mdnRes.alternativeEntries,
-                        warnings: unknownWarnings
+                        warnings: combinedWarnings
                     }));
-                    setDocsCache(cacheKey, { text, source: 'mdn', confidence: 'high', cachedAt: Date.now() });
+                    if (confidence !== 'low') {
+                        setDocsCache(cacheKey, { text, source: 'mdn', confidence, cachedAt: Date.now() });
+                    }
                     return {
                         content: [{ type: 'text', text }],
                         source: 'mdn',
-                        confidence: 'high',
-                        warnings: unknownWarnings
+                        confidence,
+                        warnings: combinedWarnings
                     } as unknown as { content: Array<{ type: 'text'; text: string }> };
                 }
                 return {
@@ -461,8 +465,8 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
 
             // 5. 显式指定 javadoc
             if (reqSource === 'javadoc') {
-                logTool(`queryDocs directly querying Javadoc.io for: ${target}`);
-                const javadocRes = await queryJavadocDocs({ library: target, version, signal, fetchWeb: fetchViaWeb });
+                logTool(`queryDocs directly querying Javadoc.io for: ${target} (query: ${query ?? ''})`);
+                const javadocRes = await queryJavadocDocs({ library: target, version, query, signal, fetchWeb: fetchViaWeb });
                 if (javadocRes) {
                     metrics.recordQueryDocsAttempt('javadoc', false);
                     const text = capTextResponse(formatQueryDocsMarkdown({
@@ -673,22 +677,26 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     const mdnRes = await queryMdnDocs({ library: target, query, signal, fetchWeb: fetchViaWeb });
                     if (mdnRes) {
                         metrics.recordQueryDocsAttempt('mdn', false);
+                        const confidence = mdnRes.confidence ?? 'high';
+                        const combinedWarnings = [...(mdnRes.warnings ?? []), ...unknownWarnings];
                         const text = capTextResponse(formatQueryDocsMarkdown({
                             libraryId: mdnRes.libraryId,
                             query,
                             source: 'mdn',
-                            confidence: 'high',
+                            confidence,
                             documentationUrl: mdnRes.documentationUrl,
                             content: mdnRes.content,
                             alternativeEntries: mdnRes.alternativeEntries,
-                            warnings: unknownWarnings
+                            warnings: combinedWarnings
                         }));
-                        setDocsCache(cacheKey, { text, source: 'mdn', confidence: 'high', cachedAt: Date.now() });
+                        if (confidence !== 'low') {
+                        setDocsCache(cacheKey, { text, source: 'mdn', confidence, cachedAt: Date.now() });
+                    }
                         return {
                             content: [{ type: 'text', text }],
                             source: 'mdn',
-                            confidence: 'high',
-                            warnings: unknownWarnings
+                            confidence,
+                            warnings: combinedWarnings
                         } as unknown as { content: Array<{ type: 'text'; text: string }> };
                     }
                 }
@@ -722,7 +730,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 // 5e. Javadoc.io (javadoc:..., maven:..., or groupId:artifactId)
                 if (isLikelyJavadocTarget(target)) {
                     logTool(`auto-routing to Javadoc.io for: ${target}`);
-                    const javadocRes = await queryJavadocDocs({ library: target, version, signal, fetchWeb: fetchViaWeb });
+                    const javadocRes = await queryJavadocDocs({ library: target, version, query, signal, fetchWeb: fetchViaWeb });
                     if (javadocRes) {
                         metrics.recordQueryDocsAttempt('javadoc', false);
                         const text = capTextResponse(formatQueryDocsMarkdown({
@@ -749,21 +757,12 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
             let context7Result: Context7DocsResult | null = null;
             let context7Error: unknown = null;
 
-            // 轻量意图自适应规范化：若带有 version 且意图是查更新，同时覆盖官方手册 (What Is New in X.Y) 与开源包 (Release Notes)
-            let context7Query = query;
-            if (query && version) {
-                const isUpdateIntent = /(release|update|更新|新特性|新功能|changelog|what'?s?\s*new)/i.test(query);
-                if (isUpdateIntent && !/what'?s?\s*new/i.test(query)) {
-                    context7Query = `What Is New in ${version} OR ${query}`;
-                }
-            }
-
             try {
                 logTool(`Context7 fetching docs for: ${target}`);
                 context7Result = await runtime.services.context7Docs.execute({
                     library: target,
                     version,
-                    query: context7Query,
+                    query,
                     limit,
                     strict,
                     signal

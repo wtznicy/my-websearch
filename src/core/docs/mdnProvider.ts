@@ -30,6 +30,8 @@ export interface MdnResult {
     documentationUrl: string;
     content: string;
     summary?: string;
+    confidence?: 'high' | 'medium' | 'low';
+    warnings?: string[];
     alternativeEntries?: Array<{ title: string; url: string }>;
 }
 
@@ -117,20 +119,60 @@ export async function queryMdnDocs(options: {
     const docs = await searchMdn(searchTerm, options.signal);
     if (docs.length === 0) return null;
 
-    const topDoc = docs[0]!;
+    const cleanLib = options.library.trim().replace(/^(?:mdn|html|css|webapi|dom):/i, '').trim().toLowerCase();
+    const cleanQuery = (options.query ?? '').trim().toLowerCase();
+    const queryTokens = cleanQuery.split(/[\s,:+/-]+/).filter((t) => t.length >= 2);
+
+    // 候选相关性加权打分：优先挑选标题/URL 与目标库名/API 名（如 "fetch"）精确契合的文档，
+    // 避免因为 query 中含有泛词（如 "request options"）误把无关的 HTTP OPTIONS 方法页当成第一名。
+    function scoreMdnDoc(doc: MdnDocumentItem): number {
+        let score = 0;
+        const lowerTitle = doc.title.toLowerCase();
+        const lowerUrl = doc.mdn_url.toLowerCase();
+        const lowerSummary = (doc.summary ?? '').toLowerCase();
+
+        if (cleanLib) {
+            if (lowerTitle === cleanLib || lowerTitle.startsWith(`${cleanLib}()`) || lowerTitle.startsWith(`${cleanLib}:`)) {
+                score += 100;
+            } else if (lowerTitle.includes(cleanLib)) {
+                score += 60;
+            } else if (lowerUrl.includes(`/${cleanLib}`) || lowerUrl.includes(`_${cleanLib}`)) {
+                score += 40;
+            }
+        }
+
+        for (const token of queryTokens) {
+            if (lowerTitle.includes(token)) score += 20;
+            if (lowerSummary.includes(token)) score += 5;
+        }
+
+        return score;
+    }
+
+    const scoredDocs = docs.map((doc, index) => ({ doc, score: scoreMdnDoc(doc), originalIndex: index }));
+    scoredDocs.sort((a, b) => b.score - a.score || a.originalIndex - b.originalIndex);
+
+    const topDoc = scoredDocs[0]!.doc;
+    const hasLibMatch = cleanLib ? (topDoc.title.toLowerCase().includes(cleanLib) || topDoc.mdn_url.toLowerCase().includes(cleanLib)) : true;
+    const confidence: 'high' | 'medium' | 'low' = hasLibMatch ? 'high' : 'medium';
+    const warnings: string[] = [];
+    if (!hasLibMatch && cleanLib) {
+        warnings.push(`Top MDN result "${topDoc.title}" did not directly match requested API "${cleanLib}".`);
+    }
+
     const docUrl = topDoc.mdn_url.startsWith('http')
         ? topDoc.mdn_url
         : `${MDN_HOST}${topDoc.mdn_url.startsWith('/') ? '' : '/'}${topDoc.mdn_url}`;
 
-    logTool(`MDN matched top document: "${topDoc.title}" -> ${docUrl}`);
+    logTool(`MDN matched top document: "${topDoc.title}" (score: ${scoredDocs[0]!.score}) -> ${docUrl}`);
     const content = await options.fetchWeb(docUrl);
     if (!content || content.trim().length < 20) {
         return null;
     }
 
-    const alternatives = docs.slice(1, 6).map((d) => ({
-        title: d.title,
-        url: d.mdn_url.startsWith('http') ? d.mdn_url : `${MDN_HOST}${d.mdn_url}`
+    const alternatives = scoredDocs.slice(1, 6).map((item) => ({
+        title: item.doc.title,
+        url: item.doc.mdn_url.startsWith('http') ? item.doc.mdn_url : `${MDN_HOST}${item.doc.mdn_url}`
     }));
 
     return {
@@ -139,6 +181,8 @@ export async function queryMdnDocs(options: {
         documentationUrl: docUrl,
         content: content.trim(),
         summary: topDoc.summary,
+        confidence,
+        warnings: warnings.length > 0 ? warnings : undefined,
         alternativeEntries: alternatives.length > 0 ? alternatives : undefined
     };
 }

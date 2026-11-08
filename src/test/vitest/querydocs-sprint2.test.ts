@@ -129,7 +129,7 @@ describe('queryDocs Sprint 2 Suite: DevDocs, MDN, Javadoc.io', () => {
             });
 
             expect(mockFetchWeb).toHaveBeenCalledWith(expect.objectContaining({
-                url: expect.stringContaining('https://javadoc.io/doc/com.google.guava/guava')
+                url: expect.stringMatching(/https:\/\/javadoc\.io\/(?:doc|static)\/com\.google\.guava\/guava/)
             }));
             expect(result.content[0].text).toContain('> Source: javadoc | Confidence: high');
             expect(result.content[0].text).toContain('Package com.google.common.collect');

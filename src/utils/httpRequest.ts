@@ -2,6 +2,7 @@ import axios, { AxiosError } from 'axios';
 import type { AxiosRequestConfig, AxiosResponse, RawAxiosRequestHeaders, ResponseType } from 'axios';
 import https from 'node:https';
 import http from 'node:http';
+import ipaddr from 'ipaddr.js';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import {
     RequestFilteringHttpAgent,
@@ -14,6 +15,28 @@ import { cachedDnsLookup, peekCachedLookup } from './dnsCache.js';
 import { detectSystemProxy, getSystemProxyFallbackUrl } from './systemProxy.js';
 import { metrics } from '../core/metrics.js';
 import { AppError } from '../core/errors.js';
+
+// 解决 request-filtering-agent 在对 IPv6 地址做 allowIPAddressList 检查时，
+// 若列表内为 IPv4 CIDR（如 198.18.0.0/15），内部 ipaddr.match() 跨协议族抛错并被误报为
+// "Invalid CIDR in allowIPAddressList" 刷屏告警。
+// 地址族不同时直接返回 false（IPv6 地址绝不可能匹配 IPv4 CIDR），安全且杜绝异常日志。
+const originalIpv6Match = ipaddr.IPv6.prototype.match;
+ipaddr.IPv6.prototype.match = function (this: ipaddr.IPv6, other: unknown, cidrRange?: number): boolean {
+    const target = cidrRange === undefined && Array.isArray(other) ? other[0] : other;
+    if (!target || typeof (target as { kind?: unknown }).kind !== 'function' || (target as { kind(): string }).kind() !== 'ipv6') {
+        return false;
+    }
+    return originalIpv6Match.call(this, other as [ipaddr.IPv6, number], cidrRange);
+};
+
+const originalIpv4Match = ipaddr.IPv4.prototype.match;
+ipaddr.IPv4.prototype.match = function (this: ipaddr.IPv4, other: unknown, cidrRange?: number): boolean {
+    const target = cidrRange === undefined && Array.isArray(other) ? other[0] : other;
+    if (!target || typeof (target as { kind?: unknown }).kind !== 'function' || (target as { kind(): string }).kind() !== 'ipv4') {
+        return false;
+    }
+    return originalIpv4Match.call(this, other as [ipaddr.IPv4, number], cidrRange);
+};
 
 // 默认请求超时：调用方未显式传 timeout 时使用，避免引擎请求永不超时拖垮整个搜索。
 export const DEFAULT_REQUEST_TIMEOUT_MS = 15000;

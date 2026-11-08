@@ -508,6 +508,73 @@ export async function resolveGoModuleRepository(packageName: string, signal?: Ab
     return meta?.repositoryUrl ?? null;
 }
 
+export const CORE_LANGUAGES_AND_TOOLS: Record<string, { repo: string; doc: string; home?: string }> = {
+    python: { repo: 'https://github.com/python/cpython', doc: 'https://docs.python.org/3' },
+    cpython: { repo: 'https://github.com/python/cpython', doc: 'https://docs.python.org/3' },
+    redis: { repo: 'https://github.com/redis/redis', doc: 'https://redis.io/docs' },
+    docker: { repo: 'https://github.com/docker/docker-ce', doc: 'https://docs.docker.com' },
+    nginx: { repo: 'https://github.com/nginx/nginx', doc: 'https://nginx.org/en/docs' },
+    mysql: { repo: 'https://github.com/mysql/mysql-server', doc: 'https://dev.mysql.com/doc' },
+    postgres: { repo: 'https://github.com/postgres/postgres', doc: 'https://www.postgresql.org/docs' },
+    postgresql: { repo: 'https://github.com/postgres/postgres', doc: 'https://www.postgresql.org/docs' },
+    sqlite: { repo: 'https://github.com/sqlite/sqlite', doc: 'https://www.sqlite.org/docs.html' },
+    linux: { repo: 'https://github.com/torvalds/linux', doc: 'https://www.kernel.org/doc/html/latest' },
+    git: { repo: 'https://github.com/git/git', doc: 'https://git-scm.com/doc' }
+};
+
+export const WELL_KNOWN_PYTHON_PACKAGES = new Set([
+    'fastapi', 'django', 'flask', 'numpy', 'pandas', 'scipy', 'torch', 'pytorch',
+    'tensorflow', 'keras', 'requests', 'urllib3', 'aiohttp', 'sqlalchemy', 'celery',
+    'pytest', 'scikit-learn', 'sklearn', 'matplotlib', 'seaborn', 'transformers',
+    'huggingface-hub', 'uvicorn', 'gunicorn', 'pydantic', 'alembic', 'scrapy',
+    'beautifulsoup4', 'bs4', 'pillow', 'wheel', 'setuptools', 'pip', 'poetry',
+    'flit', 'black', 'flake8', 'mypy', 'ruff', 'pylint', 'jupyter', 'ipython',
+    'nltk', 'spacy', 'opencv-python', 'xgboost', 'lightgbm', 'optuna', 'ray',
+    'dash', 'streamlit', 'gradio', 'fastcore', 'typer', 'click', 'rich', 'httpx',
+    'peft', 'accelerate', 'vllm', 'langchain', 'llama-index', 'dbt', 'airflow', 'prefect'
+]);
+
+export const WELL_KNOWN_RUST_CRATES = new Set([
+    'tokio', 'serde', 'serde_json', 'actix', 'actix-web', 'axum', 'clap', 'diesel',
+    'sqlx', 'anyhow', 'thiserror', 'rayon', 'crossbeam', 'futures', 'rand',
+    'reqwest', 'hyper', 'tower', 'tracing', 'syn', 'quote', 'proc-macro2',
+    'nom', 'regex', 'itertools', 'wasm-bindgen', 'prost', 'tonic'
+]);
+
+export const WELL_KNOWN_GO_MODULES = new Set([
+    'gin', 'fiber', 'beego', 'echo', 'chi', 'gorm', 'zap', 'logrus', 'viper', 'cobra',
+    'testify', 'go-redis'
+]);
+
+export const WELL_KNOWN_JAVA_PACKAGES = new Set([
+    'hutool', 'mybatis', 'mybatis-plus', 'guava', 'lombok', 'fastjson', 'fastjson2',
+    'druid', 'redisson', 'dubbo', 'spring-boot', 'spring-framework'
+]);
+
+export function isPythonPackageName(name: string): boolean {
+    const lower = name.toLowerCase();
+    return WELL_KNOWN_PYTHON_PACKAGES.has(lower)
+        || lower.startsWith('python-')
+        || lower.endsWith('-python')
+        || lower.startsWith('py-')
+        || lower.startsWith('py_');
+}
+
+export function isRustCrateName(name: string): boolean {
+    const lower = name.toLowerCase();
+    return WELL_KNOWN_RUST_CRATES.has(lower)
+        || lower.startsWith('rust-')
+        || lower.endsWith('-rs')
+        || lower.startsWith('rs_');
+}
+
+export function isGoModuleName(name: string): boolean {
+    const lower = name.toLowerCase();
+    return WELL_KNOWN_GO_MODULES.has(lower)
+        || lower.startsWith('go-')
+        || lower.endsWith('-go');
+}
+
 /**
  * 跨主流包管理器聚合查询元数据（npm -> PyPI -> crates.io -> Go module proxy -> Maven）。
  */
@@ -517,6 +584,18 @@ export async function resolvePackageMetadata(
 ): Promise<PackageMetadata | null> {
     const target = packageName.trim();
     if (!target) return null;
+
+    const lower = target.toLowerCase();
+    const core = CORE_LANGUAGES_AND_TOOLS[lower];
+    if (core) {
+        return {
+            source: 'official' as unknown as PackageMetadata['source'],
+            libraryId: target,
+            repositoryUrl: core.repo,
+            documentationUrl: core.doc,
+            homepageUrl: core.home ?? core.doc
+        };
+    }
 
     if (target.startsWith('crates:') || target.startsWith('crate:')) {
         return resolveCratesMetadata(target, options?.signal, options?.version);
@@ -532,6 +611,24 @@ export async function resolvePackageMetadata(
     }
     if (parseMavenCoordinates(target)) {
         return resolveMavenMetadata(target, options?.signal, options?.version);
+    }
+
+    // 生态感知重排序：若包名命中了知名生态，优先查询该生态
+    if (isPythonPackageName(lower)) {
+        const pypiMeta = await resolvePypiMetadata(target, options?.signal, options?.version);
+        if (pypiMeta && (pypiMeta.documentationUrl || pypiMeta.repositoryUrl)) {
+            return pypiMeta;
+        }
+    } else if (isRustCrateName(lower)) {
+        const cratesMeta = await resolveCratesMetadata(target, options?.signal, options?.version);
+        if (cratesMeta && (cratesMeta.documentationUrl || cratesMeta.repositoryUrl)) {
+            return cratesMeta;
+        }
+    } else if (isGoModuleName(lower)) {
+        const goMeta = await resolveGoModuleMetadata(target, options?.signal);
+        if (goMeta && goMeta.documentationUrl) {
+            return goMeta;
+        }
     }
 
     const npmMeta = await resolveNpmMetadata(target, options?.signal, options?.version);
@@ -575,6 +672,7 @@ export async function fetchPackageDocsFallback(options: {
         ? rawTarget.replace(/^\/+/, '').split('/')[1] || rawTarget.replace(/^\/+/, '')
         : rawTarget;
     const displayTarget = version ? `${cleanTarget}@${version}` : cleanTarget;
+    const lowerClean = cleanTarget.toLowerCase();
 
     const buildWarning = (registryName: string, repoUrl: string): string[] => {
         if (options.reasonHint === '') {
@@ -585,7 +683,107 @@ export async function fetchPackageDocsFallback(options: {
         return [`${reason} Fallback to ${registryName} package repository (${repoUrl}) README${suffix}.`];
     };
 
-    // 1. 尝试 npm 注册表
+    // 0. 核心语言/工具直通（如 python, redis, docker, nginx 等）
+    const core = CORE_LANGUAGES_AND_TOOLS[lowerClean];
+    if (core) {
+        const readme = await options.fetchGithub(core.repo);
+        if (readme && readme.trim().length > 20) {
+            return {
+                source: 'github-readme',
+                confidence: 'high',
+                libraryId: displayTarget,
+                repositoryUrl: core.repo,
+                readme: readme.trim(),
+                documentationUrl: core.doc,
+                warnings: buildWarning('official repository', core.repo)
+            };
+        }
+    }
+
+    const hasExplicitPrefix = /^(?:npm|pypi|crates?|go|maven):/i.test(rawTarget);
+    const preferPython = isPythonPackageName(lowerClean) || rawTarget.startsWith('pypi:');
+    const preferRust = isRustCrateName(lowerClean) || rawTarget.startsWith('crate:') || rawTarget.startsWith('crates:');
+    const preferGo = isGoModuleName(lowerClean) || rawTarget.startsWith('go:');
+    const defaultConfidence: 'high' | 'medium' = hasExplicitPrefix ? 'high' : 'medium';
+
+    const buildEcosystemWarning = (registry: string, repo: string): string[] => {
+        if (options.reasonHint === '') {
+            return [];
+        }
+        const base = buildWarning(registry, repo);
+        if (!hasExplicitPrefix) {
+            base.push(`Package "${cleanTarget}" was resolved in ${registry}. If you intended another ecosystem (such as npm, PyPI, crates.io, or Go), specify with prefix (e.g. "pypi:${cleanTarget}").`);
+        }
+        return base;
+    };
+
+    // 1. 如果优先 Python 生态（如 fastapi, django, pytest 等）
+    if (preferPython) {
+        try {
+            const pypiRepo = await resolvePypiRepository(cleanTarget, options.signal, version);
+            if (pypiRepo) {
+                const readme = await options.fetchGithub(pypiRepo);
+                if (readme && readme.trim().length > 50) {
+                    return {
+                        source: 'pypi',
+                        confidence: hasExplicitPrefix || WELL_KNOWN_PYTHON_PACKAGES.has(lowerClean) ? 'high' : defaultConfidence,
+                        libraryId: displayTarget,
+                        repositoryUrl: pypiRepo,
+                        readme: readme.trim(),
+                        warnings: buildEcosystemWarning('PyPI', pypiRepo)
+                    };
+                }
+            }
+        } catch {
+            // 继续向下尝试其他源
+        }
+    }
+
+    // 2. 如果优先 Rust 生态
+    if (preferRust) {
+        try {
+            const cratesRepo = await resolveCratesRepository(cleanTarget, options.signal);
+            if (cratesRepo) {
+                const readme = await options.fetchGithub(cratesRepo);
+                if (readme && readme.trim().length > 50) {
+                    return {
+                        source: 'crates',
+                        confidence: hasExplicitPrefix || WELL_KNOWN_RUST_CRATES.has(lowerClean) ? 'high' : defaultConfidence,
+                        libraryId: displayTarget,
+                        repositoryUrl: cratesRepo,
+                        readme: readme.trim(),
+                        warnings: buildEcosystemWarning('crates.io', cratesRepo)
+                    };
+                }
+            }
+        } catch {
+            // 继续向下尝试其他源
+        }
+    }
+
+    // 3. 如果优先 Go 生态
+    if (preferGo) {
+        try {
+            const goRepo = await resolveGoModuleRepository(cleanTarget, options.signal);
+            if (goRepo) {
+                const readme = await options.fetchGithub(goRepo);
+                if (readme && readme.trim().length > 50) {
+                    return {
+                        source: 'go',
+                        confidence: hasExplicitPrefix || WELL_KNOWN_GO_MODULES.has(lowerClean) ? 'high' : defaultConfidence,
+                        libraryId: displayTarget,
+                        repositoryUrl: goRepo,
+                        readme: readme.trim(),
+                        warnings: buildEcosystemWarning('Go module proxy', goRepo)
+                    };
+                }
+            }
+        } catch {
+            // 继续向下尝试其他源
+        }
+    }
+
+    // 4. 常规回退链：npm 注册表
     try {
         const npmRepo = await resolveNpmRepository(cleanTarget, options.signal, version);
         if (npmRepo) {
@@ -593,11 +791,11 @@ export async function fetchPackageDocsFallback(options: {
             if (readme && readme.trim().length > 50) {
                 return {
                     source: 'npm',
-                    confidence: 'high',
+                    confidence: hasExplicitPrefix ? 'high' : 'medium',
                     libraryId: displayTarget,
                     repositoryUrl: npmRepo,
                     readme: readme.trim(),
-                    warnings: buildWarning('npm', npmRepo)
+                    warnings: buildEcosystemWarning('npm', npmRepo)
                 };
             }
         }
@@ -605,67 +803,73 @@ export async function fetchPackageDocsFallback(options: {
         // npm fallback failed, continue to PyPI
     }
 
-    // 2. 尝试 PyPI
-    try {
-        const pypiRepo = await resolvePypiRepository(cleanTarget, options.signal, version);
-        if (pypiRepo) {
-            const readme = await options.fetchGithub(pypiRepo);
-            if (readme && readme.trim().length > 50) {
-                return {
-                    source: 'pypi',
-                    confidence: 'high',
-                    libraryId: displayTarget,
-                    repositoryUrl: pypiRepo,
-                    readme: readme.trim(),
-                    warnings: buildWarning('PyPI', pypiRepo)
-                };
+    // 5. 常规回退链：PyPI（若前置未命中）
+    if (!preferPython) {
+        try {
+            const pypiRepo = await resolvePypiRepository(cleanTarget, options.signal, version);
+            if (pypiRepo) {
+                const readme = await options.fetchGithub(pypiRepo);
+                if (readme && readme.trim().length > 50) {
+                    return {
+                        source: 'pypi',
+                        confidence: defaultConfidence,
+                        libraryId: displayTarget,
+                        repositoryUrl: pypiRepo,
+                        readme: readme.trim(),
+                        warnings: buildEcosystemWarning('PyPI', pypiRepo)
+                    };
+                }
             }
+        } catch {
+            // PyPI fallback failed
         }
-    } catch {
-        // PyPI fallback failed
     }
 
-    // 3. 尝试 crates.io（Rust）
-    try {
-        const cratesRepo = await resolveCratesRepository(cleanTarget, options.signal);
-        if (cratesRepo) {
-            const readme = await options.fetchGithub(cratesRepo);
-            if (readme && readme.trim().length > 50) {
-                return {
-                    source: 'crates',
-                    confidence: 'high',
-                    libraryId: displayTarget,
-                    repositoryUrl: cratesRepo,
-                    readme: readme.trim(),
-                    warnings: buildWarning('crates.io', cratesRepo)
-                };
+    // 6. 常规回退链：crates.io（Rust）
+    if (!preferRust) {
+        try {
+            const cratesRepo = await resolveCratesRepository(cleanTarget, options.signal);
+            if (cratesRepo) {
+                const readme = await options.fetchGithub(cratesRepo);
+                if (readme && readme.trim().length > 50) {
+                    return {
+                        source: 'crates',
+                        confidence: defaultConfidence,
+                        libraryId: displayTarget,
+                        repositoryUrl: cratesRepo,
+                        readme: readme.trim(),
+                        warnings: buildEcosystemWarning('crates.io', cratesRepo)
+                    };
+                }
             }
+        } catch {
+            // crates.io fallback failed
         }
-    } catch {
-        // crates.io fallback failed
     }
 
-    // 4. 尝试 Go module proxy（仅 github.com/gitlab.com 模块可直接推导仓库）
-    try {
-        const goRepo = await resolveGoModuleRepository(cleanTarget, options.signal);
-        if (goRepo) {
-            const readme = await options.fetchGithub(goRepo);
-            if (readme && readme.trim().length > 50) {
-                return {
-                    source: 'go',
-                    confidence: 'high',
-                    libraryId: displayTarget,
-                    repositoryUrl: goRepo,
-                    readme: readme.trim(),
-                    warnings: buildWarning('Go module proxy', goRepo)
-                };
+    // 7. 常规回退链：Go module proxy
+    if (!preferGo) {
+        try {
+            const goRepo = await resolveGoModuleRepository(cleanTarget, options.signal);
+            if (goRepo) {
+                const readme = await options.fetchGithub(goRepo);
+                if (readme && readme.trim().length > 50) {
+                    return {
+                        source: 'go',
+                        confidence: defaultConfidence,
+                        libraryId: displayTarget,
+                        repositoryUrl: goRepo,
+                        readme: readme.trim(),
+                        warnings: buildEcosystemWarning('Go module proxy', goRepo)
+                    };
+                }
             }
+        } catch {
+            // Go module fallback failed
         }
-    } catch {
-        // Go module fallback failed
     }
 
-    // 5. 尝试 Maven Central（Java/Kotlin/Scala）
+    // 8. 常规回退链：Maven Central（Java/Kotlin/Scala）
     try {
         const mavenRepo = await resolveMavenRepository(cleanTarget, options.signal, version);
         if (mavenRepo) {
@@ -673,11 +877,11 @@ export async function fetchPackageDocsFallback(options: {
             if (readme && readme.trim().length > 50) {
                 return {
                     source: 'maven',
-                    confidence: 'high',
+                    confidence: defaultConfidence,
                     libraryId: displayTarget,
                     repositoryUrl: mavenRepo,
                     readme: readme.trim(),
-                    warnings: buildWarning('Maven Central', mavenRepo)
+                    warnings: buildEcosystemWarning('Maven Central', mavenRepo)
                 };
             }
         }

@@ -108,7 +108,8 @@ export async function fetchJsDelivr(pathAfterGh: string, budget: ContentBudget, 
         }
 
         const timeout = attemptTimeoutMs(budget, 5000);
-        const url = `https://${host}/gh/${pathAfterGh}`;
+        const normalizedPath = pathAfterGh.startsWith('/') ? pathAfterGh : `/${pathAfterGh}`;
+        const url = `https://${host}/gh${normalizedPath}`;
         try {
             return await requestWithSafeRedirects(
                 'GET',
@@ -138,7 +139,9 @@ export type ReadmeSource =
 export async function fetchReadmeSource(source: ReadmeSource, budget: ContentBudget): Promise<ReadmeFetchOutcome> {
     const isRaw = source.kind === 'raw';
     const label = isRaw ? 'raw.githubusercontent.com' : 'jsDelivr CDN';
-    const displayUrl = isRaw ? source.url : `https://cdn.jsdelivr.net/gh/${source.path}`;
+    const displayUrl = isRaw
+        ? source.url
+        : `https://cdn.jsdelivr.net/gh${source.path.startsWith('/') ? source.path : `/${source.path}`}`;
 
     const timeout = attemptTimeoutMs(budget, isRaw ? 8000 : 5000);
     const budgetController = new AbortController();

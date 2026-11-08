@@ -21,11 +21,14 @@ describe('github content budget', () => {
         expect(contentBudgetMs(env({ GITHUB_CONTENT_CDN_FIRST: 'true', GITHUB_CONTENT_BUDGET_MS: '8000' }))).toBe(8000);
     });
 
-    it('builds the same jsDelivr path on alternate hosts', () => {
-        expect(buildJsdelivrUrl('cdn.jsdelivr.net', 'o', 'r', '@main', 'README.md'))
-            .toBe('https://cdn.jsdelivr.net/gh/o/r@main/README.md');
-        expect(buildJsdelivrUrl('fastly.jsdelivr.net', 'o', 'r', '', 'a/b.ts'))
-            .toBe('https://fastly.jsdelivr.net/gh/o/r/a/b.ts');
+    it('builds the same jsDelivr path on alternate hosts and never produces double slashes', () => {
+        const url1 = buildJsdelivrUrl('cdn.jsdelivr.net', 'o', 'r', '@main', 'README.md');
+        expect(url1).toBe('https://cdn.jsdelivr.net/gh/o/r@main/README.md');
+        expect(url1).not.toContain('gh//');
+
+        const url2 = buildJsdelivrUrl('fastly.jsdelivr.net', 'o', 'r', '', 'a/b.ts');
+        expect(url2).toBe('https://fastly.jsdelivr.net/gh/o/r/a/b.ts');
+        expect(url2).not.toContain('gh//');
     });
 });
 

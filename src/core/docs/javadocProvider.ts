@@ -9,6 +9,7 @@
 
 import { parseMavenCoordinates } from './packageDocsFallback.js';
 import { logTool } from '../../tools/toolShared.js';
+import { requestDirectFirst, buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 export interface JavadocResult {
     source: 'javadoc';
@@ -35,6 +36,7 @@ export function isLikelyJavadocTarget(target: string): boolean {
 export async function queryJavadocDocs(options: {
     library: string;
     version?: string;
+    query?: string;
     signal?: AbortSignal;
     fetchWeb: (url: string) => Promise<string | null>;
 }): Promise<JavadocResult | null> {
@@ -45,10 +47,70 @@ export async function queryJavadocDocs(options: {
     }
 
     const version = options.version?.trim() || parsed.version || 'latest';
-    const docUrl = `${JAVADOC_BASE}/${parsed.groupId}/${parsed.artifactId}/${encodeURIComponent(version)}/index.html`;
+    const wrapperUrl = `${JAVADOC_BASE}/${parsed.groupId}/${parsed.artifactId}/${encodeURIComponent(version)}/index.html`;
 
-    logTool(`Querying Javadoc.io: ${docUrl}`);
-    const content = await options.fetchWeb(docUrl);
+    let targetDocUrl = wrapperUrl;
+    let staticBase: string | null = null;
+
+    // 探测 Javadoc.io 包装页中的实际静态资源目录（/static/<groupId>/<artifactId>/<version>）
+    try {
+        const resp = await requestDirectFirst(
+            'GET',
+            wrapperUrl,
+            (forceDirect) => buildAxiosRequestOptions({
+                timeout: 5000,
+                signal: options.signal,
+                forceDirect
+            }),
+            `Javadoc wrapper for ${parsed.groupId}:${parsed.artifactId}`
+        );
+        if (resp.status === 200 && typeof resp.data === 'string') {
+            const iframeMatch = resp.data.match(/<iframe[^>]+src="(\/static\/[^"]+)"/i);
+            if (iframeMatch?.[1]) {
+                staticBase = `https://javadoc.io${iframeMatch[1].replace(/\/[^/]+$/, '')}`;
+                targetDocUrl = `${staticBase}/index.html`;
+            }
+        }
+    } catch {
+        // 请求包装页异常时继续使用默认 wrapperUrl
+    }
+
+    // 若带有具体类名/方法 query，尝试定位到具体的类文档（如 ImmutableList -> com/google/common/collect/ImmutableList.html）
+    const cleanQuery = (options.query ?? '').trim().replace(/[()[\]{}#]/g, ' ').split(/\s+/)[0]?.trim();
+    if (staticBase && cleanQuery && /^[A-Za-z0-9_$.]+$/.test(cleanQuery)) {
+        if (cleanQuery.includes('.')) {
+            const directClassUrl = `${staticBase}/${cleanQuery.replace(/\./g, '/')}.html`;
+            const testContent = await options.fetchWeb(directClassUrl);
+            if (testContent && testContent.trim().length > 100) {
+                targetDocUrl = directClassUrl;
+            }
+        } else {
+            try {
+                const searchResp = await requestDirectFirst(
+                    'GET',
+                    `${staticBase}/type-search-index.js`,
+                    (forceDirect) => buildAxiosRequestOptions({
+                        timeout: 5000,
+                        signal: options.signal,
+                        forceDirect
+                    }),
+                    `Javadoc type-search-index for ${parsed.artifactId}`
+                );
+                if (searchResp.status === 200 && typeof searchResp.data === 'string') {
+                    const match = searchResp.data.match(new RegExp(`{"p":"([^"]+)","l":"${cleanQuery}"}`, 'i'));
+                    if (match?.[1]) {
+                        const packagePath = match[1].replace(/\./g, '/');
+                        targetDocUrl = `${staticBase}/${packagePath}/${cleanQuery}.html`;
+                    }
+                }
+            } catch {
+                // type-search-index 探测失败（例如 JDK 8 Javadoc），继续使用 targetDocUrl
+            }
+        }
+    }
+
+    logTool(`Querying Javadoc.io: ${targetDocUrl}`);
+    const content = await options.fetchWeb(targetDocUrl);
     if (!content || content.trim().length < 20) {
         return null;
     }
@@ -63,7 +125,7 @@ export async function queryJavadocDocs(options: {
         groupId: parsed.groupId,
         artifactId: parsed.artifactId,
         version: version !== 'latest' ? version : undefined,
-        documentationUrl: `https://javadoc.io/doc/${parsed.groupId}/${parsed.artifactId}/${version}`,
+        documentationUrl: targetDocUrl,
         content: content.trim()
     };
 }

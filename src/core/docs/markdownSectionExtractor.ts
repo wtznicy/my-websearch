@@ -40,7 +40,10 @@ export function extractMarkdownHeadings(markdown: string): MarkdownHeading[] {
         const match = /^(#{1,4})\s+(.+)$/.exec(line);
         if (match) {
             const level = match[1]!.length;
-            const title = match[2]!.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').trim();
+            const title = match[2]!
+                .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+                .replace(/^[§#\s]+/, '')
+                .trim();
             headings.push({
                 level,
                 title,
@@ -95,8 +98,8 @@ export function extractRelevantSections(
         return { content: trimmed, isFocused: false };
     }
 
-    const cleanQuery = query.trim().toLowerCase();
-    const queryTokens = cleanQuery.split(/[\s,:+/-]+/).filter((t) => t.length >= 2);
+    const cleanQuery = query.trim().toLowerCase().replace(/[!！?？]/g, ' ');
+    const queryTokens = cleanQuery.split(/[\s,:+/-]+/).filter((t) => t.length >= 2 || /[\u4e00-\u9fa5]/.test(t));
     if (queryTokens.length === 0) {
         return { content: trimmed, isFocused: false };
     }
@@ -109,27 +112,33 @@ export function extractRelevantSections(
         return { content: trimmed, isFocused: false };
     }
 
-    // 1. 拆分 Preamble（首个 H2 之前的所有内容，通常含 H1、简介、安装与快速上手）
-    const firstH2Index = headings.findIndex((h) => h.level === 2);
-    const preambleEndLine = firstH2Index !== -1 ? headings[firstH2Index]!.lineIndex : headings[0]!.lineIndex;
+    // 1. 动态确定主要章节的切分层级（优先 H2，若无 H2 则取 H3，否则取出现频次最高的最小层级）
+    const availableLevels = headings.map((h) => h.level);
+    const hasH2 = availableLevels.includes(2);
+    const hasH3 = availableLevels.includes(3);
+    const primaryLevel = hasH2 ? 2 : (hasH3 ? 3 : Math.min(...availableLevels));
+    const primaryHeadings = headings.filter((h) => h.level === primaryLevel);
+
+    // 拆分 Preamble（首个主标题之前的所有内容，通常含 H1、简介、安装与快速上手）
+    const firstPrimaryIndex = headings.findIndex((h) => h.level === primaryLevel);
+    const preambleEndLine = firstPrimaryIndex !== -1 ? headings[firstPrimaryIndex]!.lineIndex : headings[0]!.lineIndex;
     const preambleLines = lines.slice(0, preambleEndLine);
     const preambleText = preambleLines.join('\n').trim();
 
-    // 2. 按 H2 划分主要章节块
+    // 2. 按主标题划分主要章节块
     const sectionBlocks: MarkdownSectionBlock[] = [];
-    const h2Headings = headings.filter((h) => h.level === 2);
 
-    for (let i = 0; i < h2Headings.length; i++) {
-        const currentH2 = h2Headings[i]!;
-        const nextH2 = h2Headings[i + 1];
-        const startLine = currentH2.lineIndex;
-        const endLine = nextH2 ? nextH2.lineIndex : lines.length;
+    for (let i = 0; i < primaryHeadings.length; i++) {
+        const currentHeading = primaryHeadings[i]!;
+        const nextHeading = primaryHeadings[i + 1];
+        const startLine = currentHeading.lineIndex;
+        const endLine = nextHeading ? nextHeading.lineIndex : lines.length;
         const sectionLines = lines.slice(startLine, endLine);
         const sectionBody = sectionLines.slice(1).join('\n');
-        const score = scoreSectionMatch(currentH2.title, sectionBody, queryTokens);
+        const score = scoreSectionMatch(currentHeading.title, sectionBody, queryTokens);
 
         sectionBlocks.push({
-            heading: currentH2,
+            heading: currentHeading,
             lines: sectionLines,
             score
         });
@@ -174,9 +183,9 @@ export function extractRelevantSections(
     }
 
     // 附加精炼的未展示章节目录，方便调用者知晓全貌
-    const otherH2s = h2Headings.filter((h) => !matchedTitles.includes(h.title)).map((h) => h.title);
-    if (otherH2s.length > 0) {
-        resultParts.push('\n---\n**Other Document Sections:** ' + otherH2s.slice(0, 8).map((t) => `\`${t}\``).join(' • ') + (otherH2s.length > 8 ? ` *(and ${otherH2s.length - 8} more)*` : ''));
+    const otherHeadings = primaryHeadings.filter((h) => !matchedTitles.includes(h.title)).map((h) => h.title);
+    if (otherHeadings.length > 0) {
+        resultParts.push('\n---\n**Other Document Sections:** ' + otherHeadings.slice(0, 8).map((t) => `\`${t}\``).join(' • ') + (otherHeadings.length > 8 ? ` *(and ${otherHeadings.length - 8} more)*` : ''));
     }
 
     return {

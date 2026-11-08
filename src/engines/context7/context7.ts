@@ -405,6 +405,66 @@ export async function searchContext7Libraries(
     };
 }
 
+export const COMMON_TECH_TERMS_MAP: Record<string, string> = {
+    '装饰器': 'decorator',
+    '中间件': 'middleware',
+    '异步': 'asyncio',
+    '拦截器': 'interceptor',
+    '依赖注入': 'dependency injection',
+    '并发': 'concurrency',
+    '线程池': 'thread pool',
+    '连接池': 'connection pool',
+    '路由': 'routing',
+    '微服务': 'microservice',
+    '序列化': 'serialization',
+    '反序列化': 'deserialization',
+    '分页': 'pagination',
+    '事务': 'transaction',
+    '缓存': 'cache',
+    '配置': 'configuration',
+    '认证': 'authentication',
+    '鉴权': 'authorization',
+    '权限': 'permission',
+    '生命周期': 'lifecycle',
+    '钩子': 'hook',
+    '状态管理': 'state management',
+    '虚拟DOM': 'virtual dom',
+    '响应式': 'reactivity',
+    '组件': 'component',
+    '指令': 'directive',
+    '管道': 'pipeline',
+    '超时': 'timeout',
+    '重试': 'retry',
+    '限流': 'rate limit',
+    '熔断': 'circuit breaker',
+    '降级': 'fallback',
+    '反向代理': 'reverse proxy',
+    '负载均衡': 'load balance',
+    '索引': 'index',
+    '主键': 'primary key',
+    '外键': 'foreign key',
+    '锁': 'lock'
+};
+
+export function translateChineseQueryTerm(query: string): string | null {
+    if (!/[\u4e00-\u9fa5]/.test(query)) {
+        return null;
+    }
+    let translated = query;
+    let matched = false;
+    for (const [cn, en] of Object.entries(COMMON_TECH_TERMS_MAP)) {
+        if (translated.includes(cn)) {
+            translated = translated.replaceAll(cn, ` ${en} `);
+            matched = true;
+        }
+    }
+    if (matched) {
+        const cleaned = translated.trim().replace(/\s+/g, ' ');
+        return cleaned !== query ? cleaned : null;
+    }
+    return null;
+}
+
 /**
  * 获取某个库的文档片段（代码示例 + 说明文本）。
  * libraryId 形如 /vercel/next.js、/packages/express 或带版本 /vercel/next.js@v15.1.8。
@@ -437,13 +497,58 @@ export async function fetchContext7Docs(
     const cleanQuery = (query ?? '').trim();
 
     const url = `${CONTEXT7_BASE_URL}/api/${CONTEXT7_API_VERSION}/context`;
-    const response = await context7GetWithRetry(url, {
-        params: {
-            libraryId: cleanLibraryId,
-            query: cleanQuery || 'overview',
-            type: 'json'
+    let response: AxiosResponse;
+    try {
+        response = await context7GetWithRetry(url, {
+            params: {
+                libraryId: cleanLibraryId,
+                query: cleanQuery || 'overview',
+                type: 'json'
+            }
+        }, 3, getImpl);
+    } catch (error: unknown) {
+        const errObj = error as { response?: { status?: number; data?: unknown } } | undefined;
+        const errData = errObj?.response?.data as { error?: string; message?: string } | undefined;
+
+        // 上游库存在，但该特定 query 未匹配到任何文档片段（HTTP 404 + no_relevant_snippets）
+        if (errObj?.response?.status === 404 && errData?.error === 'no_relevant_snippets') {
+            // 步骤 A：若查询含中文技术词，尝试替换为标准英文术语重试
+            const translatedTerm = cleanQuery ? translateChineseQueryTerm(cleanQuery) : null;
+            if (translatedTerm && translatedTerm !== cleanQuery) {
+                try {
+                    const retried = await fetchContext7Docs(cleanLibraryId, translatedTerm, limit, redirectHop, getImpl);
+                    return {
+                        ...retried,
+                        query: cleanQuery,
+                        warnings: [
+                            ...(retried.warnings ?? []),
+                            `Query automatically mapped from "${cleanQuery}" to "${translatedTerm}" for Context7 documentation search.`
+                        ]
+                    };
+                } catch {
+                    // 英文重试失败，继续降级到 overview
+                }
+            }
+
+            // 步骤 B：自动回退到库概览 (overview)，杜绝抛出 404 导致外层走 npm 错配假包
+            if (cleanQuery && cleanQuery !== 'overview') {
+                try {
+                    const overviewResult = await fetchContext7Docs(cleanLibraryId, 'overview', limit, redirectHop, getImpl);
+                    return {
+                        ...overviewResult,
+                        query: cleanQuery,
+                        warnings: [
+                            ...(overviewResult.warnings ?? []),
+                            `No specific documentation snippets in "${cleanLibraryId}" matched query "${cleanQuery}". Showing library overview instead. Try searching with English keywords or specific API names.`
+                        ]
+                    };
+                } catch {
+                    // overview 亦失败则抛出原错误
+                }
+            }
         }
-    }, 3, getImpl);
+        throw error;
+    }
 
     const data = (response.data || {}) as {
         codeSnippets?: Context7CodeSnippet[];
@@ -487,11 +592,36 @@ export async function fetchContext7Docs(
         });
     }
 
+    // 代码片段按 codeTitle + codeList 去重（解决同一 API 内容重复返回问题）
+    const seenCode = new Set<string>();
+    const dedupedCodeSnippets: Context7CodeSnippet[] = [];
+    for (const rawSnippet of data.codeSnippets ?? []) {
+        const normalized = normalizeCodeSnippetPageTitle(rawSnippet as Context7RawCodeSnippet);
+        const codeKey = `${normalized.codeTitle}::${normalized.codeList.map((c) => c.code.trim()).join(';')}`;
+        if (!seenCode.has(codeKey)) {
+            seenCode.add(codeKey);
+            dedupedCodeSnippets.push(normalized);
+        }
+        if (dedupedCodeSnippets.length >= limit) break;
+    }
+
+    // 信息片段按 title + content 去重
+    const seenInfo = new Set<string>();
+    const dedupedInfoSnippets: Context7InfoSnippet[] = [];
+    for (const info of data.infoSnippets ?? []) {
+        const infoKey = `${info.title.trim()}::${info.content.trim()}`;
+        if (!seenInfo.has(infoKey)) {
+            seenInfo.add(infoKey);
+            dedupedInfoSnippets.push(info);
+        }
+        if (dedupedInfoSnippets.length >= limit) break;
+    }
+
     return {
         libraryId: cleanLibraryId,
         query: cleanQuery,
-        codeSnippets: (data.codeSnippets ?? []).slice(0, limit).map((snippet) => normalizeCodeSnippetPageTitle(snippet as Context7RawCodeSnippet)),
-        infoSnippets: (data.infoSnippets ?? []).slice(0, limit),
+        codeSnippets: dedupedCodeSnippets,
+        infoSnippets: dedupedInfoSnippets,
         ...(data.redirectUrl ? { redirectUrl: data.redirectUrl } : {})
     };
 }
