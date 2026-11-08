@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { isContext7QuotaExhaustedError, Context7DocsResult, Context7InfoSnippet, Context7CodeSnippet } from '../../engines/context7/context7.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
-import { fetchPackageDocsFallback, PackageDocsFallbackResult } from '../../core/docs/packageDocsFallback.js';
+import { fetchPackageDocsFallback, PackageDocsFallbackResult, resolvePackageMetadata } from '../../core/docs/packageDocsFallback.js';
 import { docsCacheKey, getDocsCache, setDocsCache } from '../../core/docs/docsCache.js';
 import { metrics } from '../../core/metrics.js';
 import {
@@ -13,17 +13,20 @@ import {
     TOOL_ANNOTATION_HINTS,
     capTextResponse
 } from '../toolShared.js';
+import { detectUnknownParameters } from '../../utils/toolValidation.js';
 
 export type QueryDocsFormattedInput = {
     libraryId: string;
     query?: string;
-    source?: 'context7' | 'npm' | 'pypi' | 'crates' | 'go' | 'maven' | 'github-readme';
+    source?: 'context7' | 'npm' | 'pypi' | 'crates' | 'go' | 'maven' | 'github-readme' | 'official' | 'docs.rs' | 'pkg.go.dev' | 'github';
     confidence?: 'high' | 'medium' | 'low';
     warnings?: string[];
     resolvedFrom?: string;
     redirectedFrom?: string;
     repositoryUrl?: string;
+    documentationUrl?: string;
     readme?: string;
+    content?: string;
     infoSnippets?: Context7InfoSnippet[];
     codeSnippets?: Context7CodeSnippet[];
     alternativeLibraries?: Array<{ id: string; title: string; description?: string }>;
@@ -42,6 +45,9 @@ export function formatQueryDocsMarkdown(result: QueryDocsFormattedInput): string
     const source = result.source ?? 'context7';
     const confidence = result.confidence ?? 'high';
     lines.push(`> Source: ${source} | Confidence: ${confidence}`);
+    if (result.documentationUrl) {
+        lines.push(`> Documentation: ${result.documentationUrl}`);
+    }
     if (result.repositoryUrl) {
         lines.push(`> Repository: ${result.repositoryUrl}`);
     }
@@ -55,6 +61,11 @@ export function formatQueryDocsMarkdown(result: QueryDocsFormattedInput): string
             lines.push(`> ⚠️ **Warning:** ${warning}`);
         }
         lines.push('');
+    }
+
+    if (result.content) {
+        lines.push(result.content);
+        return lines.join('\n').trim();
     }
 
     if (result.readme) {
@@ -136,26 +147,34 @@ export function formatContext7DocsAsMarkdown(result: Context7DocsResult): string
     });
 }
 
-import { detectUnknownParameters } from '../../utils/toolValidation.js';
-
 export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRuntime): void {
     server.registerTool(
         "queryDocs",
         {
-            description: "Get official docs, API references, and code snippets for libraries/packages (e.g. 'react', 'fastapi', 'next.js'). Queries Context7 with fallback to npm/PyPI registry and GitHub README. Direct, no proxy needed.",
+            description: "Get official docs, API references, and code snippets for libraries/packages (e.g. 'react', 'fastapi', 'tokio'). Supports multi-source selection ('auto', 'official', 'docs.rs', 'pkg.go.dev', 'context7', 'npm', 'pypi'). Direct, no proxy needed.",
             inputSchema: z.object({
-                library: z.string().min(1).optional().describe("Library or package name (e.g. 'next.js', 'react', 'fastapi') or exact Context7 library ID (e.g. '/vercel/next.js', version-pinnable like '/vercel/next.js@v15.1.8')"),
+                library: z.string().min(1).optional().describe("Library or package name (e.g. 'next.js', 'react', 'fastapi', 'tokio') or exact Context7 library ID (e.g. '/vercel/next.js', version-pinnable like '/vercel/next.js@v15.1.8')"),
                 libraryId: z.string().min(1).optional().describe("Legacy alias for library (e.g. /vercel/next.js)"),
                 version: z.string().min(1).optional().describe("Optional explicit version (e.g. '14.2.0' or 'v15.1.8'); overrides an @version embedded in library"),
                 query: z.string().min(1).optional().describe("The question, feature, or task to get relevant documentation for (optional; defaults to an overview when omitted, e.g. 'how to set up middleware with auth')"),
-                limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets to return (default 5)"),
+                source: z.enum([
+                    'auto',
+                    'context7',
+                    'official',
+                    'docs.rs',
+                    'pkg.go.dev',
+                    'npm',
+                    'pypi',
+                    'github'
+                ]).optional().default('auto').describe("Documentation source: 'auto' (default: Context7 with smart fallback to official doc site and registries), 'official' (direct official documentation website), 'docs.rs' (Rust), 'pkg.go.dev' (Go), 'context7', 'npm', 'pypi', 'github'"),
+                limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets or sections to return (default 5)"),
                 cache: z.enum(['default', 'reload']).optional().describe("Use the 24h local docs cache (default) or bypass/refresh it with 'reload'"),
                 strict: z.boolean().optional().describe("If true, rejects low-confidence library name matches with an error instead of returning loosely matched candidate docs (default false)")
             }).passthrough(),
             annotations: TOOL_ANNOTATION_HINTS
         },
         async (rawArgs, extra) => {
-            const { library, libraryId, version, query, limit, strict, cache } = rawArgs as {
+            const { library, libraryId, version, query, limit, strict, cache, source: rawSource } = rawArgs as {
                 library?: string;
                 libraryId?: string;
                 version?: string;
@@ -163,8 +182,20 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 limit?: number;
                 strict?: boolean;
                 cache?: 'default' | 'reload';
+                source?: 'auto' | 'context7' | 'official' | 'docs.rs' | 'pkg.go.dev' | 'npm' | 'pypi' | 'github';
             } & Record<string, unknown>;
-            const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, ['library', 'libraryId', 'version', 'query', 'limit', 'strict', 'cache']);
+
+            const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, [
+                'library',
+                'libraryId',
+                'version',
+                'query',
+                'limit',
+                'strict',
+                'cache',
+                'source'
+            ]);
+
             const target = (library ?? libraryId ?? '').trim();
             if (!target) {
                 return {
@@ -173,9 +204,10 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 };
             }
 
+            const reqSource = (rawSource || 'auto').toLowerCase();
             const signal = extra?.signal;
 
-            const cacheKey = docsCacheKey({ library: target, version, query, limit, strict });
+            const cacheKey = docsCacheKey({ library: target, version, query, limit, strict, source: reqSource });
             if (cache !== 'reload') {
                 const cached = getDocsCache(cacheKey);
                 if (cached) {
@@ -190,7 +222,278 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 }
             }
 
-            // 1. 尝试 Context7 查询
+            const fetchViaWeb = async (url: string): Promise<string | null> => {
+                try {
+                    const res = await runtime.services.fetchWeb.execute({
+                        url,
+                        maxChars: 30000,
+                        format: 'markdown',
+                        readability: true,
+                        signal
+                    });
+                    if (res.content && res.content.trim().length > 20) {
+                        return res.content.trim();
+                    }
+                    return null;
+                } catch {
+                    return null;
+                }
+            };
+
+            // 1. 显式指定 docs.rs
+            if (reqSource === 'docs.rs') {
+                const clean = target.replace(/^crates?:/, '').trim().split('@')[0]?.trim() || target;
+                const url = version
+                    ? `https://docs.rs/${encodeURIComponent(clean)}/${encodeURIComponent(version)}`
+                    : `https://docs.rs/${encodeURIComponent(clean)}`;
+                logTool(`queryDocs fetching docs.rs directly: ${url}`);
+                const content = await fetchViaWeb(url);
+                if (content) {
+                    metrics.recordQueryDocsAttempt('docs.rs', false);
+                    const text = capTextResponse(formatQueryDocsMarkdown({
+                        libraryId: clean,
+                        query,
+                        source: 'docs.rs',
+                        confidence: 'high',
+                        documentationUrl: url,
+                        content,
+                        warnings: unknownWarnings
+                    }));
+                    setDocsCache(cacheKey, { text, source: 'docs.rs', confidence: 'high', cachedAt: Date.now() });
+                    return {
+                        content: [{ type: 'text', text }],
+                        source: 'docs.rs',
+                        confidence: 'high',
+                        warnings: unknownWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                }
+                return {
+                    content: [{
+                        type: 'text',
+                        text: withErrorHint(
+                            `Failed to fetch documentation from docs.rs for "${clean}"`,
+                            `Please verify the crate name on crates.io or check if version "${version ?? ''}" is published.`
+                        )
+                    }],
+                    isError: true
+                };
+            }
+
+            // 2. 显式指定 pkg.go.dev
+            if (reqSource === 'pkg.go.dev') {
+                const clean = target.replace(/^go:/, '').trim().split('@')[0]?.trim() || target;
+                const url = version
+                    ? `https://pkg.go.dev/${clean}@${encodeURIComponent(version)}`
+                    : `https://pkg.go.dev/${clean}`;
+                logTool(`queryDocs fetching pkg.go.dev directly: ${url}`);
+                const content = await fetchViaWeb(url);
+                if (content) {
+                    metrics.recordQueryDocsAttempt('pkg.go.dev', false);
+                    const text = capTextResponse(formatQueryDocsMarkdown({
+                        libraryId: clean,
+                        query,
+                        source: 'pkg.go.dev',
+                        confidence: 'high',
+                        documentationUrl: url,
+                        content,
+                        warnings: unknownWarnings
+                    }));
+                    setDocsCache(cacheKey, { text, source: 'pkg.go.dev', confidence: 'high', cachedAt: Date.now() });
+                    return {
+                        content: [{ type: 'text', text }],
+                        source: 'pkg.go.dev',
+                        confidence: 'high',
+                        warnings: unknownWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                }
+                return {
+                    content: [{
+                        type: 'text',
+                        text: withErrorHint(
+                            `Failed to fetch documentation from pkg.go.dev for "${clean}"`,
+                            `Please verify the Go module path (e.g. "github.com/gin-gonic/gin" or "golang.org/x/sync").`
+                        )
+                    }],
+                    isError: true
+                };
+            }
+
+            // 3. 显式指定 official 官方文档站
+            if (reqSource === 'official') {
+                logTool(`queryDocs resolving official documentation site for: ${target}`);
+                const meta = await resolvePackageMetadata(target, { signal, version });
+                const docUrl = meta?.documentationUrl || (meta?.homepageUrl && !meta.homepageUrl.includes('github.com') && !meta.homepageUrl.includes('gitee.com') ? meta.homepageUrl : null);
+
+                if (docUrl) {
+                    const content = await fetchViaWeb(docUrl);
+                    if (content) {
+                        metrics.recordQueryDocsAttempt('official', false);
+                        const text = capTextResponse(formatQueryDocsMarkdown({
+                            libraryId: meta?.libraryId || target,
+                            query,
+                            source: 'official',
+                            confidence: 'high',
+                            documentationUrl: docUrl,
+                            repositoryUrl: meta?.repositoryUrl || undefined,
+                            content,
+                            warnings: unknownWarnings
+                        }));
+                        setDocsCache(cacheKey, { text, source: 'official', confidence: 'high', cachedAt: Date.now() });
+                        return {
+                            content: [{ type: 'text', text }],
+                            source: 'official',
+                            confidence: 'high',
+                            warnings: unknownWarnings
+                        } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                    }
+                }
+
+                logTool(`Official doc site not available for "${target}". Falling back to repository README...`);
+                const fallback = await fetchPackageDocsFallback({
+                    library: target,
+                    version,
+                    signal,
+                    fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url })
+                });
+                if (fallback) {
+                    metrics.recordQueryDocsAttempt('official', true);
+                    const combinedWarnings = [
+                        `No standalone documentation website found for "${target}"; resolved repository README instead.`,
+                        ...new Set([...fallback.warnings, ...unknownWarnings])
+                    ];
+                    const text = capTextResponse(formatQueryDocsMarkdown({
+                        libraryId: fallback.libraryId,
+                        query,
+                        source: fallback.source,
+                        confidence: fallback.confidence,
+                        repositoryUrl: fallback.repositoryUrl,
+                        readme: fallback.readme,
+                        warnings: combinedWarnings
+                    }));
+                    if (fallback.confidence !== 'low') {
+                        setDocsCache(cacheKey, { text, source: fallback.source, confidence: fallback.confidence, cachedAt: Date.now() });
+                    }
+                    return {
+                        content: [{ type: 'text', text }],
+                        source: fallback.source,
+                        confidence: fallback.confidence,
+                        warnings: combinedWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                }
+
+                return {
+                    content: [{
+                        type: 'text',
+                        text: withErrorHint(
+                            `Failed to locate official documentation for "${target}" across npm, PyPI, crates.io, and Go.`,
+                            `Check package name spelling or query directly via source="context7" or fetchGithubContent.`
+                        )
+                    }],
+                    isError: true
+                };
+            }
+
+            // 4. 显式指定 npm / pypi / github 仓库源
+            if (reqSource === 'npm' || reqSource === 'pypi' || reqSource === 'github') {
+                logTool(`queryDocs directly querying registry/repo fallback for: ${target}`);
+                const fallback = await fetchPackageDocsFallback({
+                    library: target,
+                    version,
+                    signal,
+                    fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url })
+                });
+                if (fallback) {
+                    metrics.recordQueryDocsAttempt(fallback.source, false);
+                    const combinedWarnings = [...new Set([...fallback.warnings, ...unknownWarnings])];
+                    const text = capTextResponse(formatQueryDocsMarkdown({
+                        libraryId: fallback.libraryId,
+                        query,
+                        source: fallback.source,
+                        confidence: fallback.confidence,
+                        repositoryUrl: fallback.repositoryUrl,
+                        readme: fallback.readme,
+                        warnings: combinedWarnings
+                    }));
+                    if (fallback.confidence !== 'low') {
+                        setDocsCache(cacheKey, { text, source: fallback.source, confidence: fallback.confidence, cachedAt: Date.now() });
+                    }
+                    return {
+                        content: [{ type: 'text', text }],
+                        source: fallback.source,
+                        confidence: fallback.confidence,
+                        warnings: combinedWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                }
+                return {
+                    content: [{
+                        type: 'text',
+                        text: withErrorHint(
+                            `Failed to locate repository documentation for "${target}"`,
+                            `Verify package name spelling or try source="auto".`
+                        )
+                    }],
+                    isError: true
+                };
+            }
+
+            // 5. auto 模式下的特定生态快速路由
+            if (reqSource === 'auto') {
+                if (target.startsWith('crates:') || target.startsWith('crate:')) {
+                    const clean = target.replace(/^crates?:/, '').trim().split('@')[0]?.trim() || target;
+                    const url = version
+                        ? `https://docs.rs/${encodeURIComponent(clean)}/${encodeURIComponent(version)}`
+                        : `https://docs.rs/${encodeURIComponent(clean)}`;
+                    const content = await fetchViaWeb(url);
+                    if (content) {
+                        metrics.recordQueryDocsAttempt('docs.rs', false);
+                        const text = capTextResponse(formatQueryDocsMarkdown({
+                            libraryId: clean,
+                            query,
+                            source: 'docs.rs',
+                            confidence: 'high',
+                            documentationUrl: url,
+                            content,
+                            warnings: unknownWarnings
+                        }));
+                        setDocsCache(cacheKey, { text, source: 'docs.rs', confidence: 'high', cachedAt: Date.now() });
+                        return {
+                            content: [{ type: 'text', text }],
+                            source: 'docs.rs',
+                            confidence: 'high',
+                            warnings: unknownWarnings
+                        } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                    }
+                }
+
+                if (target.startsWith('go:') || target.includes('golang.org/') || (target.startsWith('github.com/') && target.split('/').length >= 3)) {
+                    const clean = target.replace(/^go:/, '').trim().split('@')[0]?.trim() || target;
+                    const url = version
+                        ? `https://pkg.go.dev/${clean}@${encodeURIComponent(version)}`
+                        : `https://pkg.go.dev/${clean}`;
+                    const content = await fetchViaWeb(url);
+                    if (content) {
+                        metrics.recordQueryDocsAttempt('pkg.go.dev', false);
+                        const text = capTextResponse(formatQueryDocsMarkdown({
+                            libraryId: clean,
+                            query,
+                            source: 'pkg.go.dev',
+                            confidence: 'high',
+                            documentationUrl: url,
+                            content,
+                            warnings: unknownWarnings
+                        }));
+                        setDocsCache(cacheKey, { text, source: 'pkg.go.dev', confidence: 'high', cachedAt: Date.now() });
+                        return {
+                            content: [{ type: 'text', text }],
+                            source: 'pkg.go.dev',
+                            confidence: 'high',
+                            warnings: unknownWarnings
+                        } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                    }
+                }
+            }
+
+            // 6. Context7 主路径（针对 auto 与 context7）
             let context7Result: Context7DocsResult | null = null;
             let context7Error: unknown = null;
 
@@ -213,7 +516,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 context7Error = error;
             }
 
-            // 2. 检查匹配质量：若高/中置信度命中，直接返回
+            // 检查 Context7 匹配质量：若高/中置信度命中，直接返回
             if (context7Result && context7Result.matchConfidence !== 'low') {
                 const confidence = context7Result.matchConfidence ?? 'high';
                 metrics.recordQueryDocsAttempt('context7', false);
@@ -238,80 +541,115 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 } as unknown as { content: Array<{ type: 'text'; text: string }> };
             }
 
-            // 3. 低置信度拦截或未命中时，启动兜底链：npm -> PyPI -> crates.io -> Go module proxy -> GitHub README
-            logTool(`Context7 match confidence is low or failed for "${target}". Attempting npm/PyPI/crates/Go fallback...`);
-            let fallbackResult: PackageDocsFallbackResult | null = null;
-            try {
-                fallbackResult = await fetchPackageDocsFallback({
-                    library: target,
-                    version,
-                    signal,
-                    fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url })
-                });
-            } catch (fbErr) {
-                logSafeError('Fallback package docs resolution failed', fbErr);
-            }
+            // 7. Context7 限额、报错或低置信度时，仅在 auto 模式下尝试 official 官方文档站与 fallback
+            if (reqSource === 'auto') {
+                // 优先尝试 official 官方文档站直连
+                try {
+                    logTool(`Context7 match confidence is low or failed for "${target}". Probing official doc site...`);
+                    const meta = await resolvePackageMetadata(target, { signal, version });
+                    const docUrl = meta?.documentationUrl || (meta?.homepageUrl && !meta.homepageUrl.includes('github.com') && !meta.homepageUrl.includes('gitee.com') ? meta.homepageUrl : null);
+                    if (docUrl) {
+                        const content = await fetchViaWeb(docUrl);
+                        if (content) {
+                            logTool(`Official doc site fetch succeeded: ${docUrl}`);
+                            metrics.recordQueryDocsAttempt('official', true);
+                            const text = capTextResponse(formatQueryDocsMarkdown({
+                                libraryId: meta?.libraryId || target,
+                                query,
+                                source: 'official',
+                                confidence: 'medium',
+                                documentationUrl: docUrl,
+                                repositoryUrl: meta?.repositoryUrl || undefined,
+                                content,
+                                warnings: unknownWarnings
+                            }));
+                            setDocsCache(cacheKey, { text, source: 'official', confidence: 'medium', cachedAt: Date.now() });
+                            return {
+                                content: [{ type: 'text', text }],
+                                source: 'official',
+                                confidence: 'medium',
+                                warnings: unknownWarnings
+                            } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                        }
+                    }
+                } catch (offErr) {
+                    logSafeError('Official docs probing failed', offErr);
+                }
 
-            if (fallbackResult) {
-                logTool(`Fallback succeeded via ${fallbackResult.source}: ${fallbackResult.repositoryUrl}`);
-                metrics.recordQueryDocsAttempt(fallbackResult.source, true);
-                const combinedWarnings = [...new Set([...fallbackResult.warnings, ...unknownWarnings])];
-                const text = capTextResponse(formatQueryDocsMarkdown({
-                    libraryId: fallbackResult.libraryId,
-                    query,
-                    source: fallbackResult.source,
-                    confidence: fallbackResult.confidence,
-                    repositoryUrl: fallbackResult.repositoryUrl,
-                    readme: fallbackResult.readme,
-                    warnings: combinedWarnings
-                }));
-                if (fallbackResult.confidence !== 'low') {
-                    setDocsCache(cacheKey, {
-                        text,
+                // 启动包管理器 README 兜底
+                logTool(`Attempting npm/PyPI/crates/Go fallback for "${target}"...`);
+                let fallbackResult: PackageDocsFallbackResult | null = null;
+                try {
+                    fallbackResult = await fetchPackageDocsFallback({
+                        library: target,
+                        version,
+                        signal,
+                        fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url })
+                    });
+                } catch (fbErr) {
+                    logSafeError('Fallback package docs resolution failed', fbErr);
+                }
+
+                if (fallbackResult) {
+                    logTool(`Fallback succeeded via ${fallbackResult.source}: ${fallbackResult.repositoryUrl}`);
+                    metrics.recordQueryDocsAttempt(fallbackResult.source, true);
+                    const combinedWarnings = [...new Set([...fallbackResult.warnings, ...unknownWarnings])];
+                    const text = capTextResponse(formatQueryDocsMarkdown({
+                        libraryId: fallbackResult.libraryId,
+                        query,
                         source: fallbackResult.source,
                         confidence: fallbackResult.confidence,
-                        cachedAt: Date.now()
-                    });
+                        repositoryUrl: fallbackResult.repositoryUrl,
+                        readme: fallbackResult.readme,
+                        warnings: combinedWarnings
+                    }));
+                    if (fallbackResult.confidence !== 'low') {
+                        setDocsCache(cacheKey, {
+                            text,
+                            source: fallbackResult.source,
+                            confidence: fallbackResult.confidence,
+                            cachedAt: Date.now()
+                        });
+                    }
+                    return {
+                        content: [{ type: 'text', text }],
+                        source: fallbackResult.source,
+                        confidence: fallbackResult.confidence,
+                        warnings: combinedWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
                 }
-                return {
-                    content: [{ type: 'text', text }],
-                    source: fallbackResult.source,
-                    confidence: fallbackResult.confidence,
-                    warnings: combinedWarnings
-                } as unknown as { content: Array<{ type: 'text'; text: string }> };
+
+                // 如果兜底也未找到，但在非 strict 模式下有 Context7 低置信度候选
+                if (context7Result && !strict) {
+                    metrics.recordQueryDocsAttempt('context7', false);
+                    const warnings = [
+                        `Low match confidence: "${target}" did not closely match any official library. Closest Context7 candidate was "${context7Result.libraryId}".`,
+                        ...unknownWarnings
+                    ];
+                    const text = capTextResponse(formatQueryDocsMarkdown({
+                        libraryId: context7Result.libraryId,
+                        query: context7Result.query,
+                        source: 'context7',
+                        confidence: 'low',
+                        resolvedFrom: context7Result.resolvedFrom,
+                        redirectedFrom: context7Result.redirectedFrom,
+                        infoSnippets: context7Result.infoSnippets,
+                        codeSnippets: context7Result.codeSnippets,
+                        alternativeLibraries: context7Result.alternativeLibraries,
+                        warnings
+                    }));
+                    return {
+                        content: [{ type: 'text', text }],
+                        source: 'context7',
+                        confidence: 'low',
+                        warnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                }
             }
 
-            // 4. 兜底链也未找到包信息
-            // 4a. 如果原本有低置信度 Context7 候选且非 strict 模式
-            if (context7Result && !strict) {
-                metrics.recordQueryDocsAttempt('context7', false);
-                const warnings = [
-                    `Low match confidence: "${target}" did not closely match any official library. Closest Context7 candidate was "${context7Result.libraryId}".`,
-                    ...unknownWarnings
-                ];
-                const text = capTextResponse(formatQueryDocsMarkdown({
-                    libraryId: context7Result.libraryId,
-                    query: context7Result.query,
-                    source: 'context7',
-                    confidence: 'low',
-                    resolvedFrom: context7Result.resolvedFrom,
-                    redirectedFrom: context7Result.redirectedFrom,
-                    infoSnippets: context7Result.infoSnippets,
-                    codeSnippets: context7Result.codeSnippets,
-                    alternativeLibraries: context7Result.alternativeLibraries,
-                    warnings
-                }));
-                return {
-                    content: [{ type: 'text', text }],
-                    source: 'context7',
-                    confidence: 'low',
-                    warnings
-                } as unknown as { content: Array<{ type: 'text'; text: string }> };
-            }
-
-            // 4b. 严格模式或 Context7 报错
-            const finalErr = context7Error || new Error(`No official documentation found for library "${target}" on Context7, npm registry, or PyPI.`);
-            logSafeError('Failed to fetch docs via Context7 and package fallbacks', finalErr);
+            // 最终报错处理
+            const finalErr = context7Error || new Error(`No documentation found for library "${target}" via requested source "${reqSource}".`);
+            logSafeError('Failed to fetch docs', finalErr);
             return {
                 content: [{
                     type: 'text',
@@ -319,7 +657,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                         `Failed to fetch docs: ${finalErr instanceof Error ? finalErr.message : 'Unknown error'}`,
                         isContext7QuotaExhaustedError(finalErr)
                             ? CONTEXT7_QUOTA_HINT
-                            : '可检查库名拼写（如 "next.js" 或 "/vercel/next.js"），或用 fetchGithubContent 直接读取其 GitHub 仓库 README/源码。'
+                            : '可检查库名拼写（如 "next.js" 或 "/vercel/next.js"），或指定 source="official" / source="docs.rs" / source="pkg.go.dev" 重试。'
                     )
                 }],
                 isError: true

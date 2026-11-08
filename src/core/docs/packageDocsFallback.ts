@@ -1,5 +1,14 @@
 import { buildAxiosRequestOptions, requestDirectFirst } from '../../utils/httpRequest.js';
 
+export type PackageMetadata = {
+    source: 'npm' | 'pypi' | 'crates' | 'go' | 'maven';
+    libraryId: string;
+    version?: string;
+    repositoryUrl?: string | null;
+    documentationUrl?: string | null;
+    homepageUrl?: string | null;
+};
+
 export type PackageDocsFallbackResult = {
     source: 'npm' | 'pypi' | 'crates' | 'go' | 'maven' | 'github-readme';
     confidence: 'high' | 'medium' | 'low';
@@ -7,6 +16,7 @@ export type PackageDocsFallbackResult = {
     repositoryUrl: string;
     readme: string;
     warnings: string[];
+    documentationUrl?: string | null;
 };
 
 /**
@@ -51,9 +61,9 @@ export function normalizeGitRepositoryUrl(raw: string): string | null {
 }
 
 /**
- * 从 npm registry 查询包信息并提取源码仓库 URL。
+ * 从 npm registry 查询包信息并提取完整元数据（源码仓库、官方文档站、首页）。
  */
-export async function resolveNpmRepository(packageName: string, signal?: AbortSignal, version?: string): Promise<string | null> {
+export async function resolveNpmMetadata(packageName: string, signal?: AbortSignal, version?: string): Promise<PackageMetadata | null> {
     const clean = packageName.trim().replace(/^@/, '').split('@')[0]?.trim();
     if (!clean) return null;
 
@@ -96,17 +106,43 @@ export async function resolveNpmRepository(packageName: string, signal?: AbortSi
             repoStr = data.homepage;
         }
 
-        return normalizeGitRepositoryUrl(repoStr);
+        const repositoryUrl = normalizeGitRepositoryUrl(repoStr);
+        let homepageUrl: string | null = null;
+        let documentationUrl: string | null = null;
+
+        if (typeof data.homepage === 'string' && /^https?:\/\//i.test(data.homepage)) {
+            homepageUrl = data.homepage;
+            if (!data.homepage.includes('github.com') && !data.homepage.includes('gitee.com')) {
+                documentationUrl = data.homepage;
+            }
+        }
+
+        return {
+            source: 'npm',
+            libraryId: clean,
+            version,
+            repositoryUrl,
+            documentationUrl,
+            homepageUrl
+        };
     } catch {
         return null;
     }
 }
 
 /**
- * 从 PyPI JSON API 查询包信息并提取源码仓库 URL。
+ * 从 npm registry 查询包信息并提取源码仓库 URL。
  */
-export async function resolvePypiRepository(packageName: string, signal?: AbortSignal, version?: string): Promise<string | null> {
-    const clean = packageName.trim().split('@')[0]?.trim();
+export async function resolveNpmRepository(packageName: string, signal?: AbortSignal, version?: string): Promise<string | null> {
+    const meta = await resolveNpmMetadata(packageName, signal, version);
+    return meta?.repositoryUrl ?? null;
+}
+
+/**
+ * 从 PyPI JSON API 查询包信息并提取完整元数据。
+ */
+export async function resolvePypiMetadata(packageName: string, signal?: AbortSignal, version?: string): Promise<PackageMetadata | null> {
+    const clean = packageName.trim().replace(/^pypi:/, '').split('@')[0]?.trim();
     if (!clean) return null;
 
     const url = version
@@ -133,7 +169,9 @@ export async function resolvePypiRepository(packageName: string, signal?: AbortS
             info?: {
                 project_urls?: Record<string, string>;
                 home_page?: string;
+                documentation_url?: string;
                 package_url?: string;
+                version?: string;
             };
         };
 
@@ -141,10 +179,19 @@ export async function resolvePypiRepository(packageName: string, signal?: AbortS
         if (!info) return null;
 
         const candidateUrls: string[] = [];
+        let documentationUrl: string | null = null;
+        let homepageUrl: string | null = null;
+
         if (info.project_urls && typeof info.project_urls === 'object') {
             for (const [key, val] of Object.entries(info.project_urls)) {
-                if (typeof val === 'string') {
+                if (typeof val === 'string' && /^https?:\/\//i.test(val)) {
                     const lk = key.toLowerCase();
+                    if (lk.includes('doc') && !documentationUrl) {
+                        documentationUrl = val;
+                    }
+                    if ((lk.includes('home') || lk === 'homepage') && !homepageUrl) {
+                        homepageUrl = val;
+                    }
                     if (lk.includes('source') || lk.includes('repo') || lk.includes('code') || lk.includes('home') || lk.includes('github')) {
                         candidateUrls.unshift(val);
                     } else {
@@ -153,28 +200,49 @@ export async function resolvePypiRepository(packageName: string, signal?: AbortS
                 }
             }
         }
-        if (info.home_page) {
+        if (info.home_page && /^https?:\/\//i.test(info.home_page)) {
             candidateUrls.push(info.home_page);
+            if (!homepageUrl) homepageUrl = info.home_page;
+        }
+        if (info.documentation_url && /^https?:\/\//i.test(info.documentation_url) && !documentationUrl) {
+            documentationUrl = info.documentation_url;
         }
 
+        let repositoryUrl: string | null = null;
         for (const candidate of candidateUrls) {
             const normalized = normalizeGitRepositoryUrl(candidate);
             if (normalized) {
-                return normalized;
+                repositoryUrl = normalized;
+                break;
             }
         }
-        return null;
+
+        return {
+            source: 'pypi',
+            libraryId: clean,
+            version: version || info.version,
+            repositoryUrl,
+            documentationUrl: documentationUrl || (homepageUrl && !homepageUrl.includes('github.com') ? homepageUrl : null),
+            homepageUrl
+        };
     } catch {
         return null;
     }
 }
 
 /**
- * 从 crates.io 查询 crate 信息并提取源码仓库 URL。
- * crates.io 要求请求带 User-Agent；version 仅用于展示/提示，仓库地址来自 crate 元数据。
+ * 从 PyPI JSON API 查询包信息并提取源码仓库 URL。
  */
-export async function resolveCratesRepository(packageName: string, signal?: AbortSignal): Promise<string | null> {
-    const clean = packageName.trim().split('@')[0]?.trim();
+export async function resolvePypiRepository(packageName: string, signal?: AbortSignal, version?: string): Promise<string | null> {
+    const meta = await resolvePypiMetadata(packageName, signal, version);
+    return meta?.repositoryUrl ?? null;
+}
+
+/**
+ * 从 crates.io 查询 crate 信息并提取完整元数据。
+ */
+export async function resolveCratesMetadata(packageName: string, signal?: AbortSignal, version?: string): Promise<PackageMetadata | null> {
+    const clean = packageName.trim().replace(/^crates?:/, '').split('@')[0]?.trim();
     if (!clean) return null;
 
     const url = `https://crates.io/api/v1/crates/${encodeURIComponent(clean)}`;
@@ -204,6 +272,7 @@ export async function resolveCratesRepository(packageName: string, signal?: Abor
                 repository?: string;
                 homepage?: string;
                 documentation?: string;
+                max_version?: string;
             };
         };
         const crate = data.crate;
@@ -213,10 +282,31 @@ export async function resolveCratesRepository(packageName: string, signal?: Abor
         const repo = crate.repository
             || (crate.homepage && (crate.homepage.includes('github.com') || crate.homepage.includes('gitee.com')) ? crate.homepage : '')
             || '';
-        return normalizeGitRepositoryUrl(repo);
+        const repositoryUrl = normalizeGitRepositoryUrl(repo);
+        const resolvedVersion = version || crate.max_version;
+        const docsRsUrl = `https://docs.rs/${encodeURIComponent(clean)}${resolvedVersion ? '/' + encodeURIComponent(resolvedVersion) : ''}`;
+        const documentationUrl = crate.documentation || docsRsUrl;
+
+        return {
+            source: 'crates',
+            libraryId: clean,
+            version: resolvedVersion,
+            repositoryUrl,
+            documentationUrl,
+            homepageUrl: crate.homepage || null
+        };
     } catch {
         return null;
     }
+}
+
+/**
+ * 从 crates.io 查询 crate 信息并提取源码仓库 URL。
+ * crates.io 要求请求带 User-Agent；version 仅用于展示/提示，仓库地址来自 crate 元数据。
+ */
+export async function resolveCratesRepository(packageName: string, signal?: AbortSignal): Promise<string | null> {
+    const meta = await resolveCratesMetadata(packageName, signal);
+    return meta?.repositoryUrl ?? null;
 }
 
 /**
@@ -271,6 +361,35 @@ export function extractMavenScmRepository(pom: string): string | null {
         }
     }
     return null;
+}
+
+/**
+ * 从 Maven Central 查询完整元数据。
+ */
+export async function resolveMavenMetadata(
+    packageName: string,
+    signal?: AbortSignal,
+    version?: string
+): Promise<PackageMetadata | null> {
+    const coordinates = parseMavenCoordinates(packageName);
+    if (!coordinates) {
+        return null;
+    }
+
+    const repositoryUrl = await resolveMavenRepository(packageName, signal, version);
+    const resolvedVersion = version || coordinates.version;
+    const javadocUrl = resolvedVersion
+        ? `https://javadoc.io/doc/${encodeURIComponent(coordinates.groupId)}/${encodeURIComponent(coordinates.artifactId)}/${encodeURIComponent(resolvedVersion)}`
+        : `https://javadoc.io/doc/${encodeURIComponent(coordinates.groupId)}/${encodeURIComponent(coordinates.artifactId)}`;
+
+    return {
+        source: 'maven',
+        libraryId: `${coordinates.groupId}:${coordinates.artifactId}`,
+        version: resolvedVersion,
+        repositoryUrl,
+        documentationUrl: javadocUrl,
+        homepageUrl: javadocUrl
+    };
 }
 
 /**
@@ -332,11 +451,10 @@ export async function resolveMavenRepository(
 }
 
 /**
- * 通过 Go module proxy 校验模块并推导仓库地址。
- * pkg.go.dev 没有官方 JSON API；这里只承诺 module 元数据兜底 + 可推导的 GitHub/GitLab 仓库 README。
+ * 通过 Go module proxy 校验模块并获取元数据。
  */
-export async function resolveGoModuleRepository(packageName: string, signal?: AbortSignal): Promise<string | null> {
-    const modulePath = packageName.trim().split('@')[0]?.trim();
+export async function resolveGoModuleMetadata(packageName: string, signal?: AbortSignal): Promise<PackageMetadata | null> {
+    const modulePath = packageName.trim().replace(/^go:/, '').split('@')[0]?.trim();
     if (!modulePath || !modulePath.includes('/') || /\s/.test(modulePath)) {
         return null;
     }
@@ -360,18 +478,83 @@ export async function resolveGoModuleRepository(packageName: string, signal?: Ab
             return null;
         }
 
+        let repositoryUrl: string | null = null;
         const lower = modulePath.toLowerCase();
         if (lower.startsWith('github.com/') || lower.startsWith('gitlab.com/')) {
             const [host, owner, repo] = modulePath.split('/');
-            if (!host || !owner || !repo) {
-                return null;
+            if (host && owner && repo) {
+                repositoryUrl = `https://${host}/${owner}/${repo}`;
             }
-            return `https://${host}/${owner}/${repo}`;
         }
-        return null;
+
+        return {
+            source: 'go',
+            libraryId: modulePath,
+            repositoryUrl,
+            documentationUrl: `https://pkg.go.dev/${modulePath}`,
+            homepageUrl: `https://pkg.go.dev/${modulePath}`
+        };
     } catch {
         return null;
     }
+}
+
+/**
+ * 通过 Go module proxy 校验模块并推导仓库地址。
+ * pkg.go.dev 没有官方 JSON API；这里只承诺 module 元数据兜底 + 可推导的 GitHub/GitLab 仓库 README。
+ */
+export async function resolveGoModuleRepository(packageName: string, signal?: AbortSignal): Promise<string | null> {
+    const meta = await resolveGoModuleMetadata(packageName, signal);
+    return meta?.repositoryUrl ?? null;
+}
+
+/**
+ * 跨主流包管理器聚合查询元数据（npm -> PyPI -> crates.io -> Go module proxy -> Maven）。
+ */
+export async function resolvePackageMetadata(
+    packageName: string,
+    options?: { signal?: AbortSignal; version?: string }
+): Promise<PackageMetadata | null> {
+    const target = packageName.trim();
+    if (!target) return null;
+
+    if (target.startsWith('crates:') || target.startsWith('crate:')) {
+        return resolveCratesMetadata(target, options?.signal, options?.version);
+    }
+    if (target.startsWith('pypi:')) {
+        return resolvePypiMetadata(target, options?.signal, options?.version);
+    }
+    if (target.startsWith('npm:')) {
+        return resolveNpmMetadata(target, options?.signal, options?.version);
+    }
+    if (target.startsWith('go:')) {
+        return resolveGoModuleMetadata(target, options?.signal);
+    }
+    if (parseMavenCoordinates(target)) {
+        return resolveMavenMetadata(target, options?.signal, options?.version);
+    }
+
+    const npmMeta = await resolveNpmMetadata(target, options?.signal, options?.version);
+    if (npmMeta && (npmMeta.documentationUrl || npmMeta.repositoryUrl)) {
+        return npmMeta;
+    }
+
+    const pypiMeta = await resolvePypiMetadata(target, options?.signal, options?.version);
+    if (pypiMeta && (pypiMeta.documentationUrl || pypiMeta.repositoryUrl)) {
+        return pypiMeta;
+    }
+
+    const cratesMeta = await resolveCratesMetadata(target, options?.signal, options?.version);
+    if (cratesMeta && (cratesMeta.documentationUrl || cratesMeta.repositoryUrl)) {
+        return cratesMeta;
+    }
+
+    const goMeta = await resolveGoModuleMetadata(target, options?.signal);
+    if (goMeta && goMeta.documentationUrl) {
+        return goMeta;
+    }
+
+    return null;
 }
 
 /**

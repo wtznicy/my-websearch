@@ -242,8 +242,9 @@ export function docsCacheKey(parts: {
     query?: string;
     limit?: number;
     strict?: boolean;
+    source?: string;
 }): string {
-    return [
+    const base = [
         // v2：修复裸库名解析（tailwindcss → 官方 tailwindlabs）后，旧缓存必须失效
         'v2',
         parts.library.trim().toLowerCase(),
@@ -251,5 +252,9 @@ export function docsCacheKey(parts: {
         parts.query?.trim().toLowerCase() ?? '',
         String(parts.limit ?? 5),
         parts.strict ? 'strict' : 'loose'
-    ].join('|');
+    ];
+    if (parts.source && parts.source !== 'auto') {
+        base.push(parts.source.trim().toLowerCase());
+    }
+    return base.join('|');
 }
