@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { tryNativeFileLock } from '../nativeInterop.js';
 import {
     AcquirePlaywrightPageOptions,
     BrowserPlaywrightPagePool,
@@ -241,31 +240,19 @@ export async function acquirePooledPlaywrightPageOnce(
 
         pool.entries = pool.entries.filter((candidate) => !isPageClosed(candidate.page));
 
-        let candidate: PooledPlaywrightPageEntry | null = null;
-        for (const poolEntry of pool.entries) {
-            if (poolEntry.busy) continue;
-
-            const lockPath = getPageLockFilePath(pool.poolKey, poolEntry.pageTargetId);
-            const lock = tryNativeFileLock(lockPath);
-            if (lock) {
-                poolEntry.pageLock = lock;
-                candidate = poolEntry;
-                break;
-            }
-        }
-
-        while (!candidate) {
-            const createdEntry = await createPooledPlaywrightPageEntry(browser, pool);
-            const lockPath = getPageLockFilePath(pool.poolKey, createdEntry.pageTargetId);
-            const lock = tryNativeFileLock(lockPath);
-            if (lock) {
-                createdEntry.pageLock = lock;
-                candidate = createdEntry;
-                break;
-            }
+        let candidate = pool.entries.find((entry) => !entry.busy) ?? null;
+        if (!candidate) {
+            candidate = await createPooledPlaywrightPageEntry(browser, pool);
         }
 
         candidate.busy = true;
+        candidate.pageLock = {
+            release: () => {
+                if (candidate) {
+                    candidate.busy = false;
+                }
+            }
+        };
         return candidate;
     });
 

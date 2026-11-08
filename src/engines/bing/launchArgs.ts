@@ -12,23 +12,12 @@ export const BROWSER_CONTEXT_OPTIONS = {
 
 let playwrightAvailabilityPromise: Promise<boolean> | null = null;
 let hasVerifiedPlaywrightAvailability = false;
-let hasLoggedHiddenHeadedMode = false;
-
 export function shouldUseHiddenHeadedBingBrowser(): boolean {
-    return process.platform === 'win32'
-        && config.playwrightHeadless
-        && !config.playwrightCdpEndpoint;
+    // 现代 Chromium 统一采用 --headless=new，不再默认拉起 Windows 隐藏桌面与 C++ 原生 FFI
+    return false;
 }
 
 export function getEffectiveBingPlaywrightHeadless(): boolean {
-    if (shouldUseHiddenHeadedBingBrowser()) {
-        if (!hasLoggedHiddenHeadedMode) {
-            hasLoggedHiddenHeadedMode = true;
-            console.warn('Bing Playwright search is using a hidden headed browser on Windows because PLAYWRIGHT_HEADLESS=true is more likely to trigger anti-bot detection.');
-        }
-        return false;
-    }
-
     return config.playwrightHeadless;
 }
 
