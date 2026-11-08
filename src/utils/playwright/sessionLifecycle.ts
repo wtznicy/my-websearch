@@ -22,6 +22,7 @@ import {
     writeBrowserDomainMetadata
 } from './domainLock.js';
 import {
+    processCommandLineCache,
     resolveLaunchFailureBrowserPid
 } from './candidateDiscovery.js';
 import { removeTempDirInBackground } from './browserSessionTemp.js';
@@ -63,6 +64,9 @@ export async function launchStandardLocalBrowser(playwright: PlaywrightModule, s
             stdio: ['ignore', 'pipe', 'pipe'],
             detached: true
         });
+        if (child.pid) {
+            processCommandLineCache.set(child.pid, [browserPath, ...args].join(' '));
+        }
 
         try {
             await waitForBrowserReadyViaStdout({ type: 'child', child });

@@ -1,8 +1,4 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { LocalBrowserProcessCandidate } from './types.js';
-
-const execFileAsync = promisify(execFile);
 
 export const processCommandLineCache = new Map<number, string>();
 
@@ -70,49 +66,7 @@ export async function getProcessCommandLine(pid: number): Promise<string | null>
         return null;
     }
 
-    const cached = processCommandLineCache.get(pid);
-    if (cached !== undefined) {
-        return cached;
-    }
-
-    try {
-        if (process.platform === 'win32') {
-            const { stdout } = await execFileAsync(
-                'powershell.exe',
-                [
-                    '-NoProfile',
-                    '-NonInteractive',
-                    '-Command',
-                    `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`
-                ],
-                { encoding: 'utf8', windowsHide: true, timeout: 5000 }
-            );
-            const trimmed = stdout.trim() || null;
-            if (trimmed) {
-                processCommandLineCache.set(pid, trimmed);
-            }
-            return trimmed;
-        }
-
-        const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'command='], {
-            encoding: 'utf8',
-            timeout: 5000
-        });
-        const trimmed = stdout.trim() || null;
-        if (trimmed) {
-            processCommandLineCache.set(pid, trimmed);
-        }
-        return trimmed;
-    } catch (error) {
-        if (process.platform === 'win32' && isExecTimeoutError(error)) {
-            throw createProcessInspectionTimeoutError(
-                `PowerShell timed out while querying command line for PID ${pid}`,
-                error
-            );
-        }
-
-        return null;
-    }
+    return processCommandLineCache.get(pid) ?? null;
 }
 
 export function getLocalBrowserDebugPortCommandLineFragment(debugPort?: number): string {
@@ -165,8 +119,11 @@ export function createLocalBrowserCandidateFromCommandLine(
 
 export async function getLocalBrowserCandidateFromPid(pid: number, tempDir: string, debugPort?: number): Promise<LocalBrowserProcessCandidate | null> {
     const commandLine = await getProcessCommandLine(pid);
-    return commandLine
-        ? createLocalBrowserCandidateFromCommandLine(pid, commandLine, tempDir, debugPort)
+    if (commandLine) {
+        return createLocalBrowserCandidateFromCommandLine(pid, commandLine, tempDir, debugPort);
+    }
+    return processExists(pid)
+        ? { pid, debugPort: isValidLocalBrowserDebugPort(debugPort) ? debugPort : 0 }
         : null;
 }
 
@@ -175,84 +132,12 @@ export function quotePowerShellSingleQuotedString(value: string): string {
 }
 
 export async function listLocalBrowserCandidatesByTempDir(tempDir: string, debugPort?: number): Promise<LocalBrowserProcessCandidate[]> {
-    const debugPortFragment = getLocalBrowserDebugPortCommandLineFragment(debugPort);
     const cacheKey = `${tempDir}::${debugPort ?? ''}`;
     const cached = localBrowserCandidatesCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CANDIDATES_CACHE_TTL_MS) {
         return cached.candidates.filter((candidate) => processExists(candidate.pid));
     }
-
-    if (process.platform !== 'win32') {
-        try {
-            const { stdout: raw } = await execFileAsync('ps', ['-eo', 'pid=,command='], {
-                encoding: 'utf8',
-                timeout: 5000
-            });
-            const candidates = raw.split(/\r?\n/u)
-                .map((line) => {
-                    const match = line.match(/^\s*(\d+)\s+(.*)$/u);
-                    if (!match) return null;
-                    const pid = Number(match[1]);
-                    const commandLine = match[2];
-                    if (!commandLine) return null;
-                    if (Number.isInteger(pid)) {
-                        processCommandLineCache.set(pid, commandLine);
-                    }
-                    return createLocalBrowserCandidateFromCommandLine(pid, commandLine, tempDir, debugPort);
-                })
-                .filter((candidate): candidate is LocalBrowserProcessCandidate => candidate !== null && processExists(candidate.pid));
-
-            localBrowserCandidatesCache.set(cacheKey, { timestamp: Date.now(), candidates });
-            return candidates;
-        } catch {
-            return [];
-        }
-    }
-
-    try {
-        const script = [
-            `$targetTempDir = ${quotePowerShellSingleQuotedString(tempDir)}`,
-            `$debugPortFragment = ${quotePowerShellSingleQuotedString(debugPortFragment)}`,
-            "Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'msedge.exe' -or $_.Name -eq 'chrome.exe') -and $_.CommandLine -and $_.CommandLine.Contains($targetTempDir) -and $_.CommandLine.Contains($debugPortFragment) -and $_.CommandLine -notmatch '--type=' } | Select-Object ProcessId,CommandLine | Sort-Object ProcessId | ConvertTo-Json -Compress"
-        ].join('; ');
-        const { stdout: rawOutput } = await execFileAsync(
-            'powershell.exe',
-            ['-NoProfile', '-NonInteractive', '-Command', script],
-            { encoding: 'utf8', windowsHide: true, timeout: 5000 }
-        );
-        const raw = rawOutput.trim();
-
-        if (!raw) {
-            localBrowserCandidatesCache.set(cacheKey, { timestamp: Date.now(), candidates: [] });
-            return [];
-        }
-
-        const parsed = JSON.parse(raw) as Array<{ ProcessId?: number; CommandLine?: string }> | { ProcessId?: number; CommandLine?: string };
-        const processes = Array.isArray(parsed) ? parsed : [parsed];
-        const candidates = processes
-            .map((processInfo) => {
-                const pid = processInfo.ProcessId;
-                const commandLine = processInfo.CommandLine;
-                if (!Number.isInteger(pid) || typeof commandLine !== 'string') {
-                    return null;
-                }
-                processCommandLineCache.set(pid as number, commandLine);
-                return createLocalBrowserCandidateFromCommandLine(pid as number, commandLine, tempDir, debugPort);
-            })
-            .filter((candidate): candidate is LocalBrowserProcessCandidate => candidate !== null && processExists(candidate.pid));
-
-        localBrowserCandidatesCache.set(cacheKey, { timestamp: Date.now(), candidates });
-        return candidates;
-    } catch (error) {
-        if (isExecTimeoutError(error)) {
-            throw createProcessInspectionTimeoutError(
-                `PowerShell timed out while enumerating local browser candidate processes for ${tempDir}`,
-                error
-            );
-        }
-
-        return [];
-    }
+    return [];
 }
 
 export async function resolveLocalBrowserCandidate(preferredPid: number | undefined, tempDir: string, debugPort?: number): Promise<LocalBrowserProcessCandidate | null> {
@@ -282,6 +167,10 @@ export async function resolveLocalBrowserCandidatePid(preferredPid: number | und
 }
 
 export async function requireLocalBrowserCandidatePid(preferredPid: number | undefined, tempDir: string, debugPort: number, context: string): Promise<number> {
+    if (preferredPid && processExists(preferredPid)) {
+        return preferredPid;
+    }
+
     const candidatePid = await resolveLocalBrowserCandidatePid(preferredPid, tempDir, debugPort);
     if (!candidatePid) {
         throw new Error(`${context}: local browser process could not be verified by tempDir/debugPort`);
