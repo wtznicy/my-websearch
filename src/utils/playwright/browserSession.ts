@@ -1,5 +1,4 @@
 import { config } from '../../config.js';
-import { acquireNativeFileLock } from '../nativeInterop.js';
 import {
     LocalBrowserSession,
     LocalBrowserSessionMetadata,
@@ -16,7 +15,6 @@ import {
     buildBrowserDomainKey,
     clearBrowserDomainMetadata,
     createForceKill,
-    getBrowserDomainLockFilePath,
     readBrowserDomainMetadata,
     shouldTrackLocalBrowserSessionClients,
     trackLocalBrowserSessionClientForReuse,
@@ -33,7 +31,6 @@ import {
 import {
     PLAYWRIGHT_CONNECT_TIMEOUT_MS,
     closeLocalBrowserSession,
-    launchHiddenDesktopBrowser,
     launchStandardLocalBrowser,
     probeLocalCdpReadiness
 } from './sessionLifecycle.js';
@@ -267,65 +264,22 @@ export async function getOrCreateLocalBrowserSession(
     cachedLocalBrowserSessionKey = sessionKey;
     localBrowserSessionPromise = (async () => {
         const domainKey = buildBrowserDomainKey(sessionMode);
-        const domainLockPath = getBrowserDomainLockFilePath(domainKey);
-        const domainLock = acquireNativeFileLock(domainLockPath);
-        let domainLockReleased = false;
-        const releaseDomainLock = () => {
-            if (domainLockReleased) {
-                return;
-            }
-            domainLockReleased = true;
-            domainLock.release();
-        };
 
         try {
             const reusedSession = await tryReusePersistedLocalBrowserSession(playwright, domainKey, sessionKey);
             if (reusedSession) {
-                releaseDomainLock();
                 cachedLocalBrowserSession = reusedSession;
                 registerLocalBrowserCleanup();
                 return reusedSession;
             }
 
-            if (sessionMode === 'headless') {
-                const hiddenHeadedDomainKey = buildBrowserDomainKey('hidden-headed');
-                const hiddenHeadedLockPath = getBrowserDomainLockFilePath(hiddenHeadedDomainKey);
-                const hiddenHeadedLock = acquireNativeFileLock(hiddenHeadedLockPath);
-                let hiddenHeadedLockReleased = false;
-                const releaseHiddenHeadedLock = () => {
-                    if (hiddenHeadedLockReleased) {
-                        return;
-                    }
-                    hiddenHeadedLockReleased = true;
-                    hiddenHeadedLock.release();
-                };
-                try {
-                    const hiddenHeadedSession = await tryReusePersistedLocalBrowserSession(playwright, hiddenHeadedDomainKey, sessionKey);
-                    if (hiddenHeadedSession) {
-                        releaseHiddenHeadedLock();
-                        releaseDomainLock();
-                        hiddenHeadedSession.sessionKey = sessionKey;
-                        cachedLocalBrowserSession = hiddenHeadedSession;
-                        registerLocalBrowserCleanup();
-                        return hiddenHeadedSession;
-                    }
-                } finally {
-                    releaseHiddenHeadedLock();
-                }
-            }
-
-            const session = options?.hideWindow
-                ? await launchHiddenDesktopBrowser(playwright, sessionKey, domainKey, launchArgs)
-                : await launchStandardLocalBrowser(playwright, sessionKey, domainKey, headless, launchArgs);
+            const session = await launchStandardLocalBrowser(playwright, sessionKey, domainKey, headless, launchArgs);
             session.sessionKey = sessionKey;
-
-            releaseDomainLock();
 
             cachedLocalBrowserSession = session;
             registerLocalBrowserCleanup();
             return session;
         } catch (error) {
-            releaseDomainLock();
             throw error;
         }
     })().finally(() => {

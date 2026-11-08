@@ -4,11 +4,6 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { config } from '../../config.js';
 import {
-    acquireNativeFileLock,
-    closeHandle,
-    launchProcessOnHiddenDesktopWithPipes
-} from '../nativeInterop.js';
-import {
     LocalBrowserSession,
     LocalBrowserSessionMode,
     PlaywrightModule
@@ -21,7 +16,6 @@ import {
 } from './browserDiscovery.js';
 import {
     createForceKill,
-    getBrowserDomainLockFilePath,
     readBrowserDomainMetadata,
     shouldTrackLocalBrowserSessionClients,
     unregisterLocalBrowserSessionClient,
@@ -54,114 +48,6 @@ export function detachLaunchedChildProcess(child: ChildProcess): void {
         child.unref?.();
     } catch {
         // Ignore unref errors.
-    }
-}
-
-export function quoteWindowsCommandLineArg(arg: string): string {
-    if (arg.length === 0) {
-        return '""';
-    }
-
-    if (!/[\s"]/u.test(arg)) {
-        return arg;
-    }
-
-    let escaped = '"';
-    let backslashCount = 0;
-
-    for (const char of arg) {
-        if (char === '\\') {
-            backslashCount += 1;
-            continue;
-        }
-
-        if (char === '"') {
-            escaped += '\\'.repeat(backslashCount * 2 + 1);
-            escaped += '"';
-            backslashCount = 0;
-            continue;
-        }
-
-        if (backslashCount > 0) {
-            escaped += '\\'.repeat(backslashCount);
-            backslashCount = 0;
-        }
-
-        escaped += char;
-    }
-
-    if (backslashCount > 0) {
-        escaped += '\\'.repeat(backslashCount * 2);
-    }
-
-    escaped += '"';
-    return escaped;
-}
-
-export async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionKey: string, domainKey: string, launchArgs: string[]): Promise<LocalBrowserSession> {
-    const browserPath = getLocalBrowserExecutablePath();
-    const tempDir = mkdtempSync(path.join(tmpdir(), 'mcp-search-'));
-    const port = await findFreePort();
-    const args = buildLocalBrowserProcessArgs(port, tempDir, launchArgs);
-    const cmdLine = [quoteWindowsCommandLineArg(browserPath), ...args.map((arg) => quoteWindowsCommandLineArg(arg))].join(' ');
-
-    let browserPid: number | undefined;
-    let pipeHandle: unknown = null;
-
-    if (process.platform === 'win32') {
-        const desktopName = `mcp-search-${Date.now()}`;
-        const result = launchProcessOnHiddenDesktopWithPipes(cmdLine, desktopName);
-        browserPid = result.pid;
-        pipeHandle = result.readStdoutHandle;
-        console.error(`🧭 Playwright browser started on hidden desktop "${desktopName}" (PID: ${browserPid})`);
-    } else {
-        const child = spawn(browserPath, args, {
-            stdio: ['ignore', 'pipe', 'pipe'],
-            detached: true
-        });
-        browserPid = child.pid;
-    }
-
-    try {
-        await waitForBrowserReadyViaStdout({ type: 'pipe', readHandle: pipeHandle });
-    } catch (error) {
-        closeHandle(pipeHandle);
-        createForceKill(await resolveLaunchFailureBrowserPid(browserPid, tempDir, port, error), tempDir, undefined, domainKey)();
-        throw error;
-    }
-    closeHandle(pipeHandle);
-
-    const endpoint = `http://127.0.0.1:${port}`;
-    try {
-        const connectedSession = await connectLaunchedLocalBrowserSession(
-            playwright,
-            endpoint,
-            browserPid,
-            tempDir,
-            port,
-            'Hidden desktop local browser launch'
-        );
-        browserPid = connectedSession.browserPid;
-        const browser = connectedSession.browser;
-        writeBrowserDomainMetadata({
-            domainKey,
-            sessionMode: 'hidden-headed',
-            browserPid,
-            debugPort: port,
-            tempDir,
-            clientPids: [process.pid]
-        });
-        const forceKill = createForceKill(browserPid, tempDir, browser, domainKey);
-        const session: LocalBrowserSession = {
-            browser, sessionKey, domainKey, sessionMode: 'hidden-headed',
-            browserPid, debugPort: port, tempDir,
-            closeBrowser: async () => { await closeLocalBrowserSession(session); },
-            forceKill
-        };
-        return session;
-    } catch (error) {
-        createForceKill(await resolveLaunchFailureBrowserPid(browserPid, tempDir, port, error), tempDir, undefined, domainKey)();
-        throw error;
     }
 }
 
@@ -255,8 +141,7 @@ export async function closeLocalBrowserSession(session: LocalBrowserSession): Pr
             return;
         }
 
-        const domainLockPath = getBrowserDomainLockFilePath(session.domainKey);
-        const domainLock = acquireNativeFileLock(domainLockPath);
+        const domainLock = { release: () => undefined };
 
         try {
             const metadata = readBrowserDomainMetadata(session.domainKey);

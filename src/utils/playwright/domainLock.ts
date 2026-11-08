@@ -4,7 +4,6 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { config } from '../../config.js';
-import { acquireNativeFileLock } from '../nativeInterop.js';
 import {
     BrowserDomainMetadataEntry,
     LocalBrowserSessionMetadata,

@@ -49,7 +49,6 @@ export default tseslint.config(
         files: [
             'src/utils/playwrightClient.ts', // 42 处
             'src/utils/playwright/*.ts',
-            'src/utils/nativeInterop.ts', // 41 处
             'src/engines/bing/bing.ts', // 17 处
             'src/utils/browserStealth.ts', // 13 处
             'src/utils/markdown.ts', // 12 处

@@ -1,4 +1,6 @@
-import { NativeFileLockHandle } from '../nativeInterop.js';
+export interface NativeFileLockHandle {
+    release: () => void;
+}
 
 export type PlaywrightCookie = {
     name: string;

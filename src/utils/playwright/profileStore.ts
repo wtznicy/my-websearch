@@ -2,13 +2,11 @@ import { rmSync } from 'node:fs';
 import { readdir as readdirAsync, rm as rmAsync, stat as statAsync } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { acquireNativeFileLock } from '../nativeInterop.js';
 import { isSafeTempDir, removeTempDirInBackground } from './browserSessionTemp.js';
 export { isSafeTempDir, removeTempDirInBackground } from './browserSessionTemp.js';
 import {
     clearBrowserDomainMetadataFromPath,
     createForceKill,
-    getBrowserDomainLockFilePathByHash,
     listBrowserDomainMetadataEntries,
     normalizeActiveClientPids,
     readBrowserDomainMetadataFromPath,
@@ -39,8 +37,8 @@ export function isStaleBrowserCleanupPerformed(): boolean {
 export async function doCleanupStaleLocalBrowserSessions(): Promise<void> {
     const entries = listBrowserDomainMetadataEntries();
 
-    for (const { domainHash, metadataPath, sessionMode } of entries) {
-        const domainLock = acquireNativeFileLock(getBrowserDomainLockFilePathByHash(domainHash));
+    for (const { domainHash: _domainHash, metadataPath, sessionMode } of entries) {
+        const domainLock = { release: () => undefined };
         try {
             const metadata = readBrowserDomainMetadataFromPath(metadataPath, sessionMode);
             if (!metadata) {

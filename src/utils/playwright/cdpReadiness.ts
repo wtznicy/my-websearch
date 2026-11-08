@@ -1,9 +1,6 @@
 import { ChildProcess } from 'node:child_process';
 import { config } from '../../config.js';
 import {
-    readNamedPipeAsync
-} from '../nativeInterop.js';
-import {
     PlaywrightBrowserLike,
     PlaywrightModule
 } from './types.js';
@@ -160,40 +157,13 @@ export function createLocalBrowserLaunchError(message: string, browserPid?: numb
 }
 
 export async function waitForBrowserReadyViaStdout(
-    source: { type: 'pipe'; readHandle: unknown } | { type: 'child'; child: ChildProcess },
+    source: { type: 'child'; child: ChildProcess } | ChildProcess,
     timeoutMs = 30000
 ): Promise<string> {
+    const child = 'child' in source ? source.child : source;
     let accumulated = '';
-
-    if (source.type === 'pipe') {
-        const readLoop = (async () => {
-            while (true) {
-                const chunk = await readNamedPipeAsync(source.readHandle, 4096);
-                if (!chunk || chunk.length === 0) break;
-                accumulated += chunk.toString('utf-8');
-                const match = accumulated.match(/DevTools listening on (ws:\/\/[^\s]+)/);
-                if (match?.[1]) return match[1];
-            }
-            throw new Error('Pipe closed before browser emitted DevTools ready signal');
-        })();
-
-        let timer: NodeJS.Timeout | undefined;
-        const timeout = new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error(`Browser did not emit DevTools ready signal within ${timeoutMs}ms`)), timeoutMs);
-            if (typeof timer === 'object' && 'unref' in timer) (timer as NodeJS.Timeout).unref();
-        });
-
-        try {
-            return await Promise.race([readLoop, timeout]);
-        } finally {
-            if (timer) {
-                clearTimeout(timer);
-            }
-        }
-    } else {
-        const child = source.child;
-        return new Promise<string>((resolve, reject) => {
-            let settled = false;
+    return new Promise<string>((resolve, reject) => {
+        let settled = false;
             const timer = setTimeout(() => {
                 finish(new Error(`Browser did not emit DevTools ready signal within ${timeoutMs}ms`));
             }, timeoutMs);
@@ -249,7 +219,6 @@ export async function waitForBrowserReadyViaStdout(
             child.on('exit', onExit);
             child.on('close', onClose);
         });
-    }
 }
 
 export async function connectLaunchedLocalBrowserSession(
