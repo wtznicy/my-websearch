@@ -749,12 +749,21 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
             let context7Result: Context7DocsResult | null = null;
             let context7Error: unknown = null;
 
+            // 轻量意图自适应规范化：若带有 version 且意图是查更新，同时覆盖官方手册 (What Is New in X.Y) 与开源包 (Release Notes)
+            let context7Query = query;
+            if (query && version) {
+                const isUpdateIntent = /(release|update|更新|新特性|新功能|changelog|what'?s?\s*new)/i.test(query);
+                if (isUpdateIntent && !/what'?s?\s*new/i.test(query)) {
+                    context7Query = `What Is New in ${version} OR ${query}`;
+                }
+            }
+
             try {
                 logTool(`Context7 fetching docs for: ${target}`);
                 context7Result = await runtime.services.context7Docs.execute({
                     library: target,
                     version,
-                    query,
+                    query: context7Query,
                     limit,
                     strict,
                     signal

@@ -117,7 +117,16 @@ const OFFICIAL_LIBRARY_HINTS: Record<string, string[]> = {
     prisma: ['prisma/prisma'],
     supabase: ['supabase/supabase'],
     pytorch: ['pytorch/pytorch'],
-    tensorflow: ['tensorflow/tensorflow']
+    tensorflow: ['tensorflow/tensorflow'],
+    redis: ['redis/docs', 'redis/redis-doc', 'websites/redis'],
+    mysql: ['websites/dev_mysql_doc', 'mysql/mysql-server'],
+    postgres: ['websites/postgresql', 'postgres/postgres'],
+    postgresql: ['websites/postgresql', 'postgres/postgres'],
+    docker: ['websites/docker', 'docker/docs'],
+    nginx: ['websites/nginx'],
+    'mybatis-plus': ['websites/baomidou', 'baomidou/mybatis-plus'],
+    hutool: ['chinabugotech/hutool', 'dromara/hutool', 'websites/hutool'],
+    python: ['websites/python_doc', 'python/cpython']
 };
 
 function normalizeLibraryKey(raw: string): string {
@@ -165,6 +174,30 @@ export function findAmbiguousLibraryCandidates(candidates: Context7Library[], ra
  * 2. 裸库名优先命中官方映射
  * 3. 名称/ID 尾段精确匹配优先，再按质量分排序
  */
+function computeCandidateRoleScore(c: Context7Library, target: string): number {
+    const id = c.id.toLowerCase();
+    const title = c.title.toLowerCase();
+    let score = 0;
+    // 官方文档站或核心服务端优先
+    if (id.startsWith('/websites/') && (id.includes(target) || title.includes(target))) {
+        score += 50;
+    } else if (id.includes('/docs') || id.includes('/doc') || id.includes('/core') || id.includes('server')) {
+        score += 30;
+    }
+    // 降权特定单语言周边驱动/连接器/客户端绑定
+    if (
+        id.includes('connector') ||
+        id.includes('driver') ||
+        id.includes('/client') ||
+        id.includes('rs_') ||
+        id.includes('py_') ||
+        id.includes('node_')
+    ) {
+        score -= 40;
+    }
+    return score;
+}
+
 export function pickBestLibrary(candidates: Context7Library[], rawInput: string): Context7Library | undefined {
     if (!candidates || candidates.length === 0) {
         return undefined;
@@ -195,6 +228,11 @@ export function pickBestLibrary(candidates: Context7Library[], rawInput: string)
     }
 
     return [...candidates].sort((a, b) => {
+        const aRole = computeCandidateRoleScore(a, target);
+        const bRole = computeCandidateRoleScore(b, target);
+        if (aRole !== bRole) {
+            return bRole - aRole;
+        }
         const aExact = a.title.toLowerCase() === target || a.id.toLowerCase().endsWith(`/${target}`) ? 1 : 0;
         const bExact = b.title.toLowerCase() === target || b.id.toLowerCase().endsWith(`/${target}`) ? 1 : 0;
         if (aExact !== bExact) {
