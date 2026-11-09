@@ -628,7 +628,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     content: [{
                         type: 'text',
                         text: withErrorHint(
-                            `Failed to locate official documentation for "${target}" across npm, PyPI, crates.io, and Go.`,
+                            `Failed to locate official documentation for "${target}" across npm, PyPI, crates.io, Go, and Maven Central.`,
                             `Check package name spelling or query directly via source="context7" or fetchGithubContent.`
                         )
                     }],

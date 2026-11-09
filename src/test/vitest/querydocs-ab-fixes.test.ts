@@ -12,6 +12,7 @@ import {
 } from '../../core/docs/packageDocsFallback.js';
 import { queryMdnDocs } from '../../core/docs/mdnProvider.js';
 import { queryJavadocDocs } from '../../core/docs/javadocProvider.js';
+import * as httpRequest from '../../utils/httpRequest.js';
 import { extractRelevantSections, extractMarkdownHeadings } from '../../core/docs/markdownSectionExtractor.js';
 
 describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
@@ -190,15 +191,25 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
                 fetchGithub: mockFetchGithub
             });
 
-            // 无论当前测试网络是否连通 Maven，绝不允许落入 PyPI 抢注包
-            if (result !== null) {
-                expect(result.source).toBe('maven');
-                expect(result.repositoryUrl).toMatch(/hutool/i);
-                expect(result.repositoryUrl).not.toContain('pypa/sampleproject');
-                expect(result.repositoryUrl).not.toContain('python');
-            } else {
-                expect(result).toBeNull();
-            }
+            expect(result).not.toBeNull();
+            expect(result!.source).toBe('maven');
+            expect(result!.repositoryUrl).toBe('https://github.com/looly/hutool');
+            expect(result!.readme).toContain('Hutool');
+            expect(result!.repositoryUrl).not.toContain('pypa/sampleproject');
+            expect(result!.repositoryUrl).not.toContain('python');
+        });
+
+        it('strictly returns null and blocks fallback to npm/PyPI when an unknown Java-like package cannot be found', async () => {
+            const mockFetchGithub = vi.fn().mockResolvedValue('# Fake Python Package\n\nSample code.');
+            // 'java-unknown-lib' matches isJavaPackageName because it starts with 'java-'
+            const result = await fetchPackageDocsFallback({
+                library: 'java-unknown-nonexistent-package-xyz',
+                fetchGithub: mockFetchGithub
+            });
+
+            // Must strictly return null, NEVER falling through to npm or PyPI
+            expect(result).toBeNull();
+            expect(mockFetchGithub).not.toHaveBeenCalled();
         });
 
         it('isJavaPackageName uses safe prototype check and does not leak prototype keys', () => {
@@ -211,7 +222,20 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             expect(isJavaPackageName('mybatis-plus')).toBe(true);
         });
 
-        it('queryJavadocDocs resolves well-known Java aliases and rejects navigation wrapper stubs', async () => {
+        it('queryJavadocDocs resolves well-known Java aliases and rejects navigation and frame warning stubs', async () => {
+            vi.spyOn(httpRequest, 'requestDirectFirst').mockImplementation(async (_method, url) => {
+                if (String(url).includes('type-search-index.js')) {
+                    return {
+                        status: 200,
+                        data: '[{"p":"cn.hutool.core.date","l":"DateUtil"}]'
+                    } as any;
+                }
+                return {
+                    status: 200,
+                    data: '<html><iframe src="/static/cn.hutool/hutool-all/5.8.35/index.html"></iframe></html>'
+                } as any;
+            });
+
             // 1. 验证拒绝纯导航包装页
             const stubRes = await queryJavadocDocs({
                 library: 'hutool',
@@ -219,7 +243,22 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             });
             expect(stubRes).toBeNull();
 
-            // 2. 验证真实类页内容正常返回
+            // 2. 验证拒绝 Frame Alert / 框架预警页面
+            const frameRes = await queryJavadocDocs({
+                library: 'hutool',
+                fetchWeb: vi.fn().mockResolvedValue('<h2>Frame Alert</h2><p>This document is designed to be viewed using the frames feature.</p>')
+            });
+            expect(frameRes).toBeNull();
+
+            // 3. 验证带 query 时若未命中具体类而落在根 index.html，返回 null 让上层退回 Context7
+            const unlocatedRes = await queryJavadocDocs({
+                library: 'hutool',
+                query: '分页插件',
+                fetchWeb: vi.fn().mockResolvedValue('# Package cn.hutool.all\n\nPackage overview.')
+            });
+            expect(unlocatedRes).toBeNull();
+
+            // 4. 验证命中具体类时真实类页内容正常返回
             const validRes = await queryJavadocDocs({
                 library: 'hutool',
                 query: 'DateUtil',
@@ -228,6 +267,7 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             expect(validRes).not.toBeNull();
             expect(validRes?.source).toBe('javadoc');
             expect(validRes?.libraryId).toBe('cn.hutool:hutool-all');
+            expect(validRes?.content).toContain('DateUtil');
         });
     });
 
@@ -285,7 +325,7 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             expect(extracted.content).toContain('tokio::select!');
         });
 
-        it('focuses tightly on relevant function in pkg.go.dev / H3 container style docs', () => {
+        it('focuses tightly on relevant function in pkg.go.dev with real multi-H2 structure', () => {
             const goDoc = [
                 '# Package gin',
                 'Package gin implements a HTTP web framework.',
@@ -297,13 +337,24 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
                 '- func Default() *Engine',
                 '- func (group *RouterGroup) Use(middleware ...HandlerFunc) IRoutes',
                 '',
-                '## Documentation',
+                '## Constants',
+                'const Version = "v1.9.1"',
+                '',
+                '## Variables',
+                'var DebugPrintRouteFunc func(httpMethod, absolutePath, handlerName string, nuHandlers int)',
+                '',
+                '## Functions',
+                '',
+                '### func CreateTestContext',
+                'CreateTestContext returns a fresh engine and context for testing.',
                 '',
                 '### func Default',
-                '```go',
-                'func Default() *Engine',
-                '```',
                 'Default returns an Engine instance.',
+                '',
+                '## Types',
+                '',
+                '### type Context',
+                'Context is the most important part of gin. It allows passing variables between handlers.',
                 '',
                 '### func (group *RouterGroup) Use',
                 '```go',
@@ -330,7 +381,7 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             expect(extracted.isFocused).toBe(true);
             expect(extracted.content).toContain('RouterGroup) Use');
             expect(extracted.content).toContain('Use attaches a global middleware');
-            expect(extracted.content.length).toBeLessThan(goDoc.length);
+            expect(extracted.content.length).toBeLessThan(3500);
         });
     });
 

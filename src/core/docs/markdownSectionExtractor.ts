@@ -126,39 +126,33 @@ export function extractRelevantSections(
         return { content: trimmed, isFocused: false };
     }
 
-    // 1. 动态确定主要章节的切分层级（优先 H2，若无 H2 则取 H3，否则取出现频次最高的最小层级）
-    const availableLevels = headings.map((h) => h.level);
-    const hasH2 = availableLevels.includes(2);
-    const hasH3 = availableLevels.includes(3);
-    const h2Count = headings.filter((h) => h.level === 2).length;
-    const h3Count = headings.filter((h) => h.level === 3).length;
-
-    // 若 H3 标题数量丰富（>= 4 个）且 H2 极少（<= 3 个，通常是 Overview/Index/Documentation 等顶层容器，如 pkg.go.dev），
-    // 优先以 H3 为切分粒度，以精准定位函数、宏与具体类型
-    let primaryLevel = 2;
-    if (hasH3 && h3Count >= 4 && h2Count <= 3) {
-        primaryLevel = 3;
-    } else if (hasH2) {
-        primaryLevel = 2;
-    } else if (hasH3) {
-        primaryLevel = 3;
-    } else {
-        primaryLevel = Math.min(...availableLevels);
+    // 1. 动态确定切分标题集（包含所有 H2 顶级章节，以及所有 H3 具体 API 符号/小节）
+    // 无论是 pkg.go.dev（6+ 个 H2、几十个 H3 函数/类型）还是 docs.rs（宏/函数/结构体 H3）：
+    // 允许以 H2 或 H3 为独立切分块，更深层的 H4/H5 作为代码块或参数细节归属于父小节
+    const sectionHeadings: MarkdownHeading[] = [];
+    for (const h of headings) {
+        if (h.level === 2 || h.level === 3) {
+            sectionHeadings.push(h);
+        }
     }
-    const primaryHeadings = headings.filter((h) => h.level === primaryLevel);
 
-    // 拆分 Preamble（首个主标题之前的所有内容，通常含 H1、简介、安装与快速上手）
-    const firstPrimaryIndex = headings.findIndex((h) => h.level === primaryLevel);
-    const preambleEndLine = firstPrimaryIndex !== -1 ? headings[firstPrimaryIndex]!.lineIndex : headings[0]!.lineIndex;
+    const activeHeadings = sectionHeadings.length >= 2
+        ? sectionHeadings
+        : headings.filter((h) => h.level > 1).length >= 2
+            ? headings.filter((h) => h.level > 1)
+            : headings;
+
+    // 拆分 Preamble（首个切分标题之前的所有内容，通常含 H1、简介、安装与快速上手）
+    const preambleEndLine = activeHeadings[0]!.lineIndex;
     const preambleLines = lines.slice(0, preambleEndLine);
     const preambleText = preambleLines.join('\n').trim();
 
-    // 2. 按主标题划分主要章节块
+    // 2. 按结构化标题划分候选章节块
     const sectionBlocks: MarkdownSectionBlock[] = [];
 
-    for (let i = 0; i < primaryHeadings.length; i++) {
-        const currentHeading = primaryHeadings[i]!;
-        const nextHeading = primaryHeadings[i + 1];
+    for (let i = 0; i < activeHeadings.length; i++) {
+        const currentHeading = activeHeadings[i]!;
+        const nextHeading = activeHeadings[i + 1];
         const startLine = currentHeading.lineIndex;
         const endLine = nextHeading ? nextHeading.lineIndex : lines.length;
         const sectionLines = lines.slice(startLine, endLine);
@@ -229,7 +223,7 @@ export function extractRelevantSections(
     }
 
     // 附加精炼的未展示章节目录，方便调用者知晓全貌
-    const otherHeadings = primaryHeadings.filter((h) => !matchedTitles.includes(h.title)).map((h) => h.title);
+    const otherHeadings = activeHeadings.filter((h) => !matchedTitles.includes(h.title)).map((h) => h.title);
     if (otherHeadings.length > 0) {
         resultParts.push('\n---\n**Other Document Sections:** ' + otherHeadings.slice(0, 8).map((t) => `\`${t}\``).join(' • ') + (otherHeadings.length > 8 ? ` *(and ${otherHeadings.length - 8} more)*` : ''));
     }

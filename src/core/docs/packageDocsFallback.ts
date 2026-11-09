@@ -406,6 +406,11 @@ export async function resolveMavenRepository(
         return null;
     }
 
+    const cleanKey = `${coordinates.groupId}:${coordinates.artifactId}`.toLowerCase();
+    const fallbackRepo = Object.hasOwn(WELL_KNOWN_JAVA_REPOSITORIES, cleanKey)
+        ? (WELL_KNOWN_JAVA_REPOSITORIES[cleanKey] ?? null)
+        : null;
+
     let resolvedVersion = version || coordinates.version;
     try {
         if (!resolvedVersion) {
@@ -424,7 +429,7 @@ export async function resolveMavenRepository(
             const docs = (search.data as { response?: { docs?: Array<{ latestVersion?: string }> } })?.response?.docs;
             resolvedVersion = docs?.[0]?.latestVersion;
             if (!resolvedVersion) {
-                return null;
+                return fallbackRepo;
             }
         }
 
@@ -442,11 +447,11 @@ export async function resolveMavenRepository(
             'Maven Central POM'
         );
         if (pom.status !== 200 || typeof pom.data !== 'string') {
-            return null;
+            return fallbackRepo;
         }
-        return extractMavenScmRepository(pom.data);
+        return extractMavenScmRepository(pom.data) || fallbackRepo;
     } catch {
-        return null;
+        return fallbackRepo;
     }
 }
 
@@ -559,6 +564,33 @@ export const WELL_KNOWN_JAVA_PACKAGES: Record<string, string> = {
     dubbo: 'org.apache.dubbo:dubbo',
     'spring-boot': 'org.springframework.boot:spring-boot',
     'spring-framework': 'org.springframework:spring-core'
+};
+
+export const WELL_KNOWN_JAVA_REPOSITORIES: Record<string, string> = {
+    hutool: 'https://github.com/looly/hutool',
+    'cn.hutool:hutool-all': 'https://github.com/looly/hutool',
+    'mybatis-plus': 'https://github.com/baomidou/mybatis-plus',
+    'com.baomidou:mybatis-plus': 'https://github.com/baomidou/mybatis-plus',
+    mybatis: 'https://github.com/mybatis/mybatis-3',
+    'org.mybatis:mybatis': 'https://github.com/mybatis/mybatis-3',
+    guava: 'https://github.com/google/guava',
+    'com.google.guava:guava': 'https://github.com/google/guava',
+    lombok: 'https://github.com/projectlombok/lombok',
+    'org.projectlombok:lombok': 'https://github.com/projectlombok/lombok',
+    fastjson: 'https://github.com/alibaba/fastjson',
+    'com.alibaba:fastjson': 'https://github.com/alibaba/fastjson',
+    fastjson2: 'https://github.com/alibaba/fastjson2',
+    'com.alibaba.fastjson2:fastjson2': 'https://github.com/alibaba/fastjson2',
+    druid: 'https://github.com/alibaba/druid',
+    'com.alibaba:druid': 'https://github.com/alibaba/druid',
+    redisson: 'https://github.com/redisson/redisson',
+    'org.redisson:redisson': 'https://github.com/redisson/redisson',
+    dubbo: 'https://github.com/apache/dubbo',
+    'org.apache.dubbo:dubbo': 'https://github.com/apache/dubbo',
+    'spring-boot': 'https://github.com/spring-projects/spring-boot',
+    'org.springframework.boot:spring-boot': 'https://github.com/spring-projects/spring-boot',
+    'spring-framework': 'https://github.com/spring-projects/spring-framework',
+    'org.springframework:spring-core': 'https://github.com/spring-projects/spring-framework'
 };
 
 export function isPythonPackageName(name: string): boolean {
@@ -749,7 +781,8 @@ export async function fetchPackageDocsFallback(options: {
     if (preferJava) {
         try {
             const coords = (Object.hasOwn(WELL_KNOWN_JAVA_PACKAGES, lowerClean) ? WELL_KNOWN_JAVA_PACKAGES[lowerClean] : cleanTarget) ?? cleanTarget;
-            const mavenRepo = await resolveMavenRepository(coords, options.signal, version);
+            const mavenRepo = await resolveMavenRepository(coords, options.signal, version)
+                || (Object.hasOwn(WELL_KNOWN_JAVA_REPOSITORIES, lowerClean) ? WELL_KNOWN_JAVA_REPOSITORIES[lowerClean] : null);
             if (mavenRepo) {
                 const readme = await options.fetchGithub(mavenRepo);
                 if (readme && readme.trim().length > 20) {

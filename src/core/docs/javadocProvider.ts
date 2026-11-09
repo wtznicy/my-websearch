@@ -23,13 +23,10 @@ export interface JavadocResult {
 
 const JAVADOC_BASE = 'https://javadoc.io/doc';
 
-/** 判断目标是否适合作为 Javadoc 查询 */
+/** 判断目标是否适合作为 Javadoc 快速路由（仅限显式前缀或标准 Maven 坐标） */
 export function isLikelyJavadocTarget(target: string): boolean {
     const clean = target.trim().toLowerCase();
     if (clean.startsWith('javadoc:') || clean.startsWith('maven:')) {
-        return true;
-    }
-    if (Object.hasOwn(WELL_KNOWN_JAVA_PACKAGES, clean)) {
         return true;
     }
     return parseMavenCoordinates(clean) !== null;
@@ -129,6 +126,18 @@ export async function queryJavadocDocs(options: {
         && !content.includes('Package ');
     if (isNavigationWrapper) {
         logTool(`Javadoc.io returned navigation wrapper stub without documentation body for ${parsed.groupId}:${parsed.artifactId}`);
+        return null;
+    }
+
+    // 识别 Javadoc 框架预警 / 禁用提示（静态 index.html 通常为 noscript 框架警告页）
+    if (/Frame Alert|框架预警|JavaScript is disabled|您的浏览器已禁用/.test(content)) {
+        logTool(`Javadoc.io returned frame warning/index page without class body for ${parsed.groupId}:${parsed.artifactId}`);
+        return null;
+    }
+
+    // 若调用方带有具体类/方法 query，但最终未能定位到具体类页（仍落在根 index.html 或包装页），返回 null 让上层继续兜底
+    if (cleanQuery && (targetDocUrl.endsWith('/index.html') || targetDocUrl === wrapperUrl)) {
+        logTool(`Javadoc.io could not locate specific class documentation for query "${options.query}" in ${parsed.groupId}:${parsed.artifactId}`);
         return null;
     }
 
