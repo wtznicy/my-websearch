@@ -2,7 +2,15 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { isContext7QuotaExhaustedError, Context7DocsResult, Context7InfoSnippet, Context7CodeSnippet } from '../../engines/context7/context7.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
-import { fetchPackageDocsFallback, PackageDocsFallbackResult, resolvePackageMetadata } from '../../core/docs/packageDocsFallback.js';
+import {
+    fetchPackageDocsFallback,
+    PackageDocsFallbackResult,
+    resolvePackageMetadata,
+    isPythonPackageName,
+    isRustCrateName,
+    isGoModuleName,
+    isJavaPackageName
+} from '../../core/docs/packageDocsFallback.js';
 import { docsCacheKey, getDocsCache, setDocsCache } from '../../core/docs/docsCache.js';
 import { metrics } from '../../core/metrics.js';
 import {
@@ -507,31 +515,60 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 const meta = await resolvePackageMetadata(target, { signal, version });
                 const docUrl = meta?.documentationUrl || (meta?.homepageUrl && !meta.homepageUrl.includes('github.com') && !meta.homepageUrl.includes('gitee.com') ? meta.homepageUrl : null);
 
-                if (docUrl) {
-                    const content = await fetchViaWeb(docUrl);
-                    if (content) {
-                        metrics.recordQueryDocsAttempt('official', false);
-                        const text = capTextResponse(formatQueryDocsMarkdown({
-                            libraryId: meta?.libraryId || target,
-                            query,
-                            source: 'official',
-                            confidence: 'high',
-                            documentationUrl: docUrl,
-                            repositoryUrl: meta?.repositoryUrl || undefined,
-                            content,
-                            warnings: unknownWarnings
-                        }));
-                        setDocsCache(cacheKey, { text, source: 'official', confidence: 'high', cachedAt: Date.now() });
-                        return {
-                            content: [{ type: 'text', text }],
-                            source: 'official',
-                            confidence: 'high',
-                            warnings: unknownWarnings
-                        } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                let content: string | null = null;
+                let finalDocUrl = docUrl;
+
+                // 若文档站点属于 javadoc.io，转交 queryJavadocDocs 处理（自动解析静态目录与具体类页）
+                if (docUrl && docUrl.includes('javadoc.io')) {
+                    const javadocRes = await queryJavadocDocs({
+                        library: meta?.libraryId || target,
+                        version: meta?.version || version,
+                        query,
+                        signal,
+                        fetchWeb: fetchViaWeb
+                    });
+                    if (javadocRes && javadocRes.content && javadocRes.content.trim().length >= 500) {
+                        content = javadocRes.content.trim();
+                        finalDocUrl = javadocRes.documentationUrl;
                     }
+                } else if (docUrl) {
+                    content = await fetchViaWeb(docUrl);
                 }
 
-                logTool(`Official doc site not available for "${target}". Falling back to repository README...`);
+                // 检查内容有效性：排除极短内容（< 500 字符）或 javadoc.io 包装页残片
+                const isJavadocStub = content
+                    ? (content.includes('Latest version of') && !content.includes('Class ') && !content.includes('Interface '))
+                    : false;
+                const isSubstantive = content !== null && content.trim().length >= 500 && !isJavadocStub;
+
+                if (isSubstantive && content && finalDocUrl) {
+                    metrics.recordQueryDocsAttempt('official', false);
+                    const isWellKnown = (meta?.source as string) === 'official'
+                        || isPythonPackageName(target)
+                        || isRustCrateName(target)
+                        || isGoModuleName(target)
+                        || isJavaPackageName(target);
+                    const docConfidence: 'high' | 'medium' = isWellKnown ? 'high' : 'medium';
+                    const text = capTextResponse(formatQueryDocsMarkdown({
+                        libraryId: meta?.libraryId || target,
+                        query,
+                        source: 'official',
+                        confidence: docConfidence,
+                        documentationUrl: finalDocUrl || undefined,
+                        repositoryUrl: meta?.repositoryUrl || undefined,
+                        content,
+                        warnings: unknownWarnings
+                    }));
+                    setDocsCache(cacheKey, { text, source: 'official', confidence: docConfidence, cachedAt: Date.now() });
+                    return {
+                        content: [{ type: 'text', text }],
+                        source: 'official',
+                        confidence: docConfidence,
+                        warnings: unknownWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                }
+
+                logTool(`Official doc site not available or returned stub for "${target}". Falling back to repository README...`);
                 const fallback = await fetchPackageDocsFallback({
                     library: target,
                     version,
@@ -559,6 +596,31 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                         source: fallback.source,
                         confidence: fallback.confidence,
                         warnings: combinedWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                }
+
+                // 若 README 也未取到，但之前抓到了非空短内容，作为最后的兜底输出（附带警告，标 medium）
+                if (content && finalDocUrl) {
+                    metrics.recordQueryDocsAttempt('official', false);
+                    const stubWarnings = [
+                        ...unknownWarnings,
+                        `Official documentation page returned brief content (${content.length} characters) and repository README was not available.`
+                    ];
+                    const text = capTextResponse(formatQueryDocsMarkdown({
+                        libraryId: meta?.libraryId || target,
+                        query,
+                        source: 'official',
+                        confidence: 'medium',
+                        documentationUrl: finalDocUrl || undefined,
+                        repositoryUrl: meta?.repositoryUrl || undefined,
+                        content,
+                        warnings: stubWarnings
+                    }));
+                    return {
+                        content: [{ type: 'text', text }],
+                        source: 'official',
+                        confidence: 'medium',
+                        warnings: stubWarnings
                     } as unknown as { content: Array<{ type: 'text'; text: string }> };
                 }
 

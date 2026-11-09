@@ -587,7 +587,7 @@ export function isGoModuleName(name: string): boolean {
 
 export function isJavaPackageName(name: string): boolean {
     const lower = name.toLowerCase();
-    return lower in WELL_KNOWN_JAVA_PACKAGES
+    return Object.hasOwn(WELL_KNOWN_JAVA_PACKAGES, lower)
         || lower.startsWith('java-')
         || lower.endsWith('-java');
 }
@@ -603,7 +603,7 @@ export async function resolvePackageMetadata(
     if (!target) return null;
 
     const lower = target.toLowerCase();
-    const core = CORE_LANGUAGES_AND_TOOLS[lower];
+    const core = Object.hasOwn(CORE_LANGUAGES_AND_TOOLS, lower) ? CORE_LANGUAGES_AND_TOOLS[lower] : undefined;
     if (core) {
         return {
             source: 'official' as unknown as PackageMetadata['source'],
@@ -647,7 +647,7 @@ export async function resolvePackageMetadata(
             return goMeta;
         }
     } else if (isJavaPackageName(lower)) {
-        const coords = WELL_KNOWN_JAVA_PACKAGES[lower];
+        const coords = Object.hasOwn(WELL_KNOWN_JAVA_PACKAGES, lower) ? WELL_KNOWN_JAVA_PACKAGES[lower] : undefined;
         if (coords) {
             const mavenMeta = await resolveMavenMetadata(coords, options?.signal, options?.version);
             if (mavenMeta && (mavenMeta.documentationUrl || mavenMeta.repositoryUrl)) {
@@ -711,7 +711,7 @@ export async function fetchPackageDocsFallback(options: {
     };
 
     // 0. 核心语言/工具直通（如 python, redis, docker, nginx 等）
-    const core = CORE_LANGUAGES_AND_TOOLS[lowerClean];
+    const core = Object.hasOwn(CORE_LANGUAGES_AND_TOOLS, lowerClean) ? CORE_LANGUAGES_AND_TOOLS[lowerClean] : undefined;
     if (core) {
         const readme = await options.fetchGithub(core.repo);
         if (readme && readme.trim().length > 20) {
@@ -748,14 +748,14 @@ export async function fetchPackageDocsFallback(options: {
     // 如果优先 Java 生态（如 hutool, mybatis-plus, guava 等）
     if (preferJava) {
         try {
-            const coords = WELL_KNOWN_JAVA_PACKAGES[lowerClean] || cleanTarget;
+            const coords = (Object.hasOwn(WELL_KNOWN_JAVA_PACKAGES, lowerClean) ? WELL_KNOWN_JAVA_PACKAGES[lowerClean] : cleanTarget) ?? cleanTarget;
             const mavenRepo = await resolveMavenRepository(coords, options.signal, version);
             if (mavenRepo) {
                 const readme = await options.fetchGithub(mavenRepo);
                 if (readme && readme.trim().length > 20) {
                     return {
                         source: 'maven',
-                        confidence: hasExplicitPrefix || lowerClean in WELL_KNOWN_JAVA_PACKAGES ? 'high' : defaultConfidence,
+                        confidence: hasExplicitPrefix || Object.hasOwn(WELL_KNOWN_JAVA_PACKAGES, lowerClean) ? 'high' : defaultConfidence,
                         libraryId: displayTarget,
                         repositoryUrl: mavenRepo,
                         readme: readme.trim(),
@@ -768,7 +768,7 @@ export async function fetchPackageDocsFallback(options: {
         }
     }
 
-    if (lowerClean in WELL_KNOWN_JAVA_PACKAGES) {
+    if (Object.hasOwn(WELL_KNOWN_JAVA_PACKAGES, lowerClean)) {
         // Java 知名包（如 hutool）未在 Maven 提取到 README 时，严禁向 npm / PyPI 兜底，防止命中 pypa 抢注垃圾包
         return null;
     }

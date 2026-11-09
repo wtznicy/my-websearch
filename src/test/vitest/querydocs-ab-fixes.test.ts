@@ -7,9 +7,11 @@ import {
     CORE_LANGUAGES_AND_TOOLS,
     isPythonPackageName,
     isRustCrateName,
-    isGoModuleName
+    isGoModuleName,
+    isJavaPackageName
 } from '../../core/docs/packageDocsFallback.js';
 import { queryMdnDocs } from '../../core/docs/mdnProvider.js';
+import { queryJavadocDocs } from '../../core/docs/javadocProvider.js';
 import { extractRelevantSections, extractMarkdownHeadings } from '../../core/docs/markdownSectionExtractor.js';
 
 describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
@@ -188,11 +190,44 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
                 fetchGithub: mockFetchGithub
             });
 
-            if (result) {
+            // 无论当前测试网络是否连通 Maven，绝不允许落入 PyPI 抢注包
+            if (result !== null) {
                 expect(result.source).toBe('maven');
+                expect(result.repositoryUrl).toMatch(/hutool/i);
                 expect(result.repositoryUrl).not.toContain('pypa/sampleproject');
                 expect(result.repositoryUrl).not.toContain('python');
+            } else {
+                expect(result).toBeNull();
             }
+        });
+
+        it('isJavaPackageName uses safe prototype check and does not leak prototype keys', () => {
+            expect(isJavaPackageName('constructor')).toBe(false);
+            expect(isJavaPackageName('__proto__')).toBe(false);
+            expect(isJavaPackageName('toString')).toBe(false);
+            expect(isJavaPackageName('valueOf')).toBe(false);
+            expect(isJavaPackageName('hutool')).toBe(true);
+            expect(isJavaPackageName('guava')).toBe(true);
+            expect(isJavaPackageName('mybatis-plus')).toBe(true);
+        });
+
+        it('queryJavadocDocs resolves well-known Java aliases and rejects navigation wrapper stubs', async () => {
+            // 1. 验证拒绝纯导航包装页
+            const stubRes = await queryJavadocDocs({
+                library: 'hutool',
+                fetchWeb: vi.fn().mockResolvedValue('Latest version of cn.hutool:hutool-all\n\n- 5.8.35\n- 5.8.34')
+            });
+            expect(stubRes).toBeNull();
+
+            // 2. 验证真实类页内容正常返回
+            const validRes = await queryJavadocDocs({
+                library: 'hutool',
+                query: 'DateUtil',
+                fetchWeb: vi.fn().mockResolvedValue('# DateUtil Class\n\nProvides methods for date parsing.')
+            });
+            expect(validRes).not.toBeNull();
+            expect(validRes?.source).toBe('javadoc');
+            expect(validRes?.libraryId).toBe('cn.hutool:hutool-all');
         });
     });
 
@@ -248,6 +283,54 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             expect(extracted.isFocused).toBe(true);
             expect(extracted.focusedSectionTitles?.some((t) => t.toLowerCase().includes('macro'))).toBe(true);
             expect(extracted.content).toContain('tokio::select!');
+        });
+
+        it('focuses tightly on relevant function in pkg.go.dev / H3 container style docs', () => {
+            const goDoc = [
+                '# Package gin',
+                'Package gin implements a HTTP web framework.',
+                '',
+                '## Overview',
+                'Gin is a HTTP web framework written in Go.',
+                '',
+                '## Index',
+                '- func Default() *Engine',
+                '- func (group *RouterGroup) Use(middleware ...HandlerFunc) IRoutes',
+                '',
+                '## Documentation',
+                '',
+                '### func Default',
+                '```go',
+                'func Default() *Engine',
+                '```',
+                'Default returns an Engine instance.',
+                '',
+                '### func (group *RouterGroup) Use',
+                '```go',
+                'func (group *RouterGroup) Use(middleware ...HandlerFunc) IRoutes',
+                '```',
+                'Use attaches a global middleware to the router group.',
+                '',
+                '### func (c *Context) JSON',
+                '```go',
+                'func (c *Context) JSON(code int, obj any)',
+                '```',
+                'JSON serializes the given struct as JSON.',
+                '',
+                '### func (c *Context) Next',
+                '```go',
+                'func (c *Context) Next()',
+                '```',
+                'Next executes the pending handlers in the chain.',
+                '',
+                'Filler content to exceed 8000 chars.\n'.repeat(300)
+            ].join('\n');
+
+            const extracted = extractRelevantSections(goDoc, 'middleware');
+            expect(extracted.isFocused).toBe(true);
+            expect(extracted.content).toContain('RouterGroup) Use');
+            expect(extracted.content).toContain('Use attaches a global middleware');
+            expect(extracted.content.length).toBeLessThan(goDoc.length);
         });
     });
 

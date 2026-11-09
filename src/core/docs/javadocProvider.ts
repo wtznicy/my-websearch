@@ -7,7 +7,7 @@
  * - 官方文档直连：https://javadoc.io/doc/<groupId>/<artifactId>/<version|latest>/index.html
  */
 
-import { parseMavenCoordinates } from './packageDocsFallback.js';
+import { parseMavenCoordinates, WELL_KNOWN_JAVA_PACKAGES } from './packageDocsFallback.js';
 import { logTool } from '../../tools/toolShared.js';
 import { requestDirectFirst, buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 
@@ -29,6 +29,9 @@ export function isLikelyJavadocTarget(target: string): boolean {
     if (clean.startsWith('javadoc:') || clean.startsWith('maven:')) {
         return true;
     }
+    if (Object.hasOwn(WELL_KNOWN_JAVA_PACKAGES, clean)) {
+        return true;
+    }
     return parseMavenCoordinates(clean) !== null;
 }
 
@@ -41,7 +44,11 @@ export async function queryJavadocDocs(options: {
     fetchWeb: (url: string) => Promise<string | null>;
 }): Promise<JavadocResult | null> {
     const rawTarget = options.library.trim().replace(/^(?:javadoc|maven):/i, '').trim();
-    const parsed = parseMavenCoordinates(rawTarget);
+    const lower = rawTarget.toLowerCase();
+    const coords = (Object.hasOwn(WELL_KNOWN_JAVA_PACKAGES, lower)
+        ? WELL_KNOWN_JAVA_PACKAGES[lower]
+        : rawTarget) ?? rawTarget;
+    const parsed = parseMavenCoordinates(coords);
     if (!parsed) {
         return null;
     }
@@ -112,6 +119,16 @@ export async function queryJavadocDocs(options: {
     logTool(`Querying Javadoc.io: ${targetDocUrl}`);
     const content = await options.fetchWeb(targetDocUrl);
     if (!content || content.trim().length < 20) {
+        return null;
+    }
+
+    // 识别 Javadoc.io 包装导航壳（仅含 "Latest version of..." 及版本导航链接，无具体文档正文）
+    const isNavigationWrapper = content.includes('Latest version of')
+        && !content.includes('Class ')
+        && !content.includes('Interface ')
+        && !content.includes('Package ');
+    if (isNavigationWrapper) {
+        logTool(`Javadoc.io returned navigation wrapper stub without documentation body for ${parsed.groupId}:${parsed.artifactId}`);
         return null;
     }
 

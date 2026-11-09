@@ -130,7 +130,21 @@ export function extractRelevantSections(
     const availableLevels = headings.map((h) => h.level);
     const hasH2 = availableLevels.includes(2);
     const hasH3 = availableLevels.includes(3);
-    const primaryLevel = hasH2 ? 2 : (hasH3 ? 3 : Math.min(...availableLevels));
+    const h2Count = headings.filter((h) => h.level === 2).length;
+    const h3Count = headings.filter((h) => h.level === 3).length;
+
+    // 若 H3 标题数量丰富（>= 4 个）且 H2 极少（<= 3 个，通常是 Overview/Index/Documentation 等顶层容器，如 pkg.go.dev），
+    // 优先以 H3 为切分粒度，以精准定位函数、宏与具体类型
+    let primaryLevel = 2;
+    if (hasH3 && h3Count >= 4 && h2Count <= 3) {
+        primaryLevel = 3;
+    } else if (hasH2) {
+        primaryLevel = 2;
+    } else if (hasH3) {
+        primaryLevel = 3;
+    } else {
+        primaryLevel = Math.min(...availableLevels);
+    }
     const primaryHeadings = headings.filter((h) => h.level === primaryLevel);
 
     // 拆分 Preamble（首个主标题之前的所有内容，通常含 H1、简介、安装与快速上手）
@@ -158,28 +172,38 @@ export function extractRelevantSections(
         });
     }
 
-    // 3. 寻找得分最高的章节
+    // 3. 寻找得分最高的章节，设置相对阈值过滤弱相关的噪音章节
     const sorted = [...sectionBlocks].sort((a, b) => b.score - a.score);
-    const bestMatches = sorted.filter((s) => s.score > 0);
+    const highestScore = sorted[0]?.score ?? 0;
+    if (highestScore <= 0) {
+        return { content: trimmed, isFocused: false };
+    }
 
-    // 如果没有任何章节匹配关键词，退回全量原文，避免盲目过滤
+    // 相对阈值：至少达到最高分的 30%，过滤弱相关的噪音章节
+    const scoreThreshold = Math.max(1, Math.floor(highestScore * 0.3));
+    const bestMatches = sorted.filter((s) => s.score >= scoreThreshold);
+
     if (bestMatches.length === 0) {
         return { content: trimmed, isFocused: false };
     }
 
     // 4. 组装结果：Preamble + 选中的完整章节 + 目录提示
-    // 若前导 Preamble 冗长（> 1500 字符，例如 docs.rs 整页的 crate tour），截取前导概要，避免挤占核心章节
+    // 若前导 Preamble 较长（> 500 字符，例如 docs.rs/pkg.go.dev 整页的 crate/pkg tour），截取前导概要，优先呈现核心章节
     let displayPreamble = preambleText;
-    if (preambleText.length > 1500) {
-        const cut = preambleText.lastIndexOf('\n\n', 1200);
-        displayPreamble = (cut > 200 ? preambleText.slice(0, cut) : preambleText.slice(0, 1200))
+    if (preambleText.length > 500) {
+        const cut = preambleText.lastIndexOf('\n\n', 450);
+        displayPreamble = (cut > 150 ? preambleText.slice(0, cut) : preambleText.slice(0, 450))
             + '\n\n*(... Overview truncated, focused section below ...)*';
     }
 
     const selectedBlocks: MarkdownSectionBlock[] = [];
     let currentLength = displayPreamble.length;
+    const maxSections = 4;
 
     for (const block of bestMatches) {
+        if (selectedBlocks.length >= maxSections) {
+            break;
+        }
         const blockLen = block.lines.join('\n').length;
         if (currentLength + blockLen <= maxChars || selectedBlocks.length === 0) {
             selectedBlocks.push(block);
