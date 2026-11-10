@@ -308,7 +308,22 @@ function defaultContext7Get(url: string, params: Record<string, unknown> | undef
 }
 
 /**
- * 带退避重试的 context7 GET：429（限流）与 5xx（上游故障）最多重试 2 次并尊重 Retry-After。
+ * 识别 Context7 请求中的网络层偶发故障（如连接重置、TLS 握手断开、超时、socket hang up），
+ * 避免网络层瞬断时不重试就草率降级到无关页面。
+ */
+export function isContext7TransientNetworkError(error: unknown): boolean {
+    if (!error) return false;
+    const err = error as { code?: string; message?: string; name?: string };
+    const code = err.code || '';
+    if (/ECONNRESET|ECONNABORTED|ETIMEDOUT|ESOCKETTIMEDOUT|ENOTFOUND|EAI_AGAIN|EPROTO|ERR_SSL/i.test(code)) {
+        return true;
+    }
+    const message = err.message || '';
+    return /ECONNRESET|socket hang up|socket disconnected|before secure TLS connection|unexpected EOF|network timeout|network error|Client network socket disconnected|SSL routines/i.test(message);
+}
+
+/**
+ * 带退避重试的 context7 GET：429（限流）、5xx（上游故障）及网络层偶发断开（ECONNRESET/TLS）最多重试 2 次并尊重 Retry-After。
  * 无 API key 时低速率限流（429）是预期失败模式，重试耗尽后转成带明确提示的错误，
  * 而不是和 5xx 一样笼统报"Failed to fetch docs"。
  *
@@ -336,14 +351,20 @@ export async function context7GetWithRetry(
             if (status === 301 && (error as { response?: AxiosResponse })?.response) {
                 return (error as { response: AxiosResponse }).response;
             }
-            if (status !== 429 && (status === undefined || status < 500)) {
-                throw error; // 非限流、非上游故障：直接抛
+
+            const isTransientNetwork = isContext7TransientNetworkError(error);
+            const isRetryableStatus = status === 429 || (typeof status === 'number' && status >= 500);
+
+            if (!isRetryableStatus && !isTransientNetwork) {
+                throw error; // 非限流、非 5xx、非网络层瞬断（如 400、401、404 等）：直接抛
             }
+
             if (attempt >= retries - 1) {
                 break;
             }
+
             const retryAfter = readHeaderNumber((error as { response?: { headers?: Record<string, string> } })?.response?.headers, 'retry-after');
-            const base = status === 429 ? 1500 : 800;
+            const base = status === 429 ? 1500 : (isTransientNetwork ? 600 : 800);
             await sleep(computeContext7RetryDelayMs(retryAfter, attempt, base));
         }
     }

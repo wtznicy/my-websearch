@@ -121,9 +121,10 @@ export function extractRelevantSections(
     const lines = trimmed.split(/\r?\n/);
     const headings = extractMarkdownHeadings(trimmed);
 
-    // 如果文档没有明显的标题结构（少于 2 个标题），不擅自切块，直接返回原文
+    // 如果文档没有明显的标题结构（少于 2 个标题，例如 pkg.go.dev 正文退化为单段），
+    // 退化为基于段落与关键词密度的聚焦抽取（Query-Centered Excerpt Window），避免直接原样输出 30KB 巨型文本
     if (headings.length < 2) {
-        return { content: trimmed, isFocused: false };
+        return extractWindowByQueryTokens(trimmed, query, queryTokens, maxChars);
     }
 
     // 1. 动态确定切分标题集（包含所有 H2 顶级章节，以及所有 H3 具体 API 符号/小节）
@@ -233,5 +234,186 @@ export function extractRelevantSections(
         isFocused: true,
         focusedSectionTitles: matchedTitles,
         toc: headings.map((h) => `${'  '.repeat(h.level - 1)}- ${h.title}`)
+    };
+}
+
+/**
+ * 当文档缺乏 Markdown 标题树时（例如 pkg.go.dev 页面转换为 Markdown 后仅含 1 个顶层标题），
+ * 基于段落块与关键词密度提取最相关的上下文窗口（Query-Centered Excerpt Window），
+ * 确保即使无标准 Markdown 标题，也能从 30KB 巨型文档中精准聚焦出 ~2-3KB 的核心小节。
+ */
+export function extractWindowByQueryTokens(
+    markdown: string,
+    query: string,
+    queryTokens: string[],
+    maxChars = 24000
+): ExtractedSectionResult {
+    const trimmed = markdown.trim();
+    if (!query || !query.trim() || trimmed.length <= 8000 || queryTokens.length === 0) {
+        return { content: trimmed, isFocused: false };
+    }
+
+    const blocks = trimmed.split(/\n{2,}/);
+    if (blocks.length <= 2) {
+        return extractCharacterWindow(trimmed, query, queryTokens, maxChars);
+    }
+
+    // 1. 对各个段落块进行评分
+    const scoredBlocks: Array<{ index: number; text: string; score: number }> = [];
+    for (let i = 0; i < blocks.length; i++) {
+        const text = blocks[i]!.trim();
+        if (!text) continue;
+        const lowerText = text.toLowerCase();
+        let score = 0;
+
+        for (const token of queryTokens) {
+            if (!token) continue;
+            // 包含函数声明/标识符（如 func ... Middleware 或 type Middleware 等签名模式）
+            if (new RegExp(`(?:func|type|var|const|def|class|interface|fn)\\s+[^\\n]*\\b${token}\\b`, 'i').test(text)) {
+                score += 80;
+            } else if (lowerText.includes(token)) {
+                const occurrences = lowerText.split(token).length - 1;
+                score += 30 + Math.min(occurrences * 5, 20);
+            }
+        }
+
+        // 代码块加成
+        if (score > 0 && text.includes('```')) {
+            score += 20;
+        }
+
+        scoredBlocks.push({ index: i, text, score });
+    }
+
+    const matched = scoredBlocks.filter((b) => b.score > 0).sort((a, b) => b.score - a.score);
+    if (matched.length === 0) {
+        return { content: trimmed, isFocused: false };
+    }
+
+    const best = matched[0]!;
+    const bestIndex = best.index;
+
+    // 2. 以最高得分段落为中心，向前后扩展上下文（保留前置签名与后续示例/说明）
+    // 目标聚焦窗口约为 2000 - 4000 字符
+    const targetExcerptBudget = Math.min(maxChars, 4000);
+    const selectedIndices = new Set<number>([bestIndex]);
+    let currentLength = best.text.length;
+
+    // 向前扩展 1-2 块（捕获函数签名或前置说明）
+    for (let step = 1; step <= 2; step++) {
+        const prevIdx = bestIndex - step;
+        if (prevIdx > 0) {
+            const prevBlock = blocks[prevIdx]!;
+            if (currentLength + prevBlock.length <= targetExcerptBudget) {
+                selectedIndices.add(prevIdx);
+                currentLength += prevBlock.length;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // 向后扩展 1-3 块（捕获后续用法示例或参数解释）
+    for (let step = 1; step <= 3; step++) {
+        const nextIdx = bestIndex + step;
+        if (nextIdx < blocks.length) {
+            const nextBlock = blocks[nextIdx]!;
+            if (currentLength + nextBlock.length <= targetExcerptBudget) {
+                selectedIndices.add(nextIdx);
+                currentLength += nextBlock.length;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // 若还有预算，且存在其他高分匹配段落（如相关性 >= 最高分 60% 的紧密相关方法），也按需纳入
+    for (const other of matched.slice(1)) {
+        if (other.score >= best.score * 0.6 && !selectedIndices.has(other.index)) {
+            if (currentLength + other.text.length <= targetExcerptBudget) {
+                selectedIndices.add(other.index);
+                currentLength += other.text.length;
+            }
+        }
+    }
+
+    const sortedIndices = Array.from(selectedIndices).sort((a, b) => a - b);
+    const minSelected = sortedIndices[0]!;
+    const maxSelected = sortedIndices[sortedIndices.length - 1]!;
+
+    // 3. 提取 Preamble（通常是第一段：库/包简介与导入）
+    let displayPreamble = '';
+    if (minSelected > 0 && blocks[0]) {
+        const intro = blocks[0].trim();
+        displayPreamble = intro.length > 500
+            ? intro.slice(0, 450) + '\n\n*(... Overview truncated, focused excerpt below ...)*'
+            : intro;
+    }
+
+    // 4. 组装结果
+    const resultParts: string[] = [];
+    if (displayPreamble) {
+        resultParts.push(displayPreamble);
+    }
+
+    resultParts.push(`\n> ℹ️ **Focused Excerpt:** Retrieved focused context for "${query}" (no heading tree found in document, extracted query-dense section):\n`);
+
+    if (minSelected > 1) {
+        resultParts.push('*(... preceding sections truncated ...)*\n');
+    }
+
+    const excerptText = sortedIndices.map((idx) => blocks[idx]!.trim()).join('\n\n');
+    resultParts.push(excerptText);
+
+    if (maxSelected < blocks.length - 1) {
+        resultParts.push('\n*(... following sections truncated ...)*');
+    }
+
+    return {
+        content: resultParts.join('\n\n').trim(),
+        isFocused: true,
+        focusedSectionTitles: [`Excerpt around "${query}"`]
+    };
+}
+
+function extractCharacterWindow(
+    text: string,
+    query: string,
+    queryTokens: string[],
+    maxChars: number
+): ExtractedSectionResult {
+    const lower = text.toLowerCase();
+    let bestPos = -1;
+    for (const token of queryTokens) {
+        const pos = lower.indexOf(token.toLowerCase());
+        if (pos !== -1) {
+            bestPos = pos;
+            break;
+        }
+    }
+    if (bestPos === -1) {
+        return { content: text.slice(0, maxChars), isFocused: false };
+    }
+
+    const windowSize = Math.min(maxChars, 3500);
+    const half = Math.floor(windowSize / 2);
+    let start = Math.max(0, bestPos - half);
+    let end = Math.min(text.length, start + windowSize);
+    if (end === text.length) {
+        start = Math.max(0, end - windowSize);
+    }
+
+    const excerpt = text.slice(start, end).trim();
+    const parts = [
+        `> ℹ️ **Focused Excerpt:** Retrieved focused character window for "${query}":`,
+        start > 0 ? '*(... preceding text truncated ...)*\n' : '',
+        excerpt,
+        end < text.length ? '\n*(... following text truncated ...)*' : ''
+    ].filter(Boolean);
+
+    return {
+        content: parts.join('\n').trim(),
+        isFocused: true,
+        focusedSectionTitles: [`Window around "${query}"`]
     };
 }

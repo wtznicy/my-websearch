@@ -126,6 +126,7 @@ const OFFICIAL_LIBRARY_HINTS: Record<string, string[]> = {
     nginx: ['websites/nginx'],
     'mybatis-plus': ['websites/baomidou', 'baomidou/mybatis-plus'],
     hutool: ['chinabugotech/hutool', 'dromara/hutool', 'websites/hutool'],
+    guava: ['google/guava'],
     python: ['websites/python_doc', 'python/cpython']
 };
 

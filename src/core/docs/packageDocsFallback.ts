@@ -407,9 +407,16 @@ export async function resolveMavenRepository(
     }
 
     const cleanKey = `${coordinates.groupId}:${coordinates.artifactId}`.toLowerCase();
-    const fallbackRepo = Object.hasOwn(WELL_KNOWN_JAVA_REPOSITORIES, cleanKey)
+    const fallbackRepo = (Object.hasOwn(WELL_KNOWN_JAVA_REPOSITORIES, cleanKey)
         ? (WELL_KNOWN_JAVA_REPOSITORIES[cleanKey] ?? null)
-        : null;
+        : null)
+        || (Object.hasOwn(WELL_KNOWN_JAVA_REPOSITORIES, coordinates.artifactId.toLowerCase())
+        ? (WELL_KNOWN_JAVA_REPOSITORIES[coordinates.artifactId.toLowerCase()] ?? null)
+        : null);
+
+    if (fallbackRepo) {
+        return fallbackRepo;
+    }
 
     let resolvedVersion = version || coordinates.version;
     try {
@@ -567,8 +574,8 @@ export const WELL_KNOWN_JAVA_PACKAGES: Record<string, string> = {
 };
 
 export const WELL_KNOWN_JAVA_REPOSITORIES: Record<string, string> = {
-    hutool: 'https://github.com/looly/hutool',
-    'cn.hutool:hutool-all': 'https://github.com/looly/hutool',
+    hutool: 'https://github.com/dromara/hutool',
+    'cn.hutool:hutool-all': 'https://github.com/dromara/hutool',
     'mybatis-plus': 'https://github.com/baomidou/mybatis-plus',
     'com.baomidou:mybatis-plus': 'https://github.com/baomidou/mybatis-plus',
     mybatis: 'https://github.com/mybatis/mybatis-3',
@@ -781,8 +788,9 @@ export async function fetchPackageDocsFallback(options: {
     if (preferJava) {
         try {
             const coords = (Object.hasOwn(WELL_KNOWN_JAVA_PACKAGES, lowerClean) ? WELL_KNOWN_JAVA_PACKAGES[lowerClean] : cleanTarget) ?? cleanTarget;
-            const mavenRepo = await resolveMavenRepository(coords, options.signal, version)
-                || (Object.hasOwn(WELL_KNOWN_JAVA_REPOSITORIES, lowerClean) ? WELL_KNOWN_JAVA_REPOSITORIES[lowerClean] : null);
+            const mavenRepo = (Object.hasOwn(WELL_KNOWN_JAVA_REPOSITORIES, lowerClean) ? WELL_KNOWN_JAVA_REPOSITORIES[lowerClean] : null)
+                || await resolveMavenRepository(coords, options.signal, version)
+                || (Object.hasOwn(WELL_KNOWN_JAVA_REPOSITORIES, coords.toLowerCase()) ? WELL_KNOWN_JAVA_REPOSITORIES[coords.toLowerCase()] : null);
             if (mavenRepo) {
                 const readme = await options.fetchGithub(mavenRepo);
                 if (readme && readme.trim().length > 20) {
@@ -801,8 +809,8 @@ export async function fetchPackageDocsFallback(options: {
         }
     }
 
-    if (Object.hasOwn(WELL_KNOWN_JAVA_PACKAGES, lowerClean)) {
-        // Java 知名包（如 hutool）未在 Maven 提取到 README 时，严禁向 npm / PyPI 兜底，防止命中 pypa 抢注垃圾包
+    if (preferJava) {
+        // Java 包（如 hutool、guava、或 java-* 等）未在 Maven 提取到 README 时，严禁向 npm / PyPI 兜底，防止命中 pypa 抢注垃圾包
         return null;
     }
 

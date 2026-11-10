@@ -1,6 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import ipaddr from 'ipaddr.js';
-import { translateChineseQueryTerm, fetchContext7Docs, Context7GetImpl } from '../../engines/context7/context7.js';
+import {
+    translateChineseQueryTerm,
+    fetchContext7Docs,
+    Context7GetImpl,
+    context7GetWithRetry,
+    isContext7TransientNetworkError
+} from '../../engines/context7/context7.js';
+import { pickBestLibrary } from '../../core/context7/context7Service.js';
 import {
     resolvePackageMetadata,
     fetchPackageDocsFallback,
@@ -193,7 +200,7 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
 
             expect(result).not.toBeNull();
             expect(result!.source).toBe('maven');
-            expect(result!.repositoryUrl).toBe('https://github.com/looly/hutool');
+            expect(result!.repositoryUrl).toBe('https://github.com/dromara/hutool');
             expect(result!.readme).toContain('Hutool');
             expect(result!.repositoryUrl).not.toContain('pypa/sampleproject');
             expect(result!.repositoryUrl).not.toContain('python');
@@ -383,6 +390,37 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             expect(extracted.content).toContain('Use attaches a global middleware');
             expect(extracted.content.length).toBeLessThan(3500);
         });
+
+        it('focuses relevant excerpts even when document has NO Markdown headings (headings.length < 2, like real pkg.go.dev)', () => {
+            // Real pkg.go.dev documents often render with just a single title and flat paragraphs / code blocks without ## or ###
+            const flatGoDoc = [
+                '# Package gin',
+                'Package gin implements a HTTP web framework called gin.',
+                '',
+                'Constants and variables for gin web engine.',
+                'Default returns an Engine instance with the Logger and Recovery middleware already attached.',
+                '',
+                'func CreateTestContext(w http.ResponseWriter) (c *Context, r *Engine)',
+                'CreateTestContext returns a fresh engine and context for testing.',
+                '',
+                'func (group *RouterGroup) Use(middleware ...HandlerFunc) IRoutes',
+                'Use attaches a global middleware to the router group. For the example, see the test cases.',
+                '```go',
+                'r := gin.New()',
+                'r.Use(gin.Logger())',
+                '```',
+                '',
+                'func (c *Context) JSON(code int, obj any)',
+                'JSON serializes the given struct as JSON into the response body.',
+                '',
+                'Massive filler content without any headings to simulate 30KB of documentation.\n'.repeat(400)
+            ].join('\n');
+
+            const extracted = extractRelevantSections(flatGoDoc, 'middleware');
+            expect(extracted.isFocused).toBe(true);
+            expect(extracted.content).toContain('Use attaches a global middleware');
+            expect(extracted.content.length).toBeLessThan(3500);
+        });
     });
 
     describe('P2-7: IPv6 match IPv4 CIDR compatibility', () => {
@@ -397,6 +435,60 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             // Standard range checks must still work properly
             expect(ipaddr.IPv4.parse('127.0.0.1').range()).toBe('loopback');
             expect(ipaddr.IPv6.parse('2001::1').range()).toBe('teredo');
+        });
+    });
+
+    describe('Context7 transient network retry & guava official hints', () => {
+        it('isContext7TransientNetworkError accurately recognizes transient network errors', () => {
+            expect(isContext7TransientNetworkError(new Error('Client network socket disconnected before secure TLS connection was established'))).toBe(true);
+            expect(isContext7TransientNetworkError({ code: 'ECONNRESET', message: 'read ECONNRESET' })).toBe(true);
+            expect(isContext7TransientNetworkError({ message: 'socket hang up' })).toBe(true);
+            expect(isContext7TransientNetworkError({ code: 'ETIMEDOUT' })).toBe(true);
+
+            // Non-transient errors
+            expect(isContext7TransientNetworkError(null)).toBe(false);
+            expect(isContext7TransientNetworkError(new Error('Bad Request'))).toBe(false);
+            expect(isContext7TransientNetworkError({ response: { status: 404 } })).toBe(false);
+        });
+
+        it('context7GetWithRetry retries transient network errors and succeeds on recovery', async () => {
+            let calls = 0;
+            const mockGet: Context7GetImpl = vi.fn().mockImplementation(async () => {
+                calls++;
+                if (calls === 1) {
+                    throw new Error('Client network socket disconnected before secure TLS connection was established');
+                }
+                return { status: 200, data: { ok: true } } as any;
+            });
+
+            const res = await context7GetWithRetry('https://context7.com/api/test', {}, 3, mockGet);
+            expect(res.status).toBe(200);
+            expect(res.data).toEqual({ ok: true });
+            expect(calls).toBe(2);
+        });
+
+        it('context7GetWithRetry does not retry non-transient non-5xx errors like 400', async () => {
+            let calls = 0;
+            const mockGet: Context7GetImpl = vi.fn().mockImplementation(async () => {
+                calls++;
+                const err = new Error('Bad Request') as any;
+                err.response = { status: 400, data: { error: 'invalid_params' } };
+                throw err;
+            });
+
+            await expect(context7GetWithRetry('https://context7.com/api/test', {}, 3, mockGet)).rejects.toThrow('Bad Request');
+            expect(calls).toBe(1);
+        });
+
+        it('pickBestLibrary prefers google/guava over websites/guava_dev for guava', () => {
+            const candidates = [
+                { id: '/websites/guava_dev', title: 'guava.dev', totalSnippets: 100 },
+                { id: '/google/guava', title: 'Google Guava', totalSnippets: 80 }
+            ] as any[];
+
+            const chosen = pickBestLibrary(candidates, 'guava');
+            expect(chosen).toBeDefined();
+            expect(chosen!.id).toBe('/google/guava');
         });
     });
 });
