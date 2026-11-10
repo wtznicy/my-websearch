@@ -462,6 +462,75 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             expect(extracted.content.length).toBeGreaterThan(500);
         });
 
+        it('skips TOC index links and anchors onto function implementation and usage body in massive pkg.go.dev documents', () => {
+            // pkg.go.dev documents place a huge index of - [func ...](#...) at the top
+            const tocAndBodyDoc = [
+                '# Package gin',
+                'Package gin implements an HTTP web framework.',
+                '',
+                '## Index',
+                '- [func CreateTestContext(w http.ResponseWriter) (c *Context, r *Engine)](#CreateTestContext)',
+                '- [func Default() *Engine](#Default)',
+                '- [func (engine *Engine) Use(middleware ...HandlerFunc) IRoutes](#Engine.Use)',
+                '- [func (group *RouterGroup) Use(middleware ...HandlerFunc) IRoutes](#RouterGroup.Use)',
+                '- [func New() *Engine](#New)',
+                '- [func (c *Context) JSON(code int, obj any)](#Context.JSON)',
+                '',
+                'Filler index lines to simulate large package index.\n'.repeat(300) +
+                '\n' +
+                '### func (group *RouterGroup) Use\n\n' +
+                '```go\n' +
+                'func (group *RouterGroup) Use(middleware ...HandlerFunc) IRoutes\n' +
+                '```\n' +
+                'Use attaches a global middleware to the router group. For the example, see the test cases.\n' +
+                'Example usage:\n' +
+                '```go\n' +
+                'router := gin.New()\n' +
+                'router.Use(gin.Logger())\n' +
+                '```\n\n' +
+                'Trailing substantive body lines.\n'.repeat(300)
+            ].join('\n');
+
+            const extracted = extractRelevantSections(tocAndBodyDoc, 'middleware');
+            expect(extracted.isFocused).toBe(true);
+            // Must contain the actual usage and code block, NOT just the index link
+            expect(extracted.content).toContain('Use attaches a global middleware to the router group');
+            expect(extracted.content).toContain('router.Use(gin.Logger())');
+            // Must NOT start in or be dominated by the index link table
+            expect(extracted.content).not.toContain('## Index');
+            expect(extracted.content).not.toContain('(#Engine.Use)');
+        });
+
+        it('skips TOC index links in completely flat single-block pkg.go.dev docs (headings.length < 2)', () => {
+            const flatPkgDoc = [
+                '# Package gin',
+                'Package gin implements an HTTP web framework.',
+                '',
+                'Index table of functions:',
+                '- [func CreateTestContext(w http.ResponseWriter) (c *Context, r *Engine)](#CreateTestContext)',
+                '- [func Default() *Engine](#Default)',
+                '- [func (engine *Engine) Use(middleware ...HandlerFunc) IRoutes](#Engine.Use)',
+                '- [func (group *RouterGroup) Use(middleware ...HandlerFunc) IRoutes](#RouterGroup.Use)',
+                '- [func New() *Engine](#New)',
+                'Filler link list lines.\n'.repeat(250) +
+                '\n' +
+                'Documentation Section for RouterGroup.Use:\n' +
+                '```go\n' +
+                'func (group *RouterGroup) Use(middleware ...HandlerFunc) IRoutes\n' +
+                '```\n' +
+                'Use attaches a global middleware to the router group. For the example, see the test cases.\n' +
+                'router.Use(gin.Logger())\n' +
+                'Trailing documentation lines.\n'.repeat(250)
+            ].join('\n');
+
+            const extracted = extractRelevantSections(flatPkgDoc, 'middleware');
+            expect(extracted.isFocused).toBe(true);
+            expect(extracted.content).toContain('Use attaches a global middleware to the router group');
+            expect(extracted.content).toContain('router.Use(gin.Logger())');
+            expect(extracted.content).not.toContain('(#Engine.Use)');
+            expect(extracted.content.length).toBeLessThan(4000);
+        });
+
         it('does not truncate Javadoc class pages and skips window extraction', () => {
             const javadocPage = [
                 '# Class ImmutableList<E>',

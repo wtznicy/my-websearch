@@ -61,6 +61,11 @@ function scoreSectionMatch(title: string, bodyText: string, queryTokens: string[
     const lowerTitle = title.toLowerCase();
     const lowerBody = bodyText.toLowerCase();
 
+    // 目录/索引章节（如 ## Index / ## Table of Contents）降权，避免真正的 API 内容小节被目录链接清单顶替
+    if (lowerTitle === 'index' || lowerTitle === 'table of contents' || lowerTitle === '目录' || lowerTitle === '索引') {
+        score -= 80;
+    }
+
     for (const token of queryTokens) {
         if (!token) continue;
         // 标题精确包含关键词：权重最高
@@ -316,6 +321,16 @@ export function extractWindowByQueryTokens(
             score += 20;
         }
 
+        // 如果段落块主要是目录/索引链接列表（如 pkg.go.dev 的 Index 区域），大幅降权，
+        // 避免最高得分块被纯链接清单抢占
+        if (score > 0) {
+            const blockLines = text.split('\n');
+            const linkLines = blockLines.filter((l) => /^\s*[-*]\s+\[.*\]\(#/.test(l.trim())).length;
+            if (linkLines >= 2 && linkLines / blockLines.length > 0.4) {
+                score -= 60;
+            }
+        }
+
         scoredBlocks.push({ index: i, text, score });
     }
 
@@ -415,34 +430,112 @@ export function extractWindowByQueryTokens(
     };
 }
 
+/**
+ * 在无标题文档或超长块中智能选取最具信息量、最相关的 query 命中位置。
+ * 核心优化：
+ * 1. 彻底跳过/惩罚目录/索引链接行（如 pkg.go.dev 的 - [func ...](#...)），避免落入无用的 TOC 链接区；
+ * 2. 优先挑选包含真实函数/类型声明、代码块及说明性正文的区域；
+ * 3. 综合评估上下文窗口内的关键词密度与正文行比例。
+ */
+function findBestOccurrencePosition(
+    text: string,
+    query: string,
+    queryTokens: string[]
+): number {
+    const lower = text.toLowerCase();
+    const candidatePositions = new Set<number>();
+
+    const cleanTerms = [
+        query?.trim().toLowerCase(),
+        ...queryTokens.map((t) => t.trim().toLowerCase())
+    ].filter((t): t is string => Boolean(t) && t.length >= 2);
+
+    for (const term of cleanTerms) {
+        let idx = 0;
+        while (idx < lower.length) {
+            const pos = lower.indexOf(term, idx);
+            if (pos === -1) break;
+            candidatePositions.add(pos);
+            idx = pos + Math.max(1, term.length);
+        }
+    }
+
+    if (candidatePositions.size === 0) {
+        return -1;
+    }
+
+    let bestPos = -1;
+    let bestScore = -Infinity;
+
+    for (const pos of candidatePositions) {
+        let score = 0;
+
+        // 1. 获取所在单行
+        const lineStart = text.lastIndexOf('\n', pos) + 1;
+        const nextNewline = text.indexOf('\n', pos);
+        const lineEnd = nextNewline === -1 ? text.length : nextNewline;
+        const line = text.slice(lineStart, lineEnd).trim();
+
+        // 目录/链接行识别：- [func ...](#...) 或包含页面内锚点链接
+        const isTocLink = /^\s*[-*]\s+\[/.test(line) && /\]\(#[^)]+\)/.test(line);
+        if (isTocLink) {
+            score -= 150;
+        } else {
+            score += 30;
+            // 包含函数/类型声明模式（如 func (group *RouterGroup) Use 或 type Middleware）
+            if (/(?:func|type|var|const|def|class|interface|fn)\s+/i.test(line)) {
+                score += 80;
+            }
+            // 标题行加成
+            if (/^#{1,5}\s+/.test(line)) {
+                score += 60;
+            }
+        }
+
+        // 2. 检查局部上下文窗口（前后各 800-1200 字符）
+        const winStart = Math.max(0, pos - 800);
+        const winEnd = Math.min(text.length, pos + 1200);
+        const winText = text.slice(winStart, winEnd);
+
+        // 代码块加成（说明是具体实现、示例或语法定义）
+        if (winText.includes('```')) {
+            score += 50;
+        }
+
+        // 说明性正文段落（存在非目录、非签名的常规句子）
+        const winLines = winText.split('\n').map((l) => l.trim()).filter(Boolean);
+        const proseLines = winLines.filter((l) => !/^\s*[-*]\s+\[/.test(l) && !/^```/.test(l) && l.length > 25);
+        if (proseLines.length > 0) {
+            score += 40;
+        }
+
+        // 目录列表密集惩罚（如果局部窗口大部分是目录链接）
+        const tocLines = winLines.filter((l) => /^\s*[-*]\s+\[.*\]\(#/.test(l));
+        if (tocLines.length >= 3) {
+            score -= Math.min(tocLines.length * 15, 90);
+        }
+
+        // 完整 query 精确匹配加成（且非链接行）
+        if (query && line.toLowerCase().includes(query.trim().toLowerCase()) && !isTocLink) {
+            score += 60;
+        }
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestPos = pos;
+        }
+    }
+
+    return bestPos;
+}
+
 function extractCharacterWindow(
     text: string,
     query: string,
     queryTokens: string[],
     maxChars: number
 ): ExtractedSectionResult {
-    const lower = text.toLowerCase();
-    let bestPos = -1;
-
-    // 优先完整 query 匹配
-    if (query && query.trim()) {
-        const fullPos = lower.indexOf(query.trim().toLowerCase());
-        if (fullPos !== -1) {
-            bestPos = fullPos;
-        }
-    }
-
-    // 其次 token 匹配
-    if (bestPos === -1) {
-        for (const token of queryTokens) {
-            const pos = lower.indexOf(token.toLowerCase());
-            if (pos !== -1) {
-                bestPos = pos;
-                break;
-            }
-        }
-    }
-
+    const bestPos = findBestOccurrencePosition(text, query, queryTokens);
     if (bestPos === -1) {
         return { content: text.slice(0, maxChars), isFocused: false };
     }
