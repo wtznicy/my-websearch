@@ -638,4 +638,170 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             expect(chosen!.id).toBe('/google/guava');
         });
     });
+
+    describe('P1-8: Real-world API matching, cross-lingual tech terms, and Javadoc retry', () => {
+        it('accurately matches "## Macros" and excludes "### WASM support" for query "select! 宏"', () => {
+            const docsRsMarkdown = [
+                '# Crate tokio',
+                'A runtime for writing reliable network applications.',
+                '',
+                '## Supported platforms',
+                'Tokio supports a wide variety of platforms.',
+                '',
+                '### WASM support',
+                'Tokio has some limited support for Wasm platforms.',
+                'Many features are restricted on Wasm targets.',
+                'Wasm is experimental.',
+                'Filler Wasm content with various platform details.\n'.repeat(120),
+                '',
+                '## Macros',
+                '### select!',
+                'Waits on multiple concurrent branches, returning when the first completes.',
+                '```rust',
+                'tokio::select! {',
+                '    val = rx1.recv() => println!("rx1: {:?}", val),',
+                '    val = rx2.recv() => println!("rx2: {:?}", val),',
+                '}',
+                '```',
+                'Macro usage details and documentation text.\n'.repeat(120),
+                '',
+                '## Modules',
+                'Various submodules.'
+            ].join('\n');
+
+            const extracted = extractRelevantSections(docsRsMarkdown, 'select! 宏');
+            expect(extracted.isFocused).toBe(true);
+            expect(extracted.focusedSectionTitles).toBeDefined();
+            // 必须精准命中 Macros，严禁误将 WASM support 当作核心段落
+            expect(extracted.focusedSectionTitles?.some((t) => t.toLowerCase().includes('macro'))).toBe(true);
+            expect(extracted.focusedSectionTitles?.some((t) => t.toLowerCase().includes('wasm'))).toBe(false);
+            expect(extracted.content).toContain('tokio::select!');
+            expect(extracted.content).toContain('Waits on multiple concurrent branches');
+        });
+
+        it('focuses on H4 method declaration in pkg.go.dev for query "middleware"', () => {
+            const goDoc = [
+                '# Package gin',
+                'Package gin implements an HTTP web framework.',
+                '',
+                '## Documentation',
+                '',
+                '### Overview',
+                'Gin is a HTTP web framework written in Go.',
+                '',
+                '### Index',
+                '- [func Default() *Engine](#Default)',
+                '- [func (engine *Engine) Use(middleware ...HandlerFunc) IRoutes](#Engine.Use)',
+                '- [func (group *RouterGroup) Use(middleware ...HandlerFunc) IRoutes](#RouterGroup.Use)',
+                '',
+                '### Functions',
+                '#### func Default',
+                'Default returns an Engine instance.',
+                '',
+                '### Types',
+                '#### type Engine',
+                'Engine is the state machine.',
+                '',
+                '#### func (*Engine) Use',
+                '```go',
+                'func (engine *Engine) Use(middleware ...HandlerFunc) IRoutes',
+                '```',
+                'Use attaches a global middleware to the router. i.e. the middleware attached through Use() will be included in the handlers chain for every single request.',
+                '',
+                '#### func (*RouterGroup) Use',
+                '```go',
+                'func (group *RouterGroup) Use(middleware ...HandlerFunc) IRoutes',
+                '```',
+                'Use attaches a middleware to the router group.',
+                '',
+                'Filler documentation lines to exceed threshold.\n'.repeat(250)
+            ].join('\n');
+
+            const extracted = extractRelevantSections(goDoc, 'middleware');
+            expect(extracted.isFocused).toBe(true);
+            expect(extracted.focusedSectionTitles?.some((t) => t.includes('Use'))).toBe(true);
+            expect(extracted.content).toContain('func (engine *Engine) Use(middleware ...HandlerFunc)');
+            expect(extracted.content).toContain('Use attaches a global middleware to the router');
+            expect(extracted.content).not.toContain('### Index');
+        });
+
+        it('strips punctuation in query like "map(" to locate function and caps missing query overview at < 3500 chars', () => {
+            const docWithMap = [
+                '# Flat Module Reference',
+                'Introduction to flat reference without heading trees.',
+                '',
+                'Some general notes on utilities and helper functions.',
+                'Filler introductory text with various details.\n'.repeat(150),
+                '',
+                'func map(input []string, fn func(string) string) []string {',
+                '    // transform string slice',
+                '    result := make([]string, len(input))',
+                '    return result',
+                '}',
+                '',
+                'Documentation on map transforms and usage examples.',
+                'Trailing documentation text with various details.\n'.repeat(150)
+            ].join('\n');
+
+            // 1. 带标点的 "map(" 自动剥离标点重试并命中 map 声明
+            const extractedMap = extractRelevantSections(docWithMap, 'map(');
+            expect(extractedMap.isFocused).toBe(true);
+            expect(extractedMap.content).toContain('func map(input []string');
+
+            // 2. 彻底不存在的 query 触发优雅概览降级，且字数严控在 < 3500 字符内
+            const extractedMissing = extractRelevantSections(docWithMap, 'completely_nonexistent_token_xyz999');
+            expect(extractedMissing.isFocused).toBe(false);
+            expect(extractedMissing.content).toContain('Document Overview');
+            expect(extractedMissing.content).toContain('No exact matches found for "completely_nonexistent_token_xyz999"');
+            expect(extractedMissing.content.length).toBeLessThan(3500);
+        });
+
+        it('retries Javadoc wrapperUrl and index probe on transient network failure', async () => {
+            let directFirstCalls = 0;
+            const spy = vi.spyOn(httpRequest, 'requestDirectFirst').mockImplementation(async (method, url) => {
+                directFirstCalls++;
+                if (url.includes('index.html')) {
+                    if (directFirstCalls === 1) {
+                        // 第 1 次探测包装页遭遇瞬时断连异常
+                        throw new Error('Client network socket disconnected before secure TLS connection was established');
+                    }
+                    // 第 2 次重试成功
+                    return {
+                        status: 200,
+                        data: '<html><body><iframe src="/static/com.google.guava/guava/33.0.0-jre/index.html"></iframe></body></html>'
+                    } as any;
+                }
+                if (url.includes('type-search-index.js')) {
+                    return {
+                        status: 200,
+                        data: '[{"p":"com.google.common.collect","l":"ImmutableList"}]'
+                    } as any;
+                }
+                throw new Error(`Unexpected url: ${url}`);
+            });
+
+            try {
+                const fetchWebMock = vi.fn().mockResolvedValue(`
+# Class ImmutableList<E>
+Method Summary:
+- asList()
+- builder()
+Detailed ImmutableList class documentation.
+                `);
+
+                const result = await queryJavadocDocs({
+                    library: 'guava',
+                    query: 'ImmutableList',
+                    fetchWeb: fetchWebMock
+                });
+
+                expect(result).not.toBeNull();
+                expect(result?.documentationUrl).toBe('https://javadoc.io/static/com.google.guava/guava/33.0.0-jre/com/google/common/collect/ImmutableList.html');
+                expect(result?.content).toContain('Class ImmutableList<E>');
+                expect(directFirstCalls).toBeGreaterThanOrEqual(2);
+            } finally {
+                spy.mockRestore();
+            }
+        });
+    });
 });

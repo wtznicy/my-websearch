@@ -30,6 +30,32 @@ export interface ExtractedSectionResult {
     toc?: string[];
 }
 
+/**
+ * 常见中文编程概念与对应英文术语词典。
+ * 用于跨语言文档检索时将中文 query（如 "select! 宏"、"中间件"）自动关联到
+ * 英文官方文档（docs.rs、pkg.go.dev 等）中的标准小节标题（如 "Macros"、"middleware"）。
+ */
+export const CHINESE_TECH_TERM_SYNONYMS: Record<string, string[]> = {
+    '宏': ['macro', 'macros'],
+    '中间件': ['middleware'],
+    '装饰器': ['decorator', 'decorators'],
+    '注解': ['annotation', 'annotations'],
+    '协程': ['coroutine', 'coroutines', 'async', 'goroutine'],
+    '路由': ['router', 'route', 'routes'],
+    '切片': ['slice'],
+    '管道': ['pipeline', 'pipe', 'channel'],
+    '结构体': ['struct'],
+    '枚举': ['enum'],
+    '接口': ['interface'],
+    '构造器': ['constructor', 'builder', 'new'],
+    '上下文': ['context', 'ctx'],
+    '指针': ['pointer', 'ptr'],
+    '线程': ['thread', 'threading'],
+    '配置': ['config', 'configuration'],
+    '异常': ['exception', 'error'],
+    '泛型': ['generic', 'generics']
+};
+
 /** 提取 Markdown 所有的 H1/H2/H3 目录标题 */
 export function extractMarkdownHeadings(markdown: string): MarkdownHeading[] {
     const lines = markdown.split(/\r?\n/);
@@ -55,6 +81,25 @@ export function extractMarkdownHeadings(markdown: string): MarkdownHeading[] {
     return headings;
 }
 
+
+/**
+ * 安全构建函数/类型/变量声明标识符匹配正则，
+ * 严格转义特殊字符（如 map(、a[b、* 等），防止 new RegExp 崩溃。
+ */
+function buildIdentifierPattern(token: string): RegExp | null {
+    if (!token) return null;
+    const safe = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const startsWithWord = /^\w/.test(token);
+    const endsWithWord = /\w$/.test(token);
+    const prefix = startsWithWord ? '\\b' : '';
+    const suffix = endsWithWord ? '\\b' : '';
+    try {
+        return new RegExp(`(?:func|type|var|const|def|class|interface|fn)\\s+[^\\n]*${prefix}${safe}${suffix}`, 'i');
+    } catch {
+        return null;
+    }
+}
+
 /** 计算某一段落或章节与 query 的匹配得分 */
 function scoreSectionMatch(title: string, bodyText: string, queryTokens: string[]): number {
     let score = 0;
@@ -73,6 +118,11 @@ function scoreSectionMatch(title: string, bodyText: string, queryTokens: string[
             score += 100;
         } else if (lowerTitle.includes(token)) {
             score += 50;
+        }
+        // 包含正式函数/方法/类型签名且参数或签名含关键词（如 func (engine *Engine) Use(middleware ...HandlerFunc)）
+        const identPattern = buildIdentifierPattern(token);
+        if (identPattern && (identPattern.test(title) || identPattern.test(bodyText))) {
+            score += 90;
         }
         // 正文中出现该关键词
         const matches = lowerBody.split(token).length - 1;
@@ -118,9 +168,20 @@ export function extractRelevantSections(
     }
 
     const cleanQuery = query.trim().toLowerCase().replace(/[!！?？]/g, ' ');
-    const queryTokens = cleanQuery.split(/[\s,:+/-]+/).filter((t) => t.length >= 2 || /[\u4e00-\u9fa5]/.test(t));
-    if (queryTokens.length === 0) {
+    const rawTokens = cleanQuery.split(/[\s,:+/-]+/).filter((t) => t.length >= 2 || /[\u4e00-\u9fa5]/.test(t));
+    if (rawTokens.length === 0) {
         return { content: trimmed, isFocused: false };
+    }
+
+    const queryTokens = [...rawTokens];
+    for (const [zhTerm, enSynonyms] of Object.entries(CHINESE_TECH_TERM_SYNONYMS)) {
+        if (query.includes(zhTerm)) {
+            for (const syn of enSynonyms) {
+                if (!queryTokens.includes(syn)) {
+                    queryTokens.push(syn);
+                }
+            }
+        }
     }
 
     const lines = trimmed.split(/\r?\n/);
@@ -136,12 +197,16 @@ export function extractRelevantSections(
         return extractWindowByQueryTokens(trimmed, query, queryTokens, maxChars);
     }
 
-    // 1. 动态确定切分标题集（包含所有 H2 顶级章节，以及所有 H3 具体 API 符号/小节）
-    // 无论是 pkg.go.dev（6+ 个 H2、几十个 H3 函数/类型）还是 docs.rs（宏/函数/结构体 H3）：
-    // 允许以 H2 或 H3 为独立切分块，更深层的 H4/H5 作为代码块或参数细节归属于父小节
+    // 1. 动态确定切分标题集（包含所有 H2 顶级章节、H3 具体 API 符号/小节，以及 API 声明型 H4 符号如 Go 方法/函数）
+    // 无论是 pkg.go.dev（6+ 个 H2、几十个 H3 函数/类型、大量 H4 具体方法）还是 docs.rs（宏/函数/结构体 H3）：
+    // 允许以 H2/H3 以及声明型 H4 为独立切分块，更深层的代码块或参数细节归属于当前符号
     const sectionHeadings: MarkdownHeading[] = [];
     for (const h of headings) {
-        if (h.level === 2 || h.level === 3) {
+        if (
+            h.level === 2 ||
+            h.level === 3 ||
+            (h.level === 4 && /(?:func|type|var|const|def|class|interface|fn|macro|struct|enum)\b/i.test(h.title))
+        ) {
             sectionHeadings.push(h);
         }
     }
@@ -256,23 +321,6 @@ export function isJavadocClassDocument(markdown: string): boolean {
         || /<div class="header">|<div class="contentContainer">|<main role="main">[\s\S]*?(?:Class|Interface)\s+[A-Z]/i.test(markdown);
 }
 
-/**
- * 安全构建函数/类型/变量声明标识符匹配正则，
- * 严格转义特殊字符（如 map(、a[b、* 等），防止 new RegExp 崩溃。
- */
-function buildIdentifierPattern(token: string): RegExp | null {
-    if (!token) return null;
-    const safe = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const startsWithWord = /^\w/.test(token);
-    const endsWithWord = /\w$/.test(token);
-    const prefix = startsWithWord ? '\\b' : '';
-    const suffix = endsWithWord ? '\\b' : '';
-    try {
-        return new RegExp(`(?:func|type|var|const|def|class|interface|fn)\\s+[^\\n]*${prefix}${safe}${suffix}`, 'i');
-    } catch {
-        return null;
-    }
-}
 
 /**
  * 当文档缺乏 Markdown 标题树时（例如 pkg.go.dev 页面转换为 Markdown 后仅含 1 个顶层标题），
@@ -292,142 +340,10 @@ export function extractWindowByQueryTokens(
 
     const targetExcerptBudget = Math.min(maxChars, 4000);
 
-    const blocks = trimmed.split(/\n{2,}/);
-    if (blocks.length <= 2) {
-        return extractCharacterWindow(trimmed, query, queryTokens, targetExcerptBudget);
-    }
-
-    // 1. 对各个段落块进行评分
-    const scoredBlocks: Array<{ index: number; text: string; score: number }> = [];
-    for (let i = 0; i < blocks.length; i++) {
-        const text = blocks[i]!.trim();
-        if (!text) continue;
-        const lowerText = text.toLowerCase();
-        let score = 0;
-
-        for (const token of queryTokens) {
-            if (!token) continue;
-            const identPattern = buildIdentifierPattern(token);
-            if (identPattern && identPattern.test(text)) {
-                score += 80;
-            } else if (lowerText.includes(token.toLowerCase())) {
-                const occurrences = lowerText.split(token.toLowerCase()).length - 1;
-                score += 30 + Math.min(occurrences * 5, 20);
-            }
-        }
-
-        // 代码块加成
-        if (score > 0 && text.includes('```')) {
-            score += 20;
-        }
-
-        // 如果段落块主要是目录/索引链接列表（如 pkg.go.dev 的 Index 区域），大幅降权，
-        // 避免最高得分块被纯链接清单抢占
-        if (score > 0) {
-            const blockLines = text.split('\n');
-            const linkLines = blockLines.filter((l) => /^\s*[-*]\s+\[.*\]\(#/.test(l.trim())).length;
-            if (linkLines >= 2 && linkLines / blockLines.length > 0.4) {
-                score -= 60;
-            }
-        }
-
-        scoredBlocks.push({ index: i, text, score });
-    }
-
-    const matched = scoredBlocks.filter((b) => b.score > 0).sort((a, b) => b.score - a.score);
-    if (matched.length === 0) {
-        return { content: trimmed, isFocused: false };
-    }
-
-    const best = matched[0]!;
-    const bestIndex = best.index;
-
-    // 如果最高得分块本身就超过了预算（例如整个页面只有 1 个超长块，或者段落本身就有 19KB），
-    // 必须对该块做二次窗口抽取，否则当前块直接输出 20KB 导致预算彻底失效
-    if (best.text.length > targetExcerptBudget) {
-        return extractCharacterWindow(best.text, query, queryTokens, targetExcerptBudget);
-    }
-
-    // 2. 以最高得分段落为中心，向前后扩展上下文（保留前置签名与后续示例/说明）
-    // 目标聚焦窗口约为 2000 - 4000 字符
-    const selectedIndices = new Set<number>([bestIndex]);
-    let currentLength = best.text.length;
-
-    // 向前扩展 1-2 块（捕获函数签名或前置说明）
-    for (let step = 1; step <= 2; step++) {
-        const prevIdx = bestIndex - step;
-        if (prevIdx > 0) {
-            const prevBlock = blocks[prevIdx]!;
-            if (currentLength + prevBlock.length <= targetExcerptBudget) {
-                selectedIndices.add(prevIdx);
-                currentLength += prevBlock.length;
-            } else {
-                break;
-            }
-        }
-    }
-
-    // 向后扩展 1-3 块（捕获后续用法示例或参数解释）
-    for (let step = 1; step <= 3; step++) {
-        const nextIdx = bestIndex + step;
-        if (nextIdx < blocks.length) {
-            const nextBlock = blocks[nextIdx]!;
-            if (currentLength + nextBlock.length <= targetExcerptBudget) {
-                selectedIndices.add(nextIdx);
-                currentLength += nextBlock.length;
-            } else {
-                break;
-            }
-        }
-    }
-
-    // 若还有预算，且存在其他高分匹配段落（如相关性 >= 最高分 60% 的紧密相关方法），也按需纳入
-    for (const other of matched.slice(1)) {
-        if (other.score >= best.score * 0.6 && !selectedIndices.has(other.index)) {
-            if (currentLength + other.text.length <= targetExcerptBudget) {
-                selectedIndices.add(other.index);
-                currentLength += other.text.length;
-            }
-        }
-    }
-
-    const sortedIndices = Array.from(selectedIndices).sort((a, b) => a - b);
-    const minSelected = sortedIndices[0]!;
-    const maxSelected = sortedIndices[sortedIndices.length - 1]!;
-
-    // 3. 提取 Preamble（通常是第一段：库/包简介与导入）
-    let displayPreamble = '';
-    if (minSelected > 0 && blocks[0]) {
-        const intro = blocks[0].trim();
-        displayPreamble = intro.length > 500
-            ? intro.slice(0, 450) + '\n\n*(... Overview truncated, focused excerpt below ...)*'
-            : intro;
-    }
-
-    // 4. 组装结果
-    const resultParts: string[] = [];
-    if (displayPreamble) {
-        resultParts.push(displayPreamble);
-    }
-
-    resultParts.push(`\n> ℹ️ **Focused Excerpt:** Retrieved focused context for "${query}" (no heading tree found in document, extracted query-dense section):\n`);
-
-    if (minSelected > 1) {
-        resultParts.push('*(... preceding sections truncated ...)*\n');
-    }
-
-    const excerptText = sortedIndices.map((idx) => blocks[idx]!.trim()).join('\n\n');
-    resultParts.push(excerptText);
-
-    if (maxSelected < blocks.length - 1) {
-        resultParts.push('\n*(... following sections truncated ...)*');
-    }
-
-    return {
-        content: resultParts.join('\n\n').trim(),
-        isFocused: true,
-        focusedSectionTitles: [`Excerpt around "${query}"`]
-    };
+    // 对于缺乏标准标题结构的长文档（如 pkg.go.dev 或扁平化的 docs.rs 页面），
+    // 直接基于全篇候选位置评分（findBestOccurrencePosition）提取核心上下文窗口。
+    // 避免因为不可靠的 \n{2,} 切块将相关函数与目录索引捆绑，或因段落大小碰巧 <= 4000 而原样输出冗余前置内容。
+    return extractCharacterWindow(trimmed, query, queryTokens, targetExcerptBudget);
 }
 
 /**
@@ -482,9 +398,15 @@ function findBestOccurrencePosition(
             score -= 150;
         } else {
             score += 30;
-            // 包含函数/类型声明模式（如 func (group *RouterGroup) Use 或 type Middleware）
-            if (/(?:func|type|var|const|def|class|interface|fn)\s+/i.test(line)) {
+            // 真实函数声明（func Name( 或 func (receiver) Name(）
+            if (/^\s*func\s+(?:\([^)]*\)\s*)?[A-Za-z0-9_]+\s*\(/i.test(line)) {
+                score += 160;
+            } else if (/(?:func|type|var|const|def|class|interface|fn)\s+/i.test(line)) {
                 score += 80;
+            }
+            // 宏定义或声明
+            if (/macro_rules!|#\[macro_export\]/i.test(line) || /^\s*[a-z0-9_]+!/i.test(line) || /macros§/i.test(line)) {
+                score += 150;
             }
             // 标题行加成
             if (/^#{1,5}\s+/.test(line)) {
@@ -535,12 +457,28 @@ function extractCharacterWindow(
     queryTokens: string[],
     maxChars: number
 ): ExtractedSectionResult {
-    const bestPos = findBestOccurrencePosition(text, query, queryTokens);
+    let bestPos = findBestOccurrencePosition(text, query, queryTokens);
+
     if (bestPos === -1) {
-        return { content: text.slice(0, maxChars), isFocused: false };
+        // 尝试去除标点符号后重试（例如 "map(" -> "map", "select!" -> "select"）
+        const strippedQuery = query.replace(/[()[\]{}*+?^$|\\!！?？:;'"`,.<>]/g, ' ').trim();
+        if (strippedQuery && strippedQuery !== query.trim()) {
+            const strippedTokens = strippedQuery.split(/\s+/).filter((t) => t.length >= 2);
+            bestPos = findBestOccurrencePosition(text, strippedQuery, strippedTokens);
+        }
     }
 
-    const windowSize = Math.min(maxChars, 3500);
+    if (bestPos === -1) {
+        // 若文档完全不含该关键词，提取文档头部概览区（最多 3000 字符），加上前缀提示控制在 3500 字符以内，严禁直接输出 30KB 原文
+        const previewSize = Math.min(maxChars, 3000);
+        const excerpt = text.slice(0, previewSize).trim();
+        return {
+            content: `> ℹ️ **Document Overview:** No exact matches found for "${query}". Displaying top documentation overview:\n\n${excerpt}\n\n*(... remaining content truncated ...)*`,
+            isFocused: false
+        };
+    }
+
+    const windowSize = Math.min(maxChars, 2800);
     const half = Math.floor(windowSize / 2);
     let start = Math.max(0, bestPos - half);
     let end = Math.min(text.length, start + windowSize);
@@ -562,8 +500,21 @@ function extractCharacterWindow(
         }
     }
 
+    // 提取简短 Preamble（包名、导言），如果距离很远，在上方保留导言
+    let displayPreamble = '';
+    if (start > 1500) {
+        const firstNewline = text.indexOf('\n\n');
+        if (firstNewline !== -1 && firstNewline < 500) {
+            const intro = text.slice(0, firstNewline).trim();
+            if (intro.length > 20 && intro.length <= 400) {
+                displayPreamble = `${intro}\n\n*(... Overview truncated, focused excerpt below ...)*\n\n`;
+            }
+        }
+    }
+
     const excerpt = text.slice(start, end).trim();
     const parts = [
+        displayPreamble,
         `> ℹ️ **Focused Excerpt:** Retrieved focused character window for "${query}":`,
         start > 0 ? '*(... preceding text truncated ...)*\n' : '',
         excerpt,

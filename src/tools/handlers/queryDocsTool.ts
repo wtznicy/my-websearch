@@ -291,19 +291,26 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
             }
 
             const fetchViaWeb = async (url: string): Promise<string | null> => {
-                try {
-                    const res = await runtime.services.fetchWeb.execute({
-                        url,
-                        maxChars: 30000,
-                        format: 'markdown',
-                        readability: true,
-                        signal
-                    });
-                    if (res.content && res.content.trim().length > 20) {
-                        return res.content.trim();
+                // 技术文档站点（如 docs.rs, pkg.go.dev, javadoc.io, devdocs.io）拥有结构化 API 目录与 class="section-header" 声明，
+                // Mozilla Readability 会将其误判为样板导航剥离，导致 Macros / 函数小节丢失。
+                const isTechDocSite = /docs\.rs|pkg\.go\.dev|javadoc\.io|devdocs\.io/i.test(url);
+                const firstReadability = !isTechDocSite;
+
+                if (firstReadability) {
+                    try {
+                        const res = await runtime.services.fetchWeb.execute({
+                            url,
+                            maxChars: 30000,
+                            format: 'markdown',
+                            readability: true,
+                            signal
+                        });
+                        if (res.content && res.content.trim().length > 20) {
+                            return res.content.trim();
+                        }
+                    } catch (err) {
+                        logSafeError(`fetchViaWeb readability pass failed for ${url}`, err);
                     }
-                } catch (err) {
-                    logSafeError(`fetchViaWeb readability pass failed for ${url}`, err);
                 }
 
                 try {
@@ -319,6 +326,24 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     }
                 } catch (err) {
                     logSafeError(`fetchViaWeb raw pass failed for ${url}`, err);
+                }
+
+                if (!firstReadability) {
+                    // 若原始解析失败，再兜底尝试一次 readability
+                    try {
+                        const res = await runtime.services.fetchWeb.execute({
+                            url,
+                            maxChars: 30000,
+                            format: 'markdown',
+                            readability: true,
+                            signal
+                        });
+                        if (res.content && res.content.trim().length > 20) {
+                            return res.content.trim();
+                        }
+                    } catch (err) {
+                        logSafeError(`fetchViaWeb fallback readability pass failed for ${url}`, err);
+                    }
                 }
 
                 return null;

@@ -14,6 +14,7 @@ import {
 import {
     isLikelyJavadocTarget
 } from '../../core/docs/javadocProvider.js';
+import * as httpRequest from '../../utils/httpRequest.js';
 
 describe('queryDocs Sprint 2 Suite: DevDocs, MDN, Javadoc.io', () => {
     describe('devdocsProvider', () => {
@@ -95,18 +96,35 @@ describe('queryDocs Sprint 2 Suite: DevDocs, MDN, Javadoc.io', () => {
             });
             runtime.services.fetchWeb.execute = mockFetchWeb;
 
-            registerQueryDocsTool(server, runtime);
-            const toolHandler = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })._registeredTools['queryDocs']?.handler;
+            const spy = vi.spyOn(httpRequest, 'requestDirectFirst').mockResolvedValue({
+                status: 200,
+                data: {
+                    documents: [
+                        {
+                            title: 'Fetch API',
+                            mdn_url: '/en-US/docs/Web/API/Fetch_API',
+                            summary: 'The Fetch API provides an interface for fetching resources asynchronously.'
+                        }
+                    ]
+                }
+            } as any);
 
-            const result = await toolHandler({
-                library: 'fetch',
-                source: 'mdn',
-                cache: 'reload'
-            });
+            try {
+                registerQueryDocsTool(server, runtime);
+                const toolHandler = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })._registeredTools['queryDocs']?.handler;
 
-            expect(mockFetchWeb).toHaveBeenCalled();
-            expect(result.content[0].text).toContain('> Source: mdn | Confidence: high');
-            expect(result.content[0].text).toContain('Fetch API');
+                const result = await toolHandler({
+                    library: 'fetch',
+                    source: 'mdn',
+                    cache: 'reload'
+                });
+
+                expect(mockFetchWeb).toHaveBeenCalled();
+                expect(result.content[0].text).toContain('> Source: mdn | Confidence: high');
+                expect(result.content[0].text).toContain('Fetch API');
+            } finally {
+                spy.mockRestore();
+            }
         });
 
         it('dispatches to javadoc when source="javadoc"', async () => {
@@ -119,20 +137,29 @@ describe('queryDocs Sprint 2 Suite: DevDocs, MDN, Javadoc.io', () => {
             });
             runtime.services.fetchWeb.execute = mockFetchWeb;
 
-            registerQueryDocsTool(server, runtime);
-            const toolHandler = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })._registeredTools['queryDocs']?.handler;
+            const spy = vi.spyOn(httpRequest, 'requestDirectFirst').mockResolvedValue({
+                status: 200,
+                data: '<html><body><iframe src="/static/com.google.guava/guava/latest/index.html"></iframe></body></html>'
+            } as any);
 
-            const result = await toolHandler({
-                library: 'com.google.guava:guava',
-                source: 'javadoc',
-                cache: 'reload'
-            });
+            try {
+                registerQueryDocsTool(server, runtime);
+                const toolHandler = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })._registeredTools['queryDocs']?.handler;
 
-            expect(mockFetchWeb).toHaveBeenCalledWith(expect.objectContaining({
-                url: expect.stringMatching(/https:\/\/javadoc\.io\/(?:doc|static)\/com\.google\.guava\/guava/)
-            }));
-            expect(result.content[0].text).toContain('> Source: javadoc | Confidence: high');
-            expect(result.content[0].text).toContain('Package com.google.common.collect');
+                const result = await toolHandler({
+                    library: 'com.google.guava:guava',
+                    source: 'javadoc',
+                    cache: 'reload'
+                });
+
+                expect(mockFetchWeb).toHaveBeenCalledWith(expect.objectContaining({
+                    url: expect.stringMatching(/https:\/\/javadoc\.io\/(?:doc|static)\/com\.google\.guava\/guava/)
+                }));
+                expect(result.content[0].text).toContain('> Source: javadoc | Confidence: high');
+                expect(result.content[0].text).toContain('Package com.google.common.collect');
+            } finally {
+                spy.mockRestore();
+            }
         });
 
         it('auto-routes mdn: prefix to mdn provider in auto mode', async () => {
@@ -145,17 +172,34 @@ describe('queryDocs Sprint 2 Suite: DevDocs, MDN, Javadoc.io', () => {
             });
             runtime.services.fetchWeb.execute = mockFetchWeb;
 
-            registerQueryDocsTool(server, runtime);
-            const toolHandler = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })._registeredTools['queryDocs']?.handler;
+            const spy = vi.spyOn(httpRequest, 'requestDirectFirst').mockResolvedValue({
+                status: 200,
+                data: {
+                    documents: [
+                        {
+                            title: 'WebSocket API',
+                            mdn_url: '/en-US/docs/Web/API/WebSocket_API',
+                            summary: 'The WebSocket API makes it possible to open a two-way interactive communication session.'
+                        }
+                    ]
+                }
+            } as any);
 
-            const result = await toolHandler({
-                library: 'mdn:WebSocket',
-                source: 'auto',
-                cache: 'reload'
-            });
+            try {
+                registerQueryDocsTool(server, runtime);
+                const toolHandler = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })._registeredTools['queryDocs']?.handler;
 
-            expect(result.content[0].text).toContain('> Source: mdn | Confidence: high');
-            expect(result.content[0].text).toContain('WebSocket API');
+                const result = await toolHandler({
+                    library: 'mdn:WebSocket',
+                    source: 'auto',
+                    cache: 'reload'
+                });
+
+                expect(result.content[0].text).toContain('> Source: mdn | Confidence: high');
+                expect(result.content[0].text).toContain('WebSocket API');
+            } finally {
+                spy.mockRestore();
+            }
         });
 
         it('auto-routes maven coordinates to javadoc in auto mode', async () => {
@@ -168,17 +212,26 @@ describe('queryDocs Sprint 2 Suite: DevDocs, MDN, Javadoc.io', () => {
             });
             runtime.services.fetchWeb.execute = mockFetchWeb;
 
-            registerQueryDocsTool(server, runtime);
-            const toolHandler = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })._registeredTools['queryDocs']?.handler;
+            const spy = vi.spyOn(httpRequest, 'requestDirectFirst').mockResolvedValue({
+                status: 200,
+                data: '<html><body><iframe src="/static/org.springframework/spring-core/latest/index.html"></iframe></body></html>'
+            } as any);
 
-            const result = await toolHandler({
-                library: 'org.springframework:spring-core',
-                source: 'auto',
-                cache: 'reload'
-            });
+            try {
+                registerQueryDocsTool(server, runtime);
+                const toolHandler = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })._registeredTools['queryDocs']?.handler;
 
-            expect(result.content[0].text).toContain('> Source: javadoc | Confidence: high');
-            expect(result.content[0].text).toContain('Spring Core Framework');
+                const result = await toolHandler({
+                    library: 'org.springframework:spring-core',
+                    source: 'auto',
+                    cache: 'reload'
+                });
+
+                expect(result.content[0].text).toContain('> Source: javadoc | Confidence: high');
+                expect(result.content[0].text).toContain('Spring Core Framework');
+            } finally {
+                spy.mockRestore();
+            }
         });
     });
 });
