@@ -20,7 +20,12 @@ import {
 import { queryMdnDocs } from '../../core/docs/mdnProvider.js';
 import { queryJavadocDocs } from '../../core/docs/javadocProvider.js';
 import * as httpRequest from '../../utils/httpRequest.js';
-import { extractRelevantSections, extractMarkdownHeadings } from '../../core/docs/markdownSectionExtractor.js';
+import {
+    extractRelevantSections,
+    extractMarkdownHeadings,
+    isJavadocClassDocument
+} from '../../core/docs/markdownSectionExtractor.js';
+import { formatQueryDocsMarkdown } from '../../tools/handlers/queryDocsTool.js';
 
 describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
     describe('P0-1: Context7 no_relevant_snippets handling', () => {
@@ -420,6 +425,79 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             expect(extracted.isFocused).toBe(true);
             expect(extracted.content).toContain('Use attaches a global middleware');
             expect(extracted.content.length).toBeLessThan(3500);
+        });
+
+        it('safely handles query with regex special characters like map( or a[b without throwing', () => {
+            const sampleDoc = [
+                '# Package maptest',
+                'func (m *Map) map(key string, val any) bool',
+                'map assigns the value to key.',
+                'More lines.\n'.repeat(800)
+            ].join('\n');
+
+            expect(() => extractRelevantSections(sampleDoc, 'map(')).not.toThrow();
+            const res1 = extractRelevantSections(sampleDoc, 'map(');
+            expect(res1.isFocused).toBe(true);
+
+            expect(() => extractRelevantSections(sampleDoc, 'a[b')).not.toThrow();
+            expect(() => extractRelevantSections(sampleDoc, 'func(c*Context)')).not.toThrow();
+            expect(() => extractRelevantSections(sampleDoc, 'key*+?^$')).not.toThrow();
+        });
+
+        it('strictly limits excerpt budget to < 4000 characters even when best block itself is 20KB', () => {
+            const massiveBlock = [
+                '# Package gin',
+                'Preamble overview before the massive block.',
+                '',
+                'Massive single block line without double newlines.\n'.repeat(200) +
+                'func (group *RouterGroup) Use(middleware ...HandlerFunc) IRoutes\n' +
+                'Use attaches a global middleware to the router group.\n' +
+                'Trailing massive single block lines without double newlines.\n'.repeat(200)
+            ].join('\n');
+
+            const extracted = extractRelevantSections(massiveBlock, 'middleware');
+            expect(extracted.isFocused).toBe(true);
+            expect(extracted.content).toContain('Use attaches a global middleware');
+            expect(extracted.content.length).toBeLessThan(4000);
+            expect(extracted.content.length).toBeGreaterThan(500);
+        });
+
+        it('does not truncate Javadoc class pages and skips window extraction', () => {
+            const javadocPage = [
+                '# Class ImmutableList<E>',
+                'java.lang.Object',
+                '  extended by com.google.common.collect.ImmutableCollection<E>',
+                '      extended by com.google.common.collect.ImmutableList<E>',
+                'All Implemented Interfaces: Serializable, Iterable<E>, Collection<E>, List<E>, RandomAccess',
+                '',
+                'A List whose contents will never change, with many other important properties associated with being immutable.',
+                'Method Summary:',
+                '- asList()',
+                '- builder()',
+                '- copyOf(Collection elements)',
+                '',
+                'Detailed method descriptions and parameters.\n'.repeat(250)
+            ].join('\n');
+
+            expect(isJavadocClassDocument(javadocPage)).toBe(true);
+
+            // 1. extractRelevantSections 直接保持全量，不触发无标题窗口截断
+            const extracted = extractRelevantSections(javadocPage, 'ImmutableList');
+            expect(extracted.isFocused).toBe(false);
+            expect(extracted.content).toBe(javadocPage.trim());
+
+            // 2. formatQueryDocsMarkdown 在 source: 'javadoc' 时不进行截断
+            const formatted = formatQueryDocsMarkdown({
+                libraryId: 'com.google.guava:guava',
+                source: 'javadoc',
+                documentationUrl: 'https://javadoc.io/doc/com.google.guava/guava/latest/com/google/common/collect/ImmutableList.html',
+                query: 'ImmutableList',
+                content: javadocPage
+            });
+            expect(formatted).not.toContain('Focused Excerpt');
+            expect(formatted).not.toContain('preceding sections truncated');
+            expect(formatted).toContain('All Implemented Interfaces');
+            expect(formatted).toContain('Method Summary');
         });
     });
 

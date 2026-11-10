@@ -124,6 +124,10 @@ export function extractRelevantSections(
     // 如果文档没有明显的标题结构（少于 2 个标题，例如 pkg.go.dev 正文退化为单段），
     // 退化为基于段落与关键词密度的聚焦抽取（Query-Centered Excerpt Window），避免直接原样输出 30KB 巨型文本
     if (headings.length < 2) {
+        // Javadoc 类/接口文档已由提供方精准定位到具体类页，不应触发无标题窗口截断破坏类结构完整性
+        if (isJavadocClassDocument(trimmed)) {
+            return { content: trimmed, isFocused: false };
+        }
         return extractWindowByQueryTokens(trimmed, query, queryTokens, maxChars);
     }
 
@@ -238,6 +242,34 @@ export function extractRelevantSections(
 }
 
 /**
+ * 识别文档是否为 Javadoc 导出的类/接口文档结构。
+ * Javadoc 类页面通常以纯结构化块渲染，标题少于 2 个，但本身就是精准的单类页面，
+ * 绝不能被无标题段落窗口截断破坏类签名和方法概览。
+ */
+export function isJavadocClassDocument(markdown: string): boolean {
+    return /All Implemented Interfaces|Method Summary|Field Summary|Constructor Summary|Nested Class Summary|All Superinterfaces/i.test(markdown)
+        || /<div class="header">|<div class="contentContainer">|<main role="main">[\s\S]*?(?:Class|Interface)\s+[A-Z]/i.test(markdown);
+}
+
+/**
+ * 安全构建函数/类型/变量声明标识符匹配正则，
+ * 严格转义特殊字符（如 map(、a[b、* 等），防止 new RegExp 崩溃。
+ */
+function buildIdentifierPattern(token: string): RegExp | null {
+    if (!token) return null;
+    const safe = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const startsWithWord = /^\w/.test(token);
+    const endsWithWord = /\w$/.test(token);
+    const prefix = startsWithWord ? '\\b' : '';
+    const suffix = endsWithWord ? '\\b' : '';
+    try {
+        return new RegExp(`(?:func|type|var|const|def|class|interface|fn)\\s+[^\\n]*${prefix}${safe}${suffix}`, 'i');
+    } catch {
+        return null;
+    }
+}
+
+/**
  * 当文档缺乏 Markdown 标题树时（例如 pkg.go.dev 页面转换为 Markdown 后仅含 1 个顶层标题），
  * 基于段落块与关键词密度提取最相关的上下文窗口（Query-Centered Excerpt Window），
  * 确保即使无标准 Markdown 标题，也能从 30KB 巨型文档中精准聚焦出 ~2-3KB 的核心小节。
@@ -253,9 +285,11 @@ export function extractWindowByQueryTokens(
         return { content: trimmed, isFocused: false };
     }
 
+    const targetExcerptBudget = Math.min(maxChars, 4000);
+
     const blocks = trimmed.split(/\n{2,}/);
     if (blocks.length <= 2) {
-        return extractCharacterWindow(trimmed, query, queryTokens, maxChars);
+        return extractCharacterWindow(trimmed, query, queryTokens, targetExcerptBudget);
     }
 
     // 1. 对各个段落块进行评分
@@ -268,11 +302,11 @@ export function extractWindowByQueryTokens(
 
         for (const token of queryTokens) {
             if (!token) continue;
-            // 包含函数声明/标识符（如 func ... Middleware 或 type Middleware 等签名模式）
-            if (new RegExp(`(?:func|type|var|const|def|class|interface|fn)\\s+[^\\n]*\\b${token}\\b`, 'i').test(text)) {
+            const identPattern = buildIdentifierPattern(token);
+            if (identPattern && identPattern.test(text)) {
                 score += 80;
-            } else if (lowerText.includes(token)) {
-                const occurrences = lowerText.split(token).length - 1;
+            } else if (lowerText.includes(token.toLowerCase())) {
+                const occurrences = lowerText.split(token.toLowerCase()).length - 1;
                 score += 30 + Math.min(occurrences * 5, 20);
             }
         }
@@ -293,9 +327,14 @@ export function extractWindowByQueryTokens(
     const best = matched[0]!;
     const bestIndex = best.index;
 
+    // 如果最高得分块本身就超过了预算（例如整个页面只有 1 个超长块，或者段落本身就有 19KB），
+    // 必须对该块做二次窗口抽取，否则当前块直接输出 20KB 导致预算彻底失效
+    if (best.text.length > targetExcerptBudget) {
+        return extractCharacterWindow(best.text, query, queryTokens, targetExcerptBudget);
+    }
+
     // 2. 以最高得分段落为中心，向前后扩展上下文（保留前置签名与后续示例/说明）
     // 目标聚焦窗口约为 2000 - 4000 字符
-    const targetExcerptBudget = Math.min(maxChars, 4000);
     const selectedIndices = new Set<number>([bestIndex]);
     let currentLength = best.text.length;
 
@@ -384,13 +423,26 @@ function extractCharacterWindow(
 ): ExtractedSectionResult {
     const lower = text.toLowerCase();
     let bestPos = -1;
-    for (const token of queryTokens) {
-        const pos = lower.indexOf(token.toLowerCase());
-        if (pos !== -1) {
-            bestPos = pos;
-            break;
+
+    // 优先完整 query 匹配
+    if (query && query.trim()) {
+        const fullPos = lower.indexOf(query.trim().toLowerCase());
+        if (fullPos !== -1) {
+            bestPos = fullPos;
         }
     }
+
+    // 其次 token 匹配
+    if (bestPos === -1) {
+        for (const token of queryTokens) {
+            const pos = lower.indexOf(token.toLowerCase());
+            if (pos !== -1) {
+                bestPos = pos;
+                break;
+            }
+        }
+    }
+
     if (bestPos === -1) {
         return { content: text.slice(0, maxChars), isFocused: false };
     }
@@ -401,6 +453,20 @@ function extractCharacterWindow(
     let end = Math.min(text.length, start + windowSize);
     if (end === text.length) {
         start = Math.max(0, end - windowSize);
+    }
+
+    // 智能吸附到就近的换行符，避免生硬截断单词或代码行
+    if (start > 0) {
+        const nextLine = text.indexOf('\n', start);
+        if (nextLine !== -1 && nextLine - start < 300) {
+            start = nextLine + 1;
+        }
+    }
+    if (end < text.length) {
+        const prevLine = text.lastIndexOf('\n', end);
+        if (prevLine !== -1 && end - prevLine < 300 && prevLine > start) {
+            end = prevLine;
+        }
     }
 
     const excerpt = text.slice(start, end).trim();

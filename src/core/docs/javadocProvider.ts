@@ -101,7 +101,8 @@ export async function queryJavadocDocs(options: {
                     `Javadoc type-search-index for ${parsed.artifactId}`
                 );
                 if (searchResp.status === 200 && typeof searchResp.data === 'string') {
-                    const match = searchResp.data.match(new RegExp(`{"p":"([^"]+)","l":"${cleanQuery}"}`, 'i'));
+                    const escapedQuery = cleanQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const match = searchResp.data.match(new RegExp(`{"p":"([^"]+)","l":"${escapedQuery}"}`, 'i'));
                     if (match?.[1]) {
                         const packagePath = match[1].replace(/\./g, '/');
                         targetDocUrl = `${staticBase}/${packagePath}/${cleanQuery}.html`;

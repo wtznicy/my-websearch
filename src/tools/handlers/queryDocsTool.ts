@@ -25,7 +25,7 @@ import { detectUnknownParameters } from '../../utils/toolValidation.js';
 import { queryDevDocs } from '../../core/docs/devdocsProvider.js';
 import { queryMdnDocs, isLikelyMdnTarget } from '../../core/docs/mdnProvider.js';
 import { queryJavadocDocs, isLikelyJavadocTarget } from '../../core/docs/javadocProvider.js';
-import { extractRelevantSections } from '../../core/docs/markdownSectionExtractor.js';
+import { extractRelevantSections, isJavadocClassDocument } from '../../core/docs/markdownSectionExtractor.js';
 
 export type QueryDocsFormattedInput = {
     libraryId: string;
@@ -78,7 +78,11 @@ export function formatQueryDocsMarkdown(result: QueryDocsFormattedInput): string
 
     if (result.content) {
         let displayContent = result.content;
-        if (result.query && result.content.length > 8000) {
+        const isJavadoc = result.source === 'javadoc'
+            || (result.documentationUrl && result.documentationUrl.includes('javadoc.io'))
+            || isJavadocClassDocument(result.content);
+
+        if (!isJavadoc && result.query && result.content.length > 8000) {
             const extracted = extractRelevantSections(result.content, result.query);
             displayContent = extracted.content;
         }
