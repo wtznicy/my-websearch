@@ -46,17 +46,15 @@ type SseSession = {
 let setupToolsFn: ((server: McpServer, runtime: MyWebSearchRuntime) => void) | undefined;
 
 export const SERVER_INSTRUCTIONS = `
-my-websearch provides 5 focused tools for web search, web extraction, Git repositories, documentation, and remote code symbols:
+my-websearch provides 4 focused tools for web search, web extraction, Git repositories, and documentation:
 1. 'search': Multi-engine web and code search. Use for finding pages, articles, issues, and code snippets across Bing, Baidu, DuckDuckGo, Brave, GitHub, grep.app, etc. Supports multi-query, timeRange (day/week/month/year), and site filters.
 2. 'fetchWebContent': Extract readable content and markdown from generic web pages and PDF files. Use for reading articles, blogs, documentation pages, or downloading and parsing PDF documents.
 3. 'fetchGithubContent': Fetch GitHub/Gitee content by URL: README, a single source file (/blob/), a directory tree (/tree/), an Issue (/issues/), or a PR (/pull/ on GitHub, /pulls/ on Gitee). Examples: https://github.com/owner/repo/blob/main/src/index.ts ; https://gitee.com/owner/repo/blob/master/README.md ; https://github.com/owner/repo/issues/42 ; https://gitee.com/owner/repo/pulls/4 — ref may be a branch, tag, or commit; one file or directory per call, not a whole-repo clone.
 4. 'queryDocs': Direct access to official documentation and code snippets for libraries and frameworks (Context7 with npm/PyPI and GitHub fallback). Always prefer queryDocs over general web search for official library APIs and examples.
-5. 'codeSymbol': Locate a symbol declaration plus references and call sites in a remote GitHub repo (signature + code block + line numbers). Requires GITHUB_TOKEN; pass the exact symbol name, e.g. repo="fastapi/fastapi", symbol="Depends".
 
 Routing guidance:
 - Prefer 'queryDocs' for official package documentation (no proxy required).
 - Prefer 'fetchGithubContent' for GitHub/Gitee repos, files, issues, and PRs.
-- Prefer 'codeSymbol' when the exact symbol name is known and you need its definition or call sites.
 - Prefer 'fetchWebContent' for generic URLs and PDF files.
 - Use 'search' with site: operator (e.g. site:docs.python.org) or timeRange for targeted queries.
 `.trim();

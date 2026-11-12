@@ -69,9 +69,9 @@
 
 <a id="mcp-tools"></a>
 
-## 🛠️ 5 大核心 MCP 工具（极简高效，低 Token 消耗）
+## 🛠️ 4 大核心 MCP 工具（极简高效，低 Token 消耗）
 
-> 💡 **Token 预算与瘦身**：所有工具描述均严格控制在 250 字符以内（总描述字符 ≤ 1200），更详细的路由策略已移入 `McpServer({ instructions })`，大幅降低宿主 LLM 的 Context 开销。
+> 💡 **Token 预算与瘦身**：所有工具描述均严格控制在 250 字符以内（总描述字符 ≤ 1000），更详细的路由策略已移入 `McpServer({ instructions })`，大幅降低宿主 LLM 的 Context 开销。
 
 | 工具名称 | 功能定位 | 关键特性 |
 | :--- | :--- | :--- |
@@ -79,7 +79,6 @@
 | **`fetchWebContent`** | 通用网页正文、Markdown 与透明 PDF 提取 | **全能知识提取网关**：内置磁盘级 Markdown 缓存（Node 22 `node:sqlite` / 分片 JSON 兜底，200MB LRU，`cache: default\|reload` 强制刷新）；透明解析 PDF（上限 20MB / 50 页，带 `[page N]` 标记，纯扫描版明确报错）；统一分页与 `focus` 章节定位（默认 **`bm25`** 按段落相关性选块，`window` 保留旧的固定窗口）；**`selector`** 用 CSS 选择器收窄提取范围（未命中直接报错，不静默回退全页）；**`extract`** 用 CSS schema 直接产出结构化 JSON（无需 LLM）；**`citations`** 把正文链接改写成编号引用 + 末尾 References；**`retainLinks`** 裁剪 URL（列表页实测省 50%） |
 | **`fetchGithubContent`** | 全能 GitHub / Gitee 内容提取网关 | 提取 README、**单个源码文件**（`/blob/<ref>/<path>`，支持 `lines`/`#L120-L180` 切片，上限 400 行）、目录树（`/tree/`，自动过滤 lock/build 产物）、Issue 与 PR、Commit（`/commit/<sha>`）、Compare（`/compare/a...b`，patch 限长 + lockfile 过滤）、Release（`/releases[/tag/<tag>]`，`releaseLimit` 1–30）；`ref` 可为分支/tag/commit；Gitee 已对齐（可选 `GITEE_TOKEN`）；返回 `warnings` |
 | **`queryDocs`** | 一站式开源库、中间件与 Web 标准官方文档与 API | **权威多源架构**：支持库名、中间件或 Context7 ID；可选 **`source`** 多源覆盖（`auto` 智能路由级联、`official` 独立站直连、`docs.rs` Rust、`pkg.go.dev` Go、`devdocs` 800+ 中间件/语言、`mdn` Web 标准中文/英文、`javadoc` Maven 坐标、`context7`、`npm`、`pypi`、`github`）；可选 **`version`** 跨源版本钉定；**语法级 Markdown 章节智能提取**（带 `query` 且文档 >8000 字符时，100% 绝对保护导言区 `import` 与启动配置，整节提取命中内容并附带全局 TOC；短文档零切片）；**24h 本地缓存**（`cache: reload` 刷新）；精准降级提示（区分 402 Quota / 故障 / 低置信度）；返回 `source`、`confidence`、`documentationUrl` 与 `warnings` |
-| **`codeSymbol`** | 远程 GitHub 符号查询 | GitHub Code Search + raw/CDN 文件；可选 Tree-sitter AST（后台下载并缓存 grammar，冷启动回退扫描器，一次解析同时产出定义与调用点）；多行签名、Python 装饰器、词法级括号匹配、过滤后的调用点、re-export + monorepo tsconfig `extends`/paths；TypeScript/JavaScript 走 TS checker，Python/Go/Rust 提供注解级类型；symbol/content/analysis TTL 缓存 + 软预算 partial 返回；私有仓库走 Contents API；需要 `GITHUB_TOKEN`；未拉取的 import 会退化为 `any` |
 
 > 💡 **向后兼容说明**：原独立的 `fetchCsdnArticle` 与 `fetchJuejinArticle` 已平滑下沉并收口进通用的 `fetchWebContent`（按域名自动采用最佳专有提取引擎）；原 `resolveLibraryId` 已合并入 `queryDocs`（支持直接传 `library` 库名或旧版 `libraryId` 别名自动解析定位）。独立的 legacy 工具已移除 —— `REGISTER_LEGACY_ARTICLE_TOOLS` 开关一并删除，因为保留三个永不注册的 handler 依然要占工具描述预算。
 

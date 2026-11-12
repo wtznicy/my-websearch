@@ -2,6 +2,11 @@
 
 All notable changes to `my-websearch` are documented in this file.
 
+## [1.5.2] - 2026-11-12
+
+### Removed
+- **移除 `codeSymbol` 工具及关联模块**：完全移除代码符号解析与 `codeIntel` 模块，MCP 工具面回归 4 大核心工具（`search`、`fetchWebContent`、`fetchGithubContent`、`queryDocs`）；移除运行时依赖 `web-tree-sitter`，将 `typescript` 移入 `devDependencies`；工具描述总预算恢复至 ≤1000 字符。
+
 ## [1.5.1] - 2026-11-05
 
 ### Added

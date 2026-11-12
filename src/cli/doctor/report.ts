@@ -226,10 +226,6 @@ export function formatDoctorHumanReadable(report: DoctorReport): string {
         `  Search deadline: ${report.effectiveConfig.searchDeadlineMs}ms`,
         `  HTTP CORS:       ${report.effectiveConfig.enableCors ? `enabled (${report.effectiveConfig.corsOrigin})` : 'disabled'}`,
         `  API keys:        ${apiKeyLine}`,
-        ...(report.effectiveConfig.apiKeys.github
-            ? []
-            : ['  ⚠️ codeSymbol needs GITHUB_TOKEN: add "github" under apiKeys in ~/.my-websearch/config.json and restart the MCP server.']
-        ),
         '',
         'Proxy:',
         `  Enabled:         ${report.proxy.enabled ? 'yes' : 'no'}`,

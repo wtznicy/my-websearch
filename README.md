@@ -70,9 +70,9 @@
 
 <a id="mcp-tools"></a>
 
-## 🛠️ 5 Core MCP Tools (Minimal & Token-Efficient)
+## 🛠️ 4 Core MCP Tools (Minimal & Token-Efficient)
 
-> 💡 **Token Budget & Slimming**: All tool descriptions are strictly kept within 250 characters (total description characters ≤ 1200), while detailed routing guidance is delegated to `McpServer({ instructions })`, significantly reducing LLM context consumption.
+> 💡 **Token Budget & Slimming**: All tool descriptions are strictly kept within 250 characters (total description characters ≤ 1000), while detailed routing guidance is delegated to `McpServer({ instructions })`, significantly reducing LLM context consumption.
 
 | Tool Name | Purpose | Key Highlights |
 | :--- | :--- | :--- |
@@ -80,7 +80,6 @@
 | **`fetchWebContent`** | Web page extraction, Markdown & transparent PDF parsing | **All-in-one content extractor**: Built-in disk-level Markdown cache (Node 22 `node:sqlite` / partitioned JSON fallback, 200MB LRU, `cache: default\|reload`); transparent PDF parsing (up to 20MB / 50 pages, `[page N]` tags, scanned doc detection); pagination & `focus` keyword targeting (**`bm25`** relevance-ranked blocks by default, `window` for the legacy fixed window); **`selector`** to scope extraction to a CSS subtree (errors instead of silently returning the whole page); **`extract`** for CSS-selector JSON with no LLM; **`citations`** for numbered references; **`retainLinks`** to strip URLs (-50% on index pages) |
 | **`fetchGithubContent`** | Comprehensive GitHub / Gitee content reader | Fetches README, **one source file** (`/blob/<ref>/<path>`, optional `lines`/`#L120-L180` slicing with a 400-line cap), directory trees (`/tree/`, lock/build artifacts filtered), Issue / PR discussions, commits (`/commit/<sha>`), compare (`/compare/a...b`, capped patch + lockfile filtering), and releases (`/releases[/tag/<tag>]`, `releaseLimit` 1-30); `ref` may be a branch, tag, or commit; Gitee parity via API (optional `GITEE_TOKEN`); returns `warnings` |
 | **`queryDocs`** | All-in-one official docs, middleware & Web standards API | **Multi-Source Authority**: Resolves package names, middleware, or Context7 IDs; optional **`source`** selection (`auto` smart cascade, `official` standalone sites, `docs.rs` Rust, `pkg.go.dev` Go, `devdocs` 800+ tools/langs, `mdn` Web standards, `javadoc` Maven packages, `context7`, `npm`, `pypi`, `github`); optional **`version`** multi-source pinning; **Syntax-Level Markdown Section Extraction** (for docs >8000 chars with `query`, keeps preamble `import` & bootstrap code 100% intact, extracts full matching sections with TOC; zero truncation for short docs); **24h local cache** (`cache: reload` bypasses); precise failover notices (402 Quota vs outages vs low-confidence); returns `source`, `confidence`, `documentationUrl` & `warnings` |
-| **`codeSymbol`** | Remote GitHub symbol lookup | GitHub code search + raw/CDN files; optional Tree-sitter AST (grammar downloaded/cached in background, scanner fallback, one parse for definitions + call sites); multi-line signatures, Python decorators, lexical brace matching, filtered call sites, re-export + monorepo tsconfig `extends`/paths; TypeScript/JavaScript checker types plus Python/Go/Rust annotation-level types; symbol/content/analysis TTL caches and a soft time budget with partial results; private repos via Contents API; requires `GITHUB_TOKEN`; unresolved imports become `any` |
 
 > 💡 **Backward Compatibility**: Legacy `fetchCsdnArticle` and `fetchJuejinArticle` are automatically routed under `fetchWebContent`; legacy `resolveLibraryId` is merged into `queryDocs` (which accepts a `library` name or the legacy `libraryId` alias). The separate legacy tools were removed — the `REGISTER_LEGACY_ARTICLE_TOOLS` switch is gone, because keeping three unregistered handlers around still cost tool-description budget for nothing.
 
