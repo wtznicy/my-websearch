@@ -15,6 +15,7 @@ import { rankSearchResults } from '../../core/search/resultRanking.js';
 import { computeSearchOutcome } from '../../core/search/searchService.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { isContext7QuotaExhausted, setContext7QuotaListener } from '../../engines/context7/context7.js';
+import { renderSearchBriefMarkdown } from './searchMarkdownBrief.js';
 import {
     logTool,
     logSafeError,
@@ -32,7 +33,7 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
         return isContext7QuotaExhausted() ? '' : DOCS_GUIDANCE;
     };
     const getSearchDescription = () => {
-        return "Search the web across multiple engines (Chinese/English/Code). Supports multi-query fan-out ('queries'), timeRange filtering, site limits, fetchTop article content, and no API keys required.";
+        return "Search the web across engines (CN/EN/Code). Supports multi-query ('queries'), timeRange, site filter. Pass fetchTop (1~3) to auto-fetch top full articles as research brief in one turn. No API keys required.";
     };
 
     const getEnginesEnum = () => {
@@ -84,14 +85,16 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                 }, z.array(z.string()).min(1).optional())
                     .describe("Restrict search to specific site domain(s) (e.g. ['github.com', 'developer.mozilla.org'])"),
                 fetchTop: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(0).max(3).optional())
-                    .describe("Two-in-one search & fetch: automatically fetch full readable Markdown content for top N results (0~3) in a single turn"),
+                    .describe("Pass 1~3 to auto-fetch top full articles as a research brief in one shot, avoiding extra fetch turns"),
+                format: z.enum(['json', 'markdown']).optional()
+                    .describe("Output format: 'json' (default when fetchTop is 0) or 'markdown' (default when fetchTop > 0 for a structured research brief)"),
                 verbose: z.boolean().optional()
                     .describe("Include verbose diagnostic fields (engineMetrics, full failure hints, and redundant source hostnames); default false to save tokens")
             }).passthrough(),
             annotations: TOOL_ANNOTATION_HINTS
         },
         async (rawArgs, extra) => {
-            const { query, queries, limit, searchMode, engines, minResults, timeRange, site, fetchTop, verbose } = rawArgs as {
+            const { query, queries, limit, searchMode, engines, minResults, timeRange, site, fetchTop, verbose, format } = rawArgs as {
                 query?: string;
                 queries?: string[];
                 limit?: number;
@@ -102,10 +105,11 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                 site?: string[];
                 fetchTop?: number;
                 verbose?: boolean;
+                format?: 'json' | 'markdown';
             } & Record<string, unknown>;
             const signal = extra?.signal;
             const requestContext = createRequestContext({ signal, timeoutMs: runtime.config.searchDeadlineMs });
-            const knownSearchKeys = ['query', 'queries', 'limit', 'searchMode', 'engines', 'minResults', 'timeRange', 'site', 'fetchTop', 'verbose'];
+            const knownSearchKeys = ['query', 'queries', 'limit', 'searchMode', 'engines', 'minResults', 'timeRange', 'site', 'fetchTop', 'verbose', 'format'];
             const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, knownSearchKeys);
             unknownWarnings.forEach((w) => requestContext.addWarning(w));
 
@@ -254,6 +258,27 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                 const allWarnings = [...new Set([...requestContext.warnings, ...executed.flatMap((one) => one.warnings ?? [])])];
                 const filterFallback = executed.find((one) => one.filterFallback)?.filterFallback;
                 const diagnostics = executed.find((one) => one.diagnostics)?.diagnostics;
+
+                const isMarkdownRequested = format === 'markdown' || (Boolean(fetchTop && fetchTop > 0) && format !== 'json');
+
+                if (isMarkdownRequested && outcome !== 'failed') {
+                    const briefText = renderSearchBriefMarkdown({
+                        query: queryList.length > 1 ? queryList : (queryList[0] ?? ''),
+                        engines: allEngines,
+                        outcome,
+                        totalResults: mergedResults.length,
+                        results: outputResults,
+                        directAnswer,
+                        warnings: allWarnings.length > 0 ? allWarnings : undefined,
+                        partialFailures: outputFailures.length > 0 ? outputFailures : undefined
+                    });
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: briefText
+                        }]
+                    };
+                }
 
                 return {
                     content: [{
