@@ -33,8 +33,9 @@
   整合 Mozilla Readability 与容器级智能降噪，为**微信公众号**（`#js_content` 深度清洗）、**StackOverflow**（问答主体与采纳答案精准提纯）定制专属净化器，针对 **CSDN 与掘金** 自动走专用提取链路；精准保留文章主标题、代码围栏及 GFM 表格；支持长文无缝分页（`startIndex`），并提供三种省 token 模式：**BM25 相关性排序的 `focus`**、**无需 LLM 的 CSS 选择器 `extract` 结构化 JSON**、**编号 `citations` 引用**。
 - 📚 **统一 Context7 官方框架/库文档直查（`queryDocs` 一站式合体）**  
   直接输入技术库名（如 `"next.js"`, `"vue"`）或 Context7 ID，内部自动多候选排序、404 自愈重搜并返回相似替代库，免去额外调用 ID 解析步骤。
-- 🐙 **全面升级的 GitHub / Gitee 资源抓取**  
+- 🐙 **全面升级的 GitHub / Gitee 资源抓取与免 Token 全仓代码符号检索**  
   `fetchGithubContent`（原 `fetchGithubReadme`）同时支持 GitHub 与 Gitee：仓库 README、任意源码单文件（`/blob/...`，支持 `lines`/`#L120-L180` 行号切片）、目录树（`/tree/...`）、Issue / PR 完整讨论、Commit（`/commit/<sha>`）、版本对比（`/compare/a...b`）与 Release（`/releases`、`/releases/tag/<tag>`）。
+  **全新代码符号检索**：传入 `symbol: "Use"` 即可直接检索指定仓库或包内的函数、类、结构体、类型与宏定义，纯流式内存解析、免 Token 且零外部二进制依赖，极速定位实现行号并输出上下文代码块。
 - 🌏 **零配置网络感知（TUN / Fake-IP 完美适配）**  
   自动嗅探系统代理（Windows 注册表 / macOS scutil / Linux 环境变量），海外引擎走代理、国内引擎直连；原生支持 `198.18.0.0/15` 放行，无缝兼容 TUN / 虚拟网卡，严守内网 SSRF 安全边界。
 - 🔌 **全形态接入支持**  
@@ -63,7 +64,7 @@
 | **`arxiv`** | 🌐 直连 API | 无 | 官方 Atom XML API 检索论文标题、作者与摘要 | 计算机科学、AI/ML 与自然科学最新论文 |
 | **`code`** | 🌐 国内需代理 | 无 | grep.app API 实时检索全球 GitHub 代码，含仓库、文件路径与精确代码行 | 源码实现翻查、API 使用范例、开源语法实战 |
 
-> **版本说明**：本 README 跟随当前源码树（**1.5.1**）。**1.5.1** 是搜索质量版本：早退改为「相关性 + 多样性」双门控、域名打散 Host Cap（单域 ≤2、官方域 ≤3）、中文技术路由改为 Bing/百度/搜狗、实体与标题焦点护栏、官方意图锚点注入（MCP/Vitest/Node.js/Next.js/React/Vue/TypeScript/Docker/PostgreSQL/Zustand）并为 Node.js 版本查询补官方 LTS 页、百度真实 URL 提取、日期型规范版本加权、级联 3.5s 封顶与 CSDN 3.5s 超时、支持 `apiKeys.gitee`，以及 `npm run eval:quality` 10 场景基准套件。**1.5.0** 统一测试体系（legacy 脚本全部迁入 Vitest，CI 只保留单一 runner）、把所有 `process.env` 读取收敛到 `src/config/env.ts`（ESLint 强制）、拆分四个最大模块、Brave 429 后新增 **180 秒「浏览器优先」窗口**、CLI 服务器栈惰性加载（冷启动约 0.32s）、`doctor --network` 新增缓存命中率 / 熔断剩余 / P50-P95 指标、核心依赖升级（MCP SDK 1.32、axios 1.21、cheerio 1.2、express 5.3、zod 4），并要求 **Node.js ≥22**（Vitest 5 与可选依赖 `unpdf` PDF 解析均要求；`node:sqlite` 可用时优先使用，否则回退分片 JSON），同时新增 Node 22 的 Windows CI job。此前：**1.4.2** 新增 Brave 429 挑战分类与伪装 CDP 浏览器回退；**1.4.1** 修复 Windows 旧版 curl 兼容；**1.4.0** 新增 CDP 设备 profile 与 DDG 202 回退。**`codeSymbol` 已移除**，工具面收敛为 4 个；npm latest 可能滞后到包发布完成。
+> **版本说明**：本 README 跟随当前源码树（**1.6.0**）。**1.6.0** 是代码智能与多源文档升级版本：`fetchGithubContent` 扩展免 Token 全仓代码符号检索（`symbol`，基于 codeload 流式全仓秒级扫描与两阶段抽样，覆盖 Go/TS/Python/Rust 等多语言）；`queryDocs` 权威多源架构重构（整合 DevDocs、Javadoc、docs.rs、pkg.go.dev、MDN、Context7 与注册表回退，支持语法级 Markdown 章节智能提取与导言区保护）；移除 `codeSymbol` 外部重型依赖，MCP 工具面正式收敛为极简 4 大核心工具（总描述字符 ≤1000）。**1.5.1** 是搜索质量版本：早退改为「相关性 + 多样性」双门控、域名打散 Host Cap、中文技术路由 Bing/百度/搜狗、实体与标题焦点护栏、官方意图锚点注入、百度真实 URL 提取与 `eval:quality` 套件。**1.5.0** 统一测试体系（Vitest）、环境变量访问层收敛、Brave 180s 浏览器优先窗口，并要求 **Node.js ≥22**。
 
 ---
 
@@ -77,7 +78,7 @@
 | :--- | :--- | :--- |
 | **`search`** | 16 大引擎联合联网与代码检索 | 支持多词并发、`timeRange: day\|week\|month\|year` 时间过滤、`site: string[]` 域名过滤，以及 `site:`、`filetype:`、`after:`、`before:`、`-排除词` 查询语法的跨引擎转译与本地后置过滤；`fetchTop` 正文前瞻、`code` 代码引擎（grep.app）；显式传 `engines` 默认 `minResults=0` 且仅在候选内级联；失败附带网络内联诊断（`diagnostics: { proxy, dns, suggestion }`） |
 | **`fetchWebContent`** | 通用网页正文、Markdown 与透明 PDF 提取 | **全能知识提取网关**：内置磁盘级 Markdown 缓存（Node 22 `node:sqlite` / 分片 JSON 兜底，200MB LRU，`cache: default\|reload` 强制刷新）；透明解析 PDF（上限 20MB / 50 页，带 `[page N]` 标记，纯扫描版明确报错）；统一分页与 `focus` 章节定位（默认 **`bm25`** 按段落相关性选块，`window` 保留旧的固定窗口）；**`selector`** 用 CSS 选择器收窄提取范围（未命中直接报错，不静默回退全页）；**`extract`** 用 CSS schema 直接产出结构化 JSON（无需 LLM）；**`citations`** 把正文链接改写成编号引用 + 末尾 References；**`retainLinks`** 裁剪 URL（列表页实测省 50%） |
-| **`fetchGithubContent`** | 全能 GitHub / Gitee 内容提取网关 | 提取 README、**单个源码文件**（`/blob/<ref>/<path>`，支持 `lines`/`#L120-L180` 切片，上限 400 行）、目录树（`/tree/`，自动过滤 lock/build 产物）、Issue 与 PR、Commit（`/commit/<sha>`）、Compare（`/compare/a...b`，patch 限长 + lockfile 过滤）、Release（`/releases[/tag/<tag>]`，`releaseLimit` 1–30）；`ref` 可为分支/tag/commit；Gitee 已对齐（可选 `GITEE_TOKEN`）；返回 `warnings` |
+| **`fetchGithubContent`** | 全能 GitHub / Gitee 内容提取与全仓代码符号检索 | 提取 README、**单个源码文件**（`/blob/<ref>/<path>`，支持 `lines`/`#L120-L180` 切片，上限 400 行）、目录树（`/tree/`）、Issue 与 PR、Commit、Compare 与 Release；**免 Token 全仓代码符号检索**（`symbol="Use"`，纯流式内存解析，极速定位函数/类/结构体/宏定义所在行号并附带实现代码块）；`ref` 可为分支/tag/commit；Gitee 已对齐；返回 `warnings` |
 | **`queryDocs`** | 一站式开源库、中间件与 Web 标准官方文档与 API | **权威多源架构**：支持库名、中间件或 Context7 ID；可选 **`source`** 多源覆盖（`auto` 智能路由级联、`official` 独立站直连、`docs.rs` Rust、`pkg.go.dev` Go、`devdocs` 800+ 中间件/语言、`mdn` Web 标准中文/英文、`javadoc` Maven 坐标、`context7`、`npm`、`pypi`、`github`）；可选 **`version`** 跨源版本钉定；**语法级 Markdown 章节智能提取**（带 `query` 且文档 >8000 字符时，100% 绝对保护导言区 `import` 与启动配置，整节提取命中内容并附带全局 TOC；短文档零切片）；**24h 本地缓存**（`cache: reload` 刷新）；精准降级提示（区分 402 Quota / 故障 / 低置信度）；返回 `source`、`confidence`、`documentationUrl` 与 `warnings` |
 
 > 💡 **向后兼容说明**：原独立的 `fetchCsdnArticle` 与 `fetchJuejinArticle` 已平滑下沉并收口进通用的 `fetchWebContent`（按域名自动采用最佳专有提取引擎）；原 `resolveLibraryId` 已合并入 `queryDocs`（支持直接传 `library` 库名或旧版 `libraryId` 别名自动解析定位）。独立的 legacy 工具已移除 —— `REGISTER_LEGACY_ARTICLE_TOOLS` 开关一并删除，因为保留三个永不注册的 handler 依然要占工具描述预算。

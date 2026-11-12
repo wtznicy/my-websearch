@@ -1,6 +1,6 @@
 {
   "name": "my-websearch",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "engines": {
     "node": ">=22"
   },
