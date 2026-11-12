@@ -503,7 +503,9 @@ export async function fetchAndExtractHtmlWithBrowserFallback(
             }
         }
 
-        if (options.format === 'markdown' && !readabilityApplied && htmlExtraction?.html && htmlExtraction.mode !== 'metadata') {
+        // 站点专用提纯（如 pkg.go.dev 的 .UnitDoc）已经产出聚焦正文，
+        // 不能再被「整页容器 Markdown」覆盖，否则 README/目录会重新混进来。
+        if (options.format === 'markdown' && !readabilityApplied && !sitePurified && htmlExtraction?.html && htmlExtraction.mode !== 'metadata') {
             try {
                 const markdown = htmlToMarkdown(htmlExtraction.html);
                 if (markdown) {

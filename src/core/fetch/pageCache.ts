@@ -93,9 +93,15 @@ export function normalizeUrlForCache(rawUrl: string): string {
     }
 }
 
+/**
+ * 页面缓存键版本：正文提取/站点提纯逻辑变更时递增，
+ * 让升级后的首次请求立即绕过旧缓存（文档页 TTL 为 24h，否则修复要等一天才生效）。
+ */
+export const PAGE_CACHE_VERSION = 2;
+
 export function computeCacheKey(rawUrl: string, format = 'markdown'): string {
     const normalized = normalizeUrlForCache(rawUrl);
-    return crypto.createHash('sha256').update(`${normalized}:${format.toLowerCase()}`).digest('hex');
+    return crypto.createHash('sha256').update(`${PAGE_CACHE_VERSION}:${normalized}:${format.toLowerCase()}`).digest('hex');
 }
 
 export function isDocumentationUrl(rawUrl: string): boolean {
