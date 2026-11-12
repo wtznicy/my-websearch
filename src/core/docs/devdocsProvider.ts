@@ -189,36 +189,63 @@ export function findMatchingDevDocsEntry(entries: DevDocsEntry[], query?: string
     }
 
     const q = query.trim().toLowerCase();
-    // 1. 精确名称匹配
-    const exact = entries.filter((e) => e.name.toLowerCase() === q);
-    if (exact.length > 0) {
-        const match = exact[0]!;
-        const alts = entries.filter((e) => e !== match && e.name.toLowerCase().includes(q)).slice(0, 5).map((e) => e.name);
-        return { match, alternatives: alts };
+
+    // 辅助单次查询匹配器
+    const attemptMatch = (targetQuery: string): { match: DevDocsEntry | null; alternatives: string[] } | null => {
+        // 1. 精确名称匹配
+        const exact = entries.filter((e) => e.name.toLowerCase() === targetQuery);
+        if (exact.length > 0) {
+            const match = exact[0]!;
+            const alts = entries.filter((e) => e !== match && e.name.toLowerCase().includes(targetQuery)).slice(0, 5).map((e) => e.name);
+            return { match, alternatives: alts };
+        }
+
+        // 2. 前缀名称匹配
+        const prefix = entries.filter((e) => e.name.toLowerCase().startsWith(targetQuery));
+        if (prefix.length > 0) {
+            const match = prefix[0]!;
+            const alts = prefix.slice(1, 6).map((e) => e.name);
+            return { match, alternatives: alts };
+        }
+
+        // 3. 包含名称或分类匹配
+        const substr = entries.filter((e) => e.name.toLowerCase().includes(targetQuery) || (e.type && e.type.toLowerCase().includes(targetQuery)));
+        if (substr.length > 0) {
+            const match = substr[0]!;
+            const alts = substr.slice(1, 6).map((e) => e.name);
+            return { match, alternatives: alts };
+        }
+
+        // 4. path 匹配
+        const pathMatch = entries.filter((e) => e.path.toLowerCase().includes(targetQuery));
+        if (pathMatch.length > 0) {
+            const match = pathMatch[0]!;
+            const alts = pathMatch.slice(1, 6).map((e) => e.name);
+            return { match, alternatives: alts };
+        }
+
+        return null;
+    };
+
+    // 1. 优先尝试原始 query
+    const directResult = attemptMatch(q);
+    if (directResult) {
+        return directResult;
     }
 
-    // 2. 前缀名称匹配
-    const prefix = entries.filter((e) => e.name.toLowerCase().startsWith(q));
-    if (prefix.length > 0) {
-        const match = prefix[0]!;
-        const alts = prefix.slice(1, 6).map((e) => e.name);
-        return { match, alternatives: alts };
-    }
-
-    // 3. 包含名称或分类匹配
-    const substr = entries.filter((e) => e.name.toLowerCase().includes(q) || (e.type && e.type.toLowerCase().includes(q)));
-    if (substr.length > 0) {
-        const match = substr[0]!;
-        const alts = substr.slice(1, 6).map((e) => e.name);
-        return { match, alternatives: alts };
-    }
-
-    // 4. path 匹配
-    const pathMatch = entries.filter((e) => e.path.toLowerCase().includes(q));
-    if (pathMatch.length > 0) {
-        const match = pathMatch[0]!;
-        const alts = pathMatch.slice(1, 6).map((e) => e.name);
-        return { match, alternatives: alts };
+    // 2. 若原始 query 未命中（例如传了 "redis/hset"、"redis.hset"、"redis:hset"、"redis hset"），
+    // 智能剥离前置库名/命名空间前缀，提取末尾 symbol（如 "hset"）进行二次匹配
+    const delimiters = ['/', '.', ':', ' '];
+    for (const d of delimiters) {
+        if (q.includes(d)) {
+            const token = q.split(d).filter(Boolean).pop()?.trim();
+            if (token && token !== q) {
+                const subResult = attemptMatch(token);
+                if (subResult) {
+                    return subResult;
+                }
+            }
+        }
     }
 
     return { match: null, alternatives: entries.slice(0, 5).map((e) => e.name) };
@@ -231,18 +258,35 @@ export async function queryDevDocs(options: {
     query?: string;
     signal?: AbortSignal;
 }): Promise<DevDocsResult | null> {
-    const slug = await resolveDevDocsSlug(options.library, options.signal, options.version);
+    let rawLib = options.library.trim().replace(/^devdocs?:/, '').trim();
+    let effectiveQuery = options.query?.trim();
+
+    // 若 library 包含斜杠（例如 "redis/hset"），DevDocs slug 均不含斜杠，自动将首段作为 library，其余作为 query
+    if (rawLib.includes('/')) {
+        const slashIdx = rawLib.indexOf('/');
+        const potentialLib = rawLib.slice(0, slashIdx).trim();
+        const potentialQ = rawLib.slice(slashIdx + 1).trim();
+        if (potentialLib) {
+            rawLib = potentialLib;
+            if (!effectiveQuery && potentialQ) {
+                effectiveQuery = potentialQ;
+            }
+        }
+    }
+
+    const slug = await resolveDevDocsSlug(rawLib, options.signal, options.version);
     if (!slug) return null;
 
-    logTool(`DevDocs resolved slug "${slug}" for "${options.library}"`);
+    logTool(`DevDocs resolved slug "${slug}" for "${rawLib}"`);
     const entries = await fetchDevDocsIndex(slug, options.signal);
     if (entries.length === 0) return null;
 
-    const { match, alternatives } = findMatchingDevDocsEntry(entries, options.query);
+    const { match, alternatives } = findMatchingDevDocsEntry(entries, effectiveQuery);
     if (!match) return null;
 
     const rawPath = match.path.split('#')[0] || match.path;
-    const htmlUrl = `${DOCUMENTS_BASE_URL}/${encodeURIComponent(slug)}/${rawPath}.html`;
+    const cleanPath = rawPath.endsWith('.html') ? rawPath : `${rawPath}.html`;
+    const htmlUrl = `${DOCUMENTS_BASE_URL}/${encodeURIComponent(slug)}/${cleanPath}`;
     try {
         const res = await requestDirectFirst(
             'GET',

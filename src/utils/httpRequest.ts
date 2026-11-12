@@ -471,7 +471,7 @@ function requestWithSignal<T>(signal: AbortSignal | undefined, fn: () => Promise
 
 /** 网络层错误判定（超时/连接拒绝/重置/不可达/DNS 失败等）；HTTP 状态类错误不算 */
 export function isNetworkLayerError(message: string): boolean {
-    return /ECONNREFUSED|ECONNRESET|ETIMEDOUT|ESOCKETTIMEDOUT|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ENOTFOUND|socket hang up|network timeout|network error|fetch failed|ERR_NETWORK|timeout of \d+ms/i.test(message);
+    return /ECONNREFUSED|ECONNRESET|ETIMEDOUT|ESOCKETTIMEDOUT|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ENOTFOUND|socket hang up|socket disconnected|network timeout|network error|fetch failed|ERR_NETWORK|timeout of \d+ms|TLS/i.test(message);
 }
 
 /**
@@ -492,27 +492,50 @@ function extractHostname(url: string): string | null {
     }
 }
 
+/** 获取主机的可信父域列表（如 documents.devdocs.io -> ['devdocs.io']，排除纯根 TLD 如 'io'/'com'） */
+function getParentDomains(hostname: string): string[] {
+    const parts = hostname.split('.');
+    const parents: string[] = [];
+    // 至少保留最后两段（如 devdocs.io），避免退化为单段顶级域（如 io, com）
+    for (let i = 1; i < parts.length - 1; i++) {
+        parents.push(parts.slice(i).join('.'));
+    }
+    return parents;
+}
+
 export function isHostMarkedDirectSlow(url: string, now = Date.now()): boolean {
     const host = extractHostname(url);
     if (!host) {
         return false;
     }
     const expiresAt = directSlowHostCache.get(host);
-    if (expiresAt === undefined) {
-        return false;
+    if (expiresAt !== undefined) {
+        if (now >= expiresAt) {
+            directSlowHostCache.delete(host);
+            return false;
+        }
+        return true;
     }
-    if (now >= expiresAt) {
-        directSlowHostCache.delete(host);
-        return false;
+    // 检查父域名是否已标记为慢主机（例如 devdocs.io 慢，则 documents.devdocs.io 直接走代理，避免白等 3.5s）
+    for (const parent of getParentDomains(host)) {
+        const parentExp = directSlowHostCache.get(parent);
+        if (parentExp !== undefined) {
+            if (now < parentExp) {
+                directSlowHostCache.set(host, parentExp);
+                return true;
+            }
+            directSlowHostCache.delete(parent);
+        }
     }
-    return true;
+    return false;
 }
 
-function markHostDirectSlow(url: string, now = Date.now()): void {
+export function markHostDirectSlow(url: string, now = Date.now()): void {
     const host = extractHostname(url);
     if (!host) {
         return;
     }
+    const exp = now + DIRECT_SLOW_HOST_TTL_MS;
     if (directSlowHostCache.has(host)) {
         directSlowHostCache.delete(host);
     } else if (directSlowHostCache.size >= MAX_DIRECT_SLOW_HOST_ENTRIES) {
@@ -521,7 +544,16 @@ function markHostDirectSlow(url: string, now = Date.now()): void {
             directSlowHostCache.delete(oldest);
         }
     }
-    directSlowHostCache.set(host, now + DIRECT_SLOW_HOST_TTL_MS);
+    directSlowHostCache.set(host, exp);
+
+    // 若子域名被标记为慢主机，将其有效父域（如 devdocs.io）也一并标记，使同域的其他子域也能直接享受代理直达
+    const parents = getParentDomains(host);
+    if (parents.length > 0) {
+        const mainParent = parents[parents.length - 1];
+        if (mainParent && !directSlowHostCache.has(mainParent) && directSlowHostCache.size < MAX_DIRECT_SLOW_HOST_ENTRIES) {
+            directSlowHostCache.set(mainParent, exp);
+        }
+    }
 }
 
 export function __resetDirectSlowHostCacheForTests(): void {

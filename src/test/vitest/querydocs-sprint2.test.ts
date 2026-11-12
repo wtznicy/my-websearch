@@ -50,6 +50,12 @@ describe('queryDocs Sprint 2 Suite: DevDocs, MDN, Javadoc.io', () => {
             // 4. Empty query falls back to first/overview entry
             const res4 = findMatchingDevDocsEntry(entries, '');
             expect(res4.match?.name).toBe('GET');
+
+            // 5. Query with library/namespace prefix stripped gracefully (e.g. redis/hset, redis.hset)
+            expect(findMatchingDevDocsEntry(entries, 'redis/hset').match?.name).toBe('HSET');
+            expect(findMatchingDevDocsEntry(entries, 'redis.hset').match?.name).toBe('HSET');
+            expect(findMatchingDevDocsEntry(entries, 'redis:hset').match?.name).toBe('HSET');
+            expect(findMatchingDevDocsEntry(entries, 'redis hset').match?.name).toBe('HSET');
         });
     });
 
@@ -232,6 +238,64 @@ describe('queryDocs Sprint 2 Suite: DevDocs, MDN, Javadoc.io', () => {
             } finally {
                 spy.mockRestore();
             }
+        });
+
+        it('dispatches to devdocs and gracefully handles query with library prefix and slash in library', async () => {
+            const server = new McpServer({ name: 'test-server', version: '1.0.0' });
+            const runtime = createMyWebSearchRuntime();
+
+            const spy = vi.spyOn(httpRequest, 'requestDirectFirst').mockImplementation(async (_method, url) => {
+                if (url.includes('/docs.json')) {
+                    return { status: 200, data: [{ name: 'Redis', slug: 'redis' }] } as any;
+                }
+                if (url.includes('/redis/index.json')) {
+                    return { status: 200, data: { entries: [{ name: 'HSET', path: 'hset/index', type: 'Core: Hash' }] } } as any;
+                }
+                if (url.includes('/redis/hset/index.html')) {
+                    return { status: 200, data: '<h1>HSET</h1><p>Sets field in the hash stored at key to value.</p>' } as any;
+                }
+                return { status: 404, data: 'Not Found' } as any;
+            });
+
+            try {
+                registerQueryDocsTool(server, runtime);
+                const toolHandler = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })._registeredTools['queryDocs']?.handler;
+
+                // 1. query 带 redis/hset 前缀
+                const res1 = await toolHandler({
+                    library: 'redis',
+                    query: 'redis/hset',
+                    source: 'devdocs',
+                    cache: 'reload'
+                });
+                expect(res1.content[0].text).toContain('> Source: devdocs | Confidence: high');
+                expect(res1.content[0].text).toContain('# HSET');
+
+                // 2. library 直接传入 redis/hset，自动拆分
+                const res2 = await toolHandler({
+                    library: 'redis/hset',
+                    source: 'devdocs',
+                    cache: 'reload'
+                });
+                expect(res2.content[0].text).toContain('> Source: devdocs | Confidence: high');
+                expect(res2.content[0].text).toContain('# HSET');
+            } finally {
+                spy.mockRestore();
+            }
+        });
+
+        it('shares directSlowHostCache between parent domain and subdomains', () => {
+            httpRequest.__resetDirectSlowHostCacheForTests();
+
+            // 标记 devdocs.io 为慢主机
+            httpRequest.markHostDirectSlow('https://devdocs.io/docs.json');
+
+            // documents.devdocs.io 应自动继承慢主机标记
+            expect(httpRequest.isHostMarkedDirectSlow('https://documents.devdocs.io/redis/index.json')).toBe(true);
+
+            // 错误消息中的 TLS 和 socket disconnected 均被判定为网络层错误
+            expect(httpRequest.isNetworkLayerError('Client network socket disconnected before secure TLS connection was established')).toBe(true);
+            expect(httpRequest.isNetworkLayerError('TLS handshake failed')).toBe(true);
         });
     });
 });

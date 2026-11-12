@@ -5,6 +5,7 @@ All notable changes to `my-websearch` are documented in this file.
 ## [1.5.2] - 2026-11-12
 
 ### Fixed
+- **DevDocs 带前缀查询与斜杠库名失败**：`queryDevDocs` 支持 `query="redis/hset"`、`redis.hset`、`redis:hset` 智能剥离库名前缀二次匹配；支持 `library="redis/hset"` 自动拆解为 library 与 query；条目 HTML 路径标准化防御；慢主机标记支持父子域继承（`devdocs.io` 确认走代理时 `documents.devdocs.io` 自动继承代理直达，消除冷启动 3.5s 直连超时白等）；TLS 握手异常补齐网络层错误判定。
 - **站点提纯结果被整页 Markdown 覆盖**：`fetchWebContent` 在站点专用提纯（如 pkg.go.dev 的 `.UnitDoc`）产出聚焦正文后，仍会用整页容器重新转换 Markdown，导致 README/目录重新混入、提纯形同虚设；现在提纯命中时跳过容器回退。
 - **提取逻辑升级后旧缓存仍生效**：页面缓存键加入 `PAGE_CACHE_VERSION`，升级后首次请求即绕过旧文档缓存（原 TTL 24h）。
 
