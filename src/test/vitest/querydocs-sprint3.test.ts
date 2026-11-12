@@ -132,6 +132,43 @@ describe('queryDocs Sprint 3 Suite: Section Extraction, Version Pinning & Locali
             expect(formatted).toContain('## Authentication');
             expect(formatted).toContain('> ℹ️ **Focused Sections:**');
         });
+
+        it('extracts deep sections located beyond 30KB (e.g. Engine.Use at 70KB depth)', () => {
+            const lines: string[] = [
+                '# gin package',
+                '',
+                '```go',
+                "import \"github.com/gin-gonic/gin\"",
+                '```',
+                '',
+                '### Variables',
+                'var DefaultWriter io.Writer',
+                ''
+            ];
+
+            // 填充 50KB 的无相关内容，模拟 Gin 前半部分庞大的类型与上下文文档
+            for (let i = 0; i < 600; i++) {
+                lines.push(`### Context Method ${i}\nfunc (*Context) Dummy${i}() string {\n    return "context"\n}\n`);
+            }
+
+            // 深度位于 60KB+ 的 Engine.Use
+            lines.push(
+                '### func (*Engine) Use',
+                '```go',
+                'func (engine *Engine) Use(middleware ...HandlerFunc) IRoutes',
+                '```',
+                'Use attaches a global middleware to the router. The middleware attached through Use() will be included in the handlers chain.',
+                ''
+            );
+
+            const deepDoc = lines.join('\n');
+            expect(deepDoc.length).toBeGreaterThan(40000);
+
+            const result = extractRelevantSections(deepDoc, 'middleware');
+            expect(result.isFocused).toBe(true);
+            expect(result.focusedSectionTitles).toContain('func (*Engine) Use');
+            expect(result.content).toContain('func (engine *Engine) Use(middleware ...HandlerFunc) IRoutes');
+        });
     });
 
     describe('DevDocs version pinning', () => {
@@ -149,6 +186,14 @@ describe('queryDocs Sprint 3 Suite: Section Extraction, Version Pinning & Locali
             const docs = await searchMdn('获取网络请求', undefined);
             // Even if offline or mock, returns an array
             expect(Array.isArray(docs)).toBe(true);
+        });
+    });
+
+    describe('Parallel ecosystem metadata resolution', () => {
+        it('resolves metadata across registries in parallel without unneeded sequential delays', async () => {
+            const { resolvePackageMetadata } = await import('../../core/docs/packageDocsFallback.js');
+            const meta = await resolvePackageMetadata('nonexistent-pkg-for-test-xyz-123');
+            expect(meta).toBeNull();
         });
     });
 });

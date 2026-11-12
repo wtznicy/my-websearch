@@ -5,6 +5,7 @@ import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import {
     fetchPackageDocsFallback,
     PackageDocsFallbackResult,
+    PackageMetadata,
     resolvePackageMetadata,
     isPythonPackageName,
     isRustCrateName,
@@ -290,18 +291,22 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 }
             }
 
-            const fetchViaWeb = async (url: string): Promise<string | null> => {
+            const fetchViaWeb = async (url: string, customMaxChars?: number): Promise<string | null> => {
                 // docs.rs 与 devdocs.io 拥有结构化 API 目录与 class="section-header" 声明，
                 // Mozilla Readability 会将其误判为样板导航剥离，导致 Macros / 函数小节丢失，因而首选 Raw。
                 // 而 Javadoc.io 原生带有大量边栏导航与类继承树，由 Readability 提取能够精准萃取出 ~9KB 的纯净类正文。
                 const isTechDocSite = /docs\.rs|pkg\.go\.dev|devdocs\.io/i.test(url);
                 const firstReadability = !isTechDocSite;
+                // 技术文档站点（如 pkg.go.dev, docs.rs）API 树通常极其庞大（例如 Gin 正文有 96KB），
+                // 抓取时必须分配更充裕的预算（120,000 字符），防止关键函数（如 Engine.Use）在 30KB 处被硬截断。
+                // 后续的 markdownSectionExtractor 会负责将其精准收窄为 2~4KB 交付给模型。
+                const maxChars = customMaxChars ?? (isTechDocSite ? 120000 : 30000);
 
                 if (firstReadability) {
                     try {
                         const res = await runtime.services.fetchWeb.execute({
                             url,
-                            maxChars: 30000,
+                            maxChars,
                             format: 'markdown',
                             readability: true,
                             signal
@@ -310,6 +315,12 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                             return res.content.trim();
                         }
                     } catch (err) {
+                        // 若网络层面已超时（network_timeout）或被取消（aborted），不要再发完全相同且注定超时的二次全量慢请求
+                        const isTimeout = err instanceof Error && /network_timeout|timed? ?out|abort/i.test(err.message);
+                        if (isTimeout || signal?.aborted) {
+                            logSafeError(`fetchViaWeb readability pass timed out for ${url}, skipping raw pass`, err);
+                            return null;
+                        }
                         logSafeError(`fetchViaWeb readability pass failed for ${url}`, err);
                     }
                 }
@@ -317,7 +328,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 try {
                     const resFallback = await runtime.services.fetchWeb.execute({
                         url,
-                        maxChars: 30000,
+                        maxChars,
                         format: 'markdown',
                         readability: false,
                         signal
@@ -334,7 +345,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     try {
                         const res = await runtime.services.fetchWeb.execute({
                             url,
-                            maxChars: 30000,
+                            maxChars,
                             format: 'markdown',
                             readability: true,
                             signal
@@ -899,9 +910,10 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
             // 7. Context7 限额、报错或低置信度时，仅在 auto 模式下尝试 official 官方文档站与 fallback
             if (reqSource === 'auto') {
                 // 优先尝试 official 官方文档站直连
+                let meta: PackageMetadata | null = null;
                 try {
                     logTool(`Context7 match confidence is low or failed for "${target}". Probing official doc site...`);
-                    const meta = await resolvePackageMetadata(target, { signal, version });
+                    meta = await resolvePackageMetadata(target, { signal, version });
                     const docUrl = meta?.documentationUrl || (meta?.homepageUrl && !meta.homepageUrl.includes('github.com') && !meta.homepageUrl.includes('gitee.com') ? meta.homepageUrl : null);
                     if (docUrl) {
                         const content = await fetchViaWeb(docUrl);
@@ -973,58 +985,63 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     logSafeError('DevDocs fallback resolution failed', ddErr);
                 }
 
-                // 启动包管理器 README 兜底
-                logTool(`Attempting npm/PyPI/crates/Go fallback for "${target}"...`);
-                let fallbackResult: PackageDocsFallbackResult | null = null;
-                const fallbackReason = context7Error
-                    ? (isContext7QuotaExhaustedError(context7Error)
-                        ? 'Context7 monthly quota exhausted (HTTP 402). Configure CONTEXT7_API_KEY in ~/.my-websearch/config.json to restore Context7 access.'
-                        : (context7Error instanceof TypeError
-                            ? `Context7 processing encountered an internal error (${context7Error.message}).`
-                            : `Context7 service temporarily unavailable (${context7Error instanceof Error ? context7Error.message : String(context7Error)}).`))
-                    : (context7Result && context7Result.matchConfidence === 'low'
-                        ? `Library "${target}" was not indexed by Context7 or match confidence was low${context7Result.libraryId ? ` (closest candidate: "${context7Result.libraryId}")` : ''}.`
-                        : 'Context7 match confidence was low or library was not found in Context7.');
+                // 启动包管理器 README 兜底：
+                // 若 meta 已经证实包在 npm / PyPI / crates / Go 均不存在，且无显式生态前缀（如 pypi:xxx），
+                // 直接短路跳过第二轮重复探测，避免未知库累加 10+ 秒延迟。
+                const hasExplicitPrefix = /^(?:crates?|pypi|npm|go|maven|javadoc):/i.test(target);
+                if (meta !== null || hasExplicitPrefix) {
+                    logTool(`Attempting npm/PyPI/crates/Go fallback for "${target}"...`);
+                    let fallbackResult: PackageDocsFallbackResult | null = null;
+                    const fallbackReason = context7Error
+                        ? (isContext7QuotaExhaustedError(context7Error)
+                            ? 'Context7 monthly quota exhausted (HTTP 402). Configure CONTEXT7_API_KEY in ~/.my-websearch/config.json to restore Context7 access.'
+                            : (context7Error instanceof TypeError
+                                ? `Context7 processing encountered an internal error (${context7Error.message}).`
+                                : `Context7 service temporarily unavailable (${context7Error instanceof Error ? context7Error.message : String(context7Error)}).`))
+                        : (context7Result && context7Result.matchConfidence === 'low'
+                            ? `Library "${target}" was not indexed by Context7 or match confidence was low${context7Result.libraryId ? ` (closest candidate: "${context7Result.libraryId}")` : ''}.`
+                            : 'Context7 match confidence was low or library was not found in Context7.');
 
-                try {
-                    fallbackResult = await fetchPackageDocsFallback({
-                        library: target,
-                        version,
-                        signal,
-                        fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url }),
-                        reasonHint: fallbackReason
-                    });
-                } catch (fbErr) {
-                    logSafeError('Fallback package docs resolution failed', fbErr);
-                }
+                    try {
+                        fallbackResult = await fetchPackageDocsFallback({
+                            library: target,
+                            version,
+                            signal,
+                            fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url }),
+                            reasonHint: fallbackReason
+                        });
+                    } catch (fbErr) {
+                        logSafeError('Fallback package docs resolution failed', fbErr);
+                    }
 
-                if (fallbackResult) {
-                    logTool(`Fallback succeeded via ${fallbackResult.source}: ${fallbackResult.repositoryUrl}`);
-                    metrics.recordQueryDocsAttempt(fallbackResult.source, true);
-                    const combinedWarnings = [...new Set([...fallbackResult.warnings, ...unknownWarnings])];
-                    const text = capTextResponse(formatQueryDocsMarkdown({
-                        libraryId: fallbackResult.libraryId,
-                        query,
-                        source: fallbackResult.source,
-                        confidence: fallbackResult.confidence,
-                        repositoryUrl: fallbackResult.repositoryUrl,
-                        readme: fallbackResult.readme,
-                        warnings: combinedWarnings
-                    }));
-                    if (fallbackResult.confidence !== 'low') {
-                        setDocsCache(cacheKey, {
-                            text,
+                    if (fallbackResult) {
+                        logTool(`Fallback succeeded via ${fallbackResult.source}: ${fallbackResult.repositoryUrl}`);
+                        metrics.recordQueryDocsAttempt(fallbackResult.source, true);
+                        const combinedWarnings = [...new Set([...fallbackResult.warnings, ...unknownWarnings])];
+                        const text = capTextResponse(formatQueryDocsMarkdown({
+                            libraryId: fallbackResult.libraryId,
+                            query,
                             source: fallbackResult.source,
                             confidence: fallbackResult.confidence,
-                            cachedAt: Date.now()
-                        });
+                            repositoryUrl: fallbackResult.repositoryUrl,
+                            readme: fallbackResult.readme,
+                            warnings: combinedWarnings
+                        }));
+                        if (fallbackResult.confidence !== 'low') {
+                            setDocsCache(cacheKey, {
+                                text,
+                                source: fallbackResult.source,
+                                confidence: fallbackResult.confidence,
+                                cachedAt: Date.now()
+                            });
+                        }
+                        return {
+                            content: [{ type: 'text', text }],
+                            source: fallbackResult.source,
+                            confidence: fallbackResult.confidence,
+                            warnings: combinedWarnings
+                        } as unknown as { content: Array<{ type: 'text'; text: string }> };
                     }
-                    return {
-                        content: [{ type: 'text', text }],
-                        source: fallbackResult.source,
-                        confidence: fallbackResult.confidence,
-                        warnings: combinedWarnings
-                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
                 }
 
                 // 如果兜底也未找到，但在非 strict 模式下有 Context7 低置信度候选

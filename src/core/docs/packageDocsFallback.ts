@@ -697,22 +697,23 @@ export async function resolvePackageMetadata(
         return null;
     }
 
-    const npmMeta = await resolveNpmMetadata(target, options?.signal, options?.version);
+    // 常规回退链：npm / PyPI / crates.io / Go module proxy 并发探测（避免串行累加延迟）
+    const [npmMeta, pypiMeta, cratesMeta, goMeta] = await Promise.all([
+        resolveNpmMetadata(target, options?.signal, options?.version),
+        resolvePypiMetadata(target, options?.signal, options?.version),
+        resolveCratesMetadata(target, options?.signal, options?.version),
+        resolveGoModuleMetadata(target, options?.signal)
+    ]);
+
     if (npmMeta && (npmMeta.documentationUrl || npmMeta.repositoryUrl)) {
         return npmMeta;
     }
-
-    const pypiMeta = await resolvePypiMetadata(target, options?.signal, options?.version);
     if (pypiMeta && (pypiMeta.documentationUrl || pypiMeta.repositoryUrl)) {
         return pypiMeta;
     }
-
-    const cratesMeta = await resolveCratesMetadata(target, options?.signal, options?.version);
     if (cratesMeta && (cratesMeta.documentationUrl || cratesMeta.repositoryUrl)) {
         return cratesMeta;
     }
-
-    const goMeta = await resolveGoModuleMetadata(target, options?.signal);
     if (goMeta && goMeta.documentationUrl) {
         return goMeta;
     }

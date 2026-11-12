@@ -5,6 +5,9 @@ All notable changes to `my-websearch` are documented in this file.
 ## [1.5.2] - 2026-11-12
 
 ### Fixed
+- **pkg.go.dev / docs.rs 深层 API 符号被截断**：`queryDocs` 在抓取 `pkg.go.dev` 和 `docs.rs` 等技术文档站点时，此前因固定 `maxChars: 30000` 导致体积庞大的 API 页面深层关键符号（如 Gin 的 `Engine.Use` 位于 ~70KB 处）在源头被截断遗失；现针对技术文档站点放宽初次抓取预算至 120,000 字符，由后续段落打分算法精准提取 2~4KB 内容。
+- **fetchViaWeb 超时错误早退**：首轮 Readability 模式遇 `network_timeout` / 超时 / 取消时，不再盲目发起注定超时的二次 Raw 请求，避免耗时串行累加至 20s+。
+- **未知库降级查询延迟优化**：`resolvePackageMetadata` 改为并发探测 npm / PyPI / crates.io / Go module proxy 注册表；并在确认全生态不存在且无前缀指定时短路跳过第二轮重复探测，未知库响应耗时大幅降低。
 - **DevDocs 带前缀查询与斜杠库名失败**：`queryDevDocs` 支持 `query="redis/hset"`、`redis.hset`、`redis:hset` 智能剥离库名前缀二次匹配；支持 `library="redis/hset"` 自动拆解为 library 与 query；条目 HTML 路径标准化防御；慢主机标记支持父子域继承（`devdocs.io` 确认走代理时 `documents.devdocs.io` 自动继承代理直达，消除冷启动 3.5s 直连超时白等）；TLS 握手异常补齐网络层错误判定。
 - **站点提纯结果被整页 Markdown 覆盖**：`fetchWebContent` 在站点专用提纯（如 pkg.go.dev 的 `.UnitDoc`）产出聚焦正文后，仍会用整页容器重新转换 Markdown，导致 README/目录重新混入、提纯形同虚设；现在提纯命中时跳过容器回退。
 - **提取逻辑升级后旧缓存仍生效**：页面缓存键加入 `PAGE_CACHE_VERSION`，升级后首次请求即绕过旧文档缓存（原 TTL 24h）。
