@@ -4,6 +4,9 @@ All notable changes to `my-websearch` are documented in this file.
 
 ## [1.5.2] - 2026-11-12
 
+### Added
+- **`fetchGithubContent` 扩展代码符号检索 (`symbol`)**：支持对指定仓库进行免 Token、全仓库级代码符号检索。主路径通过 `codeload.github.com` 流式拉取打包源码并在内存中瞬时解压扫描，支持 Go、TypeScript/JavaScript、Python、Rust、Java、C#、Ruby、PHP 等语言的函数、类、结构体、宏定义识别；当仓库超大（>8MB）或网络受限时，自动降级至两阶段候选文件抽样与扫描；支持正则安全转义、多行块注释/Docstring 过滤、行号与上下文代码块渲染及引用追踪；无任何外部二进制依赖与 Token 强依赖，保持 4 工具面与 ≤1000 字符描述预算。
+
 ### Fixed
 - **pkg.go.dev / docs.rs 深层 API 符号被截断**：`queryDocs` 在抓取 `pkg.go.dev` 和 `docs.rs` 等技术文档站点时，此前因固定 `maxChars: 30000` 导致体积庞大的 API 页面深层关键符号（如 Gin 的 `Engine.Use` 位于 ~70KB 处）在源头被截断遗失；现针对技术文档站点放宽初次抓取预算至 120,000 字符，由后续段落打分算法精准提取 2~4KB 内容。
 - **fetchViaWeb 超时错误早退**：首轮 Readability 模式遇 `network_timeout` / 超时 / 取消时，不再盲目发起注定超时的二次 Raw 请求，避免耗时串行累加至 20s+。
