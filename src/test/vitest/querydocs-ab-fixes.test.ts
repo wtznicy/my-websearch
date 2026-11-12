@@ -178,16 +178,39 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
         });
 
         it('prioritizes PyPI for known Python packages in fallback', async () => {
-            const mockFetchGithub = vi.fn().mockResolvedValue('# FastAPI\n\nFastAPI framework, high performance, easy to learn.');
-            const result = await fetchPackageDocsFallback({
-                library: 'fastapi',
-                fetchGithub: mockFetchGithub
+            const spy = vi.spyOn(httpRequest, 'requestDirectFirst').mockImplementation(async (_method, url) => {
+                if (url.includes('pypi.org/pypi/fastapi')) {
+                    return {
+                        status: 200,
+                        data: {
+                            info: {
+                                name: 'fastapi',
+                                version: '0.115.0',
+                                project_urls: {
+                                    Homepage: 'https://fastapi.tiangolo.com/',
+                                    Repository: 'https://github.com/fastapi/fastapi'
+                                }
+                            }
+                        }
+                    } as any;
+                }
+                throw new Error(`Unexpected url: ${url}`);
             });
 
-            expect(result).not.toBeNull();
-            expect(result?.source).toBe('pypi');
-            expect(result?.repositoryUrl).toMatch(/(?:fastapi|tiangolo)\/fastapi/);
-            expect(result?.repositoryUrl).not.toContain('tkambler');
+            try {
+                const mockFetchGithub = vi.fn().mockResolvedValue('# FastAPI\n\nFastAPI framework, high performance, easy to learn.');
+                const result = await fetchPackageDocsFallback({
+                    library: 'fastapi',
+                    fetchGithub: mockFetchGithub
+                });
+
+                expect(result).not.toBeNull();
+                expect(result?.source).toBe('pypi');
+                expect(result?.repositoryUrl).toMatch(/(?:fastapi|tiangolo)\/fastapi/);
+                expect(result?.repositoryUrl).not.toContain('tkambler');
+            } finally {
+                spy.mockRestore();
+            }
         });
 
         it('prevents Java packages like hutool from falling back to PyPI sampleproject', async () => {
@@ -754,6 +777,34 @@ describe('queryDocs A/B Fixes Suite (P0/P1/P2 resolution)', () => {
             expect(extractedMissing.content).toContain('Document Overview');
             expect(extractedMissing.content).toContain('No exact matches found for "completely_nonexistent_token_xyz999"');
             expect(extractedMissing.content.length).toBeLessThan(3500);
+
+            // 3. 在有标题结构的长文档中，带有标点的 "map(" 不会落到 Index 目录清单，而是命中真实函数
+            const structuredDocWithIndex = [
+                '# Package util',
+                'Overview of util package.',
+                '',
+                '### Index',
+                '- [func MapKeys(m map[string]string) []string](#MapKeys)',
+                '- [func MapValues(m map[string]string) []string](#MapValues)',
+                '- [func MapEntries(m map[string]string) []string](#MapEntries)',
+                '- [func MapFilter(m map[string]string) []string](#MapFilter)',
+                '- [func MapReduce(m map[string]string) []string](#MapReduce)',
+                '- [func MapTransform(m map[string]string) []string](#MapTransform)',
+                '',
+                '### Functions',
+                '#### func MapKeys',
+                '```go',
+                'func MapKeys(m map[string]string) []string',
+                '```',
+                'MapKeys returns the keys of the map of all pairs.',
+                'Filler text for length.\n'.repeat(350)
+            ].join('\n');
+
+            const extractedStructured = extractRelevantSections(structuredDocWithIndex, 'map(');
+            expect(extractedStructured.isFocused).toBe(true);
+            // 严禁落入 Index 目录
+            expect(extractedStructured.focusedSectionTitles).not.toContain('Index');
+            expect(extractedStructured.content).toContain('func MapKeys');
         });
 
         it('retries Javadoc wrapperUrl and index probe on transient network failure', async () => {

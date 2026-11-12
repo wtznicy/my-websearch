@@ -15,6 +15,7 @@ export default defineConfig({
         // 会造成"首次跑挂、重跑就过"的假失败（测评报告 P2-14 观察到的现象）
         testTimeout: 60000,
         hookTimeout: 60000,
+        teardownTimeout: 60000,
         projects: [
             {
                 extends: true,

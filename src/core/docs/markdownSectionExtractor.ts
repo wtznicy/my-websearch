@@ -68,7 +68,7 @@ export function extractMarkdownHeadings(markdown: string): MarkdownHeading[] {
             const level = match[1]!.length;
             const title = match[2]!
                 .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-                .replace(/^[§#\s]+/, '')
+                .replace(/^[§#¶\s]+|[§#¶\s]+$/g, '')
                 .trim();
             headings.push({
                 level,
@@ -106,9 +106,26 @@ function scoreSectionMatch(title: string, bodyText: string, queryTokens: string[
     const lowerTitle = title.toLowerCase();
     const lowerBody = bodyText.toLowerCase();
 
-    // 目录/索引章节（如 ## Index / ## Table of Contents）降权，避免真正的 API 内容小节被目录链接清单顶替
-    if (lowerTitle === 'index' || lowerTitle === 'table of contents' || lowerTitle === '目录' || lowerTitle === '索引') {
-        score -= 80;
+    // 目录/索引章节降权（如 ## Index / ## Table of Contents 或标题含 Index/目录/索引）
+    const normalizedTitle = lowerTitle.replace(/[¶§\s]+/g, ' ').trim();
+    if (
+        normalizedTitle === 'index' ||
+        normalizedTitle.startsWith('index ') ||
+        normalizedTitle.endsWith(' index') ||
+        normalizedTitle.includes('table of contents') ||
+        normalizedTitle === '目录' ||
+        normalizedTitle === '索引'
+    ) {
+        score -= 100;
+    }
+
+    // 链接行占比高就强力降权（避免真正的 API 实现小节被包含大量 - [func ...](#...) 的目录链接清单顶替）
+    const bodyLines = bodyText.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (bodyLines.length >= 3) {
+        const linkLines = bodyLines.filter((l) => /^\s*[-*]\s+\[.*\]\(#/.test(l.trim())).length;
+        if (linkLines / bodyLines.length > 0.35) {
+            score -= 150;
+        }
     }
 
     for (const token of queryTokens) {
@@ -167,7 +184,9 @@ export function extractRelevantSections(
         return { content: trimmed, isFocused: false };
     }
 
-    const cleanQuery = query.trim().toLowerCase().replace(/[!！?？]/g, ' ');
+    // 标点剥离前置到 token 生成阶段：去除常见标点符号（包括 ( ) [ ] { } ! ? : ; ' " ` , < > 等），
+    // 避免如 "map(" 或 "Use()" 带残余括号而无法在分节标题或正文中精确击中有效 API
+    const cleanQuery = query.trim().toLowerCase().replace(/[()[\]{}*+?^$|\\!！?？:;'"`,.<>]/g, ' ');
     const rawTokens = cleanQuery.split(/[\s,:+/-]+/).filter((t) => t.length >= 2 || /[\u4e00-\u9fa5]/.test(t));
     if (rawTokens.length === 0) {
         return { content: trimmed, isFocused: false };

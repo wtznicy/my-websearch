@@ -7,6 +7,7 @@ import {
     purifyZhihuContent,
     purifyCnblogsArticle,
     purifyRedditThread,
+    purifyPkgGoDev,
     purifySiteContent
 } from '../../engines/web/sitePurifiers.js';
 
@@ -256,6 +257,41 @@ describe('Site Purifiers (mp.weixin.qq.com & stackoverflow.com)', () => {
                 '<h1 id="cb_post_title_url">Cnblogs T</h1><div id="cnblogs_post_body"><p>博客园正文</p></div>'
             );
             expect(cnblogs?.text).toContain('博客园正文');
+        });
+
+        it('routes pkg.go.dev and purifies Go package documentation by stripping README and Index list', () => {
+            const html = `
+                <html>
+                <head><title>gin package - github.com/gin-gonic/gin - Go Packages</title></head>
+                <body>
+                    <div class="UnitReadme">
+                        <h3>Gin Web Framework</h3>
+                        <p>Repository README with badges and general marketing.</p>
+                    </div>
+                    <div class="UnitDoc">
+                        <h2>Documentation</h2>
+                        <div class="Documentation-overview"><p>Package gin implements an HTTP web framework.</p></div>
+                        <section class="Documentation-index">
+                            <h3>Index</h3>
+                            <ul><li><a href="#Use">func (*Engine) Use</a></li></ul>
+                        </section>
+                        <section class="Documentation-types">
+                            <h4>func (*Engine) Use</h4>
+                            <p>Use attaches a global middleware to the router.</p>
+                        </section>
+                    </div>
+                </body>
+                </html>
+            `;
+            const res = purifySiteContent('https://pkg.go.dev/github.com/gin-gonic/gin', html);
+            expect(res).toBeDefined();
+            expect(res?.siteName).toBe('Go Packages');
+            expect(res?.html).toContain('func (*Engine) Use');
+            expect(res?.html).toContain('Package gin implements an HTTP web framework.');
+            // README 与 Index 目录列表必须被干净剔除
+            expect(res?.html).not.toContain('Gin Web Framework');
+            expect(res?.html).not.toContain('Documentation-index');
+            expect(res?.text).not.toContain('Repository README with badges');
         });
 
         it('returns undefined for other hosts', () => {

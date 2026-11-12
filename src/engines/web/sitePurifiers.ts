@@ -401,6 +401,36 @@ export function purifyRedditThread(html: string): SitePurificationResult | undef
 }
 
 /**
+ * Go 官方包文档站点 (pkg.go.dev) 专用正文提纯器：
+ * - 仅提取 .UnitDoc（真正的 Go 包 API 文档），主动规避前置的 .UnitReadme（仓库 README.md、徽章与介绍等）
+ * - 剔除 .Documentation-index 与 .UnitDoc-toc（高达 20KB 的纯目录链接锚点清单），
+ *   防止抓取预算被纯目录耗尽而截断后续真正的函数与类型实现文档
+ */
+export function purifyPkgGoDev(html: string): SitePurificationResult | undefined {
+    const $ = cheerio.load(html);
+    const unitDoc = $('.UnitDoc');
+    if (unitDoc.length === 0) {
+        return undefined;
+    }
+
+    const container = unitDoc.clone();
+    // 剔除目录锚点链接清单，释放宝贵的正文抓取空间
+    container.find('.Documentation-index, .UnitDoc-toc, [data-test-id="UnitDoc-index"]').remove();
+    container.find('script, style, noscript').remove();
+
+    const title = $('title').text().trim() || 'Go Package Documentation';
+    const cleanHtml = container.html()?.trim() || '';
+    const cleanText = container.text().replace(/\s+/g, ' ').trim();
+
+    return {
+        title,
+        html: cleanHtml,
+        text: cleanText,
+        siteName: 'Go Packages'
+    };
+}
+
+/**
  * 专用站点嗅探分发入口：命中特定技术/文章站点时返回提纯结果，否则返回 undefined
  */
 export function purifySiteContent(url: string, html: string): SitePurificationResult | undefined {
@@ -408,6 +438,10 @@ export function purifySiteContent(url: string, html: string): SitePurificationRe
         const parsed = new URL(url);
         const host = parsed.hostname.toLowerCase();
         const pathname = parsed.pathname;
+
+        if (host === 'pkg.go.dev') {
+            return purifyPkgGoDev(html);
+        }
 
         if (host === 'mp.weixin.qq.com') {
             return purifyWeChatArticle(html);

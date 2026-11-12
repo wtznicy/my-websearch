@@ -291,9 +291,10 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
             }
 
             const fetchViaWeb = async (url: string): Promise<string | null> => {
-                // 技术文档站点（如 docs.rs, pkg.go.dev, javadoc.io, devdocs.io）拥有结构化 API 目录与 class="section-header" 声明，
-                // Mozilla Readability 会将其误判为样板导航剥离，导致 Macros / 函数小节丢失。
-                const isTechDocSite = /docs\.rs|pkg\.go\.dev|javadoc\.io|devdocs\.io/i.test(url);
+                // docs.rs 与 devdocs.io 拥有结构化 API 目录与 class="section-header" 声明，
+                // Mozilla Readability 会将其误判为样板导航剥离，导致 Macros / 函数小节丢失，因而首选 Raw。
+                // 而 Javadoc.io 原生带有大量边栏导航与类继承树，由 Readability 提取能够精准萃取出 ~9KB 的纯净类正文。
+                const isTechDocSite = /docs\.rs|pkg\.go\.dev|devdocs\.io/i.test(url);
                 const firstReadability = !isTechDocSite;
 
                 if (firstReadability) {
