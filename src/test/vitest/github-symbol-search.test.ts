@@ -316,6 +316,57 @@ describe('GitHub Symbol Search Engine', () => {
         expect(resRust.definitions[0]?.file).toBe('src/lib.rs');
     });
 
+    it('detects Rust macros wrapped in doc! { ... } (tokio select style)', async () => {
+        const mockFiles = [
+            {
+                name: 'tokio/src/macros/select.rs',
+                content: [
+                    '#[cfg(not(doc))]',
+                    'doc! {macro_rules! select {',
+                    '    ($($t:tt)*) => { unimplemented!() };',
+                    '}}'
+                ].join('\n')
+            }
+        ];
+
+        vi.spyOn(axios, 'get').mockResolvedValueOnce({
+            status: 200,
+            data: createMockTarGzStream(mockFiles),
+            headers: {}
+        });
+
+        const res = await searchGithubSymbol({ urlOrRepo: 'tokio-rs/tokio', symbol: 'select' });
+        expect(res.definitions.length).toBe(1);
+        expect(res.definitions[0]?.kind).toBe('macro');
+        expect(res.definitions[0]?.line).toBe(2);
+    });
+
+    it('caches symbol results per maxResults instead of reusing a smaller slice', async () => {
+        const mockFiles = [1, 2, 3].map((n) => ({
+            name: `pkg/file${n}.go`,
+            content: 'package pkg\n\nfunc Use() {}\n'
+        }));
+
+        vi.spyOn(axios, 'get')
+            .mockResolvedValueOnce({
+                status: 200,
+                data: createMockTarGzStream(mockFiles),
+                headers: {}
+            })
+            .mockResolvedValueOnce({
+                status: 200,
+                data: createMockTarGzStream(mockFiles),
+                headers: {}
+            });
+
+        const small = await searchGithubSymbol({ urlOrRepo: 'owner/cache-repo', symbol: 'Use', maxResults: 1 });
+        expect(small.definitions.length).toBe(1);
+
+        // 同一进程内不同 maxResults 必须重新取，而不是复用 1 条结果
+        const larger = await searchGithubSymbol({ urlOrRepo: 'owner/cache-repo', symbol: 'Use', maxResults: 5 });
+        expect(larger.definitions.length).toBe(3);
+    });
+
     it('falls back to sampled search when codeload throws network error', async () => {
         // 第一次调用 codeload 报错，第二次调用 jsDelivr flat tree 成功，第三次取文件内容成功
         vi.spyOn(axios, 'get')

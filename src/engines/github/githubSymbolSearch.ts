@@ -50,8 +50,8 @@ export interface GithubSymbolSearchResult {
     rateLimitRemaining?: number;
 }
 
-const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024; // 10MB 压缩包流上限（覆盖 Gin、Tokio、Vue 等绝大多数主流库与框架）
-const MAX_DECOMPRESSED_BYTES = 30 * 1024 * 1024; // 30MB 解压文本总上限
+const MAX_ARCHIVE_BYTES = 30 * 1024 * 1024; // 30MB 压缩包流上限（FastAPI 约 18MB，主流库与框架均覆盖）
+const MAX_DECOMPRESSED_BYTES = 90 * 1024 * 1024; // 90MB 解压文本总上限（源码以外的文档/图片也在 tar 内）
 const MAX_SINGLE_FILE_BYTES = 300 * 1024; // 300KB 单文件源码上限
 const SYMBOL_CACHE_TTL_MS = 30 * 60 * 1000; // 30 分钟缓存
 
@@ -154,7 +154,7 @@ function buildDefinitionRules(safeSymbol: string): Record<LanguageCategory, Defi
             { kind: 'struct', regex: new RegExp(`^\\s*(?:pub(?:\\([^)]+\\))?\\s+)?(?:struct|enum|union)\\s+${safeSymbol}\\b`) },
             { kind: 'trait', regex: new RegExp(`^\\s*(?:pub(?:\\([^)]+\\))?\\s+)?trait\\s+${safeSymbol}\\b`) },
             { kind: 'type', regex: new RegExp(`^\\s*(?:pub(?:\\([^)]+\\))?\\s+)?type\\s+${safeSymbol}\\b`) },
-            { kind: 'macro', regex: new RegExp(`^\\s*macro_rules!\\s+${safeSymbol}\\b`) }
+            { kind: 'macro', regex: new RegExp(`^\\s*(?:doc!\\s*\\{\\s*)?macro_rules!\\s+${safeSymbol}\\b`) }
         ],
         jvm_dotnet: [
             { kind: 'class', regex: new RegExp(`^\\s*(?:public|protected|private|static|final|abstract|sealed|internal|open|data|case)*\\s*(?:class|interface|enum|record|struct|object|trait)\\s+${safeSymbol}\\b`) },
@@ -637,7 +637,7 @@ export async function searchGithubSymbol(options: SearchGithubSymbolOptions): Pr
 
     const { owner, repo } = repoSpec;
     const cleanRef = ref.trim() || 'HEAD';
-    const cacheKey = `${owner}/${repo}@${cleanRef}:${symbol.trim()}`;
+    const cacheKey = `${owner}/${repo}@${cleanRef}:${symbol.trim()}:${maxResults}`;
     const cached = symbolResultCache.get(cacheKey);
     if (cached && Date.now() - cached.cachedAt < SYMBOL_CACHE_TTL_MS) {
         return cached.result;
@@ -655,7 +655,7 @@ export async function searchGithubSymbol(options: SearchGithubSymbolOptions): Pr
 
         const reqConfig = buildAxiosRequestOptions({
             headers,
-            timeout: 15000,
+            timeout: 30000,
             engine: 'github',
             trustedStaticHost: true,
             requestUrl: codeloadUrl,
