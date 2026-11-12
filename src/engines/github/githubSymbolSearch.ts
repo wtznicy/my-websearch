@@ -50,8 +50,8 @@ export interface GithubSymbolSearchResult {
     rateLimitRemaining?: number;
 }
 
-const MAX_ARCHIVE_BYTES = 8 * 1024 * 1024; // 8MB 压缩包流上限
-const MAX_DECOMPRESSED_BYTES = 25 * 1024 * 1024; // 25MB 解压文本总上限
+const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024; // 10MB 压缩包流上限（覆盖 Gin、Tokio、Vue 等绝大多数主流库与框架）
+const MAX_DECOMPRESSED_BYTES = 30 * 1024 * 1024; // 30MB 解压文本总上限
 const MAX_SINGLE_FILE_BYTES = 300 * 1024; // 300KB 单文件源码上限
 const SYMBOL_CACHE_TTL_MS = 30 * 60 * 1000; // 30 分钟缓存
 
@@ -105,7 +105,7 @@ const EXTENSION_TO_CATEGORY: Record<string, LanguageCategory> = {
     '.swift': 'swift'
 };
 
-const NOISE_PATH_PATTERN = /(?:^|\/)(?:test|tests|__tests__|testing|mocks?|vendor|node_modules|dist|build|target|generated|\.git)(?:\/|$)/i;
+const NOISE_PATH_PATTERN = /(?:^|\/)(?:test|tests|__tests__|testing|mocks?|vendor|node_modules|dist|build|target|generated|\.git)(?:\/|$)|(?:_test\.[a-z0-9]+|\.test\.[a-z0-9]+|\.spec\.[a-z0-9]+|test_[^/]+\.py)$/i;
 const BINARY_OR_IGNORE_EXTS = new Set([
     '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.webp',
     '.zip', '.tar', '.gz', '.tgz', '.wasm', '.bin', '.exe',
@@ -345,10 +345,10 @@ function scanFilesForSymbol(
     const definitions: SymbolMatchItem[] = [];
     const references: SymbolMatchItem[] = [];
 
-    // 优先非测试文件
+    // 优先生产核心代码，将测试/示例/Mock 文件后置
     const sortedFiles = [...files].sort((a, b) => {
-        const aTest = /test|spec/i.test(a.path);
-        const bTest = /test|spec/i.test(b.path);
+        const aTest = /test|spec|example|mock/i.test(a.path);
+        const bTest = /test|spec|example|mock/i.test(b.path);
         if (aTest !== bTest) return aTest ? 1 : -1;
         return a.path.localeCompare(b.path);
     });
@@ -699,7 +699,9 @@ export async function searchGithubSymbol(options: SearchGithubSymbolOptions): Pr
 
     // 2. 二级备选：Tree + 候选文件两阶段抽样
     const fallbackResult = await fallbackSampledSymbolSearch(owner, repo, cleanRef, symbol.trim(), maxResults, signal);
-    symbolResultCache.set(cacheKey, { result: fallbackResult, cachedAt: Date.now() });
+    if (!fallbackResult.truncated || fallbackResult.definitions.length > 0) {
+        symbolResultCache.set(cacheKey, { result: fallbackResult, cachedAt: Date.now() });
+    }
     return fallbackResult;
 }
 
