@@ -664,7 +664,7 @@ export function assembleFetchResult(
         generateToc: !options.raw
     });
     // 页面自己声明的发布日期（不影响 search 的 timeRange，只服务 fetchWebContent 的返回）
-    const publishedAt = extractPublishedDateFromHtml(stage.raw);
+    const publishedAt = extractPublishedDateFromHtml(stage.raw, { url: primary.finalUrl || primary.url });
 
     return {
         url: primary.parsedUrl.toString(),
