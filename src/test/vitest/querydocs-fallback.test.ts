@@ -79,8 +79,43 @@ describe('queryDocs Package Fallback & Markdown Formatting', () => {
             expect(formatted).toContain('> Source: npm | Confidence: high');
             expect(formatted).toContain('> Repository: https://github.com/expressjs/express');
             expect(formatted).toContain('> ⚠️ **Warning:** Fallback to npm registry');
-            expect(formatted).toContain('# Express');
             expect(formatted).toContain('Fast, unopinionated, minimalist web framework.');
+        });
+
+        it('distills code snippets and strips badges from full markdown readmes', () => {
+            const fullReadme = [
+                '# Express',
+                '',
+                '[![NPM Version](https://img.shields.io/npm/v/express.svg)](https://npmjs.org/package/express)',
+                '<p align="center"><img src="logo.png"></p>',
+                '',
+                'Fast, unopinionated, minimalist web framework for Node.js.',
+                '',
+                '## Quick Start',
+                'Start a web server with express:',
+                '```javascript',
+                'const express = require("express")',
+                'const app = express()',
+                'app.listen(3000)',
+                '```',
+                '',
+                '## Sponsors',
+                'Thanks to all sponsors!'
+            ].join('\n');
+
+            const formatted = formatQueryDocsMarkdown({
+                libraryId: 'express',
+                source: 'npm',
+                confidence: 'high',
+                repositoryUrl: 'https://github.com/expressjs/express',
+                readme: fullReadme
+            });
+
+            expect(formatted).not.toContain('img.shields.io');
+            expect(formatted).not.toContain('Thanks to all sponsors!');
+            expect(formatted).toContain('### Quick Start');
+            expect(formatted).toContain('Start a web server with express:');
+            expect(formatted).toContain('app.listen(3000)');
         });
     });
 });

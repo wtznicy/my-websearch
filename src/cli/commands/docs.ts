@@ -1,6 +1,8 @@
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../protocol.js';
 import { ErrorCode } from '../../core/errors.js';
+import { fetchPackageDocsFallback } from '../../core/docs/packageDocsFallback.js';
+import { distillMarkdownSnippets } from '../../core/docs/snippetDistiller.js';
 import {
     CommandContext,
     DaemonTransportArgs,
@@ -383,12 +385,68 @@ export async function handleQueryDocsCommand(ctx: CommandContext): Promise<numbe
             return daemonResult.status === 'ok' ? 0 : 1;
         }
 
-        const result = await runtime.services.context7Docs.execute({
-            library: parsed.library,
-            query: parsed.query,
-            limit: parsed.limit,
-            version: parsed.version
-        });
+        let result: Parameters<typeof formatQueryDocsHumanReadable>[0] | undefined;
+
+        // 若用户指定了显式生态前缀（如 npm:left-pad）或生态源（npm/pypi），优先走 package registry 与结构化提纯
+        const hasExplicitPackagePrefix = /^(?:npm|pypi|pip|crates?|go):/i.test(parsed.library);
+        if (hasExplicitPackagePrefix || parsed.source === 'npm' || parsed.source === 'pypi') {
+            const fallbackResult = await fetchPackageDocsFallback({
+                library: parsed.library,
+                version: parsed.version,
+                fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url })
+            });
+            if (fallbackResult) {
+                const distilled = distillMarkdownSnippets(fallbackResult.readme, {
+                    query: parsed.query,
+                    limit: parsed.limit ?? 5
+                });
+                result = {
+                    libraryId: fallbackResult.libraryId,
+                    source: fallbackResult.source,
+                    documentationUrl: fallbackResult.documentationUrl ?? undefined,
+                    repositoryUrl: fallbackResult.repositoryUrl,
+                    codeSnippets: distilled.codeSnippets,
+                    infoSnippets: distilled.infoSnippets,
+                    content: distilled.overview
+                };
+            }
+        }
+
+        // 若前置未命中，走 Context7 主链路；若 Context7 报错，自动降级到 package docs fallback
+        if (!result) {
+            try {
+                result = await runtime.services.context7Docs.execute({
+                    library: parsed.library,
+                    query: parsed.query,
+                    limit: parsed.limit,
+                    version: parsed.version
+                });
+            } catch (c7Error) {
+                // Context7 报错（如配额耗尽 402 或未找到）时，尝试 package fallback 兜底
+                const fallbackResult = await fetchPackageDocsFallback({
+                    library: parsed.library,
+                    version: parsed.version,
+                    fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url })
+                });
+                if (fallbackResult) {
+                    const distilled = distillMarkdownSnippets(fallbackResult.readme, {
+                        query: parsed.query,
+                        limit: parsed.limit ?? 5
+                    });
+                    result = {
+                        libraryId: fallbackResult.libraryId,
+                        source: fallbackResult.source,
+                        documentationUrl: fallbackResult.documentationUrl ?? undefined,
+                        repositoryUrl: fallbackResult.repositoryUrl,
+                        codeSnippets: distilled.codeSnippets,
+                        infoSnippets: distilled.infoSnippets,
+                        content: distilled.overview
+                    };
+                } else {
+                    throw c7Error;
+                }
+            }
+        }
 
         if (parsed.json) {
             io.stdout(JSON.stringify(createSuccessEnvelope(result), null, 2));

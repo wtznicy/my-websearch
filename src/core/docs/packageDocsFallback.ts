@@ -64,11 +64,12 @@ export function normalizeGitRepositoryUrl(raw: string): string | null {
  * 从 npm registry 查询包信息并提取完整元数据（源码仓库、官方文档站、首页）。
  */
 export async function resolveNpmMetadata(packageName: string, signal?: AbortSignal, version?: string): Promise<PackageMetadata | null> {
-    const clean = packageName.trim().replace(/^@/, '').split('@')[0]?.trim();
+    const withoutPrefix = packageName.trim().replace(/^npm:/i, '').trim();
+    const clean = withoutPrefix.replace(/^@/, '').split('@')[0]?.trim();
     if (!clean) return null;
 
     // 支持 scoped 包（如 @types/node 变为 @types%2fnode 或直接传入）
-    const pkgTarget = packageName.startsWith('@')
+    const pkgTarget = withoutPrefix.startsWith('@')
         ? `@${encodeURIComponent(clean)}`
         : encodeURIComponent(clean);
 
@@ -734,10 +735,11 @@ export async function fetchPackageDocsFallback(options: {
 }): Promise<PackageDocsFallbackResult | null> {
     const rawTarget = options.library.trim();
     const version = options.version?.trim() || undefined;
+    const strippedPrefix = rawTarget.replace(/^(?:npm|pypi|pip|crates?|go|maven|javadoc):/i, '').trim();
     // 剔除前后斜杠（如果是 Context7 库名形式如 /owner/repo，直接提取 repo）
-    const cleanTarget = rawTarget.startsWith('/')
-        ? rawTarget.replace(/^\/+/, '').split('/')[1] || rawTarget.replace(/^\/+/, '')
-        : rawTarget;
+    const cleanTarget = strippedPrefix.startsWith('/')
+        ? strippedPrefix.replace(/^\/+/, '').split('/')[1] || strippedPrefix.replace(/^\/+/, '')
+        : strippedPrefix;
     const displayTarget = version ? `${cleanTarget}@${version}` : cleanTarget;
     const lowerClean = cleanTarget.toLowerCase();
 

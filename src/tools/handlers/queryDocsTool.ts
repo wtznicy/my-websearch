@@ -27,6 +27,7 @@ import { queryDevDocs } from '../../core/docs/devdocsProvider.js';
 import { queryMdnDocs, isLikelyMdnTarget } from '../../core/docs/mdnProvider.js';
 import { queryJavadocDocs, isLikelyJavadocTarget } from '../../core/docs/javadocProvider.js';
 import { extractRelevantSections, isJavadocClassDocument } from '../../core/docs/markdownSectionExtractor.js';
+import { distillMarkdownSnippets, stripReadmeBoilerplate } from '../../core/docs/snippetDistiller.js';
 
 export type QueryDocsFormattedInput = {
     libraryId: string;
@@ -106,9 +107,45 @@ export function formatQueryDocsMarkdown(result: QueryDocsFormattedInput): string
     }
 
     if (result.readme) {
-        let displayReadme = result.readme;
-        if (result.query && result.readme.length > 8000) {
-            const extracted = extractRelevantSections(result.readme, result.query);
+        // 调用本地智能提纯器，自动剔除徽章/Sponsors等噪音，萃取结构化代码块与说明段落
+        const distilled = distillMarkdownSnippets(result.readme, {
+            query: result.query,
+            limit: 5
+        });
+
+        // 若成功提取出代码片段，转为高质量结构化展示
+        if (distilled.codeSnippets.length > 0) {
+            if (distilled.overview) {
+                lines.push(distilled.overview);
+                lines.push('');
+            }
+            for (const info of distilled.infoSnippets) {
+                if (info.content) {
+                    lines.push(`> **${info.title || 'Note'}**: ${info.content.trim()}`);
+                    lines.push('');
+                }
+            }
+            for (const snippet of distilled.codeSnippets) {
+                const pageTitle = snippet.pageTitle || 'Usage';
+                const codeTitle = snippet.codeTitle || '';
+                const heading = codeTitle && codeTitle !== pageTitle ? `### ${pageTitle}: ${codeTitle}` : `### ${pageTitle}`;
+                lines.push(heading);
+                if (snippet.codeDescription) {
+                    lines.push(snippet.codeDescription.trim());
+                }
+                for (const item of snippet.codeList) {
+                    const lang = item.language || '';
+                    lines.push(`\`\`\`${lang}\n${(item.code || '').trim()}\n\`\`\``);
+                    lines.push('');
+                }
+            }
+            return lines.join('\n').trim();
+        }
+
+        // 若 README 未包含可用代码块，走清洗后的段落提取
+        let displayReadme = stripReadmeBoilerplate(result.readme);
+        if (result.query && displayReadme.length > 8000) {
+            const extracted = extractRelevantSections(displayReadme, result.query);
             displayReadme = extracted.content;
         }
         lines.push(displayReadme);
