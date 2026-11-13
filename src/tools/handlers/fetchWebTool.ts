@@ -25,6 +25,16 @@ const normalizeHttpUrl = (val: unknown): unknown => {
     return val;
 };
 
+const normalizeUrlParam = (val: unknown): unknown => {
+    if (typeof val === 'string') {
+        return normalizeHttpUrl(val);
+    }
+    if (Array.isArray(val)) {
+        return normalizeUrlsArray(val);
+    }
+    return val;
+};
+
 const normalizeUrlsArray = (val: unknown): unknown => {
     if (typeof val === 'string') {
         val = val.split(',').map((item) => item.trim()).filter(Boolean);
@@ -47,73 +57,92 @@ const extractFieldInput = z.object({
     all: z.boolean().optional()
 }).passthrough();
 
+const publicHttpUrlRefined = z.string().url().refine(
+    (u) => {
+        try {
+            const parsed = new URL(u);
+            return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && validatePublicWebUrl(u);
+        } catch {
+            return false;
+        }
+    },
+    "URL must be a public HTTP(S) address (private/local network targets and non-HTTP protocols are blocked)"
+);
+
 export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRuntime): void {
     const fetchWebToolName = 'fetchWebContent';
 
     server.registerTool(
         fetchWebToolName,
         {
-            description: "Fetch readable web content/docs/PDFs from public URLs. Auto-cleans ads, keeps code/tables. Batch urls (1-3), CSS selector scoping, bm25 focus, startIndex paging, cache, schema extract to JSON, citations, link retention.",
+            description: "Fetch readable web content/docs/PDFs. Auto-cleans ads, keeps code/tables. Supports outline mode & sectionId for long docs, BM25 focus, batch URLs (1-3), and startIndex paging.",
             inputSchema: z.object({
-                url: z.preprocess(normalizeHttpUrl, z.string().url().refine(
-                    (u) => {
-                        try {
-                            const parsed = new URL(u);
-                            return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && validatePublicWebUrl(u);
-                        } catch {
-                            return false;
-                        }
-                    },
-                    "URL must be a public HTTP(S) address (private/local network targets and non-HTTP protocols are blocked)"
-                ).optional()),
-                urls: z.preprocess(normalizeUrlsArray, z.array(
-                    z.string().url().refine(
-                        (u) => {
-                            try {
-                                const parsed = new URL(u);
-                                return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && validatePublicWebUrl(u);
-                            } catch {
-                                return false;
-                            }
-                        },
-                        "Each URL must be a public HTTP(S) address"
-                    )
-                ).min(1).max(3).optional())
-                    .describe("Batch URLs (1~3 URLs run concurrently, splitting maxChars budget; ideal for comparing search results)"),
-                focus: z.string().min(1).optional()
-                    .describe("Keyword or section name to target (e.g. 'Auth', 'Config'); returns targeted window (~5000 chars) instead of burning tokens on full document"),
-                focusMode: z.enum(['bm25', 'window']).optional()
-                    .describe("How focus selects text: 'bm25' (default) ranks paragraphs by relevance and keeps the best ones; 'window' keeps the old ±2500-char window around the first match"),
+                url: z.preprocess(
+                    normalizeUrlParam,
+                    z.union([
+                        publicHttpUrlRefined,
+                        z.array(publicHttpUrlRefined).min(1).max(3)
+                    ]).optional()
+                ).describe("Public HTTP(S) URL or array of 1-3 URLs to fetch. Array fetches concurrently and splits maxChars budget"),
+                urls: z.preprocess(normalizeUrlsArray, z.array(publicHttpUrlRefined).min(1).max(3).optional())
+                    .describe("(Optional alias for url array) Batch URLs (1~3 URLs run concurrently)"),
                 mode: z.enum(['full', 'outline']).optional()
-                    .describe("Extraction mode: 'full' (default) returns document body; 'outline' returns document heading tree (H1-H4) with section slug IDs and character estimates — best for exploring long technical docs without burning tokens"),
+                    .describe("Extraction mode: 'full' (default) returns content body; 'outline' returns H1-H4 heading tree with section slug IDs and char estimates — use on long docs to avoid burning tokens"),
                 sectionId: z.string().min(1).optional()
-                    .describe("Directly extract a specific section by heading slug ID or title (e.g. 'configuration', 'api-reference'). Reads from that heading until the next same-level heading"),
+                    .describe("Directly extract a specific section by heading slug ID or title (from outline mode). Reads until next same-level heading"),
+                focus: z.string().min(1).optional()
+                    .describe("Keyword or topic to target. Uses BM25 semantic scoring to rank and extract relevant paragraphs, saving tokens on long pages"),
+                focusMode: z.enum(['bm25', 'window']).optional()
+                    .describe("Focus scoring algorithm (default 'bm25'; 'window' keeps ±2500 char slice around first match)"),
+                maxChars: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(1000).max(200000).default(30000))
+                    .describe("Max characters to return (default 30000). Use with startIndex for paging"),
+                startIndex: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(0).optional())
+                    .describe("Character offset to start reading from. Use nextStartIndex from a previous response to page through long content"),
+                format: z.enum(['markdown', 'text', 'raw']).optional()
+                    .describe("Content format: 'markdown' (default, keeps headings, code blocks, tables), 'text' (compact plain text), or 'raw' (unprocessed HTML/source)"),
                 citations: z.boolean().optional()
-                    .describe("Rewrite inline links as numbered citations and append a '## References' list, so the answer can cite sources"),
+                    .describe("Rewrite inline links as numbered citations and append a '## References' list"),
                 retainLinks: z.enum(['all', 'none', 'text']).optional()
-                    .describe("Inline link retention: 'all' (default) keeps [label](url); 'text' keeps only the label (strips URLs, big win on index/list pages); 'none' removes the link entirely. Ignored inside code blocks"),
+                    .describe("Inline link style: 'all' (default), 'text' (strip URLs, saves tokens on index pages), 'none'"),
                 selector: z.string().min(1).optional()
-                    .describe("CSS selector: return only the matched subtree, keeping code blocks and tables. Use when auto-extraction grabs the wrong container. Errors instead of silently returning the whole page when nothing matches"),
+                    .describe("CSS selector to narrow extraction to a specific DOM subtree"),
                 extract: z.object({
                     baseSelector: z.string().min(1).optional(),
                     fields: z.array(extractFieldInput).min(1).max(50)
                 }).passthrough().optional()
-                    .describe("Extract structured JSON instead of markdown, using CSS selectors — no LLM needed. fields: [{name, selector, type: text|html|markdown|attribute|list, attribute?, fields?, all?}]; selector '@attr' reads an attribute of the current node"),
-                maxChars: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(1000).max(200000).default(30000)),
+                    .describe("Extract structured JSON via CSS selectors without LLM"),
                 cache: z.enum(['default', 'reload']).optional()
                     .describe("Cache mode: 'default' uses disk Markdown cache; 'reload' forces re-fetching upstream"),
-                readability: z.boolean().optional(),
-                includeLinks: z.boolean().optional(),
-                raw: z.boolean().optional().describe("Return the raw response body (HTML/plain text) without extraction"),
-                startIndex: z.preprocess((val) => (val === undefined || val === '' ? undefined : Number(val)), z.number().int().min(0).optional())
-                    .describe("Character offset to start reading from (for paging through long content)"),
-                format: z.enum(['text', 'markdown']).optional().describe("Content format (default: 'markdown' when raw is false): 'markdown' preserves headings, lists, fenced code blocks (with language) and GFM tables — better for technical docs; use 'text' for plain text"),
+                readability: z.boolean().optional()
+                    .describe("Force readability parser (default: auto-detected based on content)"),
+                includeLinks: z.boolean().optional()
+                    .describe("Include extracted links array in metadata"),
+                raw: z.boolean().optional()
+                    .describe("(Deprecated: use format='raw') Return raw response body without extraction"),
             }).passthrough(),
             annotations: TOOL_ANNOTATION_HINTS
         },
         async (rawArgs, extra) => {
-            const { url, urls, focus, focusMode, mode, sectionId, citations, retainLinks, selector, extract, maxChars = 30000, cache, readability, includeLinks, raw, startIndex, format } = rawArgs as {
-                url?: string;
+            const {
+                url,
+                urls,
+                focus,
+                focusMode,
+                mode,
+                sectionId,
+                citations,
+                retainLinks,
+                selector,
+                extract,
+                maxChars = 30000,
+                cache,
+                readability,
+                includeLinks,
+                raw,
+                startIndex,
+                format
+            } = rawArgs as {
+                url?: string | string[];
                 urls?: string[];
                 focus?: string;
                 focusMode?: 'bm25' | 'window';
@@ -129,7 +158,7 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                 includeLinks?: boolean;
                 raw?: boolean;
                 startIndex?: number;
-                format?: 'markdown' | 'text';
+                format?: 'markdown' | 'text' | 'raw';
             } & Record<string, unknown>;
             const signal = extra?.signal;
             const knownKeys = ['url', 'urls', 'focus', 'focusMode', 'mode', 'sectionId', 'citations', 'retainLinks', 'selector', 'extract', 'maxChars', 'cache', 'readability', 'includeLinks', 'raw', 'startIndex', 'format'];
@@ -137,18 +166,31 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
 
             try {
                 const extractSchema = extract === undefined ? undefined : validateExtractSchema(extract);
-                const targetUrls: string[] = (urls && urls.length > 0 ? urls : (url ? [url] : [])).slice(0, 3);
+
+                let candidateUrls: string[] = [];
+                const isExplicitBatch = (urls && urls.length > 0) || (Array.isArray(url) && url.length > 1);
+
+                if (Array.isArray(url)) {
+                    candidateUrls = url;
+                } else if (typeof url === 'string' && url.trim().length > 0) {
+                    candidateUrls = [url.trim()];
+                } else if (Array.isArray(urls)) {
+                    candidateUrls = urls;
+                }
+
+                const targetUrls: string[] = candidateUrls.slice(0, 3);
                 if (targetUrls.length === 0) {
                     return {
-                        content: [{ type: 'text', text: 'Provide either "url" or "urls" (1-3 URLs).' }],
+                        content: [{ type: 'text', text: 'Provide a valid "url" (or array of 1-3 URLs).' }],
                         isError: true
                     };
                 }
 
-                const effectiveFormat = format ?? (raw ? undefined : 'markdown');
+                const isRawMode = raw === true || format === 'raw';
+                const effectiveFormat = format === 'raw' ? undefined : (format ?? (isRawMode ? undefined : 'markdown'));
 
-                // 批量抓取模式（urls 模式）
-                if (urls && urls.length > 0) {
+                // 批量抓取模式（urls 模式或 url 为多个）
+                if (isExplicitBatch || (urls && urls.length > 0)) {
                     logTool(`Fetching batch web content (${targetUrls.length} URLs): ${targetUrls.join(', ')}`);
                     const perUrlMaxChars = Math.floor(Math.min(maxChars, 60000) / targetUrls.length);
                     const settled = await Promise.allSettled(
@@ -159,7 +201,7 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                                 cache,
                                 readability,
                                 includeLinks,
-                                raw,
+                                raw: isRawMode,
                                 startIndex,
                                 format: effectiveFormat,
                                 focus,
@@ -209,7 +251,7 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                     cache,
                     readability,
                     includeLinks,
-                    raw,
+                    raw: isRawMode,
                     startIndex,
                     format: effectiveFormat,
                     focus,

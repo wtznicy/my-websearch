@@ -14,7 +14,7 @@ export function buildDeepResearchPrompt(topic: string, depth: 'quick' | 'deep' =
         '1. Break the topic into 2-5 concrete sub-questions.',
         '2. Call the `search` tool with multiple queries (and `engines` when useful) to cover different angles.',
         '3. For official library/framework docs, call `queryDocs` with an exact Context7 ID when possible.',
-        '4. Open the top sources with `fetchWebContent`; for repositories use `fetchGithubContent` (README, source, releases).',
+        '4. Open top sources with `fetchWebContent` (use mode="outline" or sectionId for long docs, or focus="keyword" to target specific sections); for repositories use `fetchGithubContent` (README, source, releases).',
         '5. Compare sources, call out contradictions, and never invent a citation.',
         '',
         'Return: a concise answer, key claims, evidence (URL + quoted fragment), and any unresolved uncertainty.'
