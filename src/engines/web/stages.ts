@@ -52,6 +52,7 @@ import {
 // Pagination
 import { paginateContent } from './pagination.js';
 import { extractPublishedDateFromHtml } from './publishedDate.js';
+import { extractContentFromJsonLd } from './jsonLdExtractor.js';
 
 export interface PrimaryFetchContext {
     url: string;
@@ -246,6 +247,8 @@ export async function tryHandlePdfFetch(
         maxChars: primary.targetMaxChars,
         focus: options.focus,
         focusMode: options.focusMode,
+        mode: options.mode,
+        sectionId: options.sectionId,
         appendTruncationMarker: false,
         generateToc: true
     });
@@ -263,6 +266,9 @@ export async function tryHandlePdfFetch(
         ...(paginated.hasMore ? { hasMore: true, nextStartIndex: paginated.nextStartIndex } : {}),
         pdfPages: pdfResult.totalPages,
         ...(paginated.toc && paginated.toc.length > 0 ? { toc: paginated.toc } : {}),
+        ...(paginated.outline && paginated.outline.length > 0 ? { outline: paginated.outline } : {}),
+        ...(paginated.suggestOutline ? { suggestOutline: true } : {}),
+        ...(paginated.section ? { section: paginated.section } : {}),
         ...(options.focus?.trim() ? { focused: paginated.focused ?? false } : {}),
         ...(paginated.focused ? { focusMatchOffset: paginated.focusMatchOffset } : {}),
         ...(paginated.focusMode ? { focusMode: paginated.focusMode } : {}),
@@ -322,6 +328,7 @@ export async function fetchAndExtractHtmlWithBrowserFallback(
     let extractedContent = '';
     let htmlExtraction: HtmlExtractionResult | undefined;
     let readabilityApplied = false;
+    let jsonLdApplied = false;
     const degradedNotices: string[] = [];
     let readableHtml: string | undefined;
     let sitePurifiedHtml: string | undefined;
@@ -461,51 +468,64 @@ export async function fetchAndExtractHtmlWithBrowserFallback(
             } else {
                 extractedContent = sitePurified.text;
             }
-        } else if (options.readability && (contentType.includes('text/html') || looksLikeHtml(raw))) {
-            try {
-                const article = await parseReadabilityArticle(raw, finalUrl);
-                if (article?.content) {
-                    const readableText = normalizeText(article.textContent || await extractReadableTextFromHtml(article.content));
-                    if (readableText) {
-                        readabilityApplied = true;
-                        readableHtml = article.content;
-                        links = options.includeLinks ? await extractReadableLinks(article.content, finalUrl) : undefined;
-                        byline = article.byline?.trim() || undefined;
-                        excerpt = article.excerpt?.trim() || undefined;
-                        siteName = article.siteName?.trim() || undefined;
-                        title = article.title?.trim() || title;
-                        if (options.format === 'markdown') {
-                            try {
-                                const markdown = htmlToMarkdown(article.content);
-                                extractedContent = markdown || readableText;
-                            } catch (error) {
-                                console.warn('Markdown conversion failed, falling back to plain text:', error instanceof Error ? error.message : String(error));
+        } else {
+            if (!options.selector && (contentType.includes('text/html') || looksLikeHtml(raw))) {
+                const jsonLd = extractContentFromJsonLd(raw);
+                if (jsonLd) {
+                    extractedContent = jsonLd.markdown;
+                    if (jsonLd.title) {
+                        title = jsonLd.title;
+                    }
+                    jsonLdApplied = true;
+                }
+            }
+
+            if (!jsonLdApplied && options.readability && (contentType.includes('text/html') || looksLikeHtml(raw))) {
+                try {
+                    const article = await parseReadabilityArticle(raw, finalUrl);
+                    if (article?.content) {
+                        const readableText = normalizeText(article.textContent || await extractReadableTextFromHtml(article.content));
+                        if (readableText) {
+                            readabilityApplied = true;
+                            readableHtml = article.content;
+                            links = options.includeLinks ? await extractReadableLinks(article.content, finalUrl) : undefined;
+                            byline = article.byline?.trim() || undefined;
+                            excerpt = article.excerpt?.trim() || undefined;
+                            siteName = article.siteName?.trim() || undefined;
+                            title = article.title?.trim() || title;
+                            if (options.format === 'markdown') {
+                                try {
+                                    const markdown = htmlToMarkdown(article.content);
+                                    extractedContent = markdown || readableText;
+                                } catch (error) {
+                                    console.warn('Markdown conversion failed, falling back to plain text:', error instanceof Error ? error.message : String(error));
+                                    extractedContent = readableText;
+                                }
+                            } else {
                                 extractedContent = readableText;
                             }
-                        } else {
-                            extractedContent = readableText;
                         }
+                    } else {
+                        logReadabilityFallback('parser returned no article content');
+                        degradedNotices.push('readability: parser returned no article content (fell back to container extraction)');
                     }
-                } else {
-                    logReadabilityFallback('parser returned no article content');
-                    degradedNotices.push('readability: parser returned no article content (fell back to container extraction)');
-                }
-            } catch (error) {
-                if (signal?.aborted) {
-                    throw error;
-                }
-                if (error instanceof ReadabilityUnavailableError || error instanceof JsdomUnavailableError) {
-                    throw error;
-                }
+                } catch (error) {
+                    if (signal?.aborted) {
+                        throw error;
+                    }
+                    if (error instanceof ReadabilityUnavailableError || error instanceof JsdomUnavailableError) {
+                        throw error;
+                    }
 
-                logReadabilityFallback('falling back to existing extractor after parser error', error);
-                degradedNotices.push('readability: parser error (fell back to container extraction)');
+                    logReadabilityFallback('falling back to existing extractor after parser error', error);
+                    degradedNotices.push('readability: parser error (fell back to container extraction)');
+                }
             }
         }
 
         // 站点专用提纯（如 pkg.go.dev 的 .UnitDoc）已经产出聚焦正文，
         // 不能再被「整页容器 Markdown」覆盖，否则 README/目录会重新混进来。
-        if (options.format === 'markdown' && !readabilityApplied && !sitePurified && htmlExtraction?.html && htmlExtraction.mode !== 'metadata') {
+        if (options.format === 'markdown' && !readabilityApplied && !sitePurified && !jsonLdApplied && htmlExtraction?.html && htmlExtraction.mode !== 'metadata') {
             try {
                 const markdown = htmlToMarkdown(htmlExtraction.html);
                 if (markdown) {
@@ -660,6 +680,8 @@ export function assembleFetchResult(
         maxChars: primary.targetMaxChars,
         focus: options.focus,
         focusMode: options.focusMode,
+        mode: options.mode,
+        sectionId: options.sectionId,
         appendTruncationMarker: true,
         generateToc: !options.raw
     });
@@ -686,6 +708,9 @@ export function assembleFetchResult(
         ...(stage.excerpt ? { excerpt: stage.excerpt } : {}),
         ...(stage.siteName ? { siteName: stage.siteName } : {}),
         ...(paginated.toc && paginated.toc.length > 0 ? { toc: paginated.toc } : {}),
+        ...(paginated.outline && paginated.outline.length > 0 ? { outline: paginated.outline } : {}),
+        ...(paginated.suggestOutline ? { suggestOutline: true } : {}),
+        ...(paginated.section ? { section: paginated.section } : {}),
         ...(options.focus?.trim() ? { focused: paginated.focused ?? false } : {}),
         ...(paginated.focused ? { focusMatchOffset: paginated.focusMatchOffset } : {}),
         ...(paginated.focusMode ? { focusMode: paginated.focusMode } : {}),

@@ -27,6 +27,8 @@ export type ParsedFetchWebArgs = {
     format?: 'text' | 'markdown';
     focus?: string;
     focusMode?: 'bm25' | 'window';
+    mode?: 'full' | 'outline';
+    sectionId?: string;
     citations: boolean;
     retainLinks?: 'all' | 'none' | 'text';
     selector?: string;
@@ -44,6 +46,8 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
     let format: 'text' | 'markdown' | undefined;
     let focus: string | undefined;
     let focusMode: 'bm25' | 'window' | undefined;
+    let mode: 'full' | 'outline' | undefined;
+    let sectionId: string | undefined;
     let citations = false;
     let retainLinks: 'all' | 'none' | 'text' | undefined;
     let selector: string | undefined;
@@ -104,6 +108,21 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
                 throw new Error('focus must be a non-empty string');
             }
             focus = next;
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--outline') {
+            mode = 'outline';
+            continue;
+        }
+
+        if (arg === '--section-id' || arg === '--section') {
+            const next = requireFlagValue(argv, index, arg).trim();
+            if (!next) {
+                throw new Error(`${arg} must be a non-empty string`);
+            }
+            sectionId = next;
             index += 1;
             continue;
         }
@@ -195,6 +214,8 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
         format,
         ...(focus ? { focus } : {}),
         ...(focusMode ? { focusMode } : {}),
+        ...(mode ? { mode } : {}),
+        ...(sectionId ? { sectionId } : {}),
         citations,
         ...(retainLinks ? { retainLinks } : {}),
         ...(selector ? { selector } : {}),
@@ -290,6 +311,8 @@ export async function handleFetchWebCommand(ctx: CommandContext): Promise<number
             format: parsed.format,
             ...(parsed.focus ? { focus: parsed.focus } : {}),
             ...(parsed.focusMode ? { focusMode: parsed.focusMode } : {}),
+            ...(parsed.mode ? { mode: parsed.mode } : {}),
+            ...(parsed.sectionId ? { sectionId: parsed.sectionId } : {}),
             ...(parsed.citations ? { citations: true } : {}),
             ...(parsed.retainLinks ? { retainLinks: parsed.retainLinks } : {}),
             ...(parsed.selector ? { selector: parsed.selector } : {}),

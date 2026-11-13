@@ -49,6 +49,16 @@ describe('queryDocs Multi-Source Engine & Provider Suite', () => {
             });
             expect(goDocs).toContain('> Source: pkg.go.dev | Confidence: high');
             expect(goDocs).toContain('> Documentation: https://pkg.go.dev/github.com/gin-gonic/gin');
+
+            const rfcDocs = formatQueryDocsMarkdown({
+                libraryId: 'rfc:9110',
+                source: 'rfc',
+                confidence: 'high',
+                documentationUrl: 'https://www.rfc-editor.org/rfc/rfc9110.txt',
+                content: '# RFC 9110\n\nHTTP Semantics specification.'
+            });
+            expect(rfcDocs).toContain('> Source: rfc | Confidence: high');
+            expect(rfcDocs).toContain('> Documentation: https://www.rfc-editor.org/rfc/rfc9110.txt');
         });
     });
 

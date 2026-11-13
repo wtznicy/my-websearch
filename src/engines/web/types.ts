@@ -54,6 +54,20 @@ export interface FetchWebContentResult {
     warnings?: string[];
     pdfPages?: number;
     format?: 'markdown' | 'json';
+    /** 页面 H1-H4 结构大纲（mode="outline" 或长文自动生成） */
+    outline?: MarkdownOutlineNode[];
+    /** 长文是否建议使用 outline 模式查看全局目录 */
+    suggestOutline?: boolean;
+    /** 定向提取的章节元数据 */
+    section?: { id: string; title: string; level: number };
+}
+
+export interface MarkdownOutlineNode {
+    id: string;
+    level: number;
+    title: string;
+    offset: number;
+    chars: number;
 }
 
 /** focus 模式：bm25 = 按段落相关性选块（默认）；window = 旧的固定窗口 */
@@ -76,6 +90,10 @@ export type FetchWebContentOptions = {
      * 转为 Markdown——保留围栏代码块语言与 GFM 表格，更适合技术文档与 LLM。
      */
     format?: 'text' | 'markdown';
+    /** 提取模式：'full'（默认完整正文/切片）或 'outline'（仅提取 H1-H4 目录树与各节字符统计） */
+    mode?: 'full' | 'outline';
+    /** 定向读取指定章节（按目录 ID 或标题关键字切片，读取该标题直到同级/更高级标题结束） */
+    sectionId?: string;
     /** 章节靶向关键词：在全文中定位该词并返回相关上下文，大幅节省 Token */
     focus?: string;
     /** focus 模式：默认 bm25（按段落相关性选块）；window 保留旧的「首次命中 ±2500 字」行为 */

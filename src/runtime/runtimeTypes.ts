@@ -37,6 +37,8 @@ export type FetchWebService = {
         format?: 'text' | 'markdown';
         focus?: string;
         focusMode?: FocusMode;
+        mode?: 'full' | 'outline';
+        sectionId?: string;
         citations?: boolean;
         retainLinks?: LinkRetentionMode;
         selector?: string;

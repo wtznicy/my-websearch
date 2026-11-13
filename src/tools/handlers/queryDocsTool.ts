@@ -25,6 +25,7 @@ import {
 import { detectUnknownParameters } from '../../utils/toolValidation.js';
 import { queryDevDocs } from '../../core/docs/devdocsProvider.js';
 import { queryMdnDocs, isLikelyMdnTarget } from '../../core/docs/mdnProvider.js';
+import { queryRfcDocs, isLikelyRfcTarget } from '../../core/docs/rfcProvider.js';
 import { queryJavadocDocs, isLikelyJavadocTarget } from '../../core/docs/javadocProvider.js';
 import { extractRelevantSections, isJavadocClassDocument } from '../../core/docs/markdownSectionExtractor.js';
 import { distillMarkdownSnippets, stripReadmeBoilerplate } from '../../core/docs/snippetDistiller.js';
@@ -32,7 +33,7 @@ import { distillMarkdownSnippets, stripReadmeBoilerplate } from '../../core/docs
 export type QueryDocsFormattedInput = {
     libraryId: string;
     query?: string;
-    source?: 'context7' | 'npm' | 'pypi' | 'crates' | 'go' | 'maven' | 'github-readme' | 'official' | 'docs.rs' | 'pkg.go.dev' | 'devdocs' | 'mdn' | 'javadoc' | 'github';
+    source?: 'context7' | 'npm' | 'pypi' | 'crates' | 'go' | 'maven' | 'github-readme' | 'official' | 'docs.rs' | 'pkg.go.dev' | 'devdocs' | 'mdn' | 'rfc' | 'javadoc' | 'github';
     confidence?: 'high' | 'medium' | 'low';
     warnings?: string[];
     resolvedFrom?: string;
@@ -268,11 +269,12 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     'pkg.go.dev',
                     'devdocs',
                     'mdn',
+                    'rfc',
                     'javadoc',
                     'npm',
                     'pypi',
                     'github'
-                ]).optional().default('auto').describe("Documentation source: 'auto' (smart routing & cascade fallback: Context7 -> Official Site -> DevDocs -> Registry), 'official' (standalone doc site), 'docs.rs' (Rust crates), 'pkg.go.dev' (Go packages), 'devdocs' (800+ middleware & languages: Redis, Docker, Nginx, Python, C++, etc.), 'mdn' (MDN Web Docs: JS, Web APIs, CSS), 'javadoc' (Javadoc.io for Maven packages), 'context7' (Context7 LLM doc index), 'npm', 'pypi', 'github' (registry fallback)"),
+                ]).optional().default('auto').describe("Documentation source: 'auto' (smart routing & cascade fallback: Context7 -> Official Site -> DevDocs -> Registry), 'official' (standalone doc site), 'docs.rs' (Rust crates), 'pkg.go.dev' (Go packages), 'devdocs' (800+ middleware & languages: Redis, Docker, Nginx, Python, C++, etc.), 'mdn' (MDN Web Docs: JS, Web APIs, CSS), 'rfc' (IETF/RFC standards: HTTP, TLS, QUIC, JSON, etc.), 'javadoc' (Javadoc.io for Maven packages), 'context7' (Context7 LLM doc index), 'npm', 'pypi', 'github' (registry fallback)"),
                 limit: z.number().int().min(1).max(10).optional().describe("Maximum number of code snippets or sections to return (default 5)"),
                 cache: z.enum(['default', 'reload']).optional().describe("Use the 24h local docs cache (default 'default') or bypass/refresh it with 'reload'"),
                 strict: z.boolean().optional().describe("If true, rejects low-confidence matches with an error instead of returning loosely matched candidate docs or alternative libraries (default false)")
@@ -288,7 +290,7 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                 limit?: number;
                 strict?: boolean;
                 cache?: 'default' | 'reload';
-                source?: 'auto' | 'context7' | 'official' | 'docs.rs' | 'pkg.go.dev' | 'devdocs' | 'mdn' | 'javadoc' | 'npm' | 'pypi' | 'github';
+                source?: 'auto' | 'context7' | 'official' | 'docs.rs' | 'pkg.go.dev' | 'devdocs' | 'mdn' | 'rfc' | 'javadoc' | 'npm' | 'pypi' | 'github';
             } & Record<string, unknown>;
 
             const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, [
@@ -546,6 +548,44 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                         text: withErrorHint(
                             `Failed to find documentation on MDN for "${target}"`,
                             `Verify keyword or standard API name (e.g. "fetch", "Array.prototype.map", "WebSocket") or try source="auto".`
+                        )
+                    }],
+                    isError: true
+                };
+            }
+
+            // 4b. 显式指定 rfc
+            if (reqSource === 'rfc') {
+                logTool(`queryDocs directly querying RFC for: ${target} (query: ${query ?? ''})`);
+                const rfcRes = await queryRfcDocs({ library: target, query, signal });
+                if (rfcRes) {
+                    const confidence = rfcRes.confidence ?? 'high';
+                    const combinedWarnings = [...(rfcRes.warnings ?? []), ...unknownWarnings];
+                    const text = capTextResponse(formatQueryDocsMarkdown({
+                        libraryId: rfcRes.libraryId,
+                        query,
+                        source: 'rfc',
+                        confidence,
+                        documentationUrl: rfcRes.documentationUrl,
+                        content: rfcRes.content,
+                        warnings: combinedWarnings
+                    }));
+                    if (confidence !== 'low') {
+                        setDocsCache(cacheKey, { text, source: 'rfc', confidence, cachedAt: Date.now() });
+                    }
+                    return {
+                        content: [{ type: 'text', text }],
+                        source: 'rfc',
+                        confidence,
+                        warnings: combinedWarnings
+                    } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                }
+                return {
+                    content: [{
+                        type: 'text',
+                        text: withErrorHint(
+                            `Failed to find RFC specification for "${target}"`,
+                            `Verify RFC number (e.g. "rfc:9110", "rfc9110", "rfc 8446") or try source="auto".`
                         )
                     }],
                     isError: true
@@ -814,7 +854,35 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                     }
                 }
 
-                // 5c. MDN Web Docs (mdn:fetch, html:video, css:grid, webapi:WebSocket, or common web standards)
+                // 5c. RFC / IETF Specifications (rfc:9110, rfc8446, etc.)
+                if (isLikelyRfcTarget(target)) {
+                    logTool(`auto-routing to RFC for: ${target}`);
+                    const rfcRes = await queryRfcDocs({ library: target, query, signal });
+                    if (rfcRes) {
+                        const confidence = rfcRes.confidence ?? 'high';
+                        const combinedWarnings = [...(rfcRes.warnings ?? []), ...unknownWarnings];
+                        const text = capTextResponse(formatQueryDocsMarkdown({
+                            libraryId: rfcRes.libraryId,
+                            query,
+                            source: 'rfc',
+                            confidence,
+                            documentationUrl: rfcRes.documentationUrl,
+                            content: rfcRes.content,
+                            warnings: combinedWarnings
+                        }));
+                        if (confidence !== 'low') {
+                            setDocsCache(cacheKey, { text, source: 'rfc', confidence, cachedAt: Date.now() });
+                        }
+                        return {
+                            content: [{ type: 'text', text }],
+                            source: 'rfc',
+                            confidence,
+                            warnings: combinedWarnings
+                        } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                    }
+                }
+
+                // 5d. MDN Web Docs (mdn:fetch, html:video, css:grid, webapi:WebSocket, or common web standards)
                 if (isLikelyMdnTarget(target)) {
                     logTool(`auto-routing to MDN for: ${target}`);
                     const mdnRes = await queryMdnDocs({ library: target, query, signal, fetchWeb: fetchViaWeb });

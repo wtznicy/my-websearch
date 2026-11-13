@@ -2,7 +2,7 @@ import { AppError } from '../../core/errors.js';
 import { addCitations } from '../../utils/citations.js';
 import { selectFocusBlocks } from '../../utils/bm25.js';
 import { applyLinkRetention, type LinkRetentionMode } from '../../utils/linkRetention.js';
-import { FetchWebContentResult, FocusMode } from './types.js';
+import { FetchWebContentResult, FocusMode, MarkdownOutlineNode } from './types.js';
 
 export interface PaginateOptions {
     startIndex?: number;
@@ -12,6 +12,10 @@ export interface PaginateOptions {
     focusMode?: FocusMode;
     appendTruncationMarker?: boolean;
     generateToc?: boolean;
+    /** 提取模式：'full'（默认完整正文/切片）或 'outline'（仅提取 H1-H4 目录树与各节字符统计） */
+    mode?: 'full' | 'outline';
+    /** 定向读取指定章节（按目录 ID 或标题关键字切片，读取该标题直到同级/更高级标题结束） */
+    sectionId?: string;
 }
 
 export interface PaginateResult {
@@ -28,6 +32,61 @@ export interface PaginateResult {
     /** focus 未命中时的说明（也会并入 warnings） */
     focusWarning?: string;
     toc?: string[];
+    outline?: MarkdownOutlineNode[];
+    suggestOutline?: boolean;
+    section?: { id: string; title: string; level: number };
+}
+
+export function generateMarkdownOutline(markdown: string): MarkdownOutlineNode[] {
+    const headingRegex = /(?:^|\n)(#{1,4})\s+([^\n\r]+)/g;
+    const rawMatches: Array<{ level: number; title: string; offset: number; rawTitle: string }> = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = headingRegex.exec(markdown)) !== null) {
+        if (!match[1] || !match[2]) continue;
+        const level = match[1].length;
+        const rawTitle = match[2].trim();
+        const offset = match.index + (match[0].startsWith('\n') ? 1 : 0);
+        const cleanTitle = rawTitle.replace(/\s*\{#[^}]+\}\s*$/, '').trim();
+        if (cleanTitle) {
+            rawMatches.push({ level, title: cleanTitle, offset, rawTitle });
+        }
+    }
+
+    const seenIds = new Set<string>();
+    const outline: MarkdownOutlineNode[] = [];
+
+    for (let i = 0; i < rawMatches.length; i++) {
+        const item = rawMatches[i]!;
+        const customIdMatch = item.rawTitle.match(/\{#([^}]+)\}/);
+        let id = customIdMatch && customIdMatch[1]
+            ? customIdMatch[1].trim()
+            : item.title.toLowerCase().replace(/[^\w\u4e00-\u9fa5-]+/g, '-').replace(/^-+|-+$/g, '');
+        if (!id) {
+            id = `section-${i + 1}`;
+        }
+        if (seenIds.has(id)) {
+            let counter = 2;
+            while (seenIds.has(`${id}-${counter}`)) {
+                counter++;
+            }
+            id = `${id}-${counter}`;
+        }
+        seenIds.add(id);
+
+        const nextOffset = i + 1 < rawMatches.length && rawMatches[i + 1] ? rawMatches[i + 1]!.offset : markdown.length;
+        const chars = Math.max(0, nextOffset - item.offset);
+
+        outline.push({
+            id,
+            level: item.level,
+            title: item.title,
+            offset: item.offset,
+            chars
+        });
+    }
+
+    return outline;
 }
 
 export function generateMarkdownToc(markdown: string): string[] {
@@ -59,8 +118,94 @@ export function paginateContent(
     let resolvedFocusMode: FocusMode | undefined;
     let focusBlocks: { selected: number; total: number } | undefined;
 
-    const focusTerm = options.focus?.trim();
+    const outline = generateMarkdownOutline(fullText);
+    const suggestOutline = totalLength > 20000 && outline.length >= 3;
+
+    // 1. mode === 'outline' 模式：直接生成目录树与章节统计，不输出长正文
+    if (options.mode === 'outline') {
+        const lines: string[] = [
+            `# Document Outline (${outline.length} sections, total ${totalLength} chars)\n`
+        ];
+        for (const node of outline) {
+            const indent = '  '.repeat(Math.max(0, node.level - 1));
+            const hashes = '#'.repeat(node.level);
+            lines.push(`${indent}- **${hashes} ${node.title}** (id: \`${node.id}\`, ~${node.chars} chars)`);
+        }
+        lines.push(`\n> [!TIP]\n> Use \`sectionId="<id>"\` with fetchWebContent to read a specific section.`);
+
+        return {
+            content: lines.join('\n'),
+            totalLength,
+            startIndex: 0,
+            truncated: false,
+            outline
+        };
+    }
+
+    let sectionMeta: { id: string; title: string; level: number } | undefined;
     let focusWarning: string | undefined;
+
+    // 2. 定向提取指定章节 sectionId
+    if (options.sectionId) {
+        const target = options.sectionId.trim().toLowerCase();
+        let matchedNode: MarkdownOutlineNode | undefined;
+        let matchedIndex = -1;
+
+        for (let i = 0; i < outline.length; i++) {
+            const node = outline[i]!;
+            if (node.id.toLowerCase() === target || node.title.toLowerCase() === target) {
+                matchedNode = node;
+                matchedIndex = i;
+                break;
+            }
+        }
+        if (!matchedNode) {
+            for (let i = 0; i < outline.length; i++) {
+                const node = outline[i]!;
+                if (node.title.toLowerCase().includes(target) || node.id.toLowerCase().includes(target)) {
+                    matchedNode = node;
+                    matchedIndex = i;
+                    break;
+                }
+            }
+        }
+
+        if (matchedNode && matchedIndex !== -1) {
+            const start = matchedNode.offset;
+            let end = totalLength;
+            for (let i = matchedIndex + 1; i < outline.length; i++) {
+                const next = outline[i]!;
+                if (next.level <= matchedNode.level) {
+                    end = next.offset;
+                    break;
+                }
+            }
+
+            const rawSection = fullText.slice(start, end).trim();
+            const isTruncated = rawSection.length > options.maxChars;
+            const sectionContent = isTruncated
+                ? rawSection.slice(0, options.maxChars) + `\n\n[... section truncated at ${options.maxChars} chars ...]`
+                : rawSection;
+
+            const header = `[... section "${matchedNode.title}" (id: \`${matchedNode.id}\`), showing ${start}-${Math.min(end, start + options.maxChars)} of ${totalLength} ...]\n\n`;
+
+            return {
+                content: header + sectionContent,
+                totalLength,
+                startIndex: start,
+                truncated: isTruncated,
+                focused: true,
+                focusMatchOffset: start,
+                section: { id: matchedNode.id, title: matchedNode.title, level: matchedNode.level },
+                outline,
+                ...(suggestOutline ? { suggestOutline: true } : {})
+            };
+        } else {
+            focusWarning = `Section "${options.sectionId}" not found in document outline (${outline.length} headings available); returned standard paged content. Use mode="outline" to view available sections.`;
+        }
+    }
+
+    const focusTerm = options.focus?.trim();
     let bm25Missed = false;
     if (focusTerm) {
         // bm25（默认）：按段落相关性挑块，解决「只命中第一次出现 + 只给一段连续窗口」的问题
@@ -146,7 +291,10 @@ export function paginateContent(
         ...(focused ? { focusMatchOffset } : {}),
         ...(resolvedFocusMode ? { focusMode: resolvedFocusMode } : {}),
         ...(focusBlocks ? { focusBlocks } : {}),
-        ...(focusWarning ? { focusWarning } : {})
+        ...(focusWarning ? { focusWarning } : {}),
+        ...(outline && outline.length > 0 ? { outline } : {}),
+        ...(suggestOutline ? { suggestOutline: true } : {}),
+        ...(sectionMeta ? { section: sectionMeta } : {})
     };
 }
 
@@ -165,6 +313,8 @@ export function sliceMarkdownContent(
         maxChars: number;
         focus?: string;
         focusMode?: FocusMode;
+        mode?: 'full' | 'outline';
+        sectionId?: string;
         /** 把正文行内链接改写成正文编号 + 末尾 References 列表（仅在切片之后做，避免污染磁盘缓存） */
         citations?: boolean;
         /** 行内链接保留策略：all（默认）/ text（只留锚文本）/ none（整条移除） */
@@ -186,6 +336,8 @@ export function sliceMarkdownContent(
         maxChars: options.maxChars,
         focus: options.focus,
         focusMode: options.focusMode,
+        mode: options.mode,
+        sectionId: options.sectionId,
         appendTruncationMarker: false,
         generateToc: true
     });
@@ -243,6 +395,9 @@ export function sliceMarkdownContent(
         ...(options.focus?.trim() ? { focused: paginated.focused ?? false } : {}),
         ...(paginated.focused ? { focusMatchOffset: paginated.focusMatchOffset } : {}),
         ...(paginated.focusMode ? { focusMode: paginated.focusMode } : {}),
-        ...(paginated.focusBlocks ? { focusBlocks: paginated.focusBlocks } : {})
+        ...(paginated.focusBlocks ? { focusBlocks: paginated.focusBlocks } : {}),
+        ...(paginated.outline && paginated.outline.length > 0 ? { outline: paginated.outline } : {}),
+        ...(paginated.suggestOutline ? { suggestOutline: true } : {}),
+        ...(paginated.section ? { section: paginated.section } : {})
     };
 }

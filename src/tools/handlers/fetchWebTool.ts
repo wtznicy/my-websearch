@@ -84,6 +84,10 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                     .describe("Keyword or section name to target (e.g. 'Auth', 'Config'); returns targeted window (~5000 chars) instead of burning tokens on full document"),
                 focusMode: z.enum(['bm25', 'window']).optional()
                     .describe("How focus selects text: 'bm25' (default) ranks paragraphs by relevance and keeps the best ones; 'window' keeps the old ±2500-char window around the first match"),
+                mode: z.enum(['full', 'outline']).optional()
+                    .describe("Extraction mode: 'full' (default) returns document body; 'outline' returns document heading tree (H1-H4) with section slug IDs and character estimates — best for exploring long technical docs without burning tokens"),
+                sectionId: z.string().min(1).optional()
+                    .describe("Directly extract a specific section by heading slug ID or title (e.g. 'configuration', 'api-reference'). Reads from that heading until the next same-level heading"),
                 citations: z.boolean().optional()
                     .describe("Rewrite inline links as numbered citations and append a '## References' list, so the answer can cite sources"),
                 retainLinks: z.enum(['all', 'none', 'text']).optional()
@@ -108,11 +112,13 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
             annotations: TOOL_ANNOTATION_HINTS
         },
         async (rawArgs, extra) => {
-            const { url, urls, focus, focusMode, citations, retainLinks, selector, extract, maxChars = 30000, cache, readability, includeLinks, raw, startIndex, format } = rawArgs as {
+            const { url, urls, focus, focusMode, mode, sectionId, citations, retainLinks, selector, extract, maxChars = 30000, cache, readability, includeLinks, raw, startIndex, format } = rawArgs as {
                 url?: string;
                 urls?: string[];
                 focus?: string;
                 focusMode?: 'bm25' | 'window';
+                mode?: 'full' | 'outline';
+                sectionId?: string;
                 citations?: boolean;
                 retainLinks?: 'all' | 'none' | 'text';
                 selector?: string;
@@ -126,7 +132,7 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                 format?: 'markdown' | 'text';
             } & Record<string, unknown>;
             const signal = extra?.signal;
-            const knownKeys = ['url', 'urls', 'focus', 'focusMode', 'citations', 'retainLinks', 'selector', 'extract', 'maxChars', 'cache', 'readability', 'includeLinks', 'raw', 'startIndex', 'format'];
+            const knownKeys = ['url', 'urls', 'focus', 'focusMode', 'mode', 'sectionId', 'citations', 'retainLinks', 'selector', 'extract', 'maxChars', 'cache', 'readability', 'includeLinks', 'raw', 'startIndex', 'format'];
             const unknownWarnings = detectUnknownParameters(rawArgs as Record<string, unknown>, knownKeys);
 
             try {
@@ -158,6 +164,8 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                                 format: effectiveFormat,
                                 focus,
                                 focusMode,
+                                mode,
+                                sectionId,
                                 citations,
                                 retainLinks,
                                 ...(selector ? { selector } : {}),
@@ -206,6 +214,8 @@ export function registerFetchWebTool(server: McpServer, runtime: MyWebSearchRunt
                     format: effectiveFormat,
                     focus,
                     focusMode,
+                    mode,
+                    sectionId,
                     citations,
                     retainLinks,
                     ...(selector ? { selector } : {}),
