@@ -1,6 +1,5 @@
-import axios from 'axios';
 import { FetchWebContentResult } from '../engines/web/fetchWebContent.js';
-import { extractErrorStatus, isAppError } from '../core/errors.js';
+import { extractErrorStatus, extractRawErrorCode, isAppError } from '../core/errors.js';
 import { getBoolean, getNumber, getOptionalString, getString } from '../config/env.js';
 
 export { extractErrorStatus };
@@ -122,8 +121,8 @@ export function logTool(message: string): void {
 export function logSafeError(context: string, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     const details: string[] = [];
-    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-    const code = axios.isAxiosError(error) ? error.code : (error instanceof Error && 'code' in error ? String((error as { code: unknown }).code) : undefined);
+    const status = extractErrorStatus(error);
+    const code = extractRawErrorCode(error);
     if (status !== undefined) {
         details.push(`HTTP ${status}`);
     }

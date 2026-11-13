@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { MyWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { CliEnvelope } from './protocol.js';
 import { ErrorCode } from '../core/errors.js';
-import { getNumber, getOptionalString, getString } from '../config/env.js';
+import { getBoolean, getNumber, getOptionalString, getString } from '../config/env.js';
 
 export type CliIo = {
     stdout: (text: string) => void;
@@ -216,6 +216,11 @@ export async function tryDaemonRequest<T>(
     body: Record<string, unknown>,
     options: RunCliOptions = {}
 ): Promise<CliEnvelope<T> | null> {
+    const autoConnect = getBoolean('OPEN_WEBSEARCH_DAEMON_AUTO_CONNECT', false);
+    if (!transport.daemonUrlExplicit && !transport.spawn && !autoConnect) {
+        return null;
+    }
+
     try {
         return await requestDaemonEnvelope<T>(transport, path, body);
     } catch (error) {

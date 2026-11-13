@@ -6,6 +6,7 @@ import { parseFetchGithubArgs } from '../../cli/commands/fetchGithub.js';
 import { parseResolveLibraryArgs, parseQueryDocsArgs, formatQueryDocsHumanReadable } from '../../cli/commands/docs.js';
 import { parseStatusArgs } from '../../cli/commands/status.js';
 import { parseServeArgs } from '../../cli/commands/serve.js';
+import { tryDaemonRequest, DaemonUnavailableError } from '../../cli/shared.js';
 import type { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 
 describe('runCli argument parsing', () => {
@@ -240,6 +241,38 @@ describe('runCli argument parsing', () => {
             expect(formatted).toContain('Repository: https://github.com/stevemao/left-pad');
             expect(formatted).toContain('leftPad(str, len, [ch])');
             expect(formatted).toContain('String left padding.');
+        });
+    });
+
+    describe('tryDaemonRequest', () => {
+        it('returns null immediately when daemonUrlExplicit and spawn are false', async () => {
+            const result = await tryDaemonRequest(
+                {
+                    daemonUrl: 'http://127.0.0.1:3210',
+                    daemonUrlExplicit: false,
+                    spawn: false,
+                    argv: []
+                },
+                '/search',
+                { query: 'test' }
+            );
+
+            expect(result).toBeNull();
+        });
+
+        it('throws DaemonUnavailableError when explicit daemonUrl is unreachable', async () => {
+            await expect(
+                tryDaemonRequest(
+                    {
+                        daemonUrl: 'http://127.0.0.1:65534',
+                        daemonUrlExplicit: true,
+                        spawn: false,
+                        argv: []
+                    },
+                    '/search',
+                    { query: 'test' }
+                )
+            ).rejects.toThrow(DaemonUnavailableError);
         });
     });
 });
