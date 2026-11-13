@@ -1,5 +1,47 @@
 export type TimeRange = 'day' | 'week' | 'month' | 'year';
 
+const ENGLISH_MONTHS: Record<string, number> = {
+    jan: 1, january: 1,
+    feb: 2, february: 2,
+    mar: 3, march: 3,
+    apr: 4, april: 4,
+    may: 5,
+    jun: 6, june: 6,
+    jul: 7, july: 7,
+    aug: 8, august: 8,
+    sep: 9, september: 9,
+    oct: 10, october: 10,
+    nov: 11, november: 11,
+    dec: 12, december: 12,
+};
+
+export function parseEnglishDate(str: string): string | undefined {
+    // e.g. "Oct 17, 2026", "October 17 2026", "17 Oct 2026", "17th October, 2026"
+    const m1 = str.match(/\b([a-zA-Z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+((?:19|20)\d{2})\b/i);
+    if (m1 && m1[1] && m1[2] && m1[3]) {
+        const monthNum = ENGLISH_MONTHS[m1[1].toLowerCase()];
+        if (monthNum) {
+            const year = m1[3];
+            const month = String(monthNum).padStart(2, '0');
+            const day = String(Number(m1[2])).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+    }
+
+    const m2 = str.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+([a-zA-Z]{3,9}),?\s+((?:19|20)\d{2})\b/i);
+    if (m2 && m2[1] && m2[2] && m2[3]) {
+        const monthNum = ENGLISH_MONTHS[m2[2].toLowerCase()];
+        if (monthNum) {
+            const year = m2[3];
+            const month = String(monthNum).padStart(2, '0');
+            const day = String(Number(m2[1])).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+    }
+
+    return undefined;
+}
+
 export function normalizePublishedDate(rawDate?: string, referenceNow = new Date()): string | undefined {
     if (!rawDate || !rawDate.trim()) {
         return undefined;
@@ -25,7 +67,13 @@ export function normalizePublishedDate(rawDate?: string, referenceNow = new Date
         return `${year}-${month}-${day}`;
     }
 
-    // 3. Relative time parsing (e.g. 5分钟前, 2小时前, 3天前, 1周前, 2个月前, 1年前, 昨天, 前天)
+    // 3. Check English calendar dates with explicit 4-digit year (deterministic, timezone-immune)
+    const enDate = parseEnglishDate(trimmed);
+    if (enDate) {
+        return enDate;
+    }
+
+    // 4. Relative time parsing (e.g. 5分钟前, 2小时前, 3天前, 1周前, 2个月前, 1年前, 昨天, 前天)
     const now = referenceNow;
     if (/刚刚|半小时前|分钟前|小时前|hours?\s+ago|mins?\s+ago|minutes?\s+ago/i.test(trimmed)) {
         return formatDateIso(now);
@@ -68,9 +116,16 @@ export function normalizePublishedDate(rawDate?: string, referenceNow = new Date
     }
 
     // 4. Try generic Date.parse for formats like "Oct 17, 2026"
-    const parsed = Date.parse(trimmed);
-    if (!Number.isNaN(parsed)) {
-        return formatDateIso(new Date(parsed));
+    // Guard: must have a 4-digit year (19xx or 20xx) and an English month name, or be a clean date-like string
+    if (trimmed.length <= 50 && /\b(?:19|20)\d{2}\b/.test(trimmed)) {
+        const hasMonthName = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i.test(trimmed);
+        const isStandardDateLike = /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/.test(trimmed) || /^[a-zA-Z]{3},\s+\d{1,2}\s+[a-zA-Z]{3}\s+\d{4}/.test(trimmed);
+        if (hasMonthName || isStandardDateLike) {
+            const parsed = Date.parse(trimmed);
+            if (!Number.isNaN(parsed)) {
+                return formatDateIso(new Date(parsed));
+            }
+        }
     }
 
     return undefined;

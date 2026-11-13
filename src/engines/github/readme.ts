@@ -20,6 +20,7 @@ import {
 
 export const README_CANDIDATES = [
     'README.md',
+    'Readme.md',
     'readme.md',
     'README.rst',
     'README.mdx',

@@ -53,6 +53,15 @@ describe('Date Normalization & Time Range Filtering', () => {
     it('rejects invalid or undefined dates', () => {
         expect(normalizeDateToIso('')).toBeUndefined();
         expect(normalizeDateToIso('not a valid date')).toBeUndefined();
+        expect(normalizeDateToIso('TypeScript 5.5')).toBeUndefined();
+        expect(normalizeDateToIso('Vue 3.2')).toBeUndefined();
+        expect(normalizeDateToIso('Python 3.10')).toBeUndefined();
         expect(isDateWithinTimeRange(undefined, 'day')).toBe(false);
+    });
+
+    it('supports english month formatted dates with explicit 4-digit year', () => {
+        expect(normalizeDateToIso('Oct 17, 2026')).toBe('2026-10-17');
+        expect(normalizeDateToIso('October 17, 2026')).toBe('2026-10-17');
+        expect(normalizeDateToIso('17 Oct 2026')).toBe('2026-10-17');
     });
 });

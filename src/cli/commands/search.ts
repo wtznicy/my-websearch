@@ -17,9 +17,12 @@ import {
     requireFlagValue,
     tryDaemonRequest
 } from '../shared.js';
+import { renderSearchBriefMarkdown } from '../../tools/handlers/searchMarkdownBrief.js';
+import { SearchResult } from '../../types.js';
 
 export type ParsedSearchArgs = {
     query: string;
+    queries?: string[];
     limit: number;
     limitExplicit?: boolean;
     engines: SupportedSearchEngine[];
@@ -29,12 +32,21 @@ export type ParsedSearchArgs = {
     minResults: number;
     minResultsExplicit?: boolean;
     timeRange?: 'day' | 'week' | 'month' | 'year';
+    site?: string[];
+    fetchTop?: number;
+    format?: 'json' | 'markdown';
+    verbose?: boolean;
     json: boolean;
 };
 
 export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): ParsedSearchArgs {
     const positional: string[] = [];
     const requestedEngines: string[] = [];
+    const site: string[] = [];
+    let queries: string[] | undefined;
+    let fetchTop: number | undefined;
+    let format: 'json' | 'markdown' | undefined;
+    let verbose = false;
     let limit: number | undefined;
     let searchMode: AppConfig['searchMode'] | undefined;
     let minResults: number | undefined;
@@ -101,6 +113,59 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
             continue;
         }
 
+        if (arg === '--site') {
+            const next = requireFlagValue(argv, index, '--site');
+            site.push(...next.split(',').map((s) => s.trim()).filter(Boolean));
+            index += 1;
+            continue;
+        }
+
+        if (arg.startsWith('--site=')) {
+            site.push(...arg.slice(7).split(',').map((s) => s.trim()).filter(Boolean));
+            continue;
+        }
+
+        if (arg === '--fetch-top') {
+            const parsed = Number(requireFlagValue(argv, index, '--fetch-top'));
+            if (!Number.isInteger(parsed) || parsed < 0 || parsed > 3) {
+                throw new Error('--fetch-top must be an integer between 0 and 3');
+            }
+            fetchTop = parsed;
+            index += 1;
+            continue;
+        }
+
+        if (arg.startsWith('--fetch-top=')) {
+            const parsed = Number(arg.slice(12));
+            if (!Number.isInteger(parsed) || parsed < 0 || parsed > 3) {
+                throw new Error('--fetch-top must be an integer between 0 and 3');
+            }
+            fetchTop = parsed;
+            continue;
+        }
+
+        if (arg === '--format') {
+            const next = requireFlagValue(argv, index, '--format');
+            if (next !== 'json' && next !== 'markdown') {
+                throw new Error('--format must be one of: json, markdown');
+            }
+            format = next;
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--queries') {
+            const next = requireFlagValue(argv, index, '--queries');
+            queries = next.split(',').map((s) => s.trim()).filter(Boolean);
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--verbose' || arg === '-v') {
+            verbose = true;
+            continue;
+        }
+
         if (isFlag(arg)) {
             throw new Error(`Unknown argument: ${arg}`);
         }
@@ -109,7 +174,7 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
     }
 
     const query = positional.join(' ').trim();
-    if (!query) {
+    if (!query && (!queries || queries.length === 0)) {
         throw new Error('Search query is required');
     }
     if (query.length > 500) {
@@ -140,7 +205,8 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
         return (allowed && allowed.length > 0 && allowed[0] ? [allowed[0]] : routable) as SupportedSearchEngine[];
     };
 
-    const defaultEngines = resolveDefaultEngines(query);
+    const targetQueryForEngines = query || (queries && queries[0]) || '';
+    const defaultEngines = resolveDefaultEngines(targetQueryForEngines);
     const fallbackEngine = defaultEngines[0] || 'bing';
 
     const normalizedRequestedEngines = requestedEngines.length > 0
@@ -154,6 +220,7 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
 
     return {
         query,
+        queries,
         limit: effectiveLimit,
         limitExplicit,
         engines: resolvedEngines,
@@ -162,6 +229,10 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
         minResults: effectiveMinResults,
         minResultsExplicit,
         timeRange,
+        site: site.length > 0 ? site : undefined,
+        fetchTop,
+        format,
+        verbose,
         json
     };
 }
@@ -228,7 +299,8 @@ export async function handleSearchCommand(ctx: CommandContext): Promise<number> 
                 limit: parsed.limitExplicit ? parsed.limit : undefined,
                 searchMode: parsed.searchMode,
                 minResults: parsed.minResultsExplicit ? parsed.minResults : undefined,
-                ...(parsed.timeRange ? { timeRange: parsed.timeRange } : {})
+                ...(parsed.timeRange ? { timeRange: parsed.timeRange } : {}),
+                ...(parsed.site ? { site: parsed.site } : {})
             },
             options
         );
@@ -253,6 +325,7 @@ export async function handleSearchCommand(ctx: CommandContext): Promise<number> 
             searchMode: parsed.searchMode,
             minResults: parsed.minResults,
             ...(parsed.timeRange ? { timeRange: parsed.timeRange } : {}),
+            ...(parsed.site ? { site: parsed.site } : {}),
             // 显式 --engines 时把原集合传下去：级联只能在用户点名的引擎里补位，
             // 而不是悄悄把 duckduckgo/brave 也拉进来（实测 --engines github 跑了 6 个引擎、22s）
             ...(parsed.enginesExplicit ? { requestedEngines: [...parsed.engines] } : {})
@@ -285,8 +358,49 @@ export async function handleSearchCommand(ctx: CommandContext): Promise<number> 
             return 1;
         }
 
+        // fetchTop: 为前 N (1-3) 篇文章拉取全文并注入 fullContent
+        let finalResults: SearchResult[] = result.results;
+        if (parsed.fetchTop && parsed.fetchTop > 0 && result.results.length > 0) {
+            const topN = Math.min(parsed.fetchTop, 3, result.results.length);
+            const fetchTargets = result.results.slice(0, topN);
+            const fetchSettled = await Promise.allSettled(
+                fetchTargets.map((item) =>
+                    runtime.services.fetchWeb.execute({
+                        url: item.url,
+                        maxChars: 4000,
+                        readability: true,
+                        format: 'markdown'
+                    })
+                )
+            );
+            finalResults = result.results.map((item, idx) => {
+                if (idx < topN) {
+                    const settled = fetchSettled[idx];
+                    if (settled && settled.status === 'fulfilled' && settled.value?.content) {
+                        return { ...item, fullContent: settled.value.content };
+                    }
+                }
+                return item;
+            });
+            result.results = finalResults;
+        }
+
+        const isMarkdownRequested = parsed.format === 'markdown' || (Boolean(parsed.fetchTop && parsed.fetchTop > 0) && !parsed.json && parsed.format !== 'json');
+
         if (parsed.json) {
             io.stdout(JSON.stringify(createSuccessEnvelope(result), null, 2));
+        } else if (isMarkdownRequested) {
+            const briefText = renderSearchBriefMarkdown({
+                query: parsed.query,
+                engines: result.engines,
+                outcome: result.outcome ?? 'ok',
+                totalResults: result.totalResults,
+                results: finalResults,
+                directAnswer: result.directAnswer,
+                warnings: result.warnings,
+                partialFailures: result.partialFailures
+            });
+            io.stdout(briefText);
         } else {
             io.stdout(formatSearchHumanReadable(result));
         }

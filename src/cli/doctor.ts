@@ -140,7 +140,7 @@ export async function buildDoctorReport(
         : Boolean(options.engines && options.engines.length > 0);
     const browserChecked = Boolean(options.browser);
     const browserProbeTimeoutMs = options.browserProbeTimeoutMs ?? 8000;
-    const networkProbeTimeoutMs = options.networkProbeTimeoutMs ?? 3000;
+    const networkProbeTimeoutMs = options.networkProbeTimeoutMs ?? 5000;
     const rawProbeNetwork = options.networkProbeFn ?? probeEngineHttpEndpoint;
     const okCacheTtlMs = options.probeCacheTtlMs ?? (options.networkProbeFn ? 0 : DEFAULT_DOCTOR_PROBE_OK_TTL_MS);
     const challengeCacheTtlMs = options.challengeProbeCacheTtlMs

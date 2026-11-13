@@ -1,4 +1,4 @@
-import { normalizePublishedDate } from '../../utils/dateNormalizer.js';
+import { normalizePublishedDate, parseEnglishDate } from '../../utils/dateNormalizer.js';
 
 /**
  * 发布日期抽取（纯本地，零网络请求）。
@@ -53,20 +53,33 @@ export function extractDateFromUrl(rawUrl: string): string | undefined {
     return undefined;
 }
 
-/** 从标题/摘要里抽日期：优先绝对日期，再交给已有的相对时间解析器（3天前 / yesterday 等）。 */
+/** 从标题/摘要里抽日期：优先绝对日期，再尝试英文绝对日期与相对时间解析器（3天前 / yesterday 等）。 */
 export function extractDateFromText(text: string | undefined, now = new Date()): string | undefined {
     if (!text) return undefined;
     const trimmed = text.trim();
     if (!trimmed) return undefined;
 
+    // 1. 中文或标准格式绝对日期 (2024年10月21日, 2024-10-21)
     const absolute = trimmed.match(/(20\d{2})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?/);
     if (absolute) {
         const iso = toIso(Number(absolute[1]), Number(absolute[2]), Number(absolute[3]));
         if (iso) return iso;
     }
 
-    // 相对时间（含英文 "hours ago"）交给既有实现，避免重复维护一套规则
-    return normalizePublishedDate(trimmed, now);
+    // 2. 常见英文绝对日期 (例如 "Oct 21, 2024", "October 21, 2024", "21 Oct 2024")
+    const enDate = parseEnglishDate(trimmed);
+    if (enDate) {
+        return enDate;
+    }
+
+    // 3. 相对时间（含英文 "hours ago", "3 days ago", "昨天" 等）仅在命中相对模式时解析
+    const relativePattern = /(?:\d+\s*(?:天前|周前|星期前|个月前|月前|年前|days?\s+ago|weeks?\s+ago|months?\s+ago|years?\s+ago|hours?\s+ago|mins?\s+ago|minutes?\s+ago)|刚刚|半小时前|昨天|前天|yesterday)/i;
+    const relMatch = trimmed.match(relativePattern);
+    if (relMatch) {
+        return normalizePublishedDate(relMatch[0], now);
+    }
+
+    return undefined;
 }
 
 export interface DateExtractionInput {

@@ -1,6 +1,7 @@
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../protocol.js';
 import { ErrorCode, isAppError } from '../../core/errors.js';
+import { isNetworkLayerError } from '../../utils/httpRequest.js';
 import { validateExtractSchema, type ExtractSchema } from '../../engines/web/extract.js';
 import {
     CommandContext,
@@ -303,15 +304,21 @@ export async function handleFetchWebCommand(ctx: CommandContext): Promise<number
         return 0;
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const isNetworkErr = isNetworkLayerError(message);
+        const fallbackCode = isNetworkErr ? ErrorCode.NETWORK_ERROR : ErrorCode.INVALID_ARGUMENTS;
+        const fallbackHint = isNetworkErr
+            ? 'The target host was unreachable or timed out. Check network connectivity, proxy settings, or try again later.'
+            : 'Use a public HTTP(S) URL and keep maxChars within the supported range.';
+
         if (parsed.json) {
             io.stdout(JSON.stringify(createErrorEnvelope(
                 isDaemonRequestError(error)
                     ? getDaemonCliErrorCode(error)
-                    : (isAppError(error) ? error.code : ErrorCode.INVALID_ARGUMENTS),
+                    : (isAppError(error) ? error.code : fallbackCode),
                 message,
                 { hint: isDaemonRequestError(error)
                     ? getDaemonCliErrorHint(error)
-                    : (isAppError(error) && error.hint ? error.hint : 'Use a public HTTP(S) URL and keep maxChars within the supported range.') }
+                    : (isAppError(error) && error.hint ? error.hint : fallbackHint) }
             ), null, 2));
         } else {
             io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);

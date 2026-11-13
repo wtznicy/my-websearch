@@ -857,6 +857,44 @@ export function registerQueryDocsTool(server: McpServer, runtime: MyWebSearchRun
                         } as unknown as { content: Array<{ type: 'text'; text: string }> };
                     }
                 }
+
+                // 5f. npm / pypi / pip 显式前缀快速路由（跳过 Context7 误配，直查官方 registry 与仓库 README）
+                if (/^(?:npm|pypi|pip):/i.test(target)) {
+                    logTool(`auto-routing to package registry for explicit prefix: ${target}`);
+                    const fallbackResult = await fetchPackageDocsFallback({
+                        library: target,
+                        version,
+                        signal,
+                        fetchGithub: async (url) => runtime.services.fetchGithubReadme.execute({ url })
+                    });
+                    if (fallbackResult) {
+                        metrics.recordQueryDocsAttempt(fallbackResult.source, false);
+                        const combinedWarnings = [...new Set([...fallbackResult.warnings, ...unknownWarnings])];
+                        const text = capTextResponse(formatQueryDocsMarkdown({
+                            libraryId: fallbackResult.libraryId,
+                            query,
+                            source: fallbackResult.source,
+                            confidence: fallbackResult.confidence,
+                            repositoryUrl: fallbackResult.repositoryUrl,
+                            readme: fallbackResult.readme,
+                            warnings: combinedWarnings
+                        }));
+                        if (fallbackResult.confidence !== 'low') {
+                            setDocsCache(cacheKey, {
+                                text,
+                                source: fallbackResult.source,
+                                confidence: fallbackResult.confidence,
+                                cachedAt: Date.now()
+                            });
+                        }
+                        return {
+                            content: [{ type: 'text', text }],
+                            source: fallbackResult.source,
+                            confidence: fallbackResult.confidence,
+                            warnings: combinedWarnings
+                        } as unknown as { content: Array<{ type: 'text'; text: string }> };
+                    }
+                }
             }
 
             // 6. Context7 主路径（针对 auto 与 context7）

@@ -148,11 +148,26 @@ export function splitIntoBlocks(text: string, options: { maxBlockChars?: number 
     };
 
     let offset = 0;
+    let inCodeFence = false;
+    let fenceChar = '';
+    let fenceLen = 0;
+
     for (const line of text.split('\n')) {
         const lineStart = offset;
         offset += line.length + 1;
 
-        if (looksLikeHeading(line)) {
+        const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+        if (inCodeFence) {
+            if (fenceMatch && fenceMatch[1] && fenceMatch[1][0] === fenceChar && fenceMatch[1].length >= fenceLen) {
+                inCodeFence = false;
+            }
+        } else if (fenceMatch && fenceMatch[1]) {
+            inCodeFence = true;
+            fenceChar = fenceMatch[1][0] ?? '`';
+            fenceLen = fenceMatch[1].length;
+        }
+
+        if (!inCodeFence && looksLikeHeading(line)) {
             flush();
             buffer = line;
             bufferStart = lineStart;
@@ -167,7 +182,7 @@ export function splitIntoBlocks(text: string, options: { maxBlockChars?: number 
         buffer = buffer ? `${buffer}\n${line}` : line;
         bufferEnd = lineStart + line.length;
 
-        if (!line.trim()) {
+        if (!inCodeFence && !line.trim()) {
             flush();
         }
     }
@@ -336,6 +351,7 @@ export function selectFocusBlocks(
     const indices = [...chosen].sort((left, right) => left - right);
     const parts: string[] = [];
     let previous = -1;
+    let lastEmittedHeading: string | undefined;
     for (const index of indices) {
         const block = blocks[index];
         if (!block) {
@@ -344,9 +360,18 @@ export function selectFocusBlocks(
         const skipped = index - previous - 1;
         if (previous >= 0 && skipped >= 4) {
             parts.push(`[... ${skipped} unrelated blocks skipped ...]`);
+            lastEmittedHeading = undefined;
         }
-        const needsHeading = block.heading && !block.text.trimStart().startsWith('#');
-        parts.push(needsHeading ? `## ${block.heading}\n\n${block.text}` : block.text);
+        const startsWithHeading = block.text.trimStart().startsWith('#');
+        if (startsWithHeading) {
+            parts.push(block.text);
+            lastEmittedHeading = block.heading;
+        } else if (block.heading && block.heading !== lastEmittedHeading) {
+            parts.push(`## ${block.heading}\n\n${block.text}`);
+            lastEmittedHeading = block.heading;
+        } else {
+            parts.push(block.text);
+        }
         previous = index;
     }
 

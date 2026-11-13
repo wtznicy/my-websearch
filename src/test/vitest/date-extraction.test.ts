@@ -28,15 +28,21 @@ describe('extractDateFromText', () => {
     it('extracts absolute dates in common formats', () => {
         expect(extractDateFromText('发布于 2024年10月21日')).toBe('2024-10-21');
         expect(extractDateFromText('Updated 2024-10-21 by team')).toBe('2024-10-21');
+        expect(extractDateFromText('Announced on Oct 21, 2024 by admin')).toBe('2024-10-21');
+        expect(extractDateFromText('Released 21 Oct 2024')).toBe('2024-10-21');
     });
 
     it('delegates relative dates to the existing normalizer', () => {
         const now = new Date('2026-10-23T00:00:00Z');
         expect(extractDateFromText('3天前', now)).toBe('2026-10-20');
+        expect(extractDateFromText('Posted 3 days ago', now)).toBe('2026-10-20');
     });
 
-    it('returns undefined when nothing looks like a date', () => {
+    it('returns undefined when nothing looks like a date or only contains version numbers', () => {
         expect(extractDateFromText('typescript satisfies operator')).toBeUndefined();
+        expect(extractDateFromText('TypeScript: Documentation - TypeScript 5.5')).toBeUndefined();
+        expect(extractDateFromText('Vue 3.2 Released')).toBeUndefined();
+        expect(extractDateFromText('Python 3.10 is out')).toBeUndefined();
         expect(extractDateFromText(undefined)).toBeUndefined();
     });
 });

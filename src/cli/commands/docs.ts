@@ -79,6 +79,8 @@ export type ParsedQueryDocsArgs = {
     libraryId: string;
     query?: string;
     limit?: number;
+    source?: string;
+    version?: string;
     json: boolean;
 };
 
@@ -86,6 +88,8 @@ export function parseQueryDocsArgs(argv: string[]): ParsedQueryDocsArgs {
     const positional: string[] = [];
     let query: string | undefined;
     let limit: number | undefined;
+    let source: string | undefined;
+    let version: string | undefined;
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -99,15 +103,47 @@ export function parseQueryDocsArgs(argv: string[]): ParsedQueryDocsArgs {
             continue;
         }
 
-        if (arg === '--query') {
+        if (arg === '--query' || arg === '-q') {
             query = requireFlagValue(argv, index, '--query');
             index += 1;
             continue;
         }
 
-        if (arg === '--limit') {
+        if (arg.startsWith('--query=')) {
+            query = arg.slice(8);
+            continue;
+        }
+
+        if (arg === '--limit' || arg === '-l') {
             limit = Number(requireFlagValue(argv, index, '--limit'));
             index += 1;
+            continue;
+        }
+
+        if (arg.startsWith('--limit=')) {
+            limit = Number(arg.slice(8));
+            continue;
+        }
+
+        if (arg === '--source') {
+            source = requireFlagValue(argv, index, '--source');
+            index += 1;
+            continue;
+        }
+
+        if (arg.startsWith('--source=')) {
+            source = arg.slice(9);
+            continue;
+        }
+
+        if (arg === '--version' || arg === '-v') {
+            version = requireFlagValue(argv, index, '--version');
+            index += 1;
+            continue;
+        }
+
+        if (arg.startsWith('--version=')) {
+            version = arg.slice(10);
             continue;
         }
 
@@ -131,6 +167,8 @@ export function parseQueryDocsArgs(argv: string[]): ParsedQueryDocsArgs {
         libraryId: target,
         query,
         limit,
+        source,
+        version,
         json
     };
 }
@@ -144,20 +182,35 @@ export function formatResolveLibraryHumanReadable(result: { libraryName: string;
 }
 
 export function formatQueryDocsHumanReadable(result: {
-    libraryId: string;
+    libraryId?: string;
+    library?: string;
     resolvedFrom?: string;
+    source?: string;
+    documentationUrl?: string;
+    repositoryUrl?: string;
     alternativeLibraries?: Array<{ id: string; title: string }>;
     snippets?: Array<{ title?: string; code?: string; content?: string }>;
     codeSnippets?: Array<{ codeTitle?: string; pageTitle?: string; codeDescription?: string; codeList?: Array<{ code: string; language?: string; path?: string }> }>;
     infoSnippets?: Array<{ title?: string; content: string }>;
+    content?: string;
+    readme?: string;
 }): string {
+    const id = result.libraryId || result.library || 'Unknown';
+    const sourceTag = result.source ? ` [${result.source}]` : '';
     const titleHeader = result.resolvedFrom
-        ? `Documentation for ${result.libraryId} (resolved from "${result.resolvedFrom}"):`
-        : `Documentation for ${result.libraryId}:`;
+        ? `Documentation for ${id} (resolved from "${result.resolvedFrom}")${sourceTag}:`
+        : `Documentation for ${id}${sourceTag}:`;
     const lines = [titleHeader];
 
+    if (result.documentationUrl) {
+        lines.push(`URL: ${result.documentationUrl}`);
+    }
+    if (result.repositoryUrl) {
+        lines.push(`Repository: ${result.repositoryUrl}`);
+    }
+
     if (result.alternativeLibraries && result.alternativeLibraries.length > 0) {
-        lines.push(`(Alternative matches: ${result.alternativeLibraries.map(a => `${a.title} [${a.id}]`).join(', ')})`);
+        lines.push(`(Alternative matches: ${result.alternativeLibraries.map((a) => `${a.title} [${a.id}]`).join(', ')})`);
     }
 
     if (result.infoSnippets && result.infoSnippets.length > 0) {
@@ -190,6 +243,14 @@ export function formatQueryDocsHumanReadable(result: {
             if (snippet.content) lines.push(snippet.content);
             if (snippet.code) lines.push('```\n' + snippet.code + '\n```');
         }
+    }
+    if (result.content && result.content.trim()) {
+        lines.push('');
+        lines.push(result.content.trim());
+    }
+    if (result.readme && result.readme.trim()) {
+        lines.push('');
+        lines.push(result.readme.trim());
     }
     return lines.join('\n');
 }
@@ -303,7 +364,8 @@ export async function handleQueryDocsCommand(ctx: CommandContext): Promise<numbe
                 library: parsed.library,
                 libraryId: parsed.libraryId,
                 query: parsed.query,
-                limit: parsed.limit
+                limit: parsed.limit,
+                version: parsed.version
             },
             options
         );
@@ -324,7 +386,8 @@ export async function handleQueryDocsCommand(ctx: CommandContext): Promise<numbe
         const result = await runtime.services.context7Docs.execute({
             library: parsed.library,
             query: parsed.query,
-            limit: parsed.limit
+            limit: parsed.limit,
+            version: parsed.version
         });
 
         if (parsed.json) {

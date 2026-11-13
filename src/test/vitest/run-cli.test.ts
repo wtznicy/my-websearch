@@ -3,7 +3,7 @@ import { requireFlagValue, commandNeedsRuntime } from '../../cli/runCli.js';
 import { parseSearchArgs } from '../../cli/commands/search.js';
 import { parseFetchWebArgs } from '../../cli/commands/fetchWeb.js';
 import { parseFetchGithubArgs } from '../../cli/commands/fetchGithub.js';
-import { parseResolveLibraryArgs, parseQueryDocsArgs } from '../../cli/commands/docs.js';
+import { parseResolveLibraryArgs, parseQueryDocsArgs, formatQueryDocsHumanReadable } from '../../cli/commands/docs.js';
 import { parseStatusArgs } from '../../cli/commands/status.js';
 import { parseServeArgs } from '../../cli/commands/serve.js';
 import type { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
@@ -87,6 +87,14 @@ describe('runCli argument parsing', () => {
             expect(parsed.engines).toEqual(['bing', 'duckduckgo']);
         });
 
+        it('parses --site, --fetch-top, --format, and --queries', () => {
+            const parsed = parseSearchArgs(['tokio', '--site', 'tokio.rs,docs.rs', '--fetch-top', '2', '--format', 'markdown', '--queries', 'q1,q2'], mockRuntime);
+            expect(parsed.site).toEqual(['tokio.rs', 'docs.rs']);
+            expect(parsed.fetchTop).toBe(2);
+            expect(parsed.format).toBe('markdown');
+            expect(parsed.queries).toEqual(['q1', 'q2']);
+        });
+
         it('throws if query is missing', () => {
             expect(() => parseSearchArgs(['--limit', '10'], mockRuntime)).toThrow('Search query is required');
         });
@@ -117,6 +125,31 @@ describe('runCli argument parsing', () => {
 
         it('throws if format is invalid', () => {
             expect(() => parseFetchWebArgs(['https://example.com', '--format', 'xml'])).toThrow('format must be one of: text, markdown');
+        });
+    });
+
+    describe('parseFetchGithubArgs', () => {
+        it('parses valid repository URL and options', () => {
+            const parsed = parseFetchGithubArgs([
+                'https://github.com/expressjs/express',
+                '--symbol', 'Router',
+                '--lines', '10-20',
+                '--ref', 'master',
+                '--max-results', '10',
+                '--release-limit', '5',
+                '--json'
+            ]);
+            expect(parsed.url).toBe('https://github.com/expressjs/express');
+            expect(parsed.symbol).toBe('Router');
+            expect(parsed.lines).toBe('10-20');
+            expect(parsed.ref).toBe('master');
+            expect(parsed.maxResults).toBe(10);
+            expect(parsed.releaseLimit).toBe(5);
+            expect(parsed.json).toBe(true);
+        });
+
+        it('throws if URL is missing', () => {
+            expect(() => parseFetchGithubArgs(['--json'])).toThrow('Target URL is required');
         });
     });
 
@@ -153,6 +186,14 @@ describe('runCli argument parsing', () => {
             expect(parsed.libraryId).toBe('vercel/next.js');
         });
 
+        it('parses --source and --version options', () => {
+            const parsed = parseQueryDocsArgs(['devdocs:redis', '--source', 'devdocs', '--version', '7.0', '--query', 'hset']);
+            expect(parsed.libraryId).toBe('devdocs:redis');
+            expect(parsed.source).toBe('devdocs');
+            expect(parsed.version).toBe('7.0');
+            expect(parsed.query).toBe('hset');
+        });
+
         it('throws if libraryId is missing', () => {
             expect(() => parseQueryDocsArgs(['--limit', '5'])).toThrow('libraryId is required');
         });
@@ -180,6 +221,25 @@ describe('runCli argument parsing', () => {
 
         it('throws if port is out of range', () => {
             expect(() => parseServeArgs(['--port', '70000'])).toThrow('Port must be an integer between 0 and 65535');
+        });
+    });
+
+    describe('formatQueryDocsHumanReadable', () => {
+        it('renders content, readme, documentationUrl and repositoryUrl properly', () => {
+            const formatted = formatQueryDocsHumanReadable({
+                libraryId: 'left-pad',
+                source: 'npm',
+                documentationUrl: 'https://www.npmjs.com/package/left-pad',
+                repositoryUrl: 'https://github.com/stevemao/left-pad',
+                content: '## API\n\nleftPad(str, len, [ch])',
+                readme: '# left-pad\n\nString left padding.'
+            });
+
+            expect(formatted).toContain('Documentation for left-pad [npm]:');
+            expect(formatted).toContain('URL: https://www.npmjs.com/package/left-pad');
+            expect(formatted).toContain('Repository: https://github.com/stevemao/left-pad');
+            expect(formatted).toContain('leftPad(str, len, [ch])');
+            expect(formatted).toContain('String left padding.');
         });
     });
 });

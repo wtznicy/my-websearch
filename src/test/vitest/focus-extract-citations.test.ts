@@ -103,6 +103,46 @@ describe('bm25 block selection', () => {
         expect(blocks.length).toBeGreaterThan(1);
         expect(blocks.every((block) => block.text.length <= 1500)).toBe(true);
     });
+
+    it('does not split code blocks containing blank lines or code comments', () => {
+        const doc = [
+            '## Code Example',
+            '',
+            'Here is how you use the function:',
+            '',
+            '```typescript',
+            'function test() {',
+            '    const a = 1;',
+            '',
+            '    # comment here',
+            '    return a;',
+            '}',
+            '```',
+            '',
+            'After code.'
+        ].join('\n');
+
+        const blocks = splitIntoBlocks(doc);
+        const codeBlock = blocks.find((b) => b.text.includes('function test()'));
+        expect(codeBlock).toBeDefined();
+        expect(codeBlock!.text).toContain('return a;');
+        expect(codeBlock!.text.trim().endsWith('```')).toBe(true);
+    });
+
+    it('does not repeat section heading for consecutive blocks under the same heading', () => {
+        const doc = [
+            '## Tutorial Section',
+            '',
+            'First step in tutorial.',
+            '',
+            'Second step in tutorial mentions tutorial details.'
+        ].join('\n');
+
+        const selection = selectFocusBlocks(doc, 'tutorial', 4000);
+        expect(selection).not.toBeNull();
+        const headingOccurrences = selection!.content.match(/## Tutorial Section/g) ?? [];
+        expect(headingOccurrences.length).toBe(1);
+    });
 });
 
 describe('citations', () => {
