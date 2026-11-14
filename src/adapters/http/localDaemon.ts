@@ -1,6 +1,8 @@
 import express from 'express';
+import cors from 'cors';
 import http from 'node:http';
 import { applyHostValidation, applyJsonBody } from './sharedMiddleware.js';
+import { buildMcpCorsOptions } from './mcpHttpSecurity.js';
 import { AppConfig } from '../../config.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
@@ -316,6 +318,12 @@ export async function startLocalDaemon(
 
     const app = express();
     applyJsonBody(app);
+
+    const corsOptions = buildMcpCorsOptions(runtime.config);
+    if (corsOptions) {
+        app.use(cors(corsOptions));
+        app.options('/*splat', cors(corsOptions));
+    }
 
     let baseUrl = '';
 
