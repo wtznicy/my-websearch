@@ -93,6 +93,11 @@ describe('pickDefaultEngineForQuery', () => {
             .toEqual(['brave', 'duckduckgo', 'baidu']);
     });
 
+    it('should fall back to [bing, baidu, sogou] for mixed tech queries when overseas is unreachable (e.g. broken proxy)', () => {
+        expect(pickDefaultEnginesForQuery('MySQL 9.7的发布时间和更新内容', 'auto', { overseasReachable: false }))
+            .toEqual(['bing', 'baidu', 'sogou']);
+    });
+
     it('should route pure Chinese general queries to [baidu, sogou]', () => {
         expect(pickDefaultEnginesForQuery('量化宽松政策是什么', 'auto'))
             .toEqual(['baidu', 'sogou']);

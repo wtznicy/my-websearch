@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import { engineShouldUseProxy } from '../config.js';
+import { engineShouldUseProxy, config } from '../config.js';
 import { AppError } from '../core/errors.js';
 import { BROWSER_USER_AGENT } from './constants.js';
 import { detectSystemProxy } from './systemProxy.js';
@@ -142,10 +142,12 @@ async function isDirectlyReachable(engine: OverseasEngine): Promise<boolean> {
     // 有系统代理时降为 0 —— 说明用户本来就想走代理，直连失败一次基本是确定性的（被墙/无直连），
     // 再等 3s 只是把 DDG 的失败从 ~4s 拉到 ~7s；真能用的话并行中的代理探测会立刻成功。
     const systemProxy = await detectSystemProxy();
-    // 有系统代理时两条路径都只探 1 次：它们本来就是并行兜底关系，
+    const explicitProxy = (config.useProxy && config.proxyUrl && engineShouldUseProxy(engine)) ? config.proxyUrl : undefined;
+    const effectiveProxy = explicitProxy || systemProxy;
+    // 有代理时两条路径都只探 1 次：它们本来就是并行兜底关系，
     // 任一条能通会立刻短路，重试只会在「双双失败」时把 3s 翻成 6s（实测 7.3s → 3.4s）。
     // 没有系统代理时保留 1 次重试：可能是网络抖动，没有第二条路可走。
-    const probeRetries = systemProxy ? 0 : PROBE_MAX_RETRIES;
+    const probeRetries = effectiveProxy ? 0 : PROBE_MAX_RETRIES;
     const attempts: Array<Promise<boolean>> = [
         (async () => {
             let reachable = false;
@@ -155,11 +157,11 @@ async function isDirectlyReachable(engine: OverseasEngine): Promise<boolean> {
             return reachable;
         })()
     ];
-    if (systemProxy) {
+    if (effectiveProxy) {
         attempts.push((async () => {
             let reachable = false;
             for (let attempt = 0; attempt <= probeRetries && !reachable; attempt += 1) {
-                reachable = await probeOnce(PROBE_TARGETS[engine], systemProxy);
+                reachable = await probeOnce(PROBE_TARGETS[engine], effectiveProxy);
             }
             return reachable;
         })());
@@ -276,24 +278,27 @@ export async function assertOverseasEngineUsable(engine: OverseasEngine): Promis
 
 /**
  * 快速判断海外网络是否通畅（用于中英混合技术查询等场景智能切换最优海外引擎组）：
- * - 配置了代理（显式配置或检测到系统代理 Clash 等）→ 直接判定可达；
- * - 无代理时通过轻量直连探测确认。
+ * - 优先查已有缓存：若命中有效缓存（成功 5min / 失败 1min），0ms 纯内存返回；
+ * - 真实测试链路可达性（带代理与直连并行探测，3s 超时）：
+ *   若开启了代理且节点可用，代理探测极速通过（~200ms）并缓存 5 分钟；
+ *   若开启了代理但【代理节点故障/死节点/超时】或无代理被墙，探测会在 3s 内捕获失败并返回 false，
+ *   同时写入 1 分钟短缓存，避免每次查询都重复探测，并指引路由平滑降级至国内保底组。
  */
 export async function isOverseasNetworkReachable(): Promise<boolean> {
-    if (engineShouldUseProxy('brave') || engineShouldUseProxy('duckduckgo')) {
-        return true;
-    }
-    const systemProxy = await detectSystemProxy();
-    if (systemProxy) {
-        return true;
+    const now = Date.now();
+    const braveCache = probeCache.get('brave');
+    if (braveCache && (now - braveCache.checkedAt < (braveCache.reachable ? PROBE_CACHE_TTL_MS : PROBE_FAILURE_CACHE_TTL_MS))) {
+        return braveCache.reachable;
     }
     return isDirectlyReachable('brave');
 }
 
-/** 同步判断海外网络可达性（不发阻塞网络请求，基于缓存与已知代理配置） */
+/** 同步判断海外网络可达性（不发阻塞网络请求，仅读取已有有效缓存） */
 export function isOverseasNetworkKnownReachable(): boolean {
-    if (engineShouldUseProxy('brave') || engineShouldUseProxy('duckduckgo')) {
-        return true;
+    const now = Date.now();
+    const braveCache = probeCache.get('brave');
+    if (braveCache && (now - braveCache.checkedAt < (braveCache.reachable ? PROBE_CACHE_TTL_MS : PROBE_FAILURE_CACHE_TTL_MS))) {
+        return braveCache.reachable;
     }
-    return !isKnownUnreachableOverseasEngine('brave') && !isKnownUnreachableOverseasEngine('duckduckgo');
+    return !isKnownUnreachableOverseasEngine('brave');
 }
