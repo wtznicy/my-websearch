@@ -8,7 +8,7 @@ import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
 import { pickDefaultEnginesForQuery } from '../../core/search/queryEngineRouting.js';
-import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
+import { isKnownUnreachableOverseasEngine, isOverseasNetworkReachable } from '../../utils/overseasProbe.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
 import { ErrorCode, extractErrorCode, extractErrorStatus, isAppError } from '../../core/errors.js';
 import { metrics } from '../../core/metrics.js';
@@ -78,11 +78,15 @@ function sendError(
     res.status(statusCode).json(createErrorEnvelope(code, message, options));
 }
 
-function parseRequestedEngines(runtime: MyWebSearchRuntime, engines: unknown, query: string): SupportedSearchEngine[] {
-    // DEFAULT_SEARCH_ENGINE=auto 时按查询特征自动路由（返回引擎组：中文 → baidu+sogou，英文 → bing+duckduckgo）
+async function parseRequestedEngines(runtime: MyWebSearchRuntime, engines: unknown, query: string): Promise<SupportedSearchEngine[]> {
+    // 快速探测海外可达性（带 5min 缓存与系统代理短路）
+    const overseasReachable = await isOverseasNetworkReachable();
+    // DEFAULT_SEARCH_ENGINE=auto 时按查询特征自动路由：
+    // 中英混合技术查询在海外通畅时自动选用实测最优的 ['brave', 'duckduckgo', 'baidu']
     const routed = pickDefaultEnginesForQuery(query, runtime.config.defaultSearchEngine, {
         en: runtime.config.autoRouteEnEngines,
-        zh: runtime.config.autoRouteZhEngines
+        zh: runtime.config.autoRouteZhEngines,
+        overseasReachable
     });
     // 已知不可达的境外引擎（探测失败缓存内且未走代理）从默认路由排除，避免每次查询白等探测；
     // 显式指定 engines 的请求不受影响（下面 engines !== undefined 的分支走原逻辑）
@@ -404,7 +408,7 @@ export async function startLocalDaemon(
             }
 
             const limit = parseLimit(req.body?.limit, runtime.config.defaultSearchLimit);
-            const engines = parseRequestedEngines(runtime, req.body?.engines, query);
+            const engines = await parseRequestedEngines(runtime, req.body?.engines, query);
             const searchMode = parseSearchMode(req.body?.searchMode);
             const minResults = parseMinResults(req.body?.minResults, Math.min(limit, runtime.config.defaultMinResults));
             const result = await runtime.services.search.execute({

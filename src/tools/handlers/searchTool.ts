@@ -9,7 +9,7 @@ import {
     getEngineLabel
 } from '../../core/search/searchEngines.js';
 import { pickDefaultEnginesForQuery } from '../../core/search/queryEngineRouting.js';
-import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
+import { isKnownUnreachableOverseasEngine, isOverseasNetworkReachable } from '../../utils/overseasProbe.js';
 import { mergeMultiQueryResults, mergeEngineMetricsAcrossQueries } from '../../core/search/multiQuery.js';
 import { rankSearchResults } from '../../core/search/resultRanking.js';
 import { computeSearchOutcome } from '../../core/search/searchService.js';
@@ -130,10 +130,12 @@ export function registerSearchTool(server: McpServer, runtime: MyWebSearchRuntim
                     : (engines && engines.length > 0 ? 0 : Math.min(effectiveLimit, runtime.config.defaultMinResults));
 
                 const allowed = runtime.config.allowedSearchEngines;
+                const overseasReachable = await isOverseasNetworkReachable();
                 const resolveEnginesForQuery = (queryText: string): SupportedSearchEngine[] => {
                     const picked = pickDefaultEnginesForQuery(queryText, runtime.config.defaultSearchEngine, {
                         en: runtime.config.autoRouteEnEngines,
-                        zh: runtime.config.autoRouteZhEngines
+                        zh: runtime.config.autoRouteZhEngines,
+                        overseasReachable
                     });
                     const reachable = picked.filter((engine) => !isKnownUnreachableOverseasEngine(engine));
                     const routable = reachable.length > 0 ? reachable : picked;

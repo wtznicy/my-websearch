@@ -273,3 +273,27 @@ export async function assertOverseasEngineUsable(engine: OverseasEngine): Promis
         });
     }
 }
+
+/**
+ * 快速判断海外网络是否通畅（用于中英混合技术查询等场景智能切换最优海外引擎组）：
+ * - 配置了代理（显式配置或检测到系统代理 Clash 等）→ 直接判定可达；
+ * - 无代理时通过轻量直连探测确认。
+ */
+export async function isOverseasNetworkReachable(): Promise<boolean> {
+    if (engineShouldUseProxy('brave') || engineShouldUseProxy('duckduckgo')) {
+        return true;
+    }
+    const systemProxy = await detectSystemProxy();
+    if (systemProxy) {
+        return true;
+    }
+    return isDirectlyReachable('brave');
+}
+
+/** 同步判断海外网络可达性（不发阻塞网络请求，基于缓存与已知代理配置） */
+export function isOverseasNetworkKnownReachable(): boolean {
+    if (engineShouldUseProxy('brave') || engineShouldUseProxy('duckduckgo')) {
+        return true;
+    }
+    return !isKnownUnreachableOverseasEngine('brave') && !isKnownUnreachableOverseasEngine('duckduckgo');
+}

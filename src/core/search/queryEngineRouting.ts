@@ -21,7 +21,9 @@ const MIN_CJK_CHARS = 2;
 
 const DEFAULT_EN_ENGINES = ['bing', 'duckduckgo'];
 const DEFAULT_ZH_ENGINES = ['baidu', 'sogou'];
-const DEFAULT_MIXED_TECH_ENGINES = ['bing', 'baidu', 'sogou'];
+export const DEFAULT_MIXED_TECH_DOMESTIC_ENGINES = ['bing', 'baidu', 'sogou'];
+export const DEFAULT_MIXED_TECH_OVERSEAS_ENGINES = ['brave', 'duckduckgo', 'baidu'];
+export const DEFAULT_MIXED_TECH_ENGINES = DEFAULT_MIXED_TECH_DOMESTIC_ENGINES;
 
 function parseEnvEngineList(raw: string | undefined): string[] | undefined {
     if (!raw || !raw.trim()) {
@@ -48,7 +50,12 @@ function isEngineHealthyForPrimaryRouting(engine: string): boolean {
  * 自动将其从主引擎组剔除，并从同语种替补池（英文优先 exa/brave，中文优先 csdn/juejin/bing）补齐，
  * 避免主引擎组持续挂着一个 100% 失败的引擎白白消耗配额与超时预算。
  */
-function applyPrimaryHealthFilter(baseGroup: string[], isChinese: boolean, hasCustomOverride: boolean): string[] {
+function applyPrimaryHealthFilter(
+    baseGroup: string[],
+    isChinese: boolean,
+    hasCustomOverride: boolean,
+    isOverseasReachable?: boolean
+): string[] {
     const healthyBase = baseGroup.filter((engine) => isEngineHealthyForPrimaryRouting(engine));
     if (healthyBase.length === baseGroup.length) {
         return [...baseGroup];
@@ -64,7 +71,9 @@ function applyPrimaryHealthFilter(baseGroup: string[], isChinese: boolean, hasCu
     // 「杭州落户政策」「今天天气」这类查询直接 0 结果（可用性换延迟是亏本买卖）。
     // 垂直引擎只在查询被判定为代码/学术特征时才由路由显式拉入。
     const fallbackPool = isChinese
-        ? ['bing', 'sogou', 'baidu']
+        ? (isOverseasReachable
+            ? ['brave', 'duckduckgo', 'baidu', 'bing', 'sogou']
+            : ['bing', 'sogou', 'baidu'])
         // Yahoo 排第一：DDG 被限流/202 时，Yahoo 只需一次首页 cookie 预热即可稳定返回；
         // Brave 429 后可能进入浏览器优先窗口（每次 4–13s），放在其后并会被下面的稳定降权排到最后。
         : ['yahoo', ...(hasExaKey ? ['exa'] : []), 'brave', 'duckduckgo', 'bing'];
@@ -87,11 +96,18 @@ function applyPrimaryHealthFilter(baseGroup: string[], isChinese: boolean, hasCu
     return result.length > 0 ? result : [...baseGroup];
 }
 
+export interface QueryEngineRoutingOptions {
+    en?: string[];
+    zh?: string[];
+    mixed?: string[];
+    overseasReachable?: boolean;
+}
+
 /** 路由引擎组：auto 模式返回一组引擎（组内并列执行、融合去重） */
 export function pickDefaultEnginesForQuery(
     query: string,
     configuredDefault: string,
-    routing?: { en?: string[]; zh?: string[]; mixed?: string[] }
+    routing?: QueryEngineRoutingOptions
 ): string[] {
     if (configuredDefault !== 'auto') {
         return [configuredDefault];
@@ -107,28 +123,32 @@ export function pickDefaultEnginesForQuery(
 
     const enEngines = customEn ?? DEFAULT_EN_ENGINES;
     const zhEngines = customZh ?? DEFAULT_ZH_ENGINES;
-    const mixedEngines = customMixed ?? DEFAULT_MIXED_TECH_ENGINES;
 
     const normalized = query.trim();
     if (!normalized) {
-        return applyPrimaryHealthFilter(enEngines, false, Boolean(customEn));
+        return applyPrimaryHealthFilter(enEngines, false, Boolean(customEn), routing?.overseasReachable);
     }
 
     const cjkCount = (normalized.match(/[\u4e00-\u9fff]/g) || []).length;
     const isChinese = cjkCount >= MIN_CJK_CHARS;
 
     if (isChinese) {
-        // 中英混合技术查询：包含英文词（3+字符）或常见技术缩写，路由给 ['bing', 'juejin', 'baidu']
+        // 中英混合技术查询：包含英文词（3+字符）或常见技术缩写
         const hasTechTerms = /[a-zA-Z]{3,}/.test(normalized) || /\b(js|ts|go|c\+\+|ui|ai|os|db|k8s|ci|cd)\b/i.test(normalized);
         if (hasTechTerms) {
-            return applyPrimaryHealthFilter(mixedEngines, true, Boolean(customMixed));
+            const isOverseas = routing?.overseasReachable ?? false;
+            const defaultMixedGroup = isOverseas
+                ? (parseEnvEngineList(getOptionalString('AUTO_ROUTE_MIXED_OVERSEAS_ENGINES')) ?? DEFAULT_MIXED_TECH_OVERSEAS_ENGINES)
+                : DEFAULT_MIXED_TECH_DOMESTIC_ENGINES;
+            const targetMixedEngines = customMixed ?? defaultMixedGroup;
+            return applyPrimaryHealthFilter(targetMixedEngines, true, Boolean(customMixed), isOverseas);
         }
         // 纯中文通用查询：路由给 ['baidu', 'sogou']
-        return applyPrimaryHealthFilter(zhEngines, true, Boolean(customZh));
+        return applyPrimaryHealthFilter(zhEngines, true, Boolean(customZh), routing?.overseasReachable);
     }
 
     // 纯英文/符号查询：路由给 ['bing', 'duckduckgo']
-    return applyPrimaryHealthFilter(enEngines, false, Boolean(customEn));
+    return applyPrimaryHealthFilter(enEngines, false, Boolean(customEn), routing?.overseasReachable);
 }
 
 /** 兼容单引擎调用方（返回路由组的首个引擎） */

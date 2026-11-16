@@ -86,6 +86,13 @@ describe('pickDefaultEngineForQuery', () => {
             .toEqual(['bing', 'baidu', 'sogou']);
     });
 
+    it('should route mixed Chinese-English technical queries to [brave, duckduckgo, baidu] when overseas is reachable', () => {
+        expect(pickDefaultEnginesForQuery('MySQL 9.7的发布时间和更新内容', 'auto', { overseasReachable: true }))
+            .toEqual(['brave', 'duckduckgo', 'baidu']);
+        expect(pickDefaultEnginesForQuery('Next.js 15 Hydration failed 怎么解决', 'auto', { overseasReachable: true }))
+            .toEqual(['brave', 'duckduckgo', 'baidu']);
+    });
+
     it('should route pure Chinese general queries to [baidu, sogou]', () => {
         expect(pickDefaultEnginesForQuery('量化宽松政策是什么', 'auto'))
             .toEqual(['baidu', 'sogou']);

@@ -1,6 +1,6 @@
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
 import { pickDefaultEnginesForQuery } from '../../core/search/queryEngineRouting.js';
-import { isKnownUnreachableOverseasEngine } from '../../utils/overseasProbe.js';
+import { isKnownUnreachableOverseasEngine, isOverseasNetworkKnownReachable } from '../../utils/overseasProbe.js';
 import { MyWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { AppConfig } from '../../config.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../protocol.js';
@@ -191,9 +191,11 @@ export function parseSearchArgs(argv: string[], runtime: MyWebSearchRuntime): Pa
     }
 
     const resolveDefaultEngines = (queryText: string): SupportedSearchEngine[] => {
+        const overseasReachable = isOverseasNetworkKnownReachable();
         const picked = pickDefaultEnginesForQuery(queryText, runtime.config.defaultSearchEngine, {
             en: runtime.config.autoRouteEnEngines,
-            zh: runtime.config.autoRouteZhEngines
+            zh: runtime.config.autoRouteZhEngines,
+            overseasReachable
         });
         const reachable = picked.filter((engine) => !isKnownUnreachableOverseasEngine(engine));
         const routable = reachable.length > 0 ? reachable : picked;
