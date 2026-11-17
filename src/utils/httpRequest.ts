@@ -370,7 +370,7 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
     const effectiveProxyUrl = forceDirect
         ? undefined
         : (engine !== undefined
-            ? (engineShouldUseProxy(engine) ? getProxyUrl() : getSystemProxyFallbackUrl(engine))
+            ? ((engineShouldUseProxy(engine) ? getProxyUrl() : undefined) ?? getSystemProxyFallbackUrl(engine))
             : (getProxyUrl() ?? getSystemProxyFallbackUrl(undefined)));
     if (effectiveProxyUrl) {
         const proxyAgent = getProxyAgent(effectiveProxyUrl, allowInsecureTls);
