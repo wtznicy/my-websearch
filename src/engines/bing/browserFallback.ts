@@ -76,9 +76,11 @@ export async function waitForBingSearchInputValue(page: PlaywrightPageLike, expe
                 && element.getClientRects().length > 0;
         };
 
+        const normalize = (s: string) => s.trim().replace(/["'“”‘’]/g, '').replace(/\s+/g, ' ').toLowerCase();
+
         return selectors.some((selector) => {
             const input = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | null;
-            return input !== null && isVisible(input) && input.value === value;
+            return input !== null && isVisible(input) && normalize(input.value) === normalize(value);
         });
     }, { selectors: SEARCH_INPUT_SELECTORS, value: expectedValue }, { timeout: getBingUiTimeoutMs() });
 }
@@ -117,7 +119,11 @@ export async function waitForAnyDeterministicSignal(signals: Array<Promise<unkno
 }
 
 export function normalizeBingQueryForUrl(query: string): string {
-    return query.trim().replace(/\s+/g, ' ').toLowerCase();
+    return query
+        .trim()
+        .replace(/["'“”‘’]/g, '')
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
 }
 
 export function doesBingUrlMatchQuery(url: string, query: string): boolean {
@@ -235,7 +241,36 @@ export function isBingUrl(url: string): boolean {
     }
 }
 
+export function getBingSearchUrl(query: string): string {
+    const homeUrl = getBingHomeUrl();
+    try {
+        const url = new URL(homeUrl);
+        url.pathname = '/search';
+        url.searchParams.set('q', query);
+        return url.toString();
+    } catch {
+        return `https://cn.bing.com/search?q=${encodeURIComponent(query)}&mkt=zh-CN`;
+    }
+}
+
 export async function openBingAndSearch(page: PlaywrightPageLike, query: string): Promise<void> {
+    const searchUrl = getBingSearchUrl(query);
+    try {
+        // 策略 A：直达结果页（Direct Navigation），跳过首页输入框查找、打字输入、回车提交等多步等待
+        await page.goto(searchUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: Math.min(config.playwrightNavigationTimeoutMs, 8000)
+        });
+        await waitForBingResultsReady(page);
+        return;
+    } catch (directNavError) {
+        console.warn(
+            '[bing] Direct navigation to search URL failed, falling back to interactive input:',
+            directNavError instanceof Error ? directNavError.message : String(directNavError)
+        );
+    }
+
+    // 交互式输入搜索（第二重兜底）
     const homeUrl = getBingHomeUrl();
     const currentUrl = page.url();
     if (!isBingUrl(currentUrl)) {
