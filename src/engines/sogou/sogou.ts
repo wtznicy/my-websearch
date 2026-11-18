@@ -5,10 +5,8 @@ import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { normalizeText } from '../../utils/text.js';
 import { sleep } from '../../utils/timing.js';
-import { mapWithConcurrencyBudget } from '../../utils/concurrency.js';
 import { paginateSearch } from '../../utils/pagination.js';
 import { AppError, isAppError, markNonRetryable } from '../../core/errors.js';
-import { extractMetaOrJsRedirect } from '../../utils/redirectResolver.js';
 import { acquirePooledPlaywrightPage, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
 import { prepareStealthPage } from '../../utils/browserStealth.js';
 import { getEffectiveBingPlaywrightHeadless, buildBrowserLaunchArgs, shouldUseHiddenHeadedBingBrowser } from '../bing/launchArgs.js';
@@ -16,10 +14,6 @@ import { getString } from '../../config/env.js';
 
 const SOGOU_SEARCH_URL = 'https://www.sogou.com/web';
 const SOGOU_PAGE_SIZE = 10;
-/** 跳转链解析总预算与并发（见 searchSogouPage） */
-const SOGOU_LINK_RESOLVE_BUDGET_MS = 2000;
-// 4（而非 6）：多引擎并发时保留连接预算，避免与同批次其他引擎的解析争抢导致整体超时
-const SOGOU_LINK_RESOLVE_CONCURRENCY = 4;
 
 /** 搜狗移动端接口（WAP 集群）：风控规则远宽松于 PC 端——实测同一被标记的代理 IP 上
  *  PC 端 100% 验证码拦截，移动端 200 且返回明文链接（a.resultLink 的 url= 参数），
@@ -90,47 +84,6 @@ function extractSource(url: string, sourceText: string): string {
     } catch {
         return '';
     }
-}
-
-/**
- * 跟随 sogou.com/link 跳转链拿到真实目标 URL。
- * 搜狗把每个结果包成 /link?url=<加密> 的跳转链接，url 参数是加密的无法直接解出明文；
- * 且跳转不是 HTTP 3xx，而是页面内 JS 完成的（HTTP 200 + window.location.replace，
- * noscript 下是 meta refresh）。这里抓 body 里的跳转目标；失败时保留原链接，不影响整页结果。
- */
-async function resolveSogouLinkUrl(linkUrl: string, signal?: AbortSignal): Promise<string> {
-    if (signal?.aborted) {
-        return linkUrl;
-    }
-    try {
-        const parsed = new URL(linkUrl);
-        if (!parsed.pathname.startsWith('/link')) {
-            return linkUrl;
-        }
-    } catch {
-        return linkUrl;
-    }
-
-    try {
-        const response = await sogouHttpGet(linkUrl, buildAxiosRequestOptions({ engine: 'sogou',
-            trustedStaticHost: true,
-            headers: COMMON_HEADERS,
-            timeout: 4000,
-            signal,
-            validateStatus: (status) => status >= 200 && status < 400
-        }));
-        const html = String(response.data || '');
-        const target = extractMetaOrJsRedirect(html);
-        if (target) {
-            const targetParsed = new URL(target);
-            if (!isAllowedSogouRedirectUrl(targetParsed)) {
-                return target;
-            }
-        }
-    } catch {
-        // 解析失败保留原链接
-    }
-    return linkUrl;
 }
 
 function isAllowedSogouRedirectUrl(url: URL): boolean {
@@ -438,28 +391,7 @@ async function searchSogouPage(query: string, page: number, signal?: AbortSignal
         }
     }
 
-    return await resolveSogouResultsUrls(parsed, signal);
-}
-
-async function resolveSogouResultsUrls(parsed: SearchResult[], signal?: AbortSignal): Promise<SearchResult[]> {
-    // 跳转链并发解析成真实 URL；source 跟随真实 URL 重新提取。
-    // 总预算 3s：预算耗尽后剩余结果保留原跳转链接（仍可用），避免 N+1 请求
-    // 把引擎整体耗时推过单引擎超时上限（实测 sogou 8.4s 被掐断）
-    const resolved = await mapWithConcurrencyBudget(
-        parsed,
-        SOGOU_LINK_RESOLVE_CONCURRENCY,
-        async (result) => ({
-            ...result,
-            url: await resolveSogouLinkUrl(result.url, signal),
-            source: result.source
-        }),
-        SOGOU_LINK_RESOLVE_BUDGET_MS,
-        (result) => result
-    );
-    return resolved.map((result) => ({
-        ...result,
-        source: extractSource(result.url, result.source)
-    }));
+    return parsed;
 }
 
 /** PC 端被反爬拦截后的"暂停期"：期间直接走移动端，避免每次白等 PC 端的失败路径 */
@@ -511,9 +443,8 @@ export async function searchSogouWithBrowser(query: string, limit: number, signa
                 console.warn('Sogou CDP page contained captcha, fast failing to avoid hang');
                 return [];
             }
-            let results = parseSogouSearchResults(html);
-            results = await resolveSogouResultsUrls(results.slice(0, limit), signal);
-            return results;
+            const results = parseSogouSearchResults(html);
+            return results.slice(0, limit);
         } finally {
             await releasePage();
         }
