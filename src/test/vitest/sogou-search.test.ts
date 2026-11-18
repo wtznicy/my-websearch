@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
-import { __setSogouHttpGetForTests, parseSogouSearchResults, searchSogou } from '../../engines/sogou/sogou.js';
+import { __setSogouHttpGetForTests, parseSogouSearchResults, resetSogouState, searchSogou } from '../../engines/sogou/sogou.js';
 
 function makeResponse(status: number, headers: Record<string, string | string[]>, data: string): AxiosResponse {
     return {
@@ -14,6 +14,7 @@ function makeResponse(status: number, headers: Record<string, string | string[]>
 
 afterEach(() => {
     __setSogouHttpGetForTests();
+    resetSogouState();
 });
 
 describe('Sogou search', () => {
@@ -87,6 +88,6 @@ describe('Sogou search', () => {
         expect(results[0].title).toBe('Beijing');
         expect(requestedUrls).toHaveLength(2);
         expect(requestedUrls[0].startsWith('https://www.sogou.com/web?')).toBe(true);
-        expect(requestedCookies[1]).toBe('SNUID=test-cookie');
+        expect(requestedCookies[1]).toContain('SNUID=test-cookie');
     });
 });

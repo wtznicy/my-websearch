@@ -10,6 +10,10 @@ import { impersonateHttpGet } from '../../utils/impersonateRequest.js';
 import { paginateSearch } from '../../utils/pagination.js';
 import { AppError, isAppError, markNonRetryable } from '../../core/errors.js';
 import { extractMetaOrJsRedirect } from '../../utils/redirectResolver.js';
+import { acquirePooledPlaywrightPage, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
+import { prepareStealthPage } from '../../utils/browserStealth.js';
+import { getEffectiveBingPlaywrightHeadless, buildBrowserLaunchArgs, shouldUseHiddenHeadedBingBrowser } from '../bing/launchArgs.js';
+import { getString } from '../../config/env.js';
 
 const SOGOU_SEARCH_URL = 'https://www.sogou.com/web';
 const SOGOU_PAGE_SIZE = 10;
@@ -170,9 +174,34 @@ function mergeSetCookie(cookieHeader: string, setCookie: string | string[] | und
     return Array.from(cookieMap.values()).join('; ');
 }
 
+let cachedSogouCookieHeader = '';
+let lastSogouRequestTime = 0;
+const SOGOU_MIN_REQUEST_INTERVAL_MS = 1200;
+
+function getSogouSessionCookie(): string {
+    if (!cachedSogouCookieHeader || !/SUV=/i.test(cachedSogouCookieHeader)) {
+        const suv = (Date.now() * 1000 + Math.round(Math.random() * 1000)).toString();
+        cachedSogouCookieHeader = mergeSetCookie(cachedSogouCookieHeader, `SUV=${suv}`);
+    }
+    return cachedSogouCookieHeader;
+}
+
+async function throttleSogouRequest(): Promise<void> {
+    if (getString('NODE_ENV', '') === 'test') {
+        return;
+    }
+    const now = Date.now();
+    const elapsed = now - lastSogouRequestTime;
+    if (elapsed < SOGOU_MIN_REQUEST_INTERVAL_MS) {
+        await sleep(SOGOU_MIN_REQUEST_INTERVAL_MS - elapsed);
+    }
+    lastSogouRequestTime = Date.now();
+}
+
 async function fetchSogouHtml(initialUrl: string, signal?: AbortSignal): Promise<string> {
+    await throttleSogouRequest();
     let currentUrl = initialUrl;
-    let cookieHeader = '';
+    let cookieHeader = getSogouSessionCookie();
 
     for (let redirects = 0; redirects <= 5; redirects += 1) {
         if (signal?.aborted) {
@@ -191,7 +220,8 @@ async function fetchSogouHtml(initialUrl: string, signal?: AbortSignal): Promise
             validateStatus: (status) => status >= 200 && status < 400
         }));
 
-        cookieHeader = mergeSetCookie(cookieHeader, response.headers?.['set-cookie']);
+        cachedSogouCookieHeader = mergeSetCookie(cachedSogouCookieHeader, response.headers?.['set-cookie']);
+        cookieHeader = cachedSogouCookieHeader;
 
         if (response.status >= 300 && response.status < 400) {
             const location = response.headers?.location;
@@ -411,6 +441,10 @@ async function searchSogouPage(query: string, page: number, signal?: AbortSignal
         }
     }
 
+    return await resolveSogouResultsUrls(parsed, signal);
+}
+
+async function resolveSogouResultsUrls(parsed: SearchResult[], signal?: AbortSignal): Promise<SearchResult[]> {
     // 跳转链并发解析成真实 URL；source 跟随真实 URL 重新提取。
     // 总预算 3s：预算耗尽后剩余结果保留原跳转链接（仍可用），避免 N+1 请求
     // 把引擎整体耗时推过单引擎超时上限（实测 sogou 8.4s 被掐断）
@@ -437,6 +471,50 @@ let sogouPcBlockedUntil = 0;
 
 export function resetSogouState(): void {
     sogouPcBlockedUntil = 0;
+    cachedSogouCookieHeader = '';
+    lastSogouRequestTime = 0;
+}
+
+export async function searchSogouWithBrowser(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
+    if (signal?.aborted) {
+        return [];
+    }
+    const playwright = await loadPlaywrightClient();
+    if (!playwright) {
+        return [];
+    }
+
+    const effectiveHeadless = getEffectiveBingPlaywrightHeadless();
+    const session = await openPlaywrightBrowser(
+        effectiveHeadless,
+        buildBrowserLaunchArgs(shouldUseHiddenHeadedBingBrowser()),
+        { hideWindow: shouldUseHiddenHeadedBingBrowser() }
+    );
+
+    try {
+        const { page, releasePage } = await acquirePooledPlaywrightPage(session.browser, {
+            poolKey: 'sogou-search',
+            contextOptions: { userAgent: DEFAULT_DESKTOP_UA },
+            preparePage: prepareStealthPage
+        });
+
+        try {
+            const url = `${SOGOU_SEARCH_URL}?query=${encodeURIComponent(query)}&ie=utf8`;
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
+            await page.waitForSelector('.vrwrap, .rb, #main', { timeout: 8000 }).catch(() => undefined);
+            const html = await page.content();
+            let results = parseSogouSearchResults(html);
+            results = await resolveSogouResultsUrls(results.slice(0, limit), signal);
+            return results;
+        } finally {
+            await releasePage();
+        }
+    } catch (error) {
+        console.warn('Sogou CDP browser fallback failed:', error instanceof Error ? error.message : String(error));
+        return [];
+    } finally {
+        await session.release();
+    }
 }
 
 /**
@@ -488,28 +566,51 @@ export async function searchSogou(query: string, limit: number, options?: { sign
         console.warn('Sogou mobile endpoint failed, will attempt PC fallback:', error instanceof Error ? error.message : String(error));
     }
 
-    // ② PC 端兜底（仅在移动端完全无结果且 PC 端未处于拦截暂停期时调用）
-    if (allResults.length === 0 && Date.now() >= sogouPcBlockedUntil && !signal?.aborted) {
-        try {
-            const needed = limit - allResults.length;
-            const pcResults = await paginateSearch({
-                limit: needed,
-                initialPage: 1,
-                pageStep: 1,
-                signal,
-                fetchPage: async (page) => {
-                    return await searchSogouPage(query, page, signal);
-                },
-                dedupKey: (result) => result.url
-            });
-            merge(pcResults);
-        } catch (error) {
-            lastError = lastError ?? error;
-            const message = error instanceof Error ? error.message : String(error);
-            if (/anti-bot|verification|challenge|403|访问过于频繁|验证码/i.test(message)) {
-                sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
+    // ② PC 端兜底（在移动端完全无结果时调用，优先 HTTP，遇反爬无缝接入 CDP 浏览器兜底）
+    if (allResults.length === 0 && !signal?.aborted) {
+        if (Date.now() < sogouPcBlockedUntil) {
+            // HTTP 处于反爬暂停期，直接交由常驻 CDP 浏览器快速兜底
+            try {
+                const browserResults = await searchSogouWithBrowser(query, limit, signal);
+                if (browserResults.length > 0) {
+                    merge(browserResults);
+                    lastError = undefined;
+                }
+            } catch (browserError) {
+                lastError = lastError ?? browserError;
             }
-            console.warn('Sogou PC endpoint failed:', message);
+        } else {
+            try {
+                const needed = limit - allResults.length;
+                const pcResults = await paginateSearch({
+                    limit: needed,
+                    initialPage: 1,
+                    pageStep: 1,
+                    signal,
+                    fetchPage: async (page) => {
+                        return await searchSogouPage(query, page, signal);
+                    },
+                    dedupKey: (result) => result.url
+                });
+                merge(pcResults);
+            } catch (error) {
+                lastError = lastError ?? error;
+                const message = error instanceof Error ? error.message : String(error);
+                if (/anti-bot|verification|challenge|403|访问过于频繁|验证码/i.test(message)) {
+                    sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
+                    console.warn('Sogou PC HTTP encountered challenge, attempting CDP browser fallback...');
+                    try {
+                        const browserResults = await searchSogouWithBrowser(query, limit - allResults.length, signal);
+                        if (browserResults.length > 0) {
+                            merge(browserResults);
+                            lastError = undefined;
+                        }
+                    } catch {
+                        // 忽略浏览器错误
+                    }
+                }
+                console.warn('Sogou PC endpoint failed:', message);
+            }
         }
     }
 
