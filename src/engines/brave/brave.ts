@@ -400,7 +400,23 @@ export async function searchBraveWithBrowser(
     const { prepareStealthPage } = await import('../../utils/browserStealth.js');
     const { selectDeviceProfile } = await import('../../utils/browser/deviceProfile.js');
 
-    const session = await openPlaywrightBrowser(true);
+    // 针对 Brave 网页端 429 降级时的防爬机制特化（严格仅作用于 Brave 引擎，绝不影响其他引擎或全局无头设置）：
+    // 实测证明：当 Brave 遭遇 429 时，纯无头浏览器（--headless=new）会被识别出无头特征并升级为不可解的复杂滑块/Turnstile；
+    // 只有真实的有头浏览器（Windows 下移出可视屏幕的隐藏有头）Brave 才会仅下发轻量级的客户端 PoW「验证」按钮。
+    const isWindows = process.platform === 'win32';
+    const braveLaunchArgs = isWindows ? [
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--window-position=-32000,-32000',
+        '--window-size=1,1',
+        '--disable-blink-features=AutomationControlled'
+    ] : [
+        '--disable-blink-features=AutomationControlled',
+        '--window-position=-32000,-32000',
+        '--window-size=1,1'
+    ];
+
+    const session = await openPlaywrightBrowser(false, braveLaunchArgs, { hideWindow: true });
     try {
         const b = session.browser as {
             newPage?: () => Promise<BrowserPage>;
@@ -469,8 +485,8 @@ export async function searchBraveWithBrowser(
                     }
                     const buttons = Array.from(document.querySelectorAll('button'));
                     const btn = buttons.find((button) => {
-                        const text = button.innerText || '';
-                        return text.includes('验证') || text.includes('Verify');
+                        const text = (button.innerText || button.textContent || '').trim();
+                        return text.includes('验证') || text.includes('Verify') || text.includes('challenge');
                     });
                     if (btn) {
                         btn.click();
