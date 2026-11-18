@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractYahooResultUrl, parseYahooHtmlResults } from '../../engines/yahoo/yahoo.js';
+import { extractYahooResultUrl, parseYahooHtmlResults, __isProxyOrNetworkFatalErrorForTests } from '../../engines/yahoo/yahoo.js';
 
 /**
  * 回归：Yahoo 的结果链接是 r.search.yahoo.com 的 RU= 重定向，
@@ -36,5 +36,22 @@ describe('parseYahooHtmlResults', () => {
             description: 'A useful snippet.',
             engine: 'yahoo'
         });
+    });
+});
+
+describe('Yahoo fatal proxy/network error detection', () => {
+    it('detects unexpected EOF and connection reset errors as fatal proxy errors', () => {
+        expect(__isProxyOrNetworkFatalErrorForTests(new Error('client error (Connect): unexpected EOF'))).toBe(true);
+        expect(__isProxyOrNetworkFatalErrorForTests(new Error('Client network socket disconnected before secure TLS connection was established'))).toBe(true);
+        expect(__isProxyOrNetworkFatalErrorForTests(new Error('read ECONNRESET'))).toBe(true);
+        expect(__isProxyOrNetworkFatalErrorForTests(new Error('socket hang up'))).toBe(true);
+        expect(__isProxyOrNetworkFatalErrorForTests(new Error('operation timed out'))).toBe(true);
+        expect(__isProxyOrNetworkFatalErrorForTests(new Error('schannel: failed to receive handshake, SSL/TLS connection failed'))).toBe(true);
+    });
+
+    it('does not classify standard HTTP errors or parsing errors as fatal network errors', () => {
+        expect(__isProxyOrNetworkFatalErrorForTests(new Error('HTTP 404 Not Found'))).toBe(false);
+        expect(__isProxyOrNetworkFatalErrorForTests(new Error('Invalid HTML received'))).toBe(false);
+        expect(__isProxyOrNetworkFatalErrorForTests(null)).toBe(false);
     });
 });

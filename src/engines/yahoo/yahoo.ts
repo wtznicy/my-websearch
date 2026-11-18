@@ -8,11 +8,24 @@ import { BROWSER_USER_AGENT } from '../../utils/constants.js';
 import { AppError } from '../../core/errors.js';
 import { assertOverseasEngineUsable } from '../../utils/overseasProbe.js';
 import { createWreqSession, loadWreqModule } from '../bing/impersonate.js';
+import { isTlsOrWafResetError } from '../../utils/domesticDirectNetwork.js';
 
 const YAHOO_HOME = 'https://search.yahoo.com/';
 const YAHOO_SEARCH = 'https://search.yahoo.com/search';
+const YAHOO_HOME_TIMEOUT_MS = 3500;
+const YAHOO_SEARCH_TIMEOUT_MS = 8000;
 const PAGE_SIZE = 10;
 const MAX_PAGES = 3;
+
+function isProxyOrNetworkFatalError(error: unknown): boolean {
+    if (isTlsOrWafResetError(error)) {
+        return true;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return /unexpected EOF|socket hang up|ECONNRESET|client error \(Connect\)|handshake.*failed|operation timed out/i.test(message);
+}
+
+export const __isProxyOrNetworkFatalErrorForTests = isProxyOrNetworkFatalError;
 
 const YAHOO_HEADERS: Record<string, string> = {
     'User-Agent': BROWSER_USER_AGENT,
@@ -136,8 +149,18 @@ async function fetchYahooWithWreq(query: string, limit: number, signal?: AbortSi
         const proxy = explicitProxy ?? (await detectSystemProxy()) ?? undefined;
         const session = await createWreqSession(mod, 'yahoo', proxy ?? undefined);
         try {
-            const home = await session.fetch(YAHOO_HOME, { timeout: 10000, headers: YAHOO_HEADERS });
+            const home = await session.fetch(YAHOO_HOME, { timeout: YAHOO_HOME_TIMEOUT_MS, headers: YAHOO_HEADERS });
             await home.text();
+            if (home.status === 307) {
+                throw new AppError({
+                    code: 'overseas_unreachable',
+                    retryable: false,
+                    status: 307,
+                    engine: 'yahoo',
+                    message: 'Yahoo homepage returned HTTP 307 (EU GDPR consent wall).',
+                    hint: 'Yahoo redirected to EU consent wall (guce.yahoo.com): switch your proxy node to a non-EU region (e.g. US, JP, SG).'
+                });
+            }
             if (home.status !== 200) {
                 return null;
             }
@@ -147,9 +170,19 @@ async function fetchYahooWithWreq(query: string, limit: number, signal?: AbortSi
             const pages = Math.max(1, Math.min(MAX_PAGES, Math.ceil(limit / PAGE_SIZE)));
             for (let page = 0; page < pages && results.length < limit; page += 1) {
                 const response = await session.fetch(buildSearchUrl(query, page, timeRange), {
-                    timeout: 12000,
+                    timeout: YAHOO_SEARCH_TIMEOUT_MS,
                     headers: YAHOO_HEADERS
                 });
+                if (response.status === 307) {
+                    throw new AppError({
+                        code: 'overseas_unreachable',
+                        retryable: false,
+                        status: 307,
+                        engine: 'yahoo',
+                        message: 'Yahoo search returned HTTP 307 (EU GDPR consent wall).',
+                        hint: 'Yahoo redirected to EU consent wall (guce.yahoo.com): switch your proxy node to a non-EU region (e.g. US, JP, SG).'
+                    });
+                }
                 if (response.status !== 200) {
                     break;
                 }
@@ -165,6 +198,20 @@ async function fetchYahooWithWreq(query: string, limit: number, signal?: AbortSi
             await session.close();
         }
     } catch (error) {
+        if (error instanceof AppError) {
+            throw error;
+        }
+        if (isProxyOrNetworkFatalError(error)) {
+            console.warn('[yahoo] wreq encountered proxy/network tunnel failure, fast-failing to trigger engine cascade:', error instanceof Error ? error.message : String(error));
+            throw new AppError({
+                code: 'overseas_unreachable',
+                retryable: true,
+                status: 503,
+                engine: 'yahoo',
+                message: `Yahoo proxy tunnel error: ${error instanceof Error ? error.message : String(error)}`,
+                hint: 'Yahoo is unreachable via current proxy node: verify proxy settings or switch to a stable node.'
+            });
+        }
         console.warn('[yahoo] wreq session failed, falling back to axios:', error instanceof Error ? error.message : String(error));
         return null;
     }
@@ -172,12 +219,12 @@ async function fetchYahooWithWreq(query: string, limit: number, signal?: AbortSi
 
 async function fetchYahooWithAxios(query: string, limit: number, signal?: AbortSignal, timeRange?: 'day' | 'week' | 'month' | 'year'): Promise<SearchResult[]> {
     const jar = new Map<string, string>();
-    const request = async (url: string): Promise<{ status: number; data: string }> => {
+    const request = async (url: string, timeoutMs: number = YAHOO_SEARCH_TIMEOUT_MS): Promise<{ status: number; data: string }> => {
         const response = await axios.get<string>(url, buildAxiosRequestOptions({
             engine: 'yahoo',
             trustedStaticHost: true,
             signal,
-            timeout: 12000,
+            timeout: timeoutMs,
             responseType: 'text',
             validateStatus: () => true,
             headers: {
@@ -190,15 +237,34 @@ async function fetchYahooWithAxios(query: string, limit: number, signal?: AbortS
     };
 
     // Yahoo 对无 cookie 的搜索请求直接返回 500；先访问首页取得 A1/A3 等 cookie。
-    const home = await request(YAHOO_HOME);
-    if (home.status !== 200) {
+    // 预热超时限制为 3.5s，避免在不可达代理上空等
+    let home: { status: number; data: string };
+    try {
+        home = await request(YAHOO_HOME, YAHOO_HOME_TIMEOUT_MS);
+    } catch (homeError) {
         throw new AppError({
             code: 'overseas_unreachable',
             retryable: true,
             status: 503,
             engine: 'yahoo',
-            message: `Yahoo homepage returned HTTP ${home.status}; cannot warm cookies needed by the search endpoint.`,
+            message: `Yahoo homepage request failed: ${homeError instanceof Error ? homeError.message : String(homeError)}`,
             hint: 'Yahoo is unreachable directly from CN: enable the system proxy or PROXY_URL, and include "yahoo" in an explicit proxy.engines list.'
+        });
+    }
+
+    if (home.status !== 200) {
+        const isConsentWall = home.status === 307;
+        throw new AppError({
+            code: 'overseas_unreachable',
+            retryable: !isConsentWall,
+            status: isConsentWall ? 307 : 503,
+            engine: 'yahoo',
+            message: isConsentWall
+                ? 'Yahoo homepage returned HTTP 307 (EU GDPR consent wall).'
+                : `Yahoo homepage returned HTTP ${home.status}; cannot warm cookies needed by the search endpoint.`,
+            hint: isConsentWall
+                ? 'Yahoo redirected to EU consent wall (guce.yahoo.com): switch your proxy node to a non-EU region (e.g. US, JP, SG).'
+                : 'Yahoo is unreachable directly from CN: enable the system proxy or PROXY_URL, and include "yahoo" in an explicit proxy.engines list.'
         });
     }
 
@@ -206,15 +272,20 @@ async function fetchYahooWithAxios(query: string, limit: number, signal?: AbortS
     const results: SearchResult[] = [];
     const pages = Math.max(1, Math.min(MAX_PAGES, Math.ceil(limit / PAGE_SIZE)));
     for (let page = 0; page < pages && results.length < limit; page += 1) {
-        const response = await request(buildSearchUrl(query, page, timeRange));
+        const response = await request(buildSearchUrl(query, page, timeRange), YAHOO_SEARCH_TIMEOUT_MS);
         if (response.status !== 200) {
+            const isConsentWall = response.status === 307;
             throw new AppError({
                 code: response.status === 429 || response.status === 403 ? 'bot_challenge' : 'overseas_unreachable',
-                retryable: false,
-                status: response.status === 429 ? 429 : 503,
+                retryable: !isConsentWall,
+                status: response.status,
                 engine: 'yahoo',
-                message: `Yahoo search returned HTTP ${response.status}.`,
-                hint: 'Yahoo needs a proxy in CN; if you configured proxy.engines explicitly, add "yahoo" to it. Otherwise check the proxy and retry.'
+                message: isConsentWall
+                    ? 'Yahoo search returned HTTP 307 (EU GDPR consent wall).'
+                    : `Yahoo search returned HTTP ${response.status}.`,
+                hint: isConsentWall
+                    ? 'Yahoo redirected to EU consent wall (guce.yahoo.com): switch your proxy node to a non-EU region (e.g. US, JP, SG).'
+                    : 'Yahoo needs a proxy in CN; if you configured proxy.engines explicitly, add "yahoo" to it. Otherwise check the proxy and retry.'
             });
         }
         const parsed = parseYahooHtmlResults(response.data, limit - results.length, seenUrls);
