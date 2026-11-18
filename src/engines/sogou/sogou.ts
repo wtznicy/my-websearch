@@ -500,9 +500,20 @@ export async function searchSogouWithBrowser(query: string, limit: number, signa
 
         try {
             const url = `${SOGOU_SEARCH_URL}?query=${encodeURIComponent(query)}&ie=utf8`;
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
-            await page.waitForSelector('.vrwrap, .rb, #main', { timeout: 8000 }).catch(() => undefined);
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 8000 });
+            const currentUrl = page.url();
+            if (/captcha|antispider/i.test(currentUrl)) {
+                sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
+                console.warn('Sogou CDP browser redirected to captcha page, fast failing to avoid hang');
+                return [];
+            }
+            await page.waitForSelector('.vrwrap, .rb, #main', { timeout: 4000 }).catch(() => undefined);
             const html = await page.content();
+            if (/antispider|请输入验证码|验证码|访问过于频繁/i.test(html)) {
+                sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
+                console.warn('Sogou CDP page contained captcha, fast failing to avoid hang');
+                return [];
+            }
             let results = parseSogouSearchResults(html);
             results = await resolveSogouResultsUrls(results.slice(0, limit), signal);
             return results;
@@ -566,51 +577,43 @@ export async function searchSogou(query: string, limit: number, options?: { sign
         console.warn('Sogou mobile endpoint failed, will attempt PC fallback:', error instanceof Error ? error.message : String(error));
     }
 
-    // ② PC 端兜底（在移动端完全无结果时调用，优先 HTTP，遇反爬无缝接入 CDP 浏览器兜底）
+    // ② PC 端兜底（仅在移动端完全无结果且当前未处于全站反爬暂停期时调用）
     if (allResults.length === 0 && !signal?.aborted) {
         if (Date.now() < sogouPcBlockedUntil) {
-            // HTTP 处于反爬暂停期，直接交由常驻 CDP 浏览器快速兜底
-            try {
-                const browserResults = await searchSogouWithBrowser(query, limit, signal);
-                if (browserResults.length > 0) {
-                    merge(browserResults);
-                    lastError = undefined;
-                }
-            } catch (browserError) {
-                lastError = lastError ?? browserError;
-            }
-        } else {
-            try {
-                const needed = limit - allResults.length;
-                const pcResults = await paginateSearch({
-                    limit: needed,
-                    initialPage: 1,
-                    pageStep: 1,
-                    signal,
-                    fetchPage: async (page) => {
-                        return await searchSogouPage(query, page, signal);
-                    },
-                    dedupKey: (result) => result.url
-                });
-                merge(pcResults);
-            } catch (error) {
-                lastError = lastError ?? error;
-                const message = error instanceof Error ? error.message : String(error);
-                if (/anti-bot|verification|challenge|403|访问过于频繁|验证码/i.test(message)) {
-                    sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
-                    console.warn('Sogou PC HTTP encountered challenge, attempting CDP browser fallback...');
-                    try {
-                        const browserResults = await searchSogouWithBrowser(query, limit - allResults.length, signal);
-                        if (browserResults.length > 0) {
-                            merge(browserResults);
-                            lastError = undefined;
-                        }
-                    } catch {
-                        // 忽略浏览器错误
+            // 当前 IP 已被搜狗全站拉黑，快速避让，避免徒劳拉起浏览器卡等
+            return allResults;
+        }
+
+        try {
+            const needed = limit - allResults.length;
+            const pcResults = await paginateSearch({
+                limit: needed,
+                initialPage: 1,
+                pageStep: 1,
+                signal,
+                fetchPage: async (page) => {
+                    return await searchSogouPage(query, page, signal);
+                },
+                dedupKey: (result) => result.url
+            });
+            merge(pcResults);
+        } catch (error) {
+            lastError = lastError ?? error;
+            const message = error instanceof Error ? error.message : String(error);
+            if (/anti-bot|verification|challenge|403|访问过于频繁|验证码/i.test(message)) {
+                sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
+                console.warn('Sogou PC HTTP encountered challenge, attempting CDP browser fallback...');
+                try {
+                    const browserResults = await searchSogouWithBrowser(query, limit - allResults.length, signal);
+                    if (browserResults.length > 0) {
+                        merge(browserResults);
+                        lastError = undefined;
                     }
+                } catch {
+                    // 忽略浏览器错误
                 }
-                console.warn('Sogou PC endpoint failed:', message);
             }
+            console.warn('Sogou PC endpoint failed:', message);
         }
     }
 
