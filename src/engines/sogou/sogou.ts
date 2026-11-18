@@ -6,7 +6,6 @@ import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { normalizeText } from '../../utils/text.js';
 import { sleep } from '../../utils/timing.js';
 import { mapWithConcurrencyBudget } from '../../utils/concurrency.js';
-import { impersonateHttpGet } from '../../utils/impersonateRequest.js';
 import { paginateSearch } from '../../utils/pagination.js';
 import { AppError, isAppError, markNonRetryable } from '../../core/errors.js';
 import { extractMetaOrJsRedirect } from '../../utils/redirectResolver.js';
@@ -40,13 +39,11 @@ const COMMON_HEADERS = {
 type SogouHttpGet = (url: string, options: AxiosRequestConfig) => Promise<AxiosResponse>;
 
 /**
- * 搜狗的会话级指纹请求（wreq-js，Chrome TLS/HTTP2 指纹）。
- * 实测：纯 axios 请求搜狗搜索页会被 WAF 直接 403；换用 TLS 指纹后 403 → 200
- * （残留的图形验证码是针对代理出口 IP 的风险控制，非请求特征层可解）。
- * Session 懒创建并复用（连接复用，第二次起约 1s/请求）。
+ * 搜狗请求通道：直接采用原生标准 axios。
+ * 废除 wreq（避免在 TLS 握手阶段被搜狗网关直接掐断并超时挂起 12 秒）。
  */
 const defaultSogouHttpGet: SogouHttpGet = async (url, options) => {
-    return impersonateHttpGet('sogou', url, options, { redirect: 'manual', failOnHttpError: false });
+    return axios.get(url, options);
 };
 
 let sogouHttpGet: SogouHttpGet = defaultSogouHttpGet;
