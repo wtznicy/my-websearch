@@ -21,25 +21,11 @@ import {
 import { parseBingSearchResults } from './parser.js';
 import { hasSiteOperator, shouldSuggestRemovingSiteOperator } from './query.js';
 
-export const SEARCH_INPUT_SELECTORS = [
-    'input[name="q"]',
-    'input[type="search"]',
-    '#sb_form_q',
-    'input#sb_form_q',
-    '.b_searchboxForm input'
-];
 export const NEXT_PAGE_SELECTORS = [
     'a.sb_pagN',
     '.b_pag a.sb_pagN',
     'a[title="Next page"]',
     'a[aria-label="Next page"]'
-];
-export const SEARCH_SUBMIT_SELECTORS = [
-    '#sb_form_go',
-    'button[type="submit"]',
-    'input[type="submit"]',
-    'button[aria-label="搜索"]',
-    'button[aria-label="Search"]'
 ];
 
 export function getBingUiTimeoutMs(): number {
@@ -65,24 +51,6 @@ export async function waitForBingResultsChanged(page: PlaywrightPageLike, previo
         const current = (container?.textContent || '').replace(/\s+/g, ' ').trim();
         return current.length > 0 && current !== previous;
     }, previousSignature, { timeout: getBingUiTimeoutMs() });
-}
-
-export async function waitForBingSearchInputValue(page: PlaywrightPageLike, expectedValue: string): Promise<void> {
-    await page.waitForFunction(({ selectors, value }: { selectors: string[]; value: string }) => {
-        const isVisible = (element: Element) => {
-            const style = window.getComputedStyle(element);
-            return style.visibility !== 'hidden'
-                && style.display !== 'none'
-                && element.getClientRects().length > 0;
-        };
-
-        const normalize = (s: string) => s.trim().replace(/["'“”‘’]/g, '').replace(/\s+/g, ' ').toLowerCase();
-
-        return selectors.some((selector) => {
-            const input = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | null;
-            return input !== null && isVisible(input) && normalize(input.value) === normalize(value);
-        });
-    }, { selectors: SEARCH_INPUT_SELECTORS, value: expectedValue }, { timeout: getBingUiTimeoutMs() });
 }
 
 export async function waitForAnyDeterministicSignal(signals: Array<Promise<unknown>>, timeoutMs: number): Promise<boolean> {
@@ -144,16 +112,6 @@ export function doesBingUrlMatchQuery(url: string, query: string): boolean {
     }
 }
 
-export async function waitForBingQueryNavigation(page: PlaywrightPageLike, previousUrl: string, query: string): Promise<boolean> {
-    return page.waitForURL((url: URL) => {
-        const nextUrl = url.toString();
-        return nextUrl !== previousUrl && doesBingUrlMatchQuery(nextUrl, query);
-    }, {
-        timeout: getBingUiTimeoutMs(),
-        waitUntil: 'domcontentloaded'
-    }).then(() => true).catch(() => false);
-}
-
 export async function waitForBingNextPageNavigation(page: PlaywrightPageLike, previousUrl: string): Promise<void> {
     await page.waitForURL((url: URL) => {
         const nextUrl = url.toString();
@@ -164,71 +122,6 @@ export async function waitForBingNextPageNavigation(page: PlaywrightPageLike, pr
         timeout: getBingUiTimeoutMs(),
         waitUntil: 'domcontentloaded'
     });
-}
-
-export async function submitBingSearchFromCurrentPage(page: PlaywrightPageLike, searchInput: PlaywrightLocatorLike, previousUrl: string, query: string): Promise<void> {
-    if (doesBingUrlMatchQuery(page.url(), query)) {
-        return;
-    }
-
-    const enterNavigation = waitForBingQueryNavigation(page, previousUrl, query);
-    await searchInput.press('Enter').catch(() => page.keyboard.press('Enter').catch(() => undefined));
-    if (await enterNavigation) {
-        return;
-    }
-
-    for (const selector of SEARCH_SUBMIT_SELECTORS) {
-        const submitButton = page.locator(selector).first();
-        if (!await submitButton.isVisible().catch(() => false)) {
-            continue;
-        }
-
-        const clickNavigation = waitForBingQueryNavigation(page, previousUrl, query);
-        const clicked = await submitButton.click({ timeout: getBingUiTimeoutMs() })
-            .then(() => true)
-            .catch(() => false);
-        if (clicked && await clickNavigation) {
-            return;
-        }
-    }
-
-    const formSubmitted = await page.evaluate((selectors: string[]) => {
-        for (const selector of selectors) {
-            const input = document.querySelector(selector) as HTMLInputElement | null;
-            if (input?.form) {
-                input.form.submit();
-                return true;
-            }
-        }
-
-        return false;
-    }, SEARCH_INPUT_SELECTORS).catch(() => false);
-
-    if (formSubmitted && await waitForBingQueryNavigation(page, previousUrl, query)) {
-        return;
-    }
-
-    throw new Error(`Failed to submit Bing search query "${query}" from ${page.url()}`);
-}
-
-export async function findBingSearchInput(page: PlaywrightPageLike): Promise<PlaywrightLocatorLike | null> {
-    for (const selector of SEARCH_INPUT_SELECTORS) {
-        const locator = page.locator(selector).first();
-        if (await locator.isVisible().catch(() => false)) {
-            return locator;
-        }
-    }
-
-    return null;
-}
-
-export async function waitForBingSearchInput(page: PlaywrightPageLike): Promise<PlaywrightLocatorLike | null> {
-    const combinedSelector = SEARCH_INPUT_SELECTORS.join(', ');
-    const locator = await page.waitForSelector(combinedSelector, {
-        timeout: getBingUiTimeoutMs()
-    }).catch(() => null);
-
-    return locator ? page.locator(combinedSelector).first() : null;
 }
 
 export function isBingUrl(url: string): boolean {
@@ -255,44 +148,10 @@ export function getBingSearchUrl(query: string): string {
 
 export async function openBingAndSearch(page: PlaywrightPageLike, query: string): Promise<void> {
     const searchUrl = getBingSearchUrl(query);
-    try {
-        // 策略 A：直达结果页（Direct Navigation），跳过首页输入框查找、打字输入、回车提交等多步等待
-        await page.goto(searchUrl, {
-            waitUntil: 'domcontentloaded',
-            timeout: Math.min(config.playwrightNavigationTimeoutMs, 8000)
-        });
-        await waitForBingResultsReady(page);
-        return;
-    } catch (directNavError) {
-        console.warn(
-            '[bing] Direct navigation to search URL failed, falling back to interactive input:',
-            directNavError instanceof Error ? directNavError.message : String(directNavError)
-        );
-    }
-
-    // 交互式输入搜索（第二重兜底）
-    const homeUrl = getBingHomeUrl();
-    const currentUrl = page.url();
-    if (!isBingUrl(currentUrl)) {
-        await page.goto(homeUrl, {
-            waitUntil: 'domcontentloaded',
-            timeout: config.playwrightNavigationTimeoutMs
-        });
-    }
-
-    const searchInput = await waitForBingSearchInput(page) || await findBingSearchInput(page);
-    if (!searchInput) {
-        throw new Error(`Could not find Bing search box on ${page.url()}`);
-    }
-
-    await searchInput.click({ timeout: getBingUiTimeoutMs() }).catch(() => undefined);
-    await searchInput.fill(query, { timeout: getBingUiTimeoutMs() });
-    await waitForBingSearchInputValue(page, query);
-
-    const previousUrl = page.url();
-    // 关键回归防线：复用会话里若已经在历史结果页，敲 Enter 可能只触发同页局部更新；
-    // 只有在 q 参数真正切到新查询后，才允许进入结果解析。
-    await submitBingSearchFromCurrentPage(page, searchInput, previousUrl, query);
+    await page.goto(searchUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: config.playwrightNavigationTimeoutMs
+    });
     await waitForBingResultsReady(page);
 }
 
