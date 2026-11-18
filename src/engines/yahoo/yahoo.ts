@@ -17,6 +17,35 @@ const YAHOO_SEARCH_TIMEOUT_MS = 8000;
 const PAGE_SIZE = 10;
 const MAX_PAGES = 3;
 
+type WreqSession = Awaited<ReturnType<typeof createWreqSession>>;
+
+let cachedYahooSession: WreqSession | null = null;
+let yahooSessionPromise: Promise<WreqSession | null> | null = null;
+let cachedYahooProxy: string | undefined = undefined;
+let yahooSessionWarmedUp = false;
+
+export function hasYahooSessionCookie(cookies: Array<{ name?: string }>): boolean {
+    return cookies.some(c => Boolean(c.name && /^(A1|A3|lkl|B|BX)$/i.test(c.name)));
+}
+
+export async function invalidateYahooSession(): Promise<void> {
+    const session = cachedYahooSession;
+    cachedYahooSession = null;
+    yahooSessionPromise = null;
+    yahooSessionWarmedUp = false;
+    if (session) {
+        try {
+            await session.close();
+        } catch {
+            // ignore close error
+        }
+    }
+}
+
+export function __resetYahooSessionForTests(): Promise<void> {
+    return invalidateYahooSession();
+}
+
 function isProxyOrNetworkFatalError(error: unknown): boolean {
     if (isTlsOrWafResetError(error)) {
         return true;
@@ -133,6 +162,36 @@ function buildSearchUrl(query: string, page: number, timeRange?: 'day' | 'week' 
     return `${YAHOO_SEARCH}?${params.toString()}`;
 }
 
+async function getOrCreateYahooSession(mod: NonNullable<Awaited<ReturnType<typeof loadWreqModule>>>): Promise<WreqSession | null> {
+    const explicitProxy = engineShouldUseProxy('yahoo') ? getProxyUrl() : undefined;
+    const proxy = explicitProxy ?? (await detectSystemProxy()) ?? undefined;
+
+    if (cachedYahooSession && cachedYahooProxy === proxy) {
+        return cachedYahooSession;
+    }
+
+    if (yahooSessionPromise) {
+        return yahooSessionPromise;
+    }
+
+    yahooSessionPromise = (async () => {
+        if (cachedYahooSession) {
+            await invalidateYahooSession();
+        }
+        cachedYahooProxy = proxy;
+        const session = await createWreqSession(mod, 'yahoo', proxy ?? undefined);
+        cachedYahooSession = session;
+        yahooSessionWarmedUp = false;
+        return session;
+    })();
+
+    try {
+        return await yahooSessionPromise;
+    } finally {
+        yahooSessionPromise = null;
+    }
+}
+
 async function fetchYahooWithWreq(query: string, limit: number, signal?: AbortSignal, timeRange?: 'day' | 'week' | 'month' | 'year'): Promise<SearchResult[] | null> {
     if (signal?.aborted) {
         return null;
@@ -142,16 +201,26 @@ async function fetchYahooWithWreq(query: string, limit: number, signal?: AbortSi
         if (!mod) {
             return null;
         }
-        // 显式 PROXY_ENGINES 白名单优先；未显式配置时再退回系统代理。
-        // Yahoo 在默认 proxyInChina 名单里，但用户可能保留旧版硬编码名单（没有 yahoo），
-        // 此时不能再无条件套用 PROXY_URL，否则会绕过用户的白名单语义。
-        const explicitProxy = engineShouldUseProxy('yahoo') ? getProxyUrl() : undefined;
-        const proxy = explicitProxy ?? (await detectSystemProxy()) ?? undefined;
-        const session = await createWreqSession(mod, 'yahoo', proxy ?? undefined);
+
+        const session = await getOrCreateYahooSession(mod);
+        if (!session) {
+            return null;
+        }
+
+        let hasCookies = false;
         try {
+            const cookies = session.getAllCookies();
+            hasCookies = hasYahooSessionCookie(cookies);
+        } catch {
+            hasCookies = false;
+        }
+
+        // 仅在首次启动或尚未获得关键 Cookie 时执行首页预热，避免每次搜索重复消耗 1.5s~3.5s
+        if (!yahooSessionWarmedUp || !hasCookies) {
             const home = await session.fetch(YAHOO_HOME, { timeout: YAHOO_HOME_TIMEOUT_MS, headers: YAHOO_HEADERS });
             await home.text();
             if (home.status === 307) {
+                await invalidateYahooSession();
                 throw new AppError({
                     code: 'overseas_unreachable',
                     retryable: false,
@@ -162,42 +231,49 @@ async function fetchYahooWithWreq(query: string, limit: number, signal?: AbortSi
                 });
             }
             if (home.status !== 200) {
+                await invalidateYahooSession();
                 return null;
             }
-
-            const seenUrls = new Set<string>();
-            const results: SearchResult[] = [];
-            const pages = Math.max(1, Math.min(MAX_PAGES, Math.ceil(limit / PAGE_SIZE)));
-            for (let page = 0; page < pages && results.length < limit; page += 1) {
-                const response = await session.fetch(buildSearchUrl(query, page, timeRange), {
-                    timeout: YAHOO_SEARCH_TIMEOUT_MS,
-                    headers: YAHOO_HEADERS
-                });
-                if (response.status === 307) {
-                    throw new AppError({
-                        code: 'overseas_unreachable',
-                        retryable: false,
-                        status: 307,
-                        engine: 'yahoo',
-                        message: 'Yahoo search returned HTTP 307 (EU GDPR consent wall).',
-                        hint: 'Yahoo redirected to EU consent wall (guce.yahoo.com): switch your proxy node to a non-EU region (e.g. US, JP, SG).'
-                    });
-                }
-                if (response.status !== 200) {
-                    break;
-                }
-                const html = await response.text();
-                const parsed = parseYahooHtmlResults(html, limit - results.length, seenUrls);
-                results.push(...parsed.results);
-                if (parsed.rawCount === 0) {
-                    break;
-                }
-            }
-            return results;
-        } finally {
-            await session.close();
+            yahooSessionWarmedUp = true;
         }
+
+        const seenUrls = new Set<string>();
+        const results: SearchResult[] = [];
+        const pages = Math.max(1, Math.min(MAX_PAGES, Math.ceil(limit / PAGE_SIZE)));
+        for (let page = 0; page < pages && results.length < limit; page += 1) {
+            if (signal?.aborted) {
+                break;
+            }
+            const response = await session.fetch(buildSearchUrl(query, page, timeRange), {
+                timeout: YAHOO_SEARCH_TIMEOUT_MS,
+                headers: YAHOO_HEADERS
+            });
+            if (response.status === 307) {
+                await invalidateYahooSession();
+                throw new AppError({
+                    code: 'overseas_unreachable',
+                    retryable: false,
+                    status: 307,
+                    engine: 'yahoo',
+                    message: 'Yahoo search returned HTTP 307 (EU GDPR consent wall).',
+                    hint: 'Yahoo redirected to EU consent wall (guce.yahoo.com): switch your proxy node to a non-EU region (e.g. US, JP, SG).'
+                });
+            }
+            if (response.status !== 200) {
+                // 遇到非 200（如 500、429、403），可能 Cookie 失效或遭限流，废弃长效 Session
+                await invalidateYahooSession();
+                break;
+            }
+            const html = await response.text();
+            const parsed = parseYahooHtmlResults(html, limit - results.length, seenUrls);
+            results.push(...parsed.results);
+            if (parsed.rawCount === 0) {
+                break;
+            }
+        }
+        return results;
     } catch (error) {
+        await invalidateYahooSession();
         if (error instanceof AppError) {
             throw error;
         }

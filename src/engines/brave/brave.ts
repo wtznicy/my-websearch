@@ -12,8 +12,23 @@ import { isBraveBlockedPage, isBraveCaptchaChallengePage } from '../../core/anti
 import { AppError, extractErrorCode, extractErrorStatus, isAppError } from '../../core/errors.js';
 import { impersonateHttpGet } from '../../utils/impersonateRequest.js';
 import { getOptionalString, getString } from '../../config/env.js';
+import { sleep } from '../../utils/timing.js';
+import { isTlsOrWafResetError } from '../../utils/domesticDirectNetwork.js';
 import type { BrowserPage } from '../../utils/browser/driver.js';
 export { isBraveBlockedPage };
+
+function isProxyOrNetworkError(error: unknown): boolean {
+    if (!error) return false;
+    if (isTlsOrWafResetError(error)) {
+        return true;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    const code = (error as { code?: string })?.code;
+    if (code && /ECONNRESET|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNABORTED/i.test(code)) {
+        return true;
+    }
+    return /Client network socket disconnected|unexpected EOF|socket hang up|handshake.*failed|operation timed out|timeout.*exceeded|connect ECONNRESET/i.test(message);
+}
 
 /**
  * Brave 无 Key 网页检索使用内存级浏览器指纹（wreq-js）模拟请求；
@@ -312,6 +327,7 @@ export async function searchBraveOfficial(
                 engine: 'brave',
                 trustedStaticHost: true,
                 signal,
+                timeout: 6000,
                 headers: {
                     'Accept': 'application/json',
                     'Accept-Encoding': 'gzip',
@@ -673,31 +689,64 @@ export async function searchBrave(query: string, limit: number, options?: { sign
     const apiKey = (getOptionalString('BRAVE_API_KEY') || getOptionalString('BRAVE_SEARCH_API_KEY'));
     if (apiKey) {
         if (!isBraveOfficialApiDisabled()) {
-            try {
-                return await searchBraveOfficial(query, limit, apiKey, signal, options?.timeRange);
-            } catch (error: unknown) {
-                // 用户显式取消操作时直接透传其中断信号，不降级重试
+            let lastError: unknown;
+            for (let attempt = 0; attempt < 2; attempt++) {
                 if (signal?.aborted) {
                     throw signal.reason instanceof Error ? signal.reason : new Error('Brave search aborted');
                 }
-                const status = extractErrorStatus(error);
-                const message = error instanceof Error ? error.message : String(error);
+                try {
+                    return await searchBraveOfficial(query, limit, apiKey, signal, options?.timeRange);
+                } catch (error: unknown) {
+                    lastError = error;
+                    if (signal?.aborted) {
+                        throw signal.reason instanceof Error ? signal.reason : new Error('Brave search aborted');
+                    }
+                    const status = extractErrorStatus(error);
+                    const message = error instanceof Error ? error.message : String(error);
+                    const isNetErr = isProxyOrNetworkError(error);
 
-                if (status === 401 || status === 403 || status === 422) {
-                    // 场景 1: 密钥填错 / 格式非法 / 未授权（冷却 10 分钟）
-                    disableBraveOfficialApi(10 * 60 * 1000, `Invalid API Key (HTTP ${status})`);
-                    console.warn(`⚠️ [Brave] Official API key invalid or unauthorized (HTTP ${status}), falling back to web scraping (cached 10m): ${message}`);
-                } else if (status === 429 || /quota|rate limit/i.test(message)) {
-                    // 场景 2: 配额用尽 / 频率限流（冷却 5 分钟）
-                    disableBraveOfficialApi(5 * 60 * 1000, 'Quota Exhausted / Rate Limited (HTTP 429)');
-                    console.warn(`⚠️ [Brave] Official API quota exhausted or rate limited (HTTP ${status || 429}), falling back to web scraping (cached 5m): ${message}`);
-                } else {
-                    // 场景 3: 官方服务暂不可用 (5xx/超时/网络异常)（冷却 1 分钟）
-                    disableBraveOfficialApi(60 * 1000, `Service Unavailable (HTTP ${status || 'Network'})`);
-                    console.warn(`⚠️ [Brave] Official API temporarily unavailable (${status ? `HTTP ${status}: ` : ''}${message}), falling back to web scraping (cached 1m)`);
+                    // 鉴权/配额失败等不可通过就地重试解决的错误，直接跳出重试
+                    if (status === 401 || status === 403 || status === 422 || status === 429 || !isNetErr) {
+                        break;
+                    }
+
+                    // 网络瞬时抖动：第 1 次失败后等待 300ms 尝试第 2 次
+                    if (attempt === 0) {
+                        console.warn(`[brave] Official API encountered transient network error (${message}), retrying once after 300ms...`);
+                        await sleep(300);
+                    }
                 }
+            }
 
-                // 统一优雅降级到网页端抓取
+            const error = lastError;
+            const status = extractErrorStatus(error);
+            const message = error instanceof Error ? error.message : String(error);
+
+            if (status === 401 || status === 403 || status === 422) {
+                // 场景 1: 密钥填错 / 格式非法 / 未授权（冷却 10 分钟）
+                disableBraveOfficialApi(10 * 60 * 1000, `Invalid API Key (HTTP ${status})`);
+                console.warn(`⚠️ [Brave] Official API key invalid or unauthorized (HTTP ${status}), falling back to web scraping (cached 10m): ${message}`);
+                return searchBraveWeb(query, limit, options);
+            } else if (status === 429 || /quota|rate limit/i.test(message)) {
+                // 场景 2: 配额用尽 / 频率限流（冷却 5 分钟）
+                disableBraveOfficialApi(5 * 60 * 1000, 'Quota Exhausted / Rate Limited (HTTP 429)');
+                console.warn(`⚠️ [Brave] Official API quota exhausted or rate limited (HTTP ${status || 429}), falling back to web scraping (cached 5m): ${message}`);
+                return searchBraveWeb(query, limit, options);
+            } else if (isProxyOrNetworkError(error)) {
+                // 场景 3: 两次 API 均遭遇代理/网络不可达，快速抛出 overseas_unreachable 触发上层级联（如 Exa/Bing），
+                // 严禁封冻 1 分钟，且不再拉起浏览器硬撞网页端 429 验证码
+                throw new AppError({
+                    code: 'overseas_unreachable',
+                    retryable: true,
+                    status: 503,
+                    engine: 'brave',
+                    message: `Brave official API unreachable via current proxy: ${message}`,
+                    hint: 'Brave official API failed after retry: verify proxy connection to api.search.brave.com or switch proxy node.'
+                });
+            } else {
+                // 场景 4: 官方服务暂不可用 (5xx)（冷却 1 分钟）
+                disableBraveOfficialApi(60 * 1000, `Service Unavailable (HTTP ${status || '5xx'})`);
+                console.warn(`⚠️ [Brave] Official API server error (${status ? `HTTP ${status}: ` : ''}${message}), falling back to web scraping (cached 1m)`);
                 return searchBraveWeb(query, limit, options);
             }
         } else {

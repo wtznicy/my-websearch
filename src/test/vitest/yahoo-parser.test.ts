@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractYahooResultUrl, parseYahooHtmlResults, __isProxyOrNetworkFatalErrorForTests } from '../../engines/yahoo/yahoo.js';
+import { extractYahooResultUrl, parseYahooHtmlResults, __isProxyOrNetworkFatalErrorForTests, hasYahooSessionCookie } from '../../engines/yahoo/yahoo.js';
 
 /**
  * 回归：Yahoo 的结果链接是 r.search.yahoo.com 的 RU= 重定向，
@@ -53,5 +53,21 @@ describe('Yahoo fatal proxy/network error detection', () => {
         expect(__isProxyOrNetworkFatalErrorForTests(new Error('HTTP 404 Not Found'))).toBe(false);
         expect(__isProxyOrNetworkFatalErrorForTests(new Error('Invalid HTML received'))).toBe(false);
         expect(__isProxyOrNetworkFatalErrorForTests(null)).toBe(false);
+    });
+});
+
+describe('hasYahooSessionCookie', () => {
+    it('returns true when essential Yahoo session cookies are present', () => {
+        expect(hasYahooSessionCookie([{ name: 'A1' }])).toBe(true);
+        expect(hasYahooSessionCookie([{ name: 'a3' }])).toBe(true);
+        expect(hasYahooSessionCookie([{ name: 'lkl' }])).toBe(true);
+        expect(hasYahooSessionCookie([{ name: 'B' }])).toBe(true);
+        expect(hasYahooSessionCookie([{ name: 'other' }, { name: 'BX' }])).toBe(true);
+    });
+
+    it('returns false when no essential cookies match or list is empty', () => {
+        expect(hasYahooSessionCookie([])).toBe(false);
+        expect(hasYahooSessionCookie([{ name: 'test' }, { name: 'sid' }])).toBe(false);
+        expect(hasYahooSessionCookie([{}])).toBe(false);
     });
 });
