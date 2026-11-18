@@ -7,9 +7,6 @@ import { normalizeText } from '../../utils/text.js';
 import { sleep } from '../../utils/timing.js';
 import { paginateSearch } from '../../utils/pagination.js';
 import { AppError, isAppError, markNonRetryable } from '../../core/errors.js';
-import { acquirePooledPlaywrightPage, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
-import { prepareStealthPage } from '../../utils/browserStealth.js';
-import { getEffectiveBingPlaywrightHeadless, buildBrowserLaunchArgs, shouldUseHiddenHeadedBingBrowser } from '../bing/launchArgs.js';
 import { getString } from '../../config/env.js';
 
 const SOGOU_SEARCH_URL = 'https://www.sogou.com/web';
@@ -404,62 +401,10 @@ export function resetSogouState(): void {
     lastSogouRequestTime = 0;
 }
 
-export async function searchSogouWithBrowser(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
-    if (signal?.aborted) {
-        return [];
-    }
-    const playwright = await loadPlaywrightClient();
-    if (!playwright) {
-        return [];
-    }
-
-    const effectiveHeadless = getEffectiveBingPlaywrightHeadless();
-    const session = await openPlaywrightBrowser(
-        effectiveHeadless,
-        buildBrowserLaunchArgs(shouldUseHiddenHeadedBingBrowser()),
-        { hideWindow: shouldUseHiddenHeadedBingBrowser() }
-    );
-
-    try {
-        const { page, releasePage } = await acquirePooledPlaywrightPage(session.browser, {
-            poolKey: 'sogou-search',
-            contextOptions: { userAgent: DEFAULT_DESKTOP_UA },
-            preparePage: prepareStealthPage
-        });
-
-        try {
-            const url = `${SOGOU_SEARCH_URL}?query=${encodeURIComponent(query)}&ie=utf8`;
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 8000 });
-            const currentUrl = page.url();
-            if (/captcha|antispider/i.test(currentUrl)) {
-                sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
-                console.warn('Sogou CDP browser redirected to captcha page, fast failing to avoid hang');
-                return [];
-            }
-            await page.waitForSelector('.vrwrap, .rb, #main', { timeout: 4000 }).catch(() => undefined);
-            const html = await page.content();
-            if (/antispider|请输入验证码|验证码|访问过于频繁/i.test(html)) {
-                sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
-                console.warn('Sogou CDP page contained captcha, fast failing to avoid hang');
-                return [];
-            }
-            const results = parseSogouSearchResults(html);
-            return results.slice(0, limit);
-        } finally {
-            await releasePage();
-        }
-    } catch (error) {
-        console.warn('Sogou CDP browser fallback failed:', error instanceof Error ? error.message : String(error));
-        return [];
-    } finally {
-        await session.release();
-    }
-}
-
 /**
  * 双端策略（移动端优先 + PC 端兜底）：
- * - 移动端（WAP 集群）：风控宽松、响应快（~1.5s）、自带明文真实目标 URL（无需跟随 PC 端跳转链消耗 2~3s）。
- * - 仅在移动端返回 0 条（失败或空页）且 PC 端未处于拦截暂停期时，才调用 PC 端兜底，避免移动端已拿到 7~9 条时再为补 1~2 条去跑慢速 PC 跳转链。
+ * - 移动端（WAP 集群）：风控宽松、响应快（~1.5s）、自带明文真实目标 URL。
+ * - 仅在移动端返回 0 条（失败或空页）且 PC 端未处于拦截暂停期时，才调用 PC 端兜底。
  */
 export async function searchSogou(query: string, limit: number, options?: { signal?: AbortSignal }): Promise<SearchResult[]> {
     const signal = options?.signal;
@@ -530,16 +475,6 @@ export async function searchSogou(query: string, limit: number, options?: { sign
             const message = error instanceof Error ? error.message : String(error);
             if (/anti-bot|verification|challenge|403|访问过于频繁|验证码/i.test(message)) {
                 sogouPcBlockedUntil = Date.now() + SOGOU_PC_BLOCK_TTL_MS;
-                console.warn('Sogou PC HTTP encountered challenge, attempting CDP browser fallback...');
-                try {
-                    const browserResults = await searchSogouWithBrowser(query, limit - allResults.length, signal);
-                    if (browserResults.length > 0) {
-                        merge(browserResults);
-                        lastError = undefined;
-                    }
-                } catch {
-                    // 忽略浏览器错误
-                }
             }
             console.warn('Sogou PC endpoint failed:', message);
         }
