@@ -162,7 +162,7 @@ async function fetchSogouHtml(initialUrl: string, signal?: AbortSignal): Promise
                 ...COMMON_HEADERS,
                 ...(cookieHeader ? { Cookie: cookieHeader } : {})
             },
-            timeout: 8000,
+            timeout: 6000,
             signal,
             validateStatus: (status) => status >= 200 && status < 400
         }));
@@ -217,7 +217,7 @@ async function fetchSogouMobileHtml(query: string, page: number = 1, signal?: Ab
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
         },
-        timeout: 8000,
+        timeout: 6000,
         signal,
         validateStatus: (status) => status >= 200 && status < 400
     }));
@@ -226,8 +226,8 @@ async function fetchSogouMobileHtml(query: string, page: number = 1, signal?: Ab
 
 /**
  * 解析搜狗移动端结果页。
- * 只保留持 `a.resultLink` 且能解出明文 `url=` 的卡片——广告/推荐位天然被过滤；
- * 真实链接直接来自 URL 参数，无需 HTTP 跟随（这是移动端路径最大的性能收益）。
+ * 兼容经典 .vrResult 与新版 React/SSR 的 .reactResult 卡片容器；
+ * 只要能解出明文 `url=` 参数即可直接还原真实目标 URL，无需额外跳转跟随。
  */
 export function parseSogouMobileResults(html: string): SearchResult[] {
     const $ = cheerio.load(html);
@@ -241,10 +241,14 @@ export function parseSogouMobileResults(html: string): SearchResult[] {
     }
 
     const results: SearchResult[] = [];
+    const seenUrls = new Set<string>();
 
-    $('.vrResult').each((_, element) => {
+    $('.vrResult, .reactResult').each((_, element) => {
         const card = $(element);
-        const link = card.find('a.resultLink[href*="url="]').first();
+        if (card.hasClass('vr-topic') || /display:\s*none/i.test(card.attr('style') || '')) {
+            return;
+        }
+        const link = card.find('a.resultLink[href*="url="], a[href*="url="]').first();
         const href = String(link.attr('href') || '');
         const urlMatch = href.match(/[?&]url=([^&]+)/);
         const encodedUrl = urlMatch?.[1];
@@ -270,10 +274,16 @@ export function parseSogouMobileResults(html: string): SearchResult[] {
             return;
         }
 
-        const title = normalizeText(card.find('h3').first().text());
+        if (seenUrls.has(realUrl)) {
+            return;
+        }
+
+        const title = normalizeText(card.find('h3, h2').first().text());
         if (!title) {
             return;
         }
+
+        seenUrls.add(realUrl);
 
         const description = normalizeText(card.find('.text-layout, .fz-mid, .str_info, .result-summary-exp, p').first().text());
         let source = '';

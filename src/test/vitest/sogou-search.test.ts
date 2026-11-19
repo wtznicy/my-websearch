@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
-import { __setSogouHttpGetForTests, parseSogouSearchResults, resetSogouState, searchSogou } from '../../engines/sogou/sogou.js';
+import { __setSogouHttpGetForTests, parseSogouSearchResults, parseSogouMobileResults, resetSogouState, searchSogou } from '../../engines/sogou/sogou.js';
 
 function makeResponse(status: number, headers: Record<string, string | string[]>, data: string): AxiosResponse {
     return {
@@ -89,5 +89,46 @@ describe('Sogou search', () => {
         expect(requestedUrls).toHaveLength(2);
         expect(requestedUrls[0].startsWith('https://www.sogou.com/web?')).toBe(true);
         expect(requestedCookies[1]).toContain('SNUID=test-cookie');
+    });
+
+    it('extracts results from both legacy .vrResult and modern .reactResult mobile containers', () => {
+        const html = `
+            <div id="results">
+              <div class="vrResult">
+                <a class="resultLink" href="./tc?url=https%3A%2F%2Fexample.com%2Flegacy">
+                  <h3>Legacy Result</h3>
+                </a>
+                <div class="text-layout">Legacy snippet description</div>
+              </div>
+              <div class="reactResult" id="sogou_vr_30010582_1">
+                <a class="title__saTitle_287f" href="./tc?url=https%3A%2F%2Fexample.com%2Freact-item">
+                  <h3>React/SSR Modern Result</h3>
+                </a>
+                <p>Modern snippet description</p>
+              </div>
+              <!-- Hidden suggestion topic container should be skipped -->
+              <div class="vrResult vr-topic" style="display:none">
+                <a href="./tc?url=https%3A%2F%2Fexample.com%2Fskip">
+                  <h3>Should be skipped</h3>
+                </a>
+              </div>
+            </div>`;
+
+        const results = parseSogouMobileResults(html);
+        expect(results).toHaveLength(2);
+        expect(results[0]).toMatchObject({
+            title: 'Legacy Result',
+            url: 'https://example.com/legacy',
+            description: 'Legacy snippet description',
+            source: 'example.com',
+            engine: 'sogou'
+        });
+        expect(results[1]).toMatchObject({
+            title: 'React/SSR Modern Result',
+            url: 'https://example.com/react-item',
+            description: 'Modern snippet description',
+            source: 'example.com',
+            engine: 'sogou'
+        });
     });
 });
